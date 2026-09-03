@@ -147,10 +147,10 @@ Note: `apps/web`'s `e2e` script and its `@playwright/test` devDependency are add
 
 ## Phase 11: CI Pipeline
 
-- [ ] 11.1 Create `.github/workflows/ci.yml` `verify` job: setup-bun + setup-node 22 → `bun install --frozen-lockfile` → `lint` → `typecheck` → `check` (workspace-shape, test-coverage, core-purity, env-example, compose) → `test` → `build` for **all three apps** (`landing`, `web` build; `api` runs `typecheck` only, per 7.4) — *ci-pipeline: Four Gates On Every Push*
-- [ ] 11.2 Add `e2e` job (`needs: verify`): `bunx playwright install --with-deps chromium` → web e2e
-- [ ] 11.3 Add `compose-smoke` job: `docker compose config -q` → `up -d --wait` → assert `vector` extension, Mailpit send/retrieve (10.7), Kroki+Mermaid render (10.8) → `bun run db:migrate` → `down -v`
-- [ ] 11.4 Add `concurrency` to cancel superseded runs — *ci-pipeline: Any Failing Gate Fails the Pipeline*
+- [x] 11.1 Create `.github/workflows/ci.yml` `verify` job: setup-bun + setup-node 22 → `bun install --frozen-lockfile` → `lint` → `typecheck` → `check` (workspace-shape, test-coverage, core-purity, env-example, compose) → `test` → `build` for **all three apps** (`landing`, `web` build; `api` runs `typecheck` only, per 7.4) — *ci-pipeline: Four Gates On Every Push* — the final step's name and inline comment call out explicitly that it covers all three apps, not only the two front-ends, since `apps/api` has no `build` script by design (7.4)
+- [x] 11.2 Add `e2e` job (`needs: verify`): `bunx playwright install --with-deps chromium` → web e2e
+- [x] 11.3 Add `compose-smoke` job: `docker compose config -q` → `up -d --wait` → assert `vector` extension, Mailpit send/retrieve (10.7), Kroki+Mermaid render (10.8) → `bun run db:migrate` → `down -v` — runs independently of `verify` (own job, no `needs`) so a compose regression is never masked by an unrelated lint failure; teardown runs under `if: always()` so a failed assertion still tears the stack down
+- [x] 11.4 Add `concurrency` to cancel superseded runs — *ci-pipeline: Any Failing Gate Fails the Pipeline* — workflow-level `concurrency.group: ${{ github.workflow }}-${{ github.ref }}` with `cancel-in-progress: true`
 
 ## Phase 12: Docs, Decision Cleanup, and `strict_tdd`
 

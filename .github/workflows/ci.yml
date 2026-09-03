@@ -1,0 +1,138 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+# Cancels a superseded run on the same ref so only the latest push is ever
+# building — ci-pipeline: "Any Failing Gate Fails the Pipeline" is about the
+# freshest commit, not a queue of stale ones (design.md D10).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # One job, named steps: one install, one cache, one pass/fail — the failing
+  # step's name identifies the failing gate, satisfying ci-pipeline's "Any
+  # Failing Gate Fails the Pipeline" scenario without needing separate jobs
+  # per gate (design.md D10).
+  verify:
+    name: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+
+      # Development-only prerequisite for apps/web's Vitest + @nuxt/test-utils
+      # component tests (design.md — "The Deferred Decision: Vue SFC Tests").
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: install
+        run: bun install --frozen-lockfile
+
+      - name: lint
+        run: bun run lint
+
+      - name: typecheck
+        run: bun run typecheck
+
+      - name: check
+        run: bun run check
+
+      - name: test
+        run: bun run test
+
+      # Exercises all three apps, not only the two front-ends (docs/TODO.md
+      # Phase 0). apps/landing and apps/web have real build scripts; apps/api
+      # deliberately has none (task 7.4 — Hono-on-Bun runs TS directly with
+      # no bundling step), so its half of "the build gate" is typecheck,
+      # already run above for every member but named again here to make the
+      # three-app coverage explicit rather than merely implied.
+      - name: build (landing, web) + verify api's build-equivalent (typecheck only, no bundler — see apps/api/README.md)
+        run: |
+          bun run -F @deep-wiki/landing build
+          bun run -F @deep-wiki/web build
+          bun run -F @deep-wiki/api typecheck
+
+  e2e:
+    name: e2e
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: install
+        run: bun install --frozen-lockfile
+
+      - name: install playwright browsers
+        run: bunx playwright install --with-deps chromium
+
+      - name: e2e
+        run: bun run -F @deep-wiki/web e2e
+
+  # The only place the production container runtime is exercised, since
+  # Docker is absent from the development machine (design.md — CI Pipeline).
+  # Runs independently of `verify` so a compose regression is never masked
+  # by an unrelated lint failure.
+  compose-smoke:
+    name: compose-smoke
+    runs-on: ubuntu-latest
+    env:
+      # Compose-only credentials (see env.example) — not part of the app's
+      # own zod-validated configuration surface.
+      POSTGRES_USER: deepwiki
+      POSTGRES_PASSWORD: deepwiki
+      POSTGRES_DB: deepwiki
+      MINIO_ROOT_USER: deepwiki
+      MINIO_ROOT_PASSWORD: deepwiki-minio
+      # Read by packages/contracts' env schema, via apps/db's migrate.ts.
+      NODE_ENV: test
+      PORT: 4000
+      DATABASE_URL: postgres://deepwiki:deepwiki@localhost:5432/deepwiki
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+
+      - name: validate compose file
+        run: docker compose config -q
+
+      - name: start stack
+        run: docker compose up -d --wait
+
+      - name: assert pgvector extension is installed
+        run: |
+          docker compose exec -T postgres \
+            psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc \
+            "SELECT 1 FROM pg_extension WHERE extname = 'vector'" | grep -qx 1
+
+      - name: install (for the smoke assertions and db:migrate)
+        run: bun install --frozen-lockfile
+
+      # Real send-then-retrieve and render assertions, not liveness checks
+      # (container-stack: "Mailpit exposes both interfaces"; design.md D8).
+      - name: assert mailpit send+retrieve and kroki mermaid render
+        run: bun run compose:smoke
+
+      - name: run migrations against the live stack
+        run: bun run db:migrate
+
+      - name: tear down
+        if: always()
+        run: docker compose down -v
