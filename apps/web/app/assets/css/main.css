@@ -1,2 +1,506 @@
+/* deep-wiki visual system — Material Design 3 translated to Nuxt UI v4.
+ *
+ * Authority: docs/DESIGN-SYSTEM.md. This file is its §11 token block,
+ * instantiated with a real tone table. Read that document before changing
+ * anything here; every value below is a role, not a colour someone liked.
+ *
+ * Nothing in this file may be duplicated in a component: a component that
+ * needs a colour, a size, a radius or a duration reads it from here through
+ * a utility class (docs/UI-CHECKLIST.md §4.2).
+ */
+
 @import "tailwindcss";
 @import "@nuxt/ui";
+
+/* The M3 container roles are applied to Nuxt UI's variants through
+ * `app.config.ts`, where the alias is interpolated
+ * (`bg-${color}-container`). Tailwind only extracts *literal* candidates,
+ * so those utilities have to be named here or they are never emitted and
+ * the variant silently falls back to no fill at all. Nuxt UI has the same
+ * problem and solves it by generating a literal theme file; this is the
+ * project-side equivalent, and it is the complete list. */
+@source inline("{hover:,active:,}bg-{primary,secondary,success,info,warning,error}-container");
+@source inline("text-on-{primary,secondary,success,info,warning,error}-container");
+@source inline("ring-{primary,secondary,success,info,warning,error}-300");
+@source inline("dark:ring-{primary,secondary,success,info,warning,error}-600");
+
+/* ─────────────────────────────────────────────────────────────
+   1. TONAL PALETTES  (DESIGN-SYSTEM §1.1, §1.4)
+
+   One tone table per palette, sampled from a source hue across M3's
+   0–100 tone scale. Shade slot ← M3 tone:
+     50←95  100←90  200←80  300←70  400←60  500←50
+     600←40 700←30  800←20  900←10  950←0
+
+   Lightness is the ladder from §1.4's worked example; chroma is that
+   example's curve scaled to each palette's peak, then clamped into the
+   sRGB gamut. `static` is mandatory — Nuxt UI's colour plugin emits
+   `--ui-color-<alias>-<shade>: var(--color-<palette>-<shade>)` for all
+   eleven shades whether or not they appear in markup.
+   ───────────────────────────────────────────────────────────── */
+@theme static {
+  /* primary — the source colour. M3 TONAL_SPOT chroma. */
+  --color-dw-primary-50: oklch(96.0% 0.018 262);
+  --color-dw-primary-100: oklch(92.0% 0.037 262);
+  --color-dw-primary-200: oklch(84.0% 0.078 262);
+  --color-dw-primary-300: oklch(75.0% 0.120 262);
+  --color-dw-primary-400: oklch(66.0% 0.140 262);
+  --color-dw-primary-500: oklch(57.0% 0.150 262);
+  --color-dw-primary-600: oklch(48.0% 0.145 262);
+  --color-dw-primary-700: oklch(38.5% 0.124 262);
+  --color-dw-primary-800: oklch(29.0% 0.101 262);
+  --color-dw-primary-900: oklch(19.5% 0.070 262);
+  --color-dw-primary-950: oklch(0.0% 0.000 262);
+
+  /* secondary — same hue, low chroma. M3's supporting accent. */
+  --color-dw-secondary-50: oklch(96.0% 0.010 262);
+  --color-dw-secondary-100: oklch(92.0% 0.018 262);
+  --color-dw-secondary-200: oklch(84.0% 0.030 262);
+  --color-dw-secondary-300: oklch(75.0% 0.040 262);
+  --color-dw-secondary-400: oklch(66.0% 0.046 262);
+  --color-dw-secondary-500: oklch(57.0% 0.050 262);
+  --color-dw-secondary-600: oklch(48.0% 0.049 262);
+  --color-dw-secondary-700: oklch(38.5% 0.042 262);
+  --color-dw-secondary-800: oklch(29.0% 0.034 262);
+  --color-dw-secondary-900: oklch(19.5% 0.024 262);
+  --color-dw-secondary-950: oklch(0.0% 0.000 262);
+
+  /* success — M3 has no success role; this is a project palette built
+     the same way, so the `success` alias is a tone table like the rest. */
+  --color-dw-success-50: oklch(96.0% 0.026 150);
+  --color-dw-success-100: oklch(92.0% 0.048 150);
+  --color-dw-success-200: oklch(84.0% 0.078 150);
+  --color-dw-success-300: oklch(75.0% 0.104 150);
+  --color-dw-success-400: oklch(66.0% 0.121 150);
+  --color-dw-success-500: oklch(57.0% 0.130 150);
+  --color-dw-success-600: oklch(48.0% 0.126 150);
+  --color-dw-success-700: oklch(38.5% 0.108 150);
+  --color-dw-success-800: oklch(29.0% 0.085 150);
+  --color-dw-success-900: oklch(19.5% 0.061 150);
+  --color-dw-success-950: oklch(0.0% 0.000 150);
+
+  /* info */
+  --color-dw-info-50: oklch(96.0% 0.022 232);
+  --color-dw-info-100: oklch(92.0% 0.044 232);
+  --color-dw-info-200: oklch(84.0% 0.072 232);
+  --color-dw-info-300: oklch(75.0% 0.096 232);
+  --color-dw-info-400: oklch(66.0% 0.112 232);
+  --color-dw-info-500: oklch(57.0% 0.116 232);
+  --color-dw-info-600: oklch(48.0% 0.098 232);
+  --color-dw-info-700: oklch(38.5% 0.082 232);
+  --color-dw-info-800: oklch(29.0% 0.064 232);
+  --color-dw-info-900: oklch(19.5% 0.052 232);
+  --color-dw-info-950: oklch(0.0% 0.000 232);
+
+  /* warning */
+  --color-dw-warning-50: oklch(96.0% 0.030 75);
+  --color-dw-warning-100: oklch(92.0% 0.056 75);
+  --color-dw-warning-200: oklch(84.0% 0.090 75);
+  --color-dw-warning-300: oklch(75.0% 0.120 75);
+  --color-dw-warning-400: oklch(66.0% 0.140 75);
+  --color-dw-warning-500: oklch(57.0% 0.122 75);
+  --color-dw-warning-600: oklch(48.0% 0.103 75);
+  --color-dw-warning-700: oklch(38.5% 0.085 75);
+  --color-dw-warning-800: oklch(29.0% 0.069 75);
+  --color-dw-warning-900: oklch(19.5% 0.059 75);
+  --color-dw-warning-950: oklch(0.0% 0.000 75);
+
+  /* error — M3's error tonal palette hue. */
+  --color-dw-error-50: oklch(96.0% 0.020 27);
+  --color-dw-error-100: oklch(92.0% 0.041 27);
+  --color-dw-error-200: oklch(84.0% 0.088 27);
+  --color-dw-error-300: oklch(75.0% 0.136 27);
+  --color-dw-error-400: oklch(66.0% 0.158 27);
+  --color-dw-error-500: oklch(57.0% 0.170 27);
+  --color-dw-error-600: oklch(48.0% 0.165 27);
+  --color-dw-error-700: oklch(38.5% 0.141 27);
+  --color-dw-error-800: oklch(29.0% 0.114 27);
+  --color-dw-error-900: oklch(19.5% 0.080 27);
+  --color-dw-error-950: oklch(0.0% 0.000 27);
+
+  /* neutral — the source hue at near-zero chroma, so surfaces carry a
+     trace of the brand instead of reading as dead grey. */
+  --color-dw-neutral-50: oklch(96.0% 0.002 262);
+  --color-dw-neutral-100: oklch(92.0% 0.003 262);
+  --color-dw-neutral-200: oklch(84.0% 0.005 262);
+  --color-dw-neutral-300: oklch(75.0% 0.006 262);
+  --color-dw-neutral-400: oklch(66.0% 0.007 262);
+  --color-dw-neutral-500: oklch(57.0% 0.008 262);
+  --color-dw-neutral-600: oklch(48.0% 0.008 262);
+  --color-dw-neutral-700: oklch(38.5% 0.007 262);
+  --color-dw-neutral-800: oklch(29.0% 0.005 262);
+  --color-dw-neutral-900: oklch(19.5% 0.004 262);
+  --color-dw-neutral-950: oklch(0.0% 0.000 262);
+}
+
+/* ─────────────────────────────────────────────────────────────
+   2. THE M3 SURFACE LADDER  (DESIGN-SYSTEM §1.3, §1.4)
+
+   The extra neutral tones exist for one purpose: to feed the five
+   surface-container rungs. They are not a second palette.
+   ───────────────────────────────────────────────────────────── */
+:root,
+:host,
+.light {
+  --dw-neutral-tone-100: oklch(100.0% 0.002 262);
+  --dw-neutral-tone-98: oklch(98.4% 0.002 262);
+  --dw-neutral-tone-94: oklch(95.2% 0.002 262);
+  --dw-neutral-tone-92: oklch(93.6% 0.002 262);
+  --dw-neutral-tone-90: oklch(92.0% 0.002 262);
+}
+
+.dark {
+  --dw-neutral-tone-22: oklch(30.9% 0.004 262);
+  --dw-neutral-tone-17: oklch(26.2% 0.004 262);
+  --dw-neutral-tone-12: oklch(21.4% 0.004 262);
+  --dw-neutral-tone-10: oklch(19.5% 0.004 262);
+  --dw-neutral-tone-4: oklch(7.8% 0.004 262);
+}
+
+/* ─────────────────────────────────────────────────────────────
+   3. SEMANTIC ROLES ON TOP OF NUXT UI'S PRIMITIVES
+   ───────────────────────────────────────────────────────────── */
+:root,
+:host {
+  /* §3.3 — lands Nuxt UI's whole radius ladder on the M3 shape scale:
+     xs 4 · sm 8 · md 12 · lg 16 · 2xl 32 · 3xl 48 */
+  --ui-radius: 0.5rem;
+  /* §7.2 — a wiki's chrome is one density step below M3's touch baseline. */
+  --ui-header-height: 3.5rem;
+
+  /* §5.1 — M3's focus indicator: 3px, offset 2px, in the secondary role.
+     Applied globally below so no component can lose it. */
+  --dw-focus-ring-width: 3px;
+  --dw-focus-ring-offset: 2px;
+
+  /* §4.4 — M3 elevation shadows: key at 30%, ambient at 15%, over the
+     `shadow` role (tone 0). Only overlay surfaces ever use them (§4.3). */
+  --dw-shadow-key: color-mix(in oklab, var(--color-dw-neutral-950) 30%, transparent);
+  --dw-shadow-ambient: color-mix(in oklab, var(--color-dw-neutral-950) 15%, transparent);
+}
+
+:root,
+:host,
+.light {
+  /* Accent roles — M3 tone 40. Nuxt UI defaults to shade 500 (tone 50). */
+  --ui-primary: var(--ui-color-primary-600);
+  --ui-secondary: var(--ui-color-secondary-600);
+  --ui-success: var(--ui-color-success-600);
+  --ui-info: var(--ui-color-info-600);
+  --ui-warning: var(--ui-color-warning-600);
+  --ui-error: var(--ui-color-error-600);
+
+  /* Accent containers — the roles M3 has and Nuxt UI does not.
+     Container tone 90, on-container tone 30: a 60-tone gap, so every
+     pair clears 4.5:1 by construction (§10.1). */
+  --ui-primary-container: var(--ui-color-primary-100);
+  --ui-on-primary-container: var(--ui-color-primary-700);
+  --ui-secondary-container: var(--ui-color-secondary-100);
+  --ui-on-secondary-container: var(--ui-color-secondary-700);
+  --ui-success-container: var(--ui-color-success-100);
+  --ui-on-success-container: var(--ui-color-success-700);
+  --ui-info-container: var(--ui-color-info-100);
+  --ui-on-info-container: var(--ui-color-info-700);
+  --ui-warning-container: var(--ui-color-warning-100);
+  --ui-on-warning-container: var(--ui-color-warning-700);
+  --ui-error-container: var(--ui-color-error-100);
+  --ui-on-error-container: var(--ui-color-error-700);
+
+  /* Surface ladder — tones 100 / 98 / 94 / 92 / 90. */
+  --ui-bg: var(--dw-neutral-tone-100);
+  --ui-bg-muted: var(--dw-neutral-tone-98);
+  --ui-bg-elevated: var(--dw-neutral-tone-94);
+  --ui-bg-accented: var(--dw-neutral-tone-92);
+  --ui-bg-emphasized: var(--dw-neutral-tone-90);
+
+  /* inverse-surface / inverse-on-surface — tones 20 / 95. */
+  --ui-bg-inverted: var(--ui-color-neutral-800);
+  /* on-primary is tone 100 in light: `text-inverted` carries it (§1.4). */
+  --ui-text-inverted: var(--dw-neutral-tone-100);
+
+  /* Text roles. `text-muted` is M3's `on-surface-variant`, which is
+     tone 30 — not Nuxt UI's tone 50 default, which measures 3.9:1 on
+     `bg-muted` and fails the checklist's §5 4.5:1 floor for body text. */
+  --ui-text-highlighted: var(--ui-color-neutral-900); /* on-surface, tone 10 */
+  --ui-text: var(--ui-color-neutral-800); /* tone 20 */
+  --ui-text-toned: var(--ui-color-neutral-800); /* tone 20 */
+  --ui-text-muted: var(--ui-color-neutral-700); /* on-surface-variant, tone 30 */
+  --ui-text-dimmed: var(--ui-color-neutral-500); /* ornament only, tone 50 */
+
+  /* Outline roles. `border-accented` is M3's `outline` (tone 50, ≥3:1 —
+     valid as a control boundary); `border`/`border-muted` are
+     `outline-variant` (tone 80), decorative separators only (§10.1). */
+  --ui-border: var(--ui-color-neutral-200);
+  --ui-border-muted: var(--ui-color-neutral-200);
+  --ui-border-accented: var(--ui-color-neutral-500);
+  --ui-border-inverted: var(--ui-color-neutral-800);
+}
+
+.dark {
+  /* Accent roles — M3 tone 80. Nuxt UI defaults to shade 400 (tone 60). */
+  --ui-primary: var(--ui-color-primary-200);
+  --ui-secondary: var(--ui-color-secondary-200);
+  --ui-success: var(--ui-color-success-200);
+  --ui-info: var(--ui-color-info-200);
+  --ui-warning: var(--ui-color-warning-200);
+  --ui-error: var(--ui-color-error-200);
+
+  /* Accent containers — tone 30 / on-tone 90. */
+  --ui-primary-container: var(--ui-color-primary-700);
+  --ui-on-primary-container: var(--ui-color-primary-100);
+  --ui-secondary-container: var(--ui-color-secondary-700);
+  --ui-on-secondary-container: var(--ui-color-secondary-100);
+  --ui-success-container: var(--ui-color-success-700);
+  --ui-on-success-container: var(--ui-color-success-100);
+  --ui-info-container: var(--ui-color-info-700);
+  --ui-on-info-container: var(--ui-color-info-100);
+  --ui-warning-container: var(--ui-color-warning-700);
+  --ui-on-warning-container: var(--ui-color-warning-100);
+  --ui-error-container: var(--ui-color-error-700);
+  --ui-on-error-container: var(--ui-color-error-100);
+
+  /* Surface ladder — tones 4 / 10 / 12 / 17 / 22.
+     MANDATORY (§1.4): Nuxt UI's dark defaults collapse `--ui-bg-muted`
+     and `--ui-bg-elevated` onto the same shade, so a panel has zero
+     tonal separation from the app ground. Two of five rungs gone before
+     anyone writes markup — the §12.1 "flat dark UI" failure. */
+  --ui-bg: var(--dw-neutral-tone-4);
+  --ui-bg-muted: var(--dw-neutral-tone-10);
+  --ui-bg-elevated: var(--dw-neutral-tone-12);
+  --ui-bg-accented: var(--dw-neutral-tone-17);
+  --ui-bg-emphasized: var(--dw-neutral-tone-22);
+
+  /* inverse-surface / inverse-on-surface — tones 90 / 20.
+     Tone 20 is also M3's `on-primary` in dark, which is what
+     `text-inverted` carries onto `bg-primary` (§1.4). */
+  --ui-bg-inverted: var(--ui-color-neutral-100);
+  --ui-text-inverted: var(--ui-color-neutral-800);
+
+  --ui-text-highlighted: var(--ui-color-neutral-50); /* tone 95 */
+  --ui-text: var(--ui-color-neutral-100); /* on-surface, tone 90 */
+  --ui-text-toned: var(--ui-color-neutral-100); /* tone 90 */
+  --ui-text-muted: var(--ui-color-neutral-200); /* on-surface-variant, tone 80 */
+  --ui-text-dimmed: var(--ui-color-neutral-400); /* ornament only, tone 60 */
+
+  /* outline tone 60, outline-variant tone 30. Nuxt UI's dark default
+     puts the divider at tone 20, which disappears against a tone 12
+     panel; tone 30 is M3's value and is actually visible. */
+  --ui-border: var(--ui-color-neutral-700);
+  --ui-border-muted: var(--ui-color-neutral-700);
+  --ui-border-accented: var(--ui-color-neutral-400);
+  --ui-border-inverted: var(--ui-color-neutral-100);
+}
+
+/* ─────────────────────────────────────────────────────────────
+   4. REGISTER THE NEW ROLES AS UTILITIES  (§1.4)
+   `inline` is mandatory: each value is itself a var() redefined per
+   theme, and without it Tailwind resolves it once at :root.
+   ───────────────────────────────────────────────────────────── */
+@theme inline {
+  --color-primary-container: var(--ui-primary-container);
+  --color-on-primary-container: var(--ui-on-primary-container);
+  --color-secondary-container: var(--ui-secondary-container);
+  --color-on-secondary-container: var(--ui-on-secondary-container);
+  --color-success-container: var(--ui-success-container);
+  --color-on-success-container: var(--ui-on-success-container);
+  --color-info-container: var(--ui-info-container);
+  --color-on-info-container: var(--ui-on-info-container);
+  --color-warning-container: var(--ui-warning-container);
+  --color-on-warning-container: var(--ui-on-warning-container);
+  --color-error-container: var(--ui-error-container);
+  --color-on-error-container: var(--ui-on-error-container);
+
+  /* The fifth surface rung Nuxt UI does not ship. */
+  --background-color-emphasized: var(--ui-bg-emphasized);
+  --border-color-emphasized: var(--ui-bg-emphasized);
+}
+
+/* ─────────────────────────────────────────────────────────────
+   5. TYPE SCALE  (§2.3, §2.5)
+
+   M3 v0.192 typescale tokens, verbatim, minus `display-*` — this
+   product has no hero. One utility class carries size, leading,
+   tracking and weight, which is what makes `text-title-large` a real
+   replacement for four hand-written classes.
+   ───────────────────────────────────────────────────────────── */
+@theme static {
+  --text-headline-large: 2rem;
+  --text-headline-large--line-height: 2.5rem;
+  --text-headline-large--letter-spacing: 0rem;
+  --text-headline-large--font-weight: 400;
+
+  --text-headline-medium: 1.75rem;
+  --text-headline-medium--line-height: 2.25rem;
+  --text-headline-medium--letter-spacing: 0rem;
+  --text-headline-medium--font-weight: 400;
+
+  --text-headline-small: 1.5rem;
+  --text-headline-small--line-height: 2rem;
+  --text-headline-small--letter-spacing: 0rem;
+  --text-headline-small--font-weight: 400;
+
+  --text-title-large: 1.375rem;
+  --text-title-large--line-height: 1.75rem;
+  --text-title-large--letter-spacing: 0rem;
+  --text-title-large--font-weight: 400;
+
+  --text-title-medium: 1rem;
+  --text-title-medium--line-height: 1.5rem;
+  --text-title-medium--letter-spacing: 0.009375rem;
+  --text-title-medium--font-weight: 500;
+
+  --text-title-small: 0.875rem;
+  --text-title-small--line-height: 1.25rem;
+  --text-title-small--letter-spacing: 0.00625rem;
+  --text-title-small--font-weight: 500;
+
+  --text-body-large: 1rem;
+  --text-body-large--line-height: 1.5rem;
+  --text-body-large--letter-spacing: 0.03125rem;
+  --text-body-large--font-weight: 400;
+
+  --text-body-medium: 0.875rem;
+  --text-body-medium--line-height: 1.25rem;
+  --text-body-medium--letter-spacing: 0.015625rem;
+  --text-body-medium--font-weight: 400;
+
+  --text-body-small: 0.75rem;
+  --text-body-small--line-height: 1rem;
+  --text-body-small--letter-spacing: 0.025rem;
+  --text-body-small--font-weight: 400;
+
+  --text-label-large: 0.875rem;
+  --text-label-large--line-height: 1.25rem;
+  --text-label-large--letter-spacing: 0.00625rem;
+  --text-label-large--font-weight: 500;
+
+  --text-label-medium: 0.75rem;
+  --text-label-medium--line-height: 1rem;
+  --text-label-medium--letter-spacing: 0.03125rem;
+  --text-label-medium--font-weight: 500;
+
+  --text-label-small: 0.6875rem;
+  --text-label-small--line-height: 1rem;
+  --text-label-small--letter-spacing: 0.03125rem;
+  --text-label-small--font-weight: 500;
+
+  /* M3 Expressive emphasized variants — one weight step up at the same
+     size, the sanctioned way to add hierarchy without a new size (§2.2). */
+  --text-body-large-emphasized: 1rem;
+  --text-body-large-emphasized--line-height: 1.5rem;
+  --text-body-large-emphasized--letter-spacing: 0.009375rem;
+  --text-body-large-emphasized--font-weight: 500;
+
+  --text-label-large-emphasized: 0.875rem;
+  --text-label-large-emphasized--line-height: 1.25rem;
+  --text-label-large-emphasized--letter-spacing: 0.00625rem;
+  --text-label-large-emphasized--font-weight: 700;
+
+  /* The one documented deviation from M3 (§2.3): the document body runs
+     at 16/26 rather than 16/24, because this is read all day. */
+  --text-doc-body: 1rem;
+  --text-doc-body--line-height: 1.625rem;
+  --text-doc-body--letter-spacing: 0.03125rem;
+  --text-doc-body--font-weight: 400;
+
+  /* §2.4 — the 65–80 character measure, in `ch` so it self-corrects
+     when the theme changes the body size or the user zooms. */
+  --container-measure: 72ch;
+}
+
+/* ─────────────────────────────────────────────────────────────
+   6. MOTION  (§6.5)
+   Durations need no tokens — M3's values are already Tailwind's
+   numeric duration utilities (short2 = duration-100, and so on).
+   ───────────────────────────────────────────────────────────── */
+@theme {
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-standard-accelerate: cubic-bezier(0.3, 0, 1, 1);
+  --ease-standard-decelerate: cubic-bezier(0, 0, 0, 1);
+  --ease-emphasized: cubic-bezier(0.2, 0, 0, 1);
+  --ease-emphasized-accelerate: cubic-bezier(0.3, 0, 0.8, 0.15);
+  --ease-emphasized-decelerate: cubic-bezier(0.05, 0.7, 0.1, 1);
+}
+
+/* ─────────────────────────────────────────────────────────────
+   7. ELEVATION SHADOWS  (§4.4)
+   Placement is Nuxt UI's and is already M3-correct: only transient
+   floating surfaces carry one. This retunes the rendering, once.
+   ───────────────────────────────────────────────────────────── */
+@theme inline {
+  --shadow-sm: 0 1px 2px 0 var(--dw-shadow-key), 0 1px 3px 1px var(--dw-shadow-ambient);
+  --shadow-md: 0 1px 2px 0 var(--dw-shadow-key), 0 2px 6px 2px var(--dw-shadow-ambient);
+  --shadow-lg: 0 1px 3px 0 var(--dw-shadow-key), 0 4px 8px 3px var(--dw-shadow-ambient);
+}
+
+/* ─────────────────────────────────────────────────────────────
+   8. APP GROUND  (§8.3)
+   The panes sit on `surface` / `surface-container-low`, not on
+   `surface-container-lowest`. Nuxt UI puts `bg-default` on <body>;
+   the ladder only reads correctly if the ground is one rung up.
+   ───────────────────────────────────────────────────────────── */
+body {
+  background-color: var(--ui-bg-muted);
+}
+
+/* ─────────────────────────────────────────────────────────────
+   9. FOCUS INDICATOR  (§5.1, checklist §5 — pass/fail)
+   M3's focus indicator is separate from the state layer: 3px, offset
+   2px, in the `secondary` role. Declared unlayered so it outranks
+   every utility and no component can quietly drop it.
+   ───────────────────────────────────────────────────────────── */
+:focus-visible {
+  outline: var(--dw-focus-ring-width) solid var(--ui-secondary);
+  outline-offset: var(--dw-focus-ring-offset);
+}
+
+/* ─────────────────────────────────────────────────────────────
+   10. STATE LAYER  (§5.2)
+   The M3 model expressed literally: a translucent layer of the
+   element's *content* colour, composited over its container. Use only
+   where no Nuxt UI component already provides one.
+   ───────────────────────────────────────────────────────────── */
+@utility dw-state-layer {
+  position: relative;
+  isolation: isolate;
+
+  &::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: inherit;
+    background-color: currentColor;
+    opacity: 0;
+    transition: opacity 100ms var(--ease-standard);
+  }
+
+  &:hover::before {
+    opacity: 0.08;
+  }
+
+  &:focus-visible::before {
+    opacity: 0.12;
+  }
+
+  &:active::before {
+    opacity: 0.12;
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────
+   11. REDUCED MOTION  (§6.6, checklist §5 — pass/fail)
+   Nuxt UI applies its animations inline rather than through tokens,
+   so a global override is the only reliable point of control.
+   1ms rather than 0s so `transitionend` / `animationend` still fire.
+   ───────────────────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+    scroll-behavior: auto !important;
+  }
+}
