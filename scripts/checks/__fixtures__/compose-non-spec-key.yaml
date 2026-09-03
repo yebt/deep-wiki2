@@ -1,0 +1,7 @@
+name: fixture-non-spec-key
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    container_name: pinned-postgres
+    ports:
+      - "5432:5432"

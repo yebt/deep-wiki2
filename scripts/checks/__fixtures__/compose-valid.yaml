@@ -1,0 +1,15 @@
+name: fixture-valid
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./infra/postgres/init:/docker-entrypoint-initdb.d:z
+  kroki:
+    image: yuzutech/kroki
+    ports:
+      - "8000:8000"
+volumes:
+  pgdata:

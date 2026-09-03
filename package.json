@@ -11,9 +11,10 @@
     "test": "bun run --filter '*' test && bun test scripts/checks",
     "lint": "bun run --filter '*' lint && eslint .",
     "typecheck": "bun run --filter '*' typecheck && tsc --noEmit -p tsconfig.json",
-    "check": "bun run scripts/checks/workspace-shape.ts && bun run scripts/checks/test-coverage.ts && bun run scripts/checks/core-purity.ts && bun run scripts/checks/env-example.ts",
+    "check": "bun run scripts/checks/workspace-shape.ts && bun run scripts/checks/test-coverage.ts && bun run scripts/checks/core-purity.ts && bun run scripts/checks/env-example.ts && bun run scripts/checks/compose.ts",
     "db:migrate": "bun run --filter @deep-wiki/db migrate",
-    "db:seed": "bun run --filter @deep-wiki/db seed"
+    "db:seed": "bun run --filter @deep-wiki/db seed",
+    "compose:smoke": "bun run scripts/checks/compose-smoke.ts"
   },
   "overrides": {},
   "devDependencies": {
@@ -22,6 +23,7 @@
     "@types/bun": "^1.1.14",
     "eslint": "^9.19.0",
     "typescript": "^5.7.3",
-    "typescript-eslint": "^8.21.0"
+    "typescript-eslint": "^8.21.0",
+    "yaml": "^2.9.0"
   }
 }
