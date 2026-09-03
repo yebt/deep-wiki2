@@ -87,9 +87,9 @@ Chain strategy: size-exception
 
 ## Phase 4: `packages/markdown`
 
-- [ ] 4.1 Create fixture corpus under `packages/markdown/fixtures/` (GATE-2 location)
-- [ ] 4.2 (RED) `packages/markdown/src/index.test.ts` — `parse()` heading fixture into expected mdast
-- [ ] 4.3 (GREEN) Implement `packages/markdown/src/index.ts` `parse(md): Root` over unified/remark
+- [x] 4.1 Create fixture corpus under `packages/markdown/fixtures/` (GATE-2 location)
+- [x] 4.2 (RED) `packages/markdown/src/index.test.ts` — `parse()` heading fixture into expected mdast
+- [x] 4.3 (GREEN) Implement `packages/markdown/src/index.ts` `parse(md): Root` over unified/remark — *also exports `stringify(tree): string` over `remark-stringify`, kept in this same single pipeline so `packages/editor`'s round-trip harness (Phase 5) reuses `packages/markdown` for both directions rather than instantiating a second unified processor; not explicitly listed in the task text but required to honor `openspec/config.yaml`'s "reuse packages/markdown as the single parser for editor, api and indexer" rule*
 
 ## Phase 5: `packages/editor`
 
