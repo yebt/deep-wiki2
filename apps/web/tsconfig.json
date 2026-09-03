@@ -1,0 +1,17 @@
+{
+  // Nuxt generates the referenced project configs on `nuxt prepare`
+  // (wired as this package's postinstall script). They carry Nuxt's
+  // auto-import types, path aliases (`~`, `#imports`, ...) and the
+  // app/server/shared compiler-option split — see
+  // https://nuxt.com/docs/guide/concepts/typescript. This intentionally
+  // does not extend the repository's shared tsconfig.base.json: Nuxt
+  // owns its own strict-mode compiler options (enabled explicitly in
+  // nuxt.config.ts) instead.
+  "files": [],
+  "references": [
+    { "path": "./.nuxt/tsconfig.app.json" },
+    { "path": "./.nuxt/tsconfig.server.json" },
+    { "path": "./.nuxt/tsconfig.shared.json" },
+    { "path": "./.nuxt/tsconfig.node.json" }
+  ]
+}

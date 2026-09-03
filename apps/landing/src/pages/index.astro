@@ -1,0 +1,50 @@
+---
+import { site } from '../lib/site';
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{site.name} — {site.tagline}</title>
+    <meta name="description" content={site.description} />
+  </head>
+  <body>
+    <header>
+      <h1>{site.name}</h1>
+      <p>{site.tagline}</p>
+    </header>
+    <main>
+      <p>{site.description}</p>
+    </main>
+    <footer>
+      <p>Bootstrap smoke page — Phase 0. The full marketing site is future work.</p>
+    </footer>
+  </body>
+</html>
+
+<style>
+  :root {
+    color-scheme: light dark;
+  }
+
+  body {
+    margin: 0;
+    font-family: system-ui, sans-serif;
+    line-height: 1.5;
+  }
+
+  header,
+  main,
+  footer {
+    max-width: 40rem;
+    margin: 0 auto;
+    padding: 1.5rem;
+  }
+
+  footer {
+    opacity: 0.75;
+    font-size: 0.875rem;
+  }
+</style>

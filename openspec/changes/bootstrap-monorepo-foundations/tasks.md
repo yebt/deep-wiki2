@@ -112,25 +112,27 @@ Chain strategy: size-exception
 
 ## Phase 8: `apps/web` + `apps/landing` — human review checkpoint (new UI screen)
 
-- [ ] 8.1 Scaffold `apps/web` Nuxt 4 + Nuxt UI shell, one smoke page, one composable
-- [ ] 8.2 Scaffold `apps/landing` Astro shell + `src/lib/site.ts` metadata
-- [ ] 8.3 Create `apps/web/vitest.config.ts` (`defineVitestConfig({ test: { environment: 'nuxt' } })`); add `vitest` + `@nuxt/test-utils` as `apps/web`-only devDependencies — in the same unit that introduces `apps/web`, not a later one
-- [ ] 8.4 Create `apps/web/src/config.ts` — typed loader (zod) documenting explicitly that `apps/web` requires zero variables in Phase 0 — *environment-config: Typed Configuration Loading*
-- [ ] 8.5 Create `apps/landing/src/lib/config.ts` — typed loader documenting explicitly that `apps/landing` requires zero variables in Phase 0
-- [ ] 8.6 (RED) `apps/web` composable unit test
-- [ ] 8.7 (GREEN) Implement the composable
-- [ ] 8.8 (RED) — **human review checkpoint: new UI screen** — smoke-page component test via `@nuxt/test-utils`
-- [ ] 8.9 (GREEN) Implement the smoke page
-- [ ] 8.10 (RED) `apps/landing` metadata unit test under `bun test`
-- [ ] 8.11 (GREEN) Implement `src/lib/site.ts` metadata
-- [ ] 8.12 Add `build` scripts to `apps/web/package.json` and `apps/landing/package.json`; run both builds locally to confirm WU-0's finding holds with real installs — *proposal risk: Nuxt/Astro coexistence*
-- [ ] 8.13 Confirm `workspace-shape.ts` reports Vitest in exactly `apps/web`
+- [x] 8.1 Scaffold `apps/web` Nuxt 4 + Nuxt UI shell, one smoke page, one composable — Nuxt UI 4.11 / Tailwind v4 / Reka UI per docs/SPECS.md §11.1; scaffolded from `nuxi init -t ui` to inspect the official module wiring, then hand-authored the actual smoke-page content (the `ui` template's marketing starter content was discarded, not shipped)
+- [x] 8.2 Scaffold `apps/landing` Astro shell + `src/lib/site.ts` metadata — dependency-isolated per design.md (no Nuxt UI, no Tailwind — plain semantic HTML/CSS; `color-scheme: light dark` for a free light/dark-aware default rather than a hand-rolled theme system, since landing has no user accounts/theme selection)
+- [x] 8.3 Create `apps/web/vitest.config.ts` (`defineVitestConfig({ test: { environment: 'nuxt' } })`); add `vitest` + `@nuxt/test-utils` as `apps/web`-only devDependencies — in the same unit that introduces `apps/web`, not a later one — also raised `hookTimeout`/`testTimeout` beyond Vitest's 10s default: booting the Nuxt test environment on a cold cache reliably exceeded it (observed, not hypothetical)
+- [x] 8.4 Create `apps/web/src/config.ts` — typed loader (zod) documenting explicitly that `apps/web` requires zero variables in Phase 0 — *environment-config: Typed Configuration Loading* — covered by its own RED→GREEN test even though not separately called out in this task, for the same reason as 7.1
+- [x] 8.5 Create `apps/landing/src/lib/config.ts` — typed loader documenting explicitly that `apps/landing` requires zero variables in Phase 0 — RED→GREEN test verified against a real `Cannot find module` failure before implementation existed
+- [x] 8.6 (RED) `apps/web` composable unit test — `useApiHealth.test.ts`; verified genuinely RED by temporarily removing `useApiHealth.ts` and re-running (`Failed to resolve import`), then restoring
+- [x] 8.7 (GREEN) Implement the composable — `useApiHealth()` pings `apps/api`'s `/health` via an injectable fetcher (idle/loading/ok/error), defaulting to Nuxt's `$fetch` against `runtimeConfig.public.apiBaseUrl`
+- [x] 8.8 (RED) — **human review checkpoint: new UI screen** — smoke-page component test via `@nuxt/test-utils` — `index.test.ts` using `mountSuspended` + `mockNuxtImport`; verified genuinely RED by stubbing the page to an empty `<div>` and re-running (all 4 assertions failed for the expected reasons: no landmarks, no `[role="status"]`, no labelled toggle), then restoring
+- [x] 8.9 (GREEN) Implement the smoke page — `UHeader`/`UMain`/`UFooter` (real `<header>`/`<main>`/`<footer>` landmarks, verified via SSR curl of a live `nuxt dev` boot, not just the component test), one `<h1>`, a `role="status"` live region pairing an icon with the health message, a `UColorModeButton` (ships its own `aria-label="Toggle color theme"`), and a "Re-check API connection" `UButton` (icon + visible text)
+- [x] 8.10 (RED) `apps/landing` metadata unit test under `bun test` — verified genuinely RED (`Cannot find module './site'`) before `site.ts` existed
+- [x] 8.11 (GREEN) Implement `src/lib/site.ts` metadata
+- [x] 8.12 Add `build` scripts to `apps/web/package.json` and `apps/landing/package.json`; run both builds locally to confirm WU-0's finding holds with real installs — *proposal risk: Nuxt/Astro coexistence* — both `bun run -F @deep-wiki/web build` and `bun run -F @deep-wiki/landing build` exit 0 with real installs (not the throwaway WU-0 tree); confirms the spike's finding holds
+- [x] 8.13 Confirm `workspace-shape.ts` reports Vitest in exactly `apps/web` — `bun run check` passes; `apps/landing` deliberately carries no `vitest` devDependency
+
+Note: `apps/web`'s `e2e` script and its `@playwright/test` devDependency are added in the Phase 9 commit alongside `playwright.config.ts`, not here — so this commit's manifest never references a script pointing at a not-yet-existing root config.
 
 ## Phase 9: Playwright E2E
 
-- [ ] 9.1 Create `playwright.config.ts` with `webServer` booting `apps/web`
-- [ ] 9.2 Write `e2e/smoke.spec.ts` exercising one real user-facing path — *test-infrastructure: Playwright boots the web app and passes*
-- [ ] 9.3 Run `bunx playwright install --with-deps chromium && bun run -F @deep-wiki/web e2e` locally and confirm it passes
+- [x] 9.1 Create `playwright.config.ts` with `webServer` booting `apps/web` — root-level (not nested under `apps/web`) since e2e is cross-cutting; `webServer` runs `nuxt dev` (fast, reliable startup) rather than a production build, since `bun run build` (8.12) and CI's `verify` job separately exercise the production bundle
+- [x] 9.2 Write `e2e/smoke.spec.ts` exercising one real user-facing path — *test-infrastructure: Playwright boots the web app and passes* — one journey: landmarks + heading render, the theme toggle produces a real computed-style change on the header (not a class-name check), the live API-health status settles away from its placeholder, and the retry action is present and enabled — all assertions via `getByRole`, none via CSS class or test ID
+- [x] 9.3 Run `bunx playwright install --with-deps chromium && bun run -F @deep-wiki/web e2e` locally and confirm it passes — ran `bunx playwright install chromium` **without** `--with-deps`: that flag's OS dependency installation only covers Debian/Ubuntu (`apt`), and this machine is Fedora (`dnf`) — verified the already-cached chromium binary launches and renders correctly (Playwright's own "OS not officially supported, using ubuntu24.04-x64 fallback build" notice, not a hard error); `bun run -F @deep-wiki/web e2e` exits 0, 1 passed
 
 ## Phase 10: Compose Stack
 

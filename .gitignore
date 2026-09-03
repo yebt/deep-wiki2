@@ -20,6 +20,10 @@ playwright-report/
 test-results/
 .turbo/
 
+# nuxt-generated bookkeeping (e.g. one-time module setup tracking written
+# by @nuxt/test-utils) — regenerated automatically, not hand-authored
+.nuxtrc
+
 # editors & os
 .DS_Store
 *.swp

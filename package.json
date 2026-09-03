@@ -9,7 +9,7 @@
   "scripts": {
     "build": "bun run --filter '*' build",
     "test": "bun run --filter '*' test && bun test scripts/checks",
-    "lint": "eslint .",
+    "lint": "bun run --filter '*' lint && eslint .",
     "typecheck": "bun run --filter '*' typecheck && tsc --noEmit -p tsconfig.json",
     "check": "bun run scripts/checks/workspace-shape.ts && bun run scripts/checks/test-coverage.ts && bun run scripts/checks/core-purity.ts && bun run scripts/checks/env-example.ts",
     "db:migrate": "bun run --filter @deep-wiki/db migrate",
