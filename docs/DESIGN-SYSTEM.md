@@ -852,7 +852,7 @@ export default defineAppConfig({
 
 **Conflict 2 — `solid` uses alpha, which is backwards in dark themes.** `hover:bg-primary/75` makes the button *translucent*, letting the page show through. In light mode that lightens it, which coincidentally resembles M3. In dark mode over a dark ground it *darkens* the button on hover — the opposite of M3, where a white-ish state layer always lightens. It also violates checklist §4.2's principle that nothing may depend on the background being light or dark.
 
-*Ruling: for `solid`, step the shade instead of the alpha.* Rest is tone 40 (light) / 80 (dark); hover and pressed step toward the lighter tone in both modes.
+*Ruling (superseded 2026-09-03 — see §14): apply the state layer as a compositing `before:` overlay of `currentColor`, not by stepping the shade.* Stepping the shade was the original ruling and it fails: one Nuxt UI shade slot spans ten M3 tones, roughly two and a half times what an 0.12 state layer is worth, so `hover:bg-primary-500` overshoots and drops the white label to **3.15:1** — below the checklist's pass/fail 4.5:1 floor, which wins on conflict per §0. A `currentColor` overlay reproduces M3's intent exactly, because its colour *is* the `on-` role: it lightens in light mode and darkens in dark mode by construction, and it never touches the label's contrast.
 
 ```ts
 compoundVariants: [
@@ -1623,7 +1623,8 @@ export default defineAppConfig({
         base: 'transition-[border-radius,background-color] duration-100 ease-standard active:rounded-sm'
       },
       compoundVariants: [
-        // M3 filled: step the shade, never the alpha (§5.2 conflict 2)
+        // M3 filled: state layer as a currentColor overlay, never a shade step
+        // and never alpha on the fill (§5.2, superseded ruling — see §14)
         { variant: 'solid', color: 'primary',
           class: 'bg-primary text-inverted hover:bg-primary-500 active:bg-primary-400 dark:hover:bg-primary-100 dark:active:bg-primary-50' },
         // M3 filled tonal: opaque container tokens, not alpha (§9.1)
@@ -1752,5 +1753,7 @@ Amend this file in place when a rule turns out to be wrong, and record why here.
 | Date | Change | Reason |
 | --- | --- | --- |
 | 2026-09-03 | Initial version. | — |
+| 2026-09-03 | §5.2: `solid` pressed/hover states now use a `currentColor` compositing overlay instead of stepping the shade. | Measured against this project's tone tables, the shade step put a white label on tone 60 at 3.15:1, below the checklist's 4.5:1 floor. The checklist wins on accessibility per §0. One shade slot spans ten M3 tones, about 2.5x an 0.12 state layer, so the step overshoots. |
+| 2026-09-03 | Dark `outline-variant` moved from tone 20 to tone 30; `text-muted` moved to `on-surface-variant` tone 30/80. | At tone 20 the border was invisible on a tone-12 panel. Nuxt UI's default muted text measured 3.9:1 on `bg-muted`, failing the §5 body-text floor. |
 </content>
 </invoke>
