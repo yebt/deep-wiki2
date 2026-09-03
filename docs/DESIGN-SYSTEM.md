@@ -1,0 +1,1756 @@
+# Visual Design System — Material Design 3, translated to Nuxt UI v4
+
+> Living document. This file is the **aesthetic system**: what things look like, and why.
+> It is the counterpart to [`docs/UI-CHECKLIST.md`](./UI-CHECKLIST.md), which is the **gate**.
+
+---
+
+## 0. How to use this file
+
+### Its relationship to the UI checklist
+
+| | `docs/UI-CHECKLIST.md` | `docs/DESIGN-SYSTEM.md` (this file) |
+| --- | --- | --- |
+| **Question it answers** | Is this screen *correct*? | Does this screen *look like the product*? |
+| **Governs** | Required states, accessibility floor, responsive behaviour, keyboard, e2e coverage, permission states | Colour roles, type scale, shape, elevation, state layers, motion, spacing, density, component selection |
+| **Verdict** | Pass / fail. A fail blocks the review. | Consistency. A deviation must be deliberate and recorded. |
+| **Mode** | Checkbox audit | Reference and rules |
+
+The checklist assumes an aesthetic system exists. This is that system.
+
+**On conflict, the checklist wins** — on correctness, accessibility, and responsive behaviour. Concretely: if an M3 rule in this file would produce a contrast ratio below the checklist's §5 floor, a target smaller than 24×24 CSS px, a focus ring that disappears in some theme, or a breakpoint behaviour that contradicts §6, the checklist's rule applies and this file is wrong. Record the correction here.
+
+Where this file wins: anything the checklist does not speak to. The checklist says "real typographic hierarchy"; this file says *which* type roles, at which sizes. The checklist says "every visual value resolves to a token"; this file says *which* tokens exist and what each is for.
+
+### The standing rule still applies
+
+The checklist's §1 standing rule — **extend the system, do not invent one** — outranks this document too. Nuxt UI v4 is the system. Material Design 3 is the *reasoning* applied to it. Every rule below is expressed as a Nuxt UI or Tailwind v4 primitive, never as a parallel component set.
+
+### How to read a section
+
+Every section has the same shape:
+
+1. **The M3 rule** — the concept, with the real token names and numeric values.
+2. **In this stack** — how it is expressed in Tailwind v4 `@theme`, Nuxt UI `app.config.ts`, or Nuxt UI component props.
+3. **Do / don't** — the short version.
+
+A rule an implementer cannot act on in Nuxt UI is not in this file.
+
+### What this stack is, and is not
+
+This project uses **Nuxt UI v4 (Tailwind CSS v4 / Reka UI)**. It does **not** use Material Web Components, Jetpack Compose Material 3, or `material-color-utilities` at runtime. M3 is a source of design decisions here, not a dependency.
+
+Verified facts about the installed stack that shape everything below:
+
+| Fact | Value |
+| --- | --- |
+| Nuxt UI version | `4.11.0` |
+| Nuxt UI Pro | Merged into free `@nuxt/ui` in v4, MIT. There is no Pro tier; all `UDashboard*`, `UPage*`, `USplitter` components are available. |
+| Stylesheet entry | `apps/web/app/assets/css/main.css` → `@import "tailwindcss";` then `@import "@nuxt/ui";` |
+| Dark mode | Class-driven. Nuxt UI defines `@variant dark (&:where(.dark, .dark *));` itself. **Do not write your own `@custom-variant dark`.** |
+| Spacing base | Tailwind `--spacing: 0.25rem` (4px) |
+| Radius base | `--ui-radius: 0.25rem` (see §4 — this project overrides it) |
+| Colour aliases | `primary` `secondary` `success` `info` `warning` `error` + `neutral` |
+
+M3 reference version for the token values below: Material 3 design system v0.192 tokens (`material-components/material-web`), plus the 2025 **Material 3 Expressive** additions taken from `androidx.compose.material3` tokens.
+
+---
+
+## 1. Colour
+
+### 1.1 The M3 rule — tonal palettes and the 0–100 tone scale
+
+M3 does not start from a set of hex values. It starts from a **source colour**, from which five (six with error) **tonal palettes** are generated: primary, secondary, tertiary, neutral, neutral-variant, error. Each palette is the same hue and chroma sampled across a **0–100 lightness tone scale**, where `0` is black and `100` is white.
+
+The reference palette ships these tones:
+
+| Palette | Tones present |
+| --- | --- |
+| primary / secondary / tertiary / error | 0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 95, 99, 100 |
+| neutral-variant | 0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 95, 99, 100 |
+| neutral | the above **plus** 4, 6, 12, 17, 22, 24, 87, 92, 94, 96, 98 |
+
+The extra neutral tones exist for exactly one purpose: the surface-container ladder in §1.3. They are not decorative.
+
+How the palettes derive from the source colour depends on the **scheme variant** — M3 ships `TONAL_SPOT` (the default), `NEUTRAL`, `VIBRANT`, `EXPRESSIVE`, `FIDELITY`, `CONTENT`, `RAINBOW`, `FRUIT_SALAD`, `MONOCHROME`. `TONAL_SPOT` keeps low-to-medium colourfulness with a tertiary hue related to the source. `EXPRESSIVE` is *intentionally detached* from the source colour, which is why an M3 Expressive theme can produce a palette whose hue never visibly appears.
+
+The point for this project: **a theme is a tone table, not a colour list.** A theme author picks a source colour and produces tones; the roles below then read tones by name.
+
+### 1.2 The colour roles — what each one is FOR
+
+A role is a *job*, not a colour. Every role has a companion `on-` role guaranteed to be legible on it.
+
+**Accent roles**
+
+| Role | Tone (light) | Tone (dark) | What it is for |
+| --- | --- | --- | --- |
+| `primary` | 40 | 80 | The single most important action or emphasis on a screen. Sparse by design. |
+| `on-primary` | 100 | 20 | Text/icons drawn on `primary`. |
+| `primary-container` | 90 | 30 | A *quieter* primary emphasis: a filled-tonal button, a selected nav item, a highlighted block. Lower attention than `primary`, still clearly "the accent". |
+| `on-primary-container` | 30 | 90 | Text/icons on `primary-container`. |
+| `secondary` | 40 | 80 | Less prominent components; supporting accents. In practice, rarely used raw. |
+| `secondary-container` | 90 | 30 | The workhorse of M3. Selected states, filter chips, nav active indicators. |
+| `on-secondary-container` | 30 | 90 | Text/icons on `secondary-container`. |
+| `tertiary` | 40 | 80 | A contrasting accent used to balance primary/secondary; for expressive moments. |
+| `tertiary-container` | 90 | 30 | Same role as `secondary-container`, different hue. |
+| `error` | 40 | 80 | Destructive and invalid state. |
+| `on-error` | 100 | 20 | Text on `error`. |
+| `error-container` | 90 | 30 | Error banners, invalid field backgrounds. |
+| `on-error-container` | 30 | 90 | Text on `error-container`. |
+
+**Surface roles**
+
+| Role | Tone (light) | Tone (dark) | What it is for |
+| --- | --- | --- | --- |
+| `surface` | 98 | 6 | The default ground the app sits on. |
+| `surface-dim` | 87 | 6 | The dimmest the surface gets. |
+| `surface-bright` | 98 | 24 | The brightest the surface gets. |
+| `surface-container-lowest` | 100 | 4 | The *recessed* end of the container ladder. |
+| `surface-container-low` | 96 | 10 | |
+| `surface-container` | 94 | 12 | The default container fill. |
+| `surface-container-high` | 92 | 17 | |
+| `surface-container-highest` | 90 | 22 | The *raised* end of the container ladder. |
+| `on-surface` | 10 | 90 | Primary body and heading text. |
+| `on-surface-variant` | 30 | 80 | Secondary/supporting text, inactive icons. The muted text role. |
+| `outline` | 50 | 60 | Borders that must be *seen* — a text field outline, a control boundary. Meets 3:1. |
+| `outline-variant` | 80 | 30 | Decorative separators — a divider between list rows, a card edge. Deliberately below 3:1; it is not a control boundary. |
+| `inverse-surface` | 20 | 90 | Snackbars, plain tooltips: surfaces that must read as *not part of* the page. |
+| `inverse-on-surface` | 95 | 20 | Text on `inverse-surface`. |
+| `inverse-primary` | 80 | 40 | An accent that stays legible on `inverse-surface` — e.g. a snackbar's action label. |
+| `scrim` | 0 | 0 | Modal backdrop, always applied with opacity. |
+| `shadow` | 0 | 0 | Shadow colour. |
+| `surface-tint` | 40 | 80 | Legacy. See §5 — deprecated in favour of the container ladder. |
+
+The deprecated roles you will see in older M3 material and should **not** introduce here: `background`, `on-background`, `surface-variant`.
+
+### 1.3 Why surface-container levels instead of elevation shadows
+
+This is the single most consequential idea in M3, and the most commonly missed.
+
+Older Material expressed hierarchy with **drop shadows** and, in M2/early-M3, an opacity-based **surface tint overlay** whose strength was tied to an elevation value. Both were dropped. The current model:
+
+> **Hierarchy is expressed by container tone, not by shadow.** A panel that sits "above" another panel is a *different tone of neutral*, not the same tone with a shadow under it.
+
+Why this is better, and why it matters specifically for a wiki:
+
+- **It survives dark themes.** A drop shadow is a dark smear. On a dark surface it is invisible. Tone separation works identically in both directions.
+- **It survives large screens.** Elevation implies a floating object. A three-pane desktop shell has no floating objects — it has *regions*. Regions have tones.
+- **It is not tied to elevation.** The old model made "raised" and "tinted" the same axis. Decoupling them means a persistently-visible sidebar can be tonally distinct without pretending to hover.
+- **It gives you five discrete steps**, which is enough to build a real hierarchy and few enough that you cannot invent a sixth.
+
+The ladder is symmetric between light and dark: in light, "higher" means *darker* (100 → 90); in dark, "higher" means *lighter* (4 → 22). Both directions move **away from the page ground**, so the same semantic ("this container is above that one") produces the correct visual result in both themes without a single conditional.
+
+Shadows are not abolished; see §5 for the narrow case where one is still correct.
+
+### 1.4 In this stack
+
+Nuxt UI v4 has its own two-layer colour model. Understand it exactly, because everything else depends on it.
+
+**Layer 1 — palette shades.** `app.config.ts` maps each alias to a Tailwind palette name:
+
+```ts
+// apps/web/app/app.config.ts
+export default defineAppConfig({
+  ui: {
+    colors: {
+      primary: 'green',
+      secondary: 'blue',
+      success: 'green',
+      info: 'blue',
+      warning: 'yellow',
+      error: 'red',
+      neutral: 'slate'
+    }
+  }
+})
+```
+
+At runtime this generates, for every alias and every shade in `[50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 950]`:
+
+```css
+--ui-color-primary-500: var(--color-green-500);
+/* …and so on for all 11 shades of all 7 aliases */
+```
+
+**Layer 2 — semantic values.** Nuxt UI then picks one shade per alias, per mode:
+
+```css
+:root, :host, .light { --ui-primary: var(--ui-color-primary-500); }
+.dark                { --ui-primary: var(--ui-color-primary-400); }
+```
+
+and ships this complete, closed set of neutral-derived semantic variables:
+
+| Variable | Light default | Dark default |
+| --- | --- | --- |
+| `--ui-text-dimmed` | `neutral-400` | `neutral-500` |
+| `--ui-text-muted` | `neutral-500` | `neutral-400` |
+| `--ui-text-toned` | `neutral-600` | `neutral-300` |
+| `--ui-text` | `neutral-700` | `neutral-200` |
+| `--ui-text-highlighted` | `neutral-900` | `#fff` |
+| `--ui-text-inverted` | `#fff` | `neutral-900` |
+| `--ui-bg` | `#fff` | `neutral-900` |
+| `--ui-bg-muted` | `neutral-50` | `neutral-800` |
+| `--ui-bg-elevated` | `neutral-100` | `neutral-800` |
+| `--ui-bg-accented` | `neutral-200` | `neutral-700` |
+| `--ui-bg-inverted` | `neutral-900` | `#fff` |
+| `--ui-border` | `neutral-200` | `neutral-800` |
+| `--ui-border-muted` | `neutral-200` | `neutral-700` |
+| `--ui-border-accented` | `neutral-300` | `neutral-700` |
+| `--ui-border-inverted` | `neutral-900` | `#fff` |
+| `--ui-radius` | `0.25rem` | — |
+| `--ui-container` | `80rem` | — |
+| `--ui-header-height` | `4rem` | — |
+
+That is the whole list. There is **no `--ui-neutral`** (neutral is excluded from the shorthand loop) and **no `--ui-border-elevated`**.
+
+The utilities are named differently from the variables: `--ui-text` → `text-default`, `--ui-bg` → `bg-default`.
+
+#### Mapping M3 tones onto Nuxt UI shades
+
+The 11 Nuxt UI shade slots map monotonically onto 11 M3 tones:
+
+| Nuxt UI shade | M3 tone |
+| --- | --- |
+| `50` | 95 |
+| `100` | 90 |
+| `200` | 80 |
+| `300` | 70 |
+| `400` | 60 |
+| `500` | 50 |
+| `600` | 40 |
+| `700` | 30 |
+| `800` | 20 |
+| `900` | 10 |
+| `950` | 0 |
+
+M3 tones 98, 99 and 100 fall outside this ladder; they are carried by `--ui-bg` and `--ui-bg-muted` directly (see the surface table below), not by an accent palette.
+
+**Rule:** a deep-wiki theme is authored by writing the 11 tones of each palette into a `@theme static` block, then pointing the aliases at it. Do not attempt to force a stock Tailwind palette to behave like an M3 tonal palette — the lightness steps do not line up.
+
+```css
+/* apps/web/app/assets/css/main.css — AFTER both imports */
+@theme static {
+  /* Tones of the primary tonal palette, generated once from the source colour.
+     Shade slot ← M3 tone.  50←95  100←90  200←80  300←70  400←60
+                            500←50 600←40 700←30 800←20 900←10 950←0 */
+  --color-dw-primary-50:  oklch(96.0% 0.030 250);
+  --color-dw-primary-100: oklch(92.0% 0.055 250);
+  --color-dw-primary-200: oklch(84.0% 0.090 250);
+  --color-dw-primary-300: oklch(75.0% 0.120 250);
+  --color-dw-primary-400: oklch(66.0% 0.140 250);
+  --color-dw-primary-500: oklch(57.0% 0.150 250);
+  --color-dw-primary-600: oklch(48.0% 0.145 250);
+  --color-dw-primary-700: oklch(38.5% 0.125 250);
+  --color-dw-primary-800: oklch(29.0% 0.100 250);
+  --color-dw-primary-900: oklch(19.5% 0.070 250);
+  --color-dw-primary-950: oklch(0%    0     250);
+}
+```
+
+```ts
+// apps/web/app/app.config.ts
+export default defineAppConfig({
+  ui: { colors: { primary: 'dw-primary', neutral: 'dw-neutral' } }
+})
+```
+
+`@theme static` is required for a custom palette: all 11 shades must be emitted, because Nuxt UI's generated `--ui-color-<alias>-<shade>` references `--color-<value>-<shade>` for every shade whether or not it is used in markup.
+
+#### The accent role bridge
+
+Nuxt UI gives you `--ui-primary` (one tone). M3 needs four (`primary`, `on-primary`, `primary-container`, `on-primary-container`). Re-point `--ui-primary` to the M3 tone, and register the container roles as project tokens so they generate real utilities.
+
+```css
+/* main.css, after the imports */
+
+/* 1. Re-point Nuxt UI's accent to M3's tones.
+      Nuxt UI defaults to shade 500 (tone 50) light / 400 (tone 60) dark.
+      M3 says tone 40 light / tone 80 dark. */
+:root, :host, .light {
+  --ui-primary:   var(--ui-color-primary-600);   /* tone 40 */
+  --ui-secondary: var(--ui-color-secondary-600);
+  --ui-error:     var(--ui-color-error-600);
+}
+.dark {
+  --ui-primary:   var(--ui-color-primary-200);   /* tone 80 */
+  --ui-secondary: var(--ui-color-secondary-200);
+  --ui-error:     var(--ui-color-error-200);
+}
+
+/* 2. The container roles M3 has and Nuxt UI does not. */
+:root, :host, .light {
+  --ui-primary-container:      var(--ui-color-primary-100);   /* tone 90 */
+  --ui-on-primary-container:   var(--ui-color-primary-700);   /* tone 30 */
+  --ui-secondary-container:    var(--ui-color-secondary-100);
+  --ui-on-secondary-container: var(--ui-color-secondary-700);
+  --ui-error-container:        var(--ui-color-error-100);
+  --ui-on-error-container:     var(--ui-color-error-700);
+}
+.dark {
+  --ui-primary-container:      var(--ui-color-primary-700);   /* tone 30 */
+  --ui-on-primary-container:   var(--ui-color-primary-100);   /* tone 90 */
+  --ui-secondary-container:    var(--ui-color-secondary-700);
+  --ui-on-secondary-container: var(--ui-color-secondary-100);
+  --ui-error-container:        var(--ui-color-error-700);
+  --ui-on-error-container:     var(--ui-color-error-100);
+}
+
+/* 3. Register them so Tailwind emits utilities.
+      `inline` is mandatory: the value is itself a var() that is redefined
+      per theme, and without `inline` Tailwind resolves it once at :root. */
+@theme inline {
+  --color-primary-container:      var(--ui-primary-container);
+  --color-on-primary-container:   var(--ui-on-primary-container);
+  --color-secondary-container:    var(--ui-secondary-container);
+  --color-on-secondary-container: var(--ui-on-secondary-container);
+  --color-error-container:        var(--ui-error-container);
+  --color-on-error-container:     var(--ui-on-error-container);
+}
+```
+
+That yields `bg-primary-container`, `text-on-primary-container`, and so on — real utilities that follow the theme switch.
+
+`text-inverted` already *is* `on-primary` in practice: it is `#fff` in light and `neutral-900` in dark, which is what M3 pairs with `primary` at tone 40 / tone 80 respectively. Use `bg-primary text-inverted` for the M3 primary/on-primary pair.
+
+#### The surface ladder bridge
+
+Nuxt UI's five `--ui-bg-*` values *are* a container ladder. Map M3's roles onto them and re-tune the tones:
+
+| M3 role | Nuxt UI variable | Utility | Light tone | Dark tone | Used in deep-wiki for |
+| --- | --- | --- | --- | --- | --- |
+| `surface-container-lowest` | `--ui-bg` | `bg-default` | 100 | 4 | Document canvas, card faces, editor body |
+| `surface` / `surface-container-low` | `--ui-bg-muted` | `bg-muted` | 98 | 10 | The app ground behind the panes |
+| `surface-container` | `--ui-bg-elevated` | `bg-elevated` | 94 | 12 | Navigation tree, contextual panel, top app bar |
+| `surface-container-high` | `--ui-bg-accented` | `bg-accented` | 92 | 17 | Menus, popovers, dialogs, command palette, search |
+| `surface-container-highest` | `--ui-bg-emphasized` *(project token)* | `bg-emphasized` | 90 | 22 | Selected tree row, code block, pressed toggle |
+| `inverse-surface` | `--ui-bg-inverted` | `bg-inverted` | 20 | 90 | Snackbars, plain tooltips |
+
+**Defect in the stock dark theme — fix this once, centrally.** Nuxt UI's dark defaults set `--ui-bg-muted` and `--ui-bg-elevated` to the *same* value (`neutral-800`). Two of the five ladder rungs collapse, so a panel on the app ground has no tonal separation in dark mode. This is precisely the "flat dark UI" failure in §12. Every deep-wiki theme must re-tune the dark ladder:
+
+```css
+.dark {
+  --ui-bg:           var(--dw-neutral-tone-4);
+  --ui-bg-muted:     var(--dw-neutral-tone-10);
+  --ui-bg-elevated:  var(--dw-neutral-tone-12);
+  --ui-bg-accented:  var(--dw-neutral-tone-17);
+  --ui-bg-emphasized:var(--dw-neutral-tone-22);
+}
+:root, :host, .light {
+  --ui-bg:           #fff;                       /* tone 100 */
+  --ui-bg-muted:     var(--dw-neutral-tone-98);
+  --ui-bg-elevated:  var(--dw-neutral-tone-94);
+  --ui-bg-accented:  var(--dw-neutral-tone-92);
+  --ui-bg-emphasized:var(--dw-neutral-tone-90);
+}
+@theme inline {
+  --background-color-emphasized: var(--ui-bg-emphasized);
+}
+```
+
+The `--dw-neutral-tone-*` variables are the extra neutral tones from §1.1 (4, 10, 12, 17, 22, 90, 92, 94, 98). They exist *only* for this ladder and are set per theme.
+
+#### Text and outline roles
+
+| M3 role | Nuxt UI utility | Note |
+| --- | --- | --- |
+| `on-surface` | `text-highlighted` | Headings and emphasised body |
+| `on-surface` (body) | `text-default` | Running text |
+| `on-surface-variant` | `text-muted` | Supporting text, inactive icons, metadata |
+| — | `text-dimmed` | Below M3's roles; use only for non-essential ornament, never for text that must be read |
+| `outline` | `border-accented` / `ring-accented` | Control boundaries. Must hold 3:1 — see §11. |
+| `outline-variant` | `border-default` / `divide-default` | Decorative separators only |
+
+**Do**
+- Author a theme as a tone table; write tones into `@theme static`, then alias.
+- Pair every foreground with its matching `on-` role. `bg-primary` always takes `text-inverted`; `bg-primary-container` always takes `text-on-primary-container`.
+- Express hierarchy by walking the `bg-default → bg-muted → bg-elevated → bg-accented → bg-emphasized` ladder.
+- Fix the dark ladder collapse in every theme.
+
+**Don't**
+- Don't use a stock Tailwind palette as an M3 tonal palette. The steps do not correspond.
+- Don't use `bg-primary/10` as a stand-in for `primary-container`. Alpha over an unknown background is exactly the class of defect checklist §4.2 exists to catch; an opaque container token is theme-safe, an alpha layer is not.
+- Don't use `border-default` (`outline-variant`) as a text-field or button boundary. It is deliberately below 3:1.
+- Don't introduce a sixth surface level.
+
+---
+
+## 2. Typography
+
+### 2.1 The M3 rule — the type scale
+
+Fifteen roles across five families. Values below are the v0.192 web tokens, verbatim.
+
+| Role | Size | Line height | Weight | Tracking | Typeface slot |
+| --- | --- | --- | --- | --- | --- |
+| `display-large` | 3.5625rem / 57px | 4rem / 64px | 400 | −0.015625rem | brand |
+| `display-medium` | 2.8125rem / 45px | 3.25rem / 52px | 400 | 0 | brand |
+| `display-small` | 2.25rem / 36px | 2.75rem / 44px | 400 | 0 | brand |
+| `headline-large` | 2rem / 32px | 2.5rem / 40px | 400 | 0 | brand |
+| `headline-medium` | 1.75rem / 28px | 2.25rem / 36px | 400 | 0 | brand |
+| `headline-small` | 1.5rem / 24px | 2rem / 32px | 400 | 0 | brand |
+| `title-large` | 1.375rem / 22px | 1.75rem / 28px | 400 | 0 | brand |
+| `title-medium` | 1rem / 16px | 1.5rem / 24px | 500 | 0.009375rem | plain |
+| `title-small` | 0.875rem / 14px | 1.25rem / 20px | 500 | 0.00625rem | plain |
+| `body-large` | 1rem / 16px | 1.5rem / 24px | 400 | 0.03125rem | plain |
+| `body-medium` | 0.875rem / 14px | 1.25rem / 20px | 400 | 0.015625rem | plain |
+| `body-small` | 0.75rem / 12px | 1rem / 16px | 400 | 0.025rem | plain |
+| `label-large` | 0.875rem / 14px | 1.25rem / 20px | 500 | 0.00625rem | plain |
+| `label-medium` | 0.75rem / 12px | 1rem / 16px | 500 | 0.03125rem | plain |
+| `label-small` | 0.6875rem / 11px | 1rem / 16px | 500 | 0.03125rem | plain |
+
+Reference weights: `regular` 400, `medium` 500, `bold` 700.
+
+What each family is *for*:
+
+| Family | Job |
+| --- | --- |
+| **Display** | Marketing and hero moments. **A wiki has none.** |
+| **Headline** | High-emphasis short text — a page title, a dialog headline. |
+| **Title** | Medium-emphasis text that organises a region — section headings, app bar titles, card titles. |
+| **Body** | Running prose. The wiki's whole reason for existing. |
+| **Label** | UI chrome — button labels, tabs, chips, badges, captions. |
+
+### 2.2 M3 Expressive — the Emphasized variants
+
+M3 Expressive (2025) doubles the scale: every role gains an `-emphasized` companion at the **same size and line height**, one weight step heavier and with adjusted tracking.
+
+| Role | Regular weight | Emphasized weight |
+| --- | --- | --- |
+| `display-*`, `headline-*` | 400 | 500 |
+| `title-large` | 400 | 500 |
+| `title-medium`, `title-small` | 500 | 700 |
+| `body-*` | 400 | 500 |
+| `label-*` | 500 | 700 |
+
+This matters here because it is the sanctioned M3 way to add hierarchy **without adding a size step** — which is exactly what a dense documentation product needs. `body-large-emphasized` (16px/24px/500, tracking 0.15px) is the correct treatment for an inline lead-in or a definition term.
+
+### 2.3 Which roles a wiki actually uses
+
+Discard `display-*` entirely. Then:
+
+**Document body — the reading surface**
+
+| Element | Role | Concrete value | Note |
+| --- | --- | --- | --- |
+| `h1` (page title) | `headline-medium` | 28px / 36px / 400 | |
+| `h2` | `headline-small` | 24px / 32px / 400 | |
+| `h3` | `title-large` | 22px / 28px / 400 | |
+| `h4` | `title-medium` | 16px / 24px / 500 | |
+| `h5` | `title-small` | 14px / 20px / 500 | |
+| `h6` | `label-large` | 14px / 20px / 500 | Use letter-spacing, not size, to distinguish from `h5` |
+| paragraph | `body-large`, relaxed leading | 16px / **26px** / 400 | See the deviation note below |
+| blockquote | `body-large` | 16px / 26px / 400 | Distinguished by `outline-variant` left rule and `text-muted` |
+| inline code | `body-medium`, mono | 14px / 24px | Size-matched to surrounding 16px prose optically |
+| code block | `body-medium`, mono | 14px / 20px | On `bg-emphasized` |
+| table cell | `body-medium` | 14px / 20px | |
+| figure caption | `body-small` | 12px / 16px | `text-muted` |
+
+Heading sizes step 28 → 24 → 22 → 16 → 14. `h1`–`h3` are cleanly separated by size alone, satisfying checklist §4.4's "distinguishable by more than weight". `h4`–`h6` sit at body size and separate by weight, tracking and colour; a deep-wiki page that needs a visually distinct `h5` is over-nested, and that is a content problem, not a typography problem.
+
+**Documented deviation from M3.** M3 specifies `body-large` at 16px/24px (1.5). This project uses **16px/26px (1.625)** for the document body only. Reason: M3's body metrics are tuned for short mobile-length passages; checklist §4.4 requires generous vertical rhythm for long-form reading, and this is a tool people read in all day. Size, weight and tracking are unchanged. Chrome text keeps M3's 24px leading.
+
+**Chrome — verified from the M3 component tokens**
+
+| Surface | Role |
+| --- | --- |
+| Top app bar (small) headline | `title-large` |
+| Top app bar (medium) headline | `headline-small` |
+| Button label | `label-large` |
+| Navigation drawer item label | `label-large` |
+| Navigation drawer section headline | `title-small` |
+| Navigation rail item label | `label-medium` |
+| List item label | `body-large` |
+| List item supporting text | `body-medium` |
+| List item overline / trailing meta | `label-small` |
+| Tab label | `title-small` |
+| Dialog headline | `headline-small` |
+| Dialog supporting text | `body-medium` |
+| Snackbar supporting text | `body-medium` |
+| Snackbar action label | `label-large` |
+| Chip label | `label-large` |
+| Badge label | `label-small` |
+| Plain tooltip text | `body-small` |
+| Text field input | `body-large` |
+| Text field supporting/helper text | `body-small` |
+
+### 2.4 Reconciling with the 65–80 character measure
+
+Checklist §4.4 requires the document column to hold roughly 65–80 characters per line. M3 has no measure rule — it is a mobile-first system where the viewport is the measure.
+
+The correct expression is a `ch`-relative container token, because `ch` is defined against the element's own font and therefore self-corrects when the theme changes the body size or the user zooms.
+
+```css
+@theme {
+  --container-measure: 72ch;   /* → max-w-measure */
+}
+```
+
+72ch lands inside the 65–80 band for every reasonable body face. Apply `max-w-measure` to the prose column, never to the pane. Tables, code blocks and diagrams are explicitly exempt: they get the full pane width and scroll inside their own container (checklist §6).
+
+Do **not** use `--ui-container` (80rem / 1280px) for prose. That token is the app shell's max width, not the reading measure.
+
+### 2.5 In this stack
+
+Register the type scale as Tailwind v4 `--text-*` tokens. The `--text-<name>--line-height`, `--text-<name>--letter-spacing` and `--text-<name>--font-weight` modifiers let one utility class carry all four properties, which is what makes `text-title-large` a real replacement for four hand-written classes.
+
+```css
+/* main.css, after the imports */
+@theme static {
+  /* ---- Headline ---- */
+  --text-headline-large: 2rem;
+  --text-headline-large--line-height: 2.5rem;
+  --text-headline-large--letter-spacing: 0rem;
+  --text-headline-large--font-weight: 400;
+
+  --text-headline-medium: 1.75rem;
+  --text-headline-medium--line-height: 2.25rem;
+  --text-headline-medium--letter-spacing: 0rem;
+  --text-headline-medium--font-weight: 400;
+
+  --text-headline-small: 1.5rem;
+  --text-headline-small--line-height: 2rem;
+  --text-headline-small--letter-spacing: 0rem;
+  --text-headline-small--font-weight: 400;
+
+  /* ---- Title ---- */
+  --text-title-large: 1.375rem;
+  --text-title-large--line-height: 1.75rem;
+  --text-title-large--letter-spacing: 0rem;
+  --text-title-large--font-weight: 400;
+
+  --text-title-medium: 1rem;
+  --text-title-medium--line-height: 1.5rem;
+  --text-title-medium--letter-spacing: 0.009375rem;
+  --text-title-medium--font-weight: 500;
+
+  --text-title-small: 0.875rem;
+  --text-title-small--line-height: 1.25rem;
+  --text-title-small--letter-spacing: 0.00625rem;
+  --text-title-small--font-weight: 500;
+
+  /* ---- Body ---- */
+  --text-body-large: 1rem;
+  --text-body-large--line-height: 1.5rem;
+  --text-body-large--letter-spacing: 0.03125rem;
+  --text-body-large--font-weight: 400;
+
+  --text-body-medium: 0.875rem;
+  --text-body-medium--line-height: 1.25rem;
+  --text-body-medium--letter-spacing: 0.015625rem;
+  --text-body-medium--font-weight: 400;
+
+  --text-body-small: 0.75rem;
+  --text-body-small--line-height: 1rem;
+  --text-body-small--letter-spacing: 0.025rem;
+  --text-body-small--font-weight: 400;
+
+  /* ---- Label ---- */
+  --text-label-large: 0.875rem;
+  --text-label-large--line-height: 1.25rem;
+  --text-label-large--letter-spacing: 0.00625rem;
+  --text-label-large--font-weight: 500;
+
+  --text-label-medium: 0.75rem;
+  --text-label-medium--line-height: 1rem;
+  --text-label-medium--letter-spacing: 0.03125rem;
+  --text-label-medium--font-weight: 500;
+
+  --text-label-small: 0.6875rem;
+  --text-label-small--line-height: 1rem;
+  --text-label-small--letter-spacing: 0.03125rem;
+  --text-label-small--font-weight: 500;
+
+  /* ---- Document body: the one deviation (§2.3) ---- */
+  --text-doc-body: 1rem;
+  --text-doc-body--line-height: 1.625rem;
+  --text-doc-body--letter-spacing: 0.03125rem;
+  --text-doc-body--font-weight: 400;
+
+  /* ---- Measure (§2.4) ---- */
+  --container-measure: 72ch;
+}
+```
+
+Usage: `class="text-title-large text-highlighted"`, `class="text-doc-body text-default max-w-measure"`.
+
+For the Expressive emphasized variants, add the ones actually needed rather than all fifteen — `--text-body-large-emphasized` (weight 500) and `--text-label-large-emphasized` (weight 700) cover the real cases.
+
+Nuxt UI's own components keep using `text-xs` / `text-sm` / `text-base` internally; that is fine and must not be "corrected". The `--text-*` tokens above are for project-authored markup.
+
+**Do**
+- Use one type role per element, via one utility class.
+- Use `text-doc-body` for prose and the M3 roles for everything else.
+- Reach for an Emphasized weight before reaching for a new size.
+
+**Don't**
+- Don't use `display-*`. This product has no hero.
+- Don't set `font-size` and `line-height` separately in markup — that is exactly the "no arbitrary values fighting the scale" failure in checklist §4.1.
+- Don't let `h2` and `h3` land on the same size.
+
+---
+
+## 3. Shape
+
+### 3.1 The M3 rule — the corner radius scale
+
+| Token | Value | Typical components |
+| --- | --- | --- |
+| `corner-none` | 0px | Full-bleed surfaces: top app bar, navigation rail, banners |
+| `corner-extra-small` | 4px | Menus, plain tooltips, snackbars, text field container |
+| `corner-small` | 8px | Chips |
+| `corner-medium` | 12px | Cards, rich tooltips, "square" small buttons |
+| `corner-large` | 16px | Navigation drawer trailing edge, side sheets |
+| `corner-large-increased` | 20px | *(M3 Expressive)* |
+| `corner-extra-large` | 28px | Dialogs, FABs, large "square" buttons |
+| `corner-extra-large-increased` | 32px | *(M3 Expressive)* |
+| `corner-extra-extra-large` | 48px | *(M3 Expressive)* Large expressive containers |
+| `corner-full` | 9999px | Buttons, search bars, chips in selected state, active indicators, focus rings |
+
+Directional variants exist and are used, not decorative: `corner-large-top` (16 16 0 0) for bottom sheets, `corner-large-end` (0 16 16 0) for the navigation drawer, `corner-extra-small-top` for filled text fields.
+
+### 3.2 What M3 Expressive changed
+
+Expressive expanded shape from a fixed property into an **expressive axis**:
+
+- Three new radius steps were added (20, 32, 48) to give designers room between the old steps.
+- `corner-full` changed meaning: it is now literally full (`9999px`), not "50% of the component".
+- **Shape morphing** became a first-class interaction. Buttons carry both a round and a square shape token *and* a distinct pressed shape. From the Compose tokens:
+
+| Button size | Height | Round shape | Square shape | **Pressed shape** |
+| --- | --- | --- | --- | --- |
+| Extra small | 32dp | full | 12px | **8px** |
+| Small | 40dp | full | 12px | **8px** |
+| Medium | 56dp | full | 16px | **12px** |
+| Large | 96dp | full | 28px | **16px** |
+| Extra large | 136dp | full | 28px | **16px** |
+
+The pressed corner is *smaller* than the rest corner. Pressing squares the button slightly. This is Expressive's principal press affordance, and it is why an M3 Expressive button feels physical while a flat Tailwind button does not.
+
+### 3.3 In this stack
+
+Nuxt UI derives its whole radius ladder from one variable:
+
+| Utility | Formula |
+| --- | --- |
+| `rounded-xs` | `calc(var(--ui-radius) * 0.5)` |
+| `rounded-sm` | `var(--ui-radius)` |
+| `rounded-md` | `calc(var(--ui-radius) * 1.5)` |
+| `rounded-lg` | `calc(var(--ui-radius) * 2)` |
+| `rounded-xl` | `calc(var(--ui-radius) * 3)` |
+| `rounded-2xl` | `calc(var(--ui-radius) * 4)` |
+| `rounded-3xl` | `calc(var(--ui-radius) * 6)` |
+
+**Ruling: set `--ui-radius: 0.5rem`.** That one change lands the entire Nuxt UI ladder on the M3 shape scale:
+
+| Utility | With `--ui-radius: 0.5rem` | M3 token |
+| --- | --- | --- |
+| `rounded-none` | 0px | `corner-none` |
+| `rounded-xs` | 4px | `corner-extra-small` |
+| `rounded-sm` | 8px | `corner-small` |
+| `rounded-md` | 12px | `corner-medium` |
+| `rounded-lg` | 16px | `corner-large` |
+| `rounded-xl` | 24px | *(between `large-increased` 20 and `extra-large` 28 — the one miss)* |
+| `rounded-2xl` | 32px | `corner-extra-large-increased` |
+| `rounded-3xl` | 48px | `corner-extra-extra-large` |
+| `rounded-full` | 9999px | `corner-full` |
+
+```css
+:root, :host { --ui-radius: 0.5rem; }
+```
+
+Nuxt UI's stock defaults then land correctly without further work: `UButton` and `UDropdownMenu` use `rounded-md` (12px = `corner-medium`, which is exactly M3 Expressive's *square* small-button shape), `UCard` uses `rounded-lg` (16px = `corner-large`), `UTooltip` uses `rounded-sm` (8px).
+
+**Ruling on button shape.** M3's default button shape is `corner-full`. This project uses **`corner-medium` (12px)** — the M3 Expressive *square* variant — because a dense, keyboard-driven professional tool reads better with rectilinear controls, and because pill-shaped buttons at 32px height waste horizontal space in toolbars. This is an M3-sanctioned shape, not an invention.
+
+**Shape morph on press.** Express Expressive's pressed shape with a single active variant, applied through `app.config.ts` so it lands on every button at once:
+
+```ts
+export default defineAppConfig({
+  ui: {
+    button: {
+      slots: {
+        base: 'transition-[border-radius,background-color] active:rounded-sm'
+      }
+    }
+  }
+})
+```
+
+`rounded-md` → `active:rounded-sm` is 12px → 8px, matching the M3 small-button pressed token exactly.
+
+Only these radii exist. `rounded-[10px]` is a checklist §4.1 failure.
+
+**Do**
+- Set `--ui-radius` once, in `main.css`. Never per component.
+- Use `rounded-none` for full-bleed chrome (top app bar, pane edges) — a rounded corner on an edge-to-edge region is wrong in M3 and always looks like a mistake.
+- Use `rounded-full` for the things M3 says are full: focus rings, active indicators, avatars, badges, count chips.
+
+**Don't**
+- Don't mix radii within one component. A card with `rounded-lg` does not contain a `rounded-xl` image.
+- Don't use `rounded-xl` (24px) for anything that has a real M3 token; it is the one rung with no exact M3 equivalent.
+
+---
+
+## 4. Elevation
+
+### 4.1 The M3 rule — levels 0 to 5
+
+| Level | dp | Where it is used |
+| --- | --- | --- |
+| 0 | 0 | Default. Cards at rest, filled/text/outlined buttons, top app bar at rest, navigation rail |
+| 1 | 1 | Elevated card, elevated button, search bar at rest |
+| 2 | 3 | Menu, rich tooltip, dropdown, autocomplete |
+| 3 | 6 | Dialog, modal bottom sheet, snackbar, search view, active search bar |
+| 4 | 8 | Navigation drawer (modal) |
+| 5 | 12 | Highest — rarely correct |
+
+### 4.2 The important part — tone, not shadow
+
+M3 **removed** the elevation-driven surface tint overlay and the opacity-overlay model entirely. The `surface-tint` role and `ElevationOverlay` remain in older APIs as deprecated compatibility. The replacement is §1.3's container ladder.
+
+The consequence is precise:
+
+> **An elevation level tells you which `surface-container-*` tone to use. It does not tell you to draw a shadow.**
+
+Practical mapping:
+
+| Level | Container tone to use | Shadow? |
+| --- | --- | --- |
+| 0 | `surface` / `surface-container-lowest` | No |
+| 1 | `surface-container-low` | Only if it floats |
+| 2 | `surface-container` | Yes — it floats |
+| 3 | `surface-container-high` | Yes — it floats |
+| 4–5 | `surface-container-highest` | Yes — it floats |
+
+### 4.3 When a shadow is still correct
+
+A shadow is correct for, and only for, a surface that:
+
+1. **floats above the page rather than being part of it**, and
+2. **can be dismissed** — it is transient.
+
+That set is closed: menus, dropdowns, popovers, tooltips, dialogs, modals, drawers/slideovers when modal, toasts, and drag previews. Everything persistent — the navigation tree, the contextual panel, the top app bar, cards, list rows, the document canvas — is a *region*, gets a container tone, and gets **no shadow**.
+
+M3's own shadow definitions, for reference when retuning tokens (key shadow at 30% opacity, ambient at 15%):
+
+| Level | Key shadow | Ambient shadow |
+| --- | --- | --- |
+| 1 | `0 1px 2px 0` | `0 1px 3px 1px` |
+| 2 | `0 1px 2px 0` | `0 2px 6px 2px` |
+| 3 | `0 1px 3px 0` | `0 4px 8px 3px` |
+| 4 | `0 2px 3px 0` | `0 6px 10px 4px` |
+| 5 | `0 4px 4px 0` | `0 8px 12px 6px` |
+
+### 4.4 In this stack
+
+Nuxt UI already applies shadows to almost exactly the correct set. Verified from the resolved theme: `shadow-lg` appears on `modal`, `slideover`, `popover`, `dropdownMenu`, `contextMenu`, `select`, `selectMenu`, `inputMenu`, `navigationMenu`, `toast`, `sidebar`, and the editor menus; `shadow-sm` on `tooltip`. Nothing else carries a shadow.
+
+**Ruling: accept Nuxt UI's shadow placement unchanged.** It is M3-correct. If the shadow *rendering* needs to match M3, retune the tokens once, centrally, rather than adding classes:
+
+```css
+@theme {
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.30), 0 1px 3px 1px rgb(0 0 0 / 0.15);  /* M3 level 1 */
+  --shadow-md: 0 1px 2px 0 rgb(0 0 0 / 0.30), 0 2px 6px 2px rgb(0 0 0 / 0.15);  /* M3 level 2 */
+  --shadow-lg: 0 1px 3px 0 rgb(0 0 0 / 0.30), 0 4px 8px 3px rgb(0 0 0 / 0.15);  /* M3 level 3 */
+}
+```
+
+Because every floating surface uses `shadow-lg`, that single override moves the whole overlay set at once.
+
+**Do**
+- Reach for a container tone first. `bg-elevated` and `bg-accented` are the tools for hierarchy.
+- Let Nuxt UI's overlay components bring their own shadow. Do not add one.
+- Give the navigation tree and contextual panel `bg-elevated` and a `border-default` divider — no shadow, no tint.
+
+**Don't**
+- Don't put `shadow-*` on a card, a list row, a panel, a sticky header, or the app bar.
+- Don't reintroduce `surface-tint`. It is deprecated.
+- Don't rely on a shadow to separate two regions. It vanishes in dark themes and fails checklist §4.2.
+
+---
+
+## 5. State layers
+
+This is the most-missed part of M3 and the reason AI-generated UI feels dead. A screenshot cannot show it, so it never gets built.
+
+### 5.1 The M3 rule
+
+Every interactive element carries a **state layer**: a translucent overlay of the element's *content colour*, painted over its container, at a fixed opacity per state.
+
+| State | Opacity |
+| --- | --- |
+| Hover | **0.08** |
+| Focus | **0.12** |
+| Pressed | **0.12** |
+| Dragged | **0.16** |
+
+Four properties of the model matter:
+
+1. **The layer's colour is the `on-` role, not the container role.** A ghost button with `text-primary` gets a `primary` layer. A list row with `text-on-surface` gets an `on-surface` layer. This is why the layer always reads as "the same control, more active" instead of "a different colour".
+2. **It composites, it does not replace.** The container tone stays; the layer sits on top.
+3. **Focus and pressed share 0.12**, so focus and press are not distinguished by the layer alone — focus adds the focus indicator, press adds (in Expressive) the shape morph.
+4. **Every interactive element has one.** Rows, tree nodes, icon buttons, tabs, chips, menu items, list items. Not just buttons.
+
+M3's focus indicator is separate from the state layer: a **3px** ring, **2px** outward offset, `corner-full`, in the `secondary` role, growing to 8px on the active frame of its animation.
+
+### 5.2 In this stack
+
+Nuxt UI implements state layers by **stepping the background colour**, not by compositing a separate layer. Two different mechanisms depending on the colour family. Verified from the resolved `UButton` theme:
+
+**Chromatic aliases — opacity modifiers on the alias value**
+
+| Variant | Rest | Hover | Active |
+| --- | --- | --- | --- |
+| `solid` | `bg-primary` | `bg-primary/75` | `bg-primary/75` |
+| `outline` | transparent + `ring-primary/50` | `bg-primary/10` | `bg-primary/10` |
+| `soft` | `bg-primary/10` | `bg-primary/15` | `bg-primary/15` |
+| `subtle` | `bg-primary/10` + `ring-primary/25` | `bg-primary/15` | `bg-primary/15` |
+| `ghost` | transparent | `bg-primary/10` | `bg-primary/10` |
+| `link` | `text-primary` | `text-primary/75` | `text-primary/75` |
+
+**Neutral — discrete steps up the `--ui-bg-*` ladder**
+
+| Variant | Rest | Hover / Active |
+| --- | --- | --- |
+| `solid` | `bg-inverted` | `bg-inverted/90` |
+| `outline` | `bg-default` | `bg-elevated` |
+| `soft` / `subtle` | `bg-elevated` | `bg-accented/75` |
+| `ghost` | transparent | `bg-elevated` |
+
+Focus is uniform and separate: `focus-visible:outline-3` with `outline-<color>/25`, plus `focus-visible:ring-<color>` on ring-bearing variants. **Nuxt UI's 3px focus outline is the same width as M3's focus ring** — no change needed.
+
+`UTree` and `UNavigationMenu` already use a true M3-style compositing layer: an absolutely-positioned `before:` pseudo-element behind the content (`before:absolute before:inset-0 before:z-[-1] before:rounded-md`) filled with `before:bg-elevated` on hover and `before:bg-elevated/50` for the resting selected state.
+
+#### The two genuine conflicts, and the rulings
+
+**Conflict 1 — there is no pressed state.** Nuxt UI sets `hover:` and `active:` to the *same* value on every chromatic variant. Pressing a button produces no feedback at all. M3 requires a distinct pressed step.
+
+*Ruling: keep Nuxt UI's variant system; add the missing pressed step centrally.* M3's opacities map exactly onto Tailwind's opacity modifiers — `/8`, `/12`, `/16` are literally 0.08, 0.12, 0.16 — so the translation is direct and requires no arbitrary values.
+
+```ts
+// apps/web/app/app.config.ts
+export default defineAppConfig({
+  ui: {
+    button: {
+      slots: {
+        // M3 Expressive shape morph on press (§3.3)
+        base: 'transition-[border-radius,background-color] active:rounded-sm'
+      },
+      compoundVariants: [
+        // ghost / outline: 0 → 0.08 hover → 0.12 pressed
+        { variant: 'ghost',   color: 'primary', class: 'hover:bg-primary/8 active:bg-primary/12' },
+        { variant: 'outline', color: 'primary', class: 'hover:bg-primary/8 active:bg-primary/12' },
+        // soft / subtle: container + 0.08 hover → +0.12 pressed
+        { variant: 'soft',    color: 'primary', class: 'hover:bg-primary/18 active:bg-primary/22' },
+        { variant: 'subtle',  color: 'primary', class: 'hover:bg-primary/18 active:bg-primary/22' }
+      ]
+    }
+  }
+})
+```
+
+**Conflict 2 — `solid` uses alpha, which is backwards in dark themes.** `hover:bg-primary/75` makes the button *translucent*, letting the page show through. In light mode that lightens it, which coincidentally resembles M3. In dark mode over a dark ground it *darkens* the button on hover — the opposite of M3, where a white-ish state layer always lightens. It also violates checklist §4.2's principle that nothing may depend on the background being light or dark.
+
+*Ruling: for `solid`, step the shade instead of the alpha.* Rest is tone 40 (light) / 80 (dark); hover and pressed step toward the lighter tone in both modes.
+
+```ts
+compoundVariants: [
+  {
+    variant: 'solid', color: 'primary',
+    class: [
+      'bg-primary text-inverted',
+      // light: tone 40 → 50 → 60
+      'hover:bg-primary-500 active:bg-primary-400',
+      // dark: tone 80 → 90 → 95
+      'dark:hover:bg-primary-100 dark:active:bg-primary-50'
+    ].join(' ')
+  }
+]
+```
+
+#### For project-authored interactive surfaces
+
+If a surface has no Nuxt UI component — check first; `UTree`, `UNavigationMenu`, `UDropdownMenu` and `UButton` cover almost everything — define the compositing layer **once**, in `main.css`, using the same `before:` idiom Nuxt UI itself uses:
+
+```css
+@utility dw-state-layer {
+  position: relative;
+  isolation: isolate;
+}
+@utility dw-state-layer {
+  &::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: inherit;
+    background-color: currentColor;
+    opacity: 0;
+    transition: opacity 100ms var(--ease-standard);
+  }
+  &:hover::before  { opacity: 0.08; }
+  &:focus-visible::before { opacity: 0.12; }
+  &:active::before { opacity: 0.12; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dw-state-layer::before { transition: none; }
+}
+```
+
+`background-color: currentColor` is the M3 rule literally expressed: the layer is the content colour.
+
+**Do**
+- Give **every** interactive element hover, focus-visible and pressed feedback. Tree rows, comment gutter icons, tab strips, presence avatars, the AI panel's stop control.
+- Use `/8`, `/12`, `/16` — they are M3's opacities exactly.
+- Keep `focus-visible:outline-3`. It already matches M3's ring width.
+- Add the pressed step and the shape morph via `app.config.ts` once, so every button gets it.
+
+**Don't**
+- Don't leave hover and active identical. That is the "dead UI" signature.
+- Don't use `bg-<color>/75` on a solid fill. Step the shade instead.
+- Don't hand-roll a state layer on a surface where a Nuxt UI component already provides one.
+- Don't remove `:focus-visible` styling to "clean up" the hover look — automatic fail under checklist §5.
+
+---
+
+## 6. Motion
+
+### 6.1 The M3 rule — easing
+
+| Token | Curve | Use |
+| --- | --- | --- |
+| `easing-linear` | `cubic-bezier(0, 0, 1, 1)` | Progress indicators, continuous loops only |
+| `easing-standard` | `cubic-bezier(0.2, 0, 0, 1)` | The default. Any transition that begins and ends on screen |
+| `easing-standard-accelerate` | `cubic-bezier(0.3, 0, 1, 1)` | Elements **leaving** the screen |
+| `easing-standard-decelerate` | `cubic-bezier(0, 0, 0, 1)` | Elements **entering** the screen |
+| `easing-emphasized` | `cubic-bezier(0.2, 0, 0, 1)` | Transitions the user should notice — a pane appearing, a mode change |
+| `easing-emphasized-accelerate` | `cubic-bezier(0.3, 0, 0.8, 0.15)` | Emphasised exits |
+| `easing-emphasized-decelerate` | `cubic-bezier(0.05, 0.7, 0.1, 1)` | Emphasised entrances |
+| `easing-legacy` | `cubic-bezier(0.4, 0, 0.2, 1)` | M2 compatibility. Do not use in new work |
+
+### 6.2 The M3 rule — duration
+
+| Token | Value | | Token | Value |
+| --- | --- | --- | --- | --- |
+| `duration-short1` | 50ms | | `duration-long1` | 450ms |
+| `duration-short2` | 100ms | | `duration-long2` | 500ms |
+| `duration-short3` | 150ms | | `duration-long3` | 550ms |
+| `duration-short4` | 200ms | | `duration-long4` | 600ms |
+| `duration-medium1` | 250ms | | `duration-extra-long1` | 700ms |
+| `duration-medium2` | 300ms | | `duration-extra-long2` | 800ms |
+| `duration-medium3` | 350ms | | `duration-extra-long3` | 900ms |
+| `duration-medium4` | 400ms | | `duration-extra-long4` | 1000ms |
+
+### 6.3 Which transition gets which
+
+| Transition | Duration | Easing |
+| --- | --- | --- |
+| State layer / colour change on hover, focus, press | `short2` 100ms | `standard` |
+| Icon or small control state change | `short3` 150ms | `standard` |
+| Menu, tooltip, popover **enter** | `short4` 200ms | `standard-decelerate` |
+| Menu, tooltip, popover **exit** | `short2`–`short3` 100–150ms | `standard-accelerate` |
+| Dialog / modal **enter** | `medium2` 300ms | `emphasized-decelerate` |
+| Dialog / modal **exit** | `short4` 200ms | `emphasized-accelerate` |
+| Pane collapse/expand, drawer slide | `medium4` 400ms | `emphasized` |
+| Skeleton shimmer loop | `extra-long*` | `linear` |
+| Expand/collapse of a tree branch | `short4` 200ms | `standard` |
+
+Exits are always **shorter** than entrances. A user who dismisses something wants it gone.
+
+### 6.4 M3 Expressive — spring motion
+
+Expressive replaced duration+easing with **springs** for spatial motion, split into two families:
+
+- **Spatial** — anything that moves, resizes, rotates, or changes shape. Damping below 1, so it overshoots and settles.
+- **Effects** — colour and opacity. Damping exactly 1.0, so it never overshoots.
+
+| Scheme | Token | Damping | Stiffness |
+| --- | --- | --- | --- |
+| Standard | default spatial | 0.9 | 700 |
+| Standard | fast spatial | 0.9 | 1400 |
+| Standard | slow spatial | 0.9 | 300 |
+| Standard | default / fast / slow effects | 1.0 | 1600 / 3800 / 800 |
+| Expressive | default spatial | 0.8 | 380 |
+| Expressive | fast spatial | **0.6** | 800 |
+| Expressive | slow spatial | 0.8 | 200 |
+| Expressive | default / fast / slow effects | 1.0 | 1600 / 3800 / 800 |
+
+**Ruling for deep-wiki: use the Standard scheme, not Expressive.** Expressive springs (damping 0.6–0.8) are designed for consumer hero moments. A tool people live in all day, whose content is a document, does not want its navigation tree bouncing. Checklist §4.4 already forbids decorative motion in the document body; the same reasoning applies to the chrome. Use M3's duration + easing tokens, which are what the Standard scheme approximates anyway.
+
+Springs are also not natively expressible in CSS transitions. Do not pull in a physics library for this.
+
+### 6.5 In this stack
+
+Easing gets `--ease-*` theme tokens. Durations do **not** need tokens — M3's values are already Tailwind's numeric duration utilities.
+
+```css
+@theme {
+  --ease-standard:               cubic-bezier(0.2, 0, 0, 1);
+  --ease-standard-accelerate:    cubic-bezier(0.3, 0, 1, 1);
+  --ease-standard-decelerate:    cubic-bezier(0, 0, 0, 1);
+  --ease-emphasized:             cubic-bezier(0.2, 0, 0, 1);
+  --ease-emphasized-accelerate:  cubic-bezier(0.3, 0, 0.8, 0.15);
+  --ease-emphasized-decelerate:  cubic-bezier(0.05, 0.7, 0.1, 1);
+}
+```
+
+| M3 duration | Tailwind utility |
+| --- | --- |
+| `short2` 100ms | `duration-100` |
+| `short3` 150ms | `duration-150` |
+| `short4` 200ms | `duration-200` |
+| `medium2` 300ms | `duration-300` |
+| `medium4` 400ms | `duration-400` |
+
+Typical usage: `class="transition-colors duration-100 ease-standard"`.
+
+Nuxt UI ships its own keyframes (`scale-in`, `scale-out`, `slide-in-from-*`, `fade-in/out`, `accordion-up/down`, and ~70 more) as raw `@keyframes`, **not** as `--animate-*` theme tokens, and applies them inline: `data-[state=open]:animate-[scale-in_100ms_var(--ease-out)]`. The durations it picks (100ms for popovers and menus, 200ms for modals) already match M3's `short2` / `short4`. Leave them alone.
+
+Nuxt UI's colour transitions are globally gated:
+
+```ts
+// nuxt.config.ts
+export default defineNuxtConfig({
+  ui: { theme: { transitions: true } }   // default; emits `transition-colors` on components
+})
+```
+
+### 6.6 `prefers-reduced-motion`
+
+Checklist §5 makes this pass/fail: all non-essential transitions, streaming animations and skeleton shimmer must reduce or stop. Because Nuxt UI applies animations inline rather than through tokens, the only reliable point of control is a global override in `main.css`:
+
+```css
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+```
+
+`1ms` rather than `0s` so that `transitionend` and `animationend` handlers still fire — zeroing them silently breaks any component that waits for one.
+
+Two things must survive the reduction because they carry meaning, not decoration: the AI panel's **in-progress marking** (checklist §3 requires streaming output be visibly marked incomplete — use a static badge, not only a pulse) and the **focus indicator** (checklist §5).
+
+**Do**
+- Use `ease-standard` unless there is a reason not to.
+- Make exits shorter than entrances.
+- Verify the reduced-motion path with the OS setting actually on, not by reading the CSS.
+
+**Don't**
+- Don't animate the document body. Checklist §4.4.
+- Don't animate `width`, `height`, `top` or `left`; use `transform` and `opacity`.
+- Don't add motion that carries no information. A nav item that slides in for no reason is noise in a tool someone opens forty times a day.
+- Don't adopt the Expressive spring scheme here.
+
+---
+
+## 7. Spacing and density
+
+### 7.1 The M3 rule
+
+M3 aligns everything — type baselines, component heights, padding, margins — to a **4dp grid**. Layout margins are 16dp on compact windows and 24dp from medium up; the gap between panes is 24dp.
+
+M3's own component metrics are **touch-first**:
+
+| Component | M3 size |
+| --- | --- |
+| Navigation rail width | 80dp |
+| Navigation rail active indicator | 56 × 32dp |
+| Navigation drawer width | 360dp |
+| Navigation drawer active indicator | 336 × 56dp |
+| Top app bar (small) height | 64dp |
+| List item leading/trailing space | 16dp |
+| List item leading icon | 24dp; avatar 40dp |
+| Chip height | 32dp |
+| Button height (M3 Expressive) | XS 32 / S 40 / M 56 / L 96 / XL 136dp |
+| Search bar height | 56dp |
+
+### 7.2 A wiki is denser than a consumer app
+
+State this plainly, because it is the rule most likely to be got wrong by copying M3 examples:
+
+> **M3's default density is wrong for this product.** M3's baseline is a phone held in one hand. deep-wiki is a three-pane desktop tool that a software team keeps open all day, with a navigation tree that may hold hundreds of pages. A 56dp list row and an 80dp navigation rail waste the vertical space the tree needs.
+
+The correct adaptation is **not** to abandon the grid. It is to step down one density level while keeping every value a multiple of 4:
+
+| Element | M3 default | deep-wiki | Rationale |
+| --- | --- | --- | --- |
+| Navigation tree row height | 56dp | **32px** (compact) / **40px** (default) | 40px still clears the 24×24 minimum target from checklist §5 with 8px of padding around a 24px icon |
+| Navigation tree indent per level | 16dp | **12px** | Four levels (shelf → book → chapter → page) at 16px pushes titles off narrow viewports; checklist §6 |
+| Navigation pane width | 360dp | **280px** default, resizable, persisted | Checklist §6 requires persisted resizable panes |
+| Contextual panel width | — | **320px** default, resizable, persisted | |
+| Top app bar height | 64dp | **56px** (`--ui-header-height: 3.5rem`) | Reclaims 8px of vertical space on every screen |
+| Toolbar / secondary button height | 40dp | **32px** (`size="sm"`) | |
+| Content-area button height | 40dp | **40px** (`size="md"`) | Unchanged |
+| Primary action button height | 40dp | **40px** (`size="lg"`) | Unchanged; distinguished by variant, not size |
+| Pane gutter | 24dp | **16px** | |
+| Document column padding | 24dp | **24px** (`p-6`) | Unchanged — reading comfort wins here |
+| Paragraph spacing in document | — | **16px** (`space-y-4`) | Checklist §4.4 vertical rhythm |
+| Block spacing (code, table, diagram) | — | **24px** (`space-y-6`) | |
+
+Chrome is denser than content. That is the shape of checklist §4.4's "chrome is visually quieter than content" expressed as spacing.
+
+### 7.3 In this stack
+
+Tailwind v4's `--spacing` is `0.25rem` = 4px. **This is already the M3 4dp grid.** No configuration needed; `p-4` is 16dp, `gap-6` is 24dp.
+
+The rule is therefore about *usage*, not tokens:
+
+> Only integer multiples of the spacing scale in project-authored layout. `p-4`, `gap-6`, `space-y-4`, `px-3` are all on-grid. `p-1.5` (6px) and `py-2.5` (10px) are off-grid.
+
+Nuxt UI's own components use half-steps internally (`px-2.5 py-1.5` on `UButton size="md"`). That is fine and must not be "corrected" — it is inside the library's own sizing system, which was calibrated as a whole. The rule binds project markup, not vendored components.
+
+Sizes on Nuxt UI components:
+
+| Nuxt UI `size` | Padding | Text | Use for |
+| --- | --- | --- | --- |
+| `xs` | `px-2 py-1` | `text-xs` | Dense inline chips and badges only |
+| `sm` | `px-2.5 py-1.5` | `text-xs` | Toolbars, tree rows, panel headers, icon buttons in chrome |
+| `md` | `px-2.5 py-1.5` | `text-sm` | Default; content-area actions, forms |
+| `lg` | `px-3 py-2` | `text-sm` | The single primary action of a screen |
+| `xl` | `px-3 py-2` | `text-base` | Rare — empty-state calls to action |
+
+Set the density defaults once so no one repeats them:
+
+```ts
+// nuxt.config.ts — replaces the library default for every component whose default is `md`
+export default defineNuxtConfig({
+  ui: { theme: { defaultVariants: { size: 'md' } } }
+})
+```
+
+```vue
+<!-- Scope a denser default to a whole pane, rather than repeating size="sm" -->
+<UTheme :props="{ button: { size: 'sm' }, tree: { size: 'sm' } }">
+  <NavigationPane />
+</UTheme>
+```
+
+`UTheme` is the right tool for pane-level density: it scopes props and `ui` overrides to a subtree through provide/inject, so the navigation pane can be dense without touching the document pane.
+
+**Do**
+- Keep every project-authored spacing value an integer multiple of 4px.
+- Use `UTheme` to set pane-level density once, not `size="sm"` on forty call sites.
+- Persist resizable pane widths per user (checklist §6).
+
+**Don't**
+- Don't copy M3's dp values literally into a desktop three-pane shell.
+- Don't compress below 32px row height or below the 24×24 target minimum. Density that fails checklist §5 is not density, it is a defect.
+- Don't mix `gap-4` in one list and `gap-5` in the next. Pick one per context and put it in the component.
+
+---
+
+## 8. Layout
+
+### 8.1 The M3 rule — window size classes
+
+| Class | Width range | Canonical layout |
+| --- | --- | --- |
+| **Compact** | 0–599dp | Single pane, bottom navigation or modal drawer |
+| **Medium** | 600–839dp | Navigation rail + one pane |
+| **Expanded** | 840–1199dp | Navigation rail + two panes |
+| **Large** | 1200–1599dp | Navigation drawer + two or three panes |
+| **Extra-large** | ≥1600dp | Navigation drawer + three panes, with room to spare |
+
+### 8.2 Mapping onto the deep-wiki shell
+
+The app shell is **navigation tree · document · contextual panel** (comments / AI / presence).
+
+Checklist §6 already defines the three bands this product ships and what must be true in each. **That section is the authority — this table exists only to name which M3 class each band corresponds to, and to say what the *navigation surface* becomes.** Do not restate §6's requirements here or in a PR; go read them.
+
+| Checklist §6 band | Tailwind variant | M3 class | Navigation surface | Panes visible |
+| --- | --- | --- | --- | --- |
+| Narrow (<768px) | *(base)* | Compact | Modal navigation **drawer** — focus-trapped, closes on select and on Escape | 1 |
+| Medium (768–1279px) | `md:` | Expanded | Persistent navigation **rail** or collapsed tree | 2 (contextual panel overlays) |
+| Wide (≥1280px) | `xl:` | Large / Extra-large | Persistent navigation **drawer** (the full tree) | 3 |
+
+**Ruling on breakpoints.** Use Tailwind's `md` (768px) and `xl` (1280px) as the pane-count switches. Do **not** introduce M3's 600 / 840 / 1200 / 1600dp breakpoints. Checklist §6 specifies 768 and 1280, its e2e verification points are 320 / 768 / 1280, and the checklist wins on responsive behaviour. Two breakpoints that are tested beat five that are not.
+
+### 8.3 In this stack
+
+Nuxt UI v4 ships the shell components in the free package:
+
+| Need | Component |
+| --- | --- |
+| Shell container | `UDashboardGroup` |
+| Navigation pane | `UDashboardSidebar` (+ `UDashboardSidebarToggle`, `UDashboardSidebarCollapse`) |
+| Document / contextual pane | `UDashboardPanel` |
+| Pane top bar | `UDashboardNavbar` |
+| Resizable pane divider | `UDashboardResizeHandle` or `USplitter` |
+| Command palette | `UDashboardSearch` + `UDashboardSearchButton`, or `UCommandPalette` |
+| Page tree | `UTree` (supports `virtualize`, `nested`, `multiple`, `propagateSelect`) |
+| Narrow-viewport drawer | `USlideover` (or `UDrawer` for a bottom sheet) |
+
+`UDashboardGroup` handles the collapse/expand state and emits `dashboard:sidebar:toggle`, `dashboard:sidebar:collapse` and `dashboard:search:toggle` hooks. `UTree`'s `virtualize` option is the answer to the checklist's "a book with 400 pages" extreme.
+
+Surfaces, per §1.4:
+
+| Region | Utility |
+| --- | --- |
+| App ground behind the panes | `bg-muted` |
+| Navigation pane | `bg-elevated` |
+| Document pane | `bg-default` |
+| Contextual panel | `bg-elevated` |
+| Pane dividers | `border-default` (`outline-variant`) |
+| Sticky pane top bar | `bg-elevated` — no shadow (§4.3) |
+
+**Do**
+- Use the `UDashboard*` set. It exists, it is free, and it already handles the collapse states.
+- Give each pane its container tone from §1.4 and let tone do the separation.
+- Virtualize the tree.
+
+**Don't**
+- Don't invent breakpoints. `md:` and `xl:`.
+- Don't let the document pane stretch to fill at wide widths — `max-w-measure` (§2.4), then centre.
+- Don't put a shadow on a pane edge. Use `border-default`.
+
+---
+
+## 9. Component guidance
+
+Values are the M3 v0.192 component tokens, with the Nuxt UI equivalent and the ruling for this project.
+
+### 9.1 Buttons — the hierarchy, and when each is correct
+
+M3 defines five button styles in a strict emphasis order. Getting this order right is most of what makes a screen read correctly.
+
+| M3 button | Container | Label | Elevation | Emphasis | Use for |
+| --- | --- | --- | --- | --- | --- |
+| **Filled** | `primary` | `on-primary` | 0 | Highest | The single primary action. **One per screen** — checklist §2. |
+| **Filled tonal** | `secondary-container` | `on-secondary-container` | 0 | High | The second-most-important action; a primary action in a context that already has one elsewhere |
+| **Elevated** | `surface-container-low` | `primary` | 1 | Medium | A button that needs separation from a busy or image background. Rare here. |
+| **Outlined** | transparent + `outline` 1px | `primary` | 0 | Medium | Secondary actions that still need a visible boundary — Cancel next to a Filled Save |
+| **Text** | transparent | `primary` | 0 | Low | Tertiary and in-place actions; dialog actions; low-risk links |
+
+All five: 40dp height, `corner-full` (this project uses `corner-medium` — §3.3), `label-large`, 18dp leading icon.
+
+**Mapping to `UButton` variants:**
+
+| M3 button | `UButton` | Notes |
+| --- | --- | --- |
+| Filled | `variant="solid"` | `bg-primary text-inverted` |
+| Filled tonal | `variant="soft"` **with the container tokens** | See ruling below |
+| Elevated | — | No equivalent; do not build one. Use `solid` or `soft`. |
+| Outlined | `variant="outline"` | |
+| Text | `variant="ghost"` | Nuxt UI's `ghost` is M3's Text button |
+| — | `variant="subtle"` | Nuxt UI extra: `soft` plus a ring. Use as a quieter Outlined. |
+| — | `variant="link"` | Inline text link. Not an M3 button; use for navigation, never for an action. |
+
+**Ruling on filled tonal.** Nuxt UI's `soft` is `bg-primary/10 text-primary` — alpha over an unknown background, which fails §1.4's rule. Override it once to use the opaque container tokens:
+
+```ts
+// app.config.ts
+ui: {
+  button: {
+    compoundVariants: [
+      { variant: 'soft', color: 'primary',
+        class: 'bg-primary-container text-on-primary-container hover:bg-primary-container active:bg-primary-container' }
+    ]
+  }
+}
+```
+
+**Destructive actions** use `color="error"` and `variant="solid"` or `variant="outline"`, never `ghost` — a destructive action must have a visible boundary. Checklist §3 requires a stronger confirmation than a 3s toast; that is a flow rule, not a button rule.
+
+Every icon-only button needs `aria-label` **and** a tooltip (checklist §4.3). `UButton` with `square` and a `UTooltip` wrapper.
+
+### 9.2 Navigation rail and drawer
+
+| | M3 spec | Nuxt UI | Ruling |
+| --- | --- | --- | --- |
+| Rail width | 80dp | — | 64px; deep-wiki's rail carries at most 6 destinations |
+| Rail container | `surface`, elevation 0, `corner-none` | `bg-elevated` | Use `bg-elevated` so the rail separates from the app ground by tone |
+| Rail active indicator | 56 × 32dp, `corner-full`, `secondary-container` | `UNavigationMenu variant="pill"` | Pill variant is the active indicator |
+| Rail label | `label-medium` (12px) | `text-label-medium` | |
+| Drawer width | 360dp | — | 280px (§7.2) |
+| Drawer shape | `corner-large-end` (0 16 16 0) | `rounded-e-lg` | Only when modal; the persistent drawer is edge-to-edge, `rounded-none` |
+| Drawer active indicator | 336 × 56dp, `corner-full`, `secondary-container` | `UTree` selected state | 40px tall (§7.2) |
+| Drawer item label | `label-large` | `text-label-large` | |
+| Drawer section headline | `title-small`, `on-surface-variant` | `text-title-small text-muted` | |
+
+The page tree is `UTree`, not a hand-rolled list. It brings keyboard navigation, `aria-*` wiring, expand/collapse state and virtualization — all of which checklist §5 and §6 require.
+
+Long titles truncate with the full title available on hover and focus (checklist §6). `UTree`'s `linkLabel` slot is already `truncate`; add a `UTooltip`.
+
+### 9.3 Top app bar
+
+| Property | M3 (small) | Nuxt UI |
+| --- | --- | --- |
+| Height | 64dp | `--ui-header-height: 3.5rem` (56px, §7.2) |
+| Container | `surface`, elevation 0 | `bg-elevated` |
+| Shape | `corner-none` | `rounded-none` |
+| Headline | `title-large` | `text-title-large` |
+| Medium variant headline | `headline-small` | `text-headline-small` |
+
+Use `UDashboardNavbar` per pane rather than one global bar — in a three-pane shell each pane owns its own actions.
+
+Sticky bars must not obscure anchored content (checklist §6): set `scroll-margin-top` on headings to the bar height.
+
+### 9.4 Cards
+
+| M3 card | Container | Elevation | Nuxt UI |
+| --- | --- | --- | --- |
+| Elevated | `surface-container-low` | 1 | — (avoid; see §4.3) |
+| Filled | `surface-container-highest` | 0 | `UCard variant="soft"` → retarget to `bg-emphasized` |
+| Outlined | `surface`, 1px `outline-variant` | 0 | `UCard variant="outline"` (the default) |
+
+All: `corner-medium` (12px). `UCard`'s stock `rounded-lg` with `--ui-radius: 0.5rem` is 16px = `corner-large`, one step up. **Ruling: accept it.** 16px on a card is within M3's own range (dialogs are 28px) and changing it fights the library for no user-visible gain.
+
+`UCard` has slots `root header title description body footer` and variants `solid outline soft subtle`. There is no `color` or `size` prop.
+
+**Ruling: outlined by default.** A wiki's cards sit inside panes that already carry a container tone; an elevated card inside a toned pane is two hierarchy signals for one level. `UCard variant="outline"` — the library default — is correct.
+
+### 9.5 Text fields
+
+| Property | M3 (outlined) | Nuxt UI |
+| --- | --- | --- |
+| Shape | `corner-extra-small` (4px) | `rounded-xs` with `--ui-radius: 0.5rem` |
+| Outline | 1px `outline` | `ring ring-inset ring-accented` |
+| Focus outline | **2px** `primary` | `focus-visible:ring-primary` + `focus-visible:outline-3` |
+| Input text | `body-large` (16px) | `text-body-large` |
+| Label | `body-large`, `on-surface-variant` | `text-muted` |
+| Supporting text | `body-small`, `on-surface-variant` | `text-body-small text-muted` |
+
+`UInput` variants are `outline | soft | subtle | ghost | none` (default `outline`) — note there is **no `solid`**. M3's outlined text field is `variant="outline"`; M3's filled text field is `variant="subtle"`.
+
+**Ruling: outlined everywhere.** M3 says pick one style and use it consistently. Outlined reads better in a dense form and does not compete with the surface ladder.
+
+16px input text is not negotiable: below 16px, iOS Safari zooms the viewport on focus.
+
+Every input has a programmatically associated label; placeholder is not a label (checklist §5). `UFormField` provides the association — use it.
+
+### 9.6 Menus, dialogs, snackbars, tooltips
+
+| Component | M3 container | M3 elevation | M3 shape | M3 text | Nuxt UI |
+| --- | --- | --- | --- | --- | --- |
+| Menu | `surface-container` | 2 | `corner-extra-small` | — | `UDropdownMenu` — `bg-default shadow-lg rounded-md ring-default` |
+| Dialog | `surface-container-high` | 3 | `corner-extra-large` (28px) | `headline-small` + `body-medium` | `UModal` |
+| Snackbar | `inverse-surface` | 3 | `corner-extra-small` | `body-medium`; action `inverse-primary`, `label-large` | `UToast` / `useToast()` |
+| Plain tooltip | `inverse-surface` | — | `corner-extra-small` | `body-small` | `UTooltip` — `bg-default text-highlighted shadow-sm rounded-sm ring-default` |
+| Rich tooltip | `surface-container` | 2 | `corner-medium` | `body-medium` | `UPopover` |
+| Search bar / palette | `surface-container-high` | 3 | `corner-full`, 56dp | `body-large` | `UCommandPalette` / `UDashboardSearch` |
+
+**Ruling on menus and dialogs.** Retarget the container to `bg-accented` (`surface-container-high`) via `app.config.ts` so overlays are tonally distinct from the panes behind them, and keep Nuxt UI's `shadow-lg`:
+
+```ts
+ui: {
+  dropdownMenu: { slots: { content: 'bg-accented' } },
+  modal:        { slots: { content: 'bg-accented' } },
+  popover:      { slots: { content: 'bg-accented' } }
+}
+```
+
+**Ruling on tooltips — a genuine conflict.** M3 puts plain tooltips on `inverse-surface` (a dark chip in light mode). Nuxt UI puts them on `bg-default` with a ring. *Nuxt UI's primitive wins.* `UTooltip` is used heavily here — every icon-only button in every toolbar requires one (checklist §4.3) — and a field of dark chips flickering over a light document is worse than a mildly non-M3 tooltip. Keep `bg-default`. Snackbars keep `inverse-surface` because they are rare and must be noticed.
+
+All Reka-backed overlays (`UModal`, `USlideover`, `UPopover`, `UDropdownMenu`, `UCommandPalette`) bring focus trapping, focus return and Escape handling. Hand-rolling any of them forfeits checklist §5 and is an automatic fail.
+
+### 9.7 Chips, badges, tooltips on data
+
+| Component | M3 | Nuxt UI |
+| --- | --- | --- |
+| Chip | 32dp, `corner-small` (8px), `label-large` | `UBadge` for static, `UButton size="xs"` for interactive filter chips |
+| Badge (dot) | 6dp, `corner-full`, `error` | `UChip` (Nuxt UI's `UChip` is M3's badge — note the naming inversion) |
+| Badge (numbered) | 16dp, `label-small` | `UChip` with content |
+
+**Naming trap:** Nuxt UI's `UChip` is M3's *badge* (an indicator dot on another element); Nuxt UI's `UBadge` is M3's *chip* (a labelled pill). Read the component, not the name.
+
+`UBadge` variants: `solid | outline | soft | subtle` — no `ghost`, no `link`. Sizes `xs | sm | md | lg | xl`.
+
+Colour is never the sole carrier of meaning (checklist §5). A badge that means "pending revision" carries an icon or a word too.
+
+### 9.8 Lists
+
+| Property | M3 | deep-wiki |
+| --- | --- | --- |
+| Label | `body-large` | `text-body-large`, or `text-body-medium` in dense panes |
+| Supporting text | `body-medium` | `text-body-medium text-muted` |
+| Overline / trailing meta | `label-small` | `text-label-small text-muted` |
+| Leading icon | 24dp | 20px in dense panes |
+| Leading avatar | 40dp | 24px in dense panes |
+| Leading / trailing space | 16dp | 12px in dense panes |
+| Row height | 56 / 72 / 88dp (1/2/3 line) | 32 / 40 / 56px (§7.2) |
+
+Every row is a `dw-state-layer` (§5.2) or a Nuxt UI component that already provides one.
+
+---
+
+## 10. Accessibility within M3
+
+### 10.1 What the colour roles give you for free
+
+M3's tonal system is built so that a correctly-paired role gives you a passing contrast ratio without measuring:
+
+| Pair | Tone gap | Guarantee |
+| --- | --- | --- |
+| `on-primary` on `primary` | 100 vs 40 (light), 20 vs 80 (dark) | ≥ 4.5:1 |
+| `on-primary-container` on `primary-container` | 30 vs 90 (light), 90 vs 30 (dark) | ≥ 4.5:1 |
+| `on-surface` on `surface` | 10 vs 98 (light), 90 vs 6 (dark) | ≥ 4.5:1 (very large margin) |
+| `on-surface-variant` on `surface` | 30 vs 98 (light), 80 vs 6 (dark) | ≥ 4.5:1 |
+| `outline` on `surface` | 50 vs 98 (light), 60 vs 6 (dark) | ≥ 3:1 — valid as a control boundary |
+| `on-error-container` on `error-container` | 30 vs 90 / 90 vs 30 | ≥ 4.5:1 |
+
+The rule of thumb behind it: **a tone gap of 40 or more clears 3:1; a gap of 50 or more clears 4.5:1.** That is what makes the `on-` pairing mechanical rather than a judgement call.
+
+The corollary is the trap: **`outline-variant` deliberately does not clear 3:1.** Tone gap is 18 (80 vs 98) in light. It is a decorative divider, not a boundary. Using `border-default` as a text-field or button boundary produces a control the user cannot see the edge of.
+
+### 10.2 Where M3 alone is not enough
+
+M3's guarantees are about the *default* light and dark schemes at default contrast. They do not survive:
+
+| Situation | Why M3 does not cover it | What the checklist requires |
+| --- | --- | --- |
+| **User-selectable themes** | M3 guarantees hold for a scheme generated by its own algorithm. A hand-authored deep-wiki theme can break every pair. | Verify contrast in **every theme shipped**, not just the default — §4.2 and §5 |
+| **Mixed roles** | Nothing stops `text-primary` on `bg-elevated`. That pair has no guarantee. | Measure any pair that is not an `on-`/container pair |
+| **Alpha compositing** | `bg-primary/10` has no defined contrast; it depends on what is behind it. | This file's §1.4 bans it for containers |
+| **Focus visibility** | M3 specifies the ring but not that it must be visible on every theme. | §5: focus visible in every theme, pass/fail |
+| **Non-text meaning** | M3 has no rule against colour-only signalling. | §5: diff add/remove, presence, validation and pending-revision all need a second signal |
+| **Target size** | M3's 24dp icon in a 32dp container is fine on touch; a 20px icon button in a dense toolbar is not. | §5: ≥ 24×24 CSS px with spacing between adjacent targets |
+| **Generated content** | Mermaid and D2 render their own colours. M3 has nothing to say. | §4.2: diagram surfaces readable in every theme |
+| **Zoom and reflow** | M3 is dp-based and assumes a fixed density. | §6: no fixed-height clipping at 200% zoom |
+| **Announcements** | M3 does not cover live regions. | §5: save, streaming start/stop, error and permission-denied announced |
+
+M3 gives you a colour system that is accessible **by construction** when used exactly as specified. It gives you nothing once a theme author, an alpha value, or a generated diagram enters the picture — which in this product is constantly. The checklist is where that gap is closed.
+
+---
+
+## 11. The copy-pasteable token block
+
+Everything above, in the order it must appear in `apps/web/app/assets/css/main.css`. Palette tone values are placeholders — generate them once per theme from a source colour.
+
+```css
+/* apps/web/app/assets/css/main.css */
+
+@import "tailwindcss";
+@import "@nuxt/ui";
+
+/* ─────────────────────────────────────────────────────────────
+   1. TONAL PALETTES
+   One tone table per palette. Shade slot ← M3 tone:
+   50←95 100←90 200←80 300←70 400←60 500←50 600←40 700←30 800←20 900←10 950←0
+   `static` is required: Nuxt UI references every shade whether or not
+   it appears in markup.
+   ───────────────────────────────────────────────────────────── */
+@theme static {
+  --color-dw-primary-50:  /* tone 95 */ ;
+  --color-dw-primary-100: /* tone 90 */ ;
+  --color-dw-primary-200: /* tone 80 */ ;
+  --color-dw-primary-300: /* tone 70 */ ;
+  --color-dw-primary-400: /* tone 60 */ ;
+  --color-dw-primary-500: /* tone 50 */ ;
+  --color-dw-primary-600: /* tone 40 */ ;
+  --color-dw-primary-700: /* tone 30 */ ;
+  --color-dw-primary-800: /* tone 20 */ ;
+  --color-dw-primary-900: /* tone 10 */ ;
+  --color-dw-primary-950: /* tone 0  */ ;
+  /* …repeat for dw-secondary, dw-error, dw-neutral… */
+}
+
+/* ─────────────────────────────────────────────────────────────
+   2. THE M3 SURFACE LADDER
+   The extra neutral tones exist only to feed surface-container-*.
+   ───────────────────────────────────────────────────────────── */
+:root, :host, .light {
+  --dw-neutral-tone-98: ;  --dw-neutral-tone-94: ;
+  --dw-neutral-tone-92: ;  --dw-neutral-tone-90: ;
+}
+.dark {
+  --dw-neutral-tone-4:  ;  --dw-neutral-tone-10: ;
+  --dw-neutral-tone-12: ;  --dw-neutral-tone-17: ;
+  --dw-neutral-tone-22: ;
+}
+
+/* ─────────────────────────────────────────────────────────────
+   3. SEMANTIC ROLES ON TOP OF NUXT UI'S PRIMITIVES
+   ───────────────────────────────────────────────────────────── */
+:root, :host {
+  --ui-radius: 0.5rem;        /* §3.3 — lands the ladder on the M3 shape scale */
+  --ui-header-height: 3.5rem; /* §7.2 */
+}
+
+:root, :host, .light {
+  /* accent: M3 tone 40 */
+  --ui-primary:   var(--ui-color-primary-600);
+  --ui-secondary: var(--ui-color-secondary-600);
+  --ui-error:     var(--ui-color-error-600);
+
+  /* accent containers: M3 tone 90 / on-tone 30 */
+  --ui-primary-container:      var(--ui-color-primary-100);
+  --ui-on-primary-container:   var(--ui-color-primary-700);
+  --ui-secondary-container:    var(--ui-color-secondary-100);
+  --ui-on-secondary-container: var(--ui-color-secondary-700);
+  --ui-error-container:        var(--ui-color-error-100);
+  --ui-on-error-container:     var(--ui-color-error-700);
+
+  /* surface ladder: tones 100 / 98 / 94 / 92 / 90 */
+  --ui-bg:            #fff;
+  --ui-bg-muted:      var(--dw-neutral-tone-98);
+  --ui-bg-elevated:   var(--dw-neutral-tone-94);
+  --ui-bg-accented:   var(--dw-neutral-tone-92);
+  --ui-bg-emphasized: var(--dw-neutral-tone-90);
+}
+
+.dark {
+  /* accent: M3 tone 80 */
+  --ui-primary:   var(--ui-color-primary-200);
+  --ui-secondary: var(--ui-color-secondary-200);
+  --ui-error:     var(--ui-color-error-200);
+
+  /* accent containers: M3 tone 30 / on-tone 90 */
+  --ui-primary-container:      var(--ui-color-primary-700);
+  --ui-on-primary-container:   var(--ui-color-primary-100);
+  --ui-secondary-container:    var(--ui-color-secondary-700);
+  --ui-on-secondary-container: var(--ui-color-secondary-100);
+  --ui-error-container:        var(--ui-color-error-700);
+  --ui-on-error-container:     var(--ui-color-error-100);
+
+  /* surface ladder: tones 4 / 10 / 12 / 17 / 22
+     NOTE: this override is mandatory. Nuxt UI's dark defaults collapse
+     --ui-bg-muted and --ui-bg-elevated to the same value. */
+  --ui-bg:            var(--dw-neutral-tone-4);
+  --ui-bg-muted:      var(--dw-neutral-tone-10);
+  --ui-bg-elevated:   var(--dw-neutral-tone-12);
+  --ui-bg-accented:   var(--dw-neutral-tone-17);
+  --ui-bg-emphasized: var(--dw-neutral-tone-22);
+}
+
+/* ─────────────────────────────────────────────────────────────
+   4. REGISTER THE NEW ROLES AS UTILITIES
+   `inline` is mandatory — the values are vars redefined per theme.
+   ───────────────────────────────────────────────────────────── */
+@theme inline {
+  --color-primary-container:      var(--ui-primary-container);
+  --color-on-primary-container:   var(--ui-on-primary-container);
+  --color-secondary-container:    var(--ui-secondary-container);
+  --color-on-secondary-container: var(--ui-on-secondary-container);
+  --color-error-container:        var(--ui-error-container);
+  --color-on-error-container:     var(--ui-on-error-container);
+  --background-color-emphasized:  var(--ui-bg-emphasized);
+}
+
+/* ─────────────────────────────────────────────────────────────
+   5. TYPE SCALE  (§2.5 — full block reproduced there)
+   ───────────────────────────────────────────────────────────── */
+@theme static {
+  --text-headline-medium: 1.75rem;
+  --text-headline-medium--line-height: 2.25rem;
+  --text-headline-medium--letter-spacing: 0rem;
+  --text-headline-medium--font-weight: 400;
+  /* …headline-large/small, title-*, body-*, label-*… */
+
+  --text-doc-body: 1rem;
+  --text-doc-body--line-height: 1.625rem;
+  --text-doc-body--letter-spacing: 0.03125rem;
+  --text-doc-body--font-weight: 400;
+
+  --container-measure: 72ch;
+}
+
+/* ─────────────────────────────────────────────────────────────
+   6. MOTION  (§6.5)
+   ───────────────────────────────────────────────────────────── */
+@theme {
+  --ease-standard:              cubic-bezier(0.2, 0, 0, 1);
+  --ease-standard-accelerate:   cubic-bezier(0.3, 0, 1, 1);
+  --ease-standard-decelerate:   cubic-bezier(0, 0, 0, 1);
+  --ease-emphasized:            cubic-bezier(0.2, 0, 0, 1);
+  --ease-emphasized-accelerate: cubic-bezier(0.3, 0, 0.8, 0.15);
+  --ease-emphasized-decelerate: cubic-bezier(0.05, 0.7, 0.1, 1);
+}
+
+/* ─────────────────────────────────────────────────────────────
+   7. ELEVATION SHADOWS  (§4.4)
+   ───────────────────────────────────────────────────────────── */
+@theme {
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.30), 0 1px 3px 1px rgb(0 0 0 / 0.15);
+  --shadow-md: 0 1px 2px 0 rgb(0 0 0 / 0.30), 0 2px 6px 2px rgb(0 0 0 / 0.15);
+  --shadow-lg: 0 1px 3px 0 rgb(0 0 0 / 0.30), 0 4px 8px 3px rgb(0 0 0 / 0.15);
+}
+
+/* ─────────────────────────────────────────────────────────────
+   8. STATE LAYER UTILITY  (§5.2) — only where no Nuxt UI
+      component already provides one.
+   ───────────────────────────────────────────────────────────── */
+@utility dw-state-layer {
+  position: relative;
+  isolation: isolate;
+  &::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: inherit;
+    background-color: currentColor;
+    opacity: 0;
+    transition: opacity 100ms var(--ease-standard);
+  }
+  &:hover::before         { opacity: 0.08; }
+  &:focus-visible::before { opacity: 0.12; }
+  &:active::before        { opacity: 0.12; }
+}
+
+/* ─────────────────────────────────────────────────────────────
+   9. REDUCED MOTION  (§6.6 — checklist §5 is pass/fail on this)
+   ───────────────────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+```
+
+And the matching `app.config.ts`:
+
+```ts
+// apps/web/app/app.config.ts
+export default defineAppConfig({
+  ui: {
+    colors: {
+      primary: 'dw-primary',
+      secondary: 'dw-secondary',
+      error: 'dw-error',
+      neutral: 'dw-neutral'
+    },
+    button: {
+      slots: {
+        // M3 Expressive shape morph on press (§3.3)
+        base: 'transition-[border-radius,background-color] duration-100 ease-standard active:rounded-sm'
+      },
+      compoundVariants: [
+        // M3 filled: step the shade, never the alpha (§5.2 conflict 2)
+        { variant: 'solid', color: 'primary',
+          class: 'bg-primary text-inverted hover:bg-primary-500 active:bg-primary-400 dark:hover:bg-primary-100 dark:active:bg-primary-50' },
+        // M3 filled tonal: opaque container tokens, not alpha (§9.1)
+        { variant: 'soft', color: 'primary',
+          class: 'bg-primary-container text-on-primary-container' },
+        // M3 state layers: 0.08 hover, 0.12 pressed (§5.2 conflict 1)
+        { variant: 'ghost',   color: 'primary', class: 'hover:bg-primary/8 active:bg-primary/12' },
+        { variant: 'outline', color: 'primary', class: 'hover:bg-primary/8 active:bg-primary/12' }
+      ]
+    },
+    // Overlays sit at surface-container-high (§9.6)
+    dropdownMenu: { slots: { content: 'bg-accented' } },
+    modal:        { slots: { content: 'bg-accented' } },
+    popover:      { slots: { content: 'bg-accented' } }
+  }
+})
+```
+
+---
+
+## 12. Common failures
+
+The specific, recognisable ways generated UI violates M3. Each one is a review finding with a named correction.
+
+### 12.1 Flat surfaces with no container-level hierarchy
+
+**Symptom.** Every region — nav pane, document, contextual panel, cards, menus — is the same background colour, separated only by 1px borders. In dark mode the whole screen is one shade of near-black.
+
+**Why it happens.** The generator reaches for `bg-white dark:bg-gray-900` and stops. The surface-container ladder was never in the picture.
+
+**In this project it is worse than usual,** because Nuxt UI's stock dark theme sets `--ui-bg-muted` and `--ui-bg-elevated` to the same value — two of five rungs already collapsed before anyone wrote a line.
+
+**Correction.** §1.4. Walk `bg-default → bg-muted → bg-elevated → bg-accented → bg-emphasized`, and fix the dark ladder in every theme.
+
+### 12.2 Missing state layers
+
+**Symptom.** Hovering a tree row does nothing, or changes colour by an amount you have to squint to see. Pressing a button produces no feedback. The whole interface feels like a screenshot.
+
+**Why it happens.** State is invisible in the artefact the generator was optimising for. Also: Nuxt UI's defaults set `hover:` and `active:` to the *same* value, so even correct library usage yields no pressed state.
+
+**Correction.** §5.2. Every interactive element gets 0.08 hover / 0.12 focus / 0.12 pressed, plus the Expressive shape morph on press. Add it once in `app.config.ts`, not per component.
+
+### 12.3 Arbitrary radii
+
+**Symptom.** `rounded-[10px]` here, `rounded-xl` there, a card at 14px and its own button at 6px. Nothing lines up.
+
+**Why it happens.** Radius was chosen per element by eye instead of read from a scale.
+
+**Correction.** §3.3. Set `--ui-radius: 0.5rem` once; use only `rounded-none | xs | sm | md | lg | 2xl | 3xl | full`. Never mix radii within one component.
+
+### 12.4 Shadows instead of surface tones
+
+**Symptom.** `shadow-md` on the sidebar, on cards, on the sticky header, on list rows. In dark mode all of it disappears and the layout goes flat.
+
+**Why it happens.** Shadow is the reflex for "this is above that". M3 replaced it with tone six years ago.
+
+**Correction.** §4.3. Shadows only on transient floating surfaces — menus, popovers, dialogs, drawers, toasts, drag previews. Nuxt UI already puts them exactly there. Everything persistent gets a container tone and a `border-default`.
+
+### 12.5 One-size type
+
+**Symptom.** Everything is 14px or 16px. `h2` and `h3` are the same size and differ only in weight. Metadata, body text and captions are indistinguishable. There is no scannable structure in a document that exists to be scanned.
+
+**Why it happens.** A type scale was never defined, so each element got whatever size looked reasonable in isolation.
+
+**Correction.** §2.3 and §2.5. Register the M3 roles as `--text-*` tokens; one role per element, one class per element. `h1`–`h3` separate by size; `h4`–`h6` separate by weight, tracking and colour.
+
+### 12.6 Cramped or wildly generous spacing with no grid
+
+**Symptom.** `p-3` next to `p-5` next to `py-[13px]`. A tree row at 56px next to a comment row at 28px. Or the opposite: a consumer-app density that fits nine tree items on a 27" monitor.
+
+**Why it happens.** Spacing was tuned per element, and M3's touch-first dp values were either copied literally or abandoned entirely.
+
+**Correction.** §7. Every project-authored spacing value is an integer multiple of 4px. Step density down one level from M3 for repeating rows, never below the 24×24 target minimum. Set pane-level density once with `UTheme`.
+
+### 12.7 Decorative motion
+
+**Symptom.** Cards fade up on scroll. The nav slides in on every route change. A gradient shimmers behind the page title. Nothing conveys information; everything costs 300ms.
+
+**Why it happens.** Motion reads as polish in a demo. In a tool someone opens forty times a day it reads as latency.
+
+**Correction.** §6. Motion communicates a state change or it does not exist. Exits shorter than entrances. No motion in the document body at all (checklist §4.4). Reduced-motion path verified with the OS setting on.
+
+### 12.8 Alpha where an opaque token belongs
+
+**Symptom.** `bg-primary/10` for a tonal container, `bg-black/5` for a hover row, `border-white/10` for a divider. Looks correct on the theme it was written against; wrong on every other one, and unpredictable wherever it overlaps something.
+
+**Why it happens.** Alpha is the shortest path to "slightly tinted" and needs no token.
+
+**Correction.** §1.4 and §5.2. Alpha is correct for a **state layer** over a known container. It is wrong for a **container fill**, a **border**, or **text**. Those get opaque tokens.
+
+### 12.9 Icon-only controls with no name
+
+**Symptom.** A toolbar of glyphs. No tooltip, no `aria-label`. Ambiguous in one icon pack, meaningless in another.
+
+**Why it happens.** The icon looked self-explanatory to whoever picked it.
+
+**Correction.** Checklist §4.3 and §5 — this is a pass/fail item there, not a matter of taste. Every icon-only button gets both an `aria-label` and a tooltip, and the screen is verified with two different icon packs.
+
+### 12.10 Hand-rolled primitives
+
+**Symptom.** A custom dropdown built from a `div` and a click-outside handler. A modal that does not trap focus. A tree built from nested `ul`s with `onclick`.
+
+**Why it happens.** Building the visual is faster than finding the component.
+
+**Correction.** Checklist §4.1. `UDropdownMenu`, `UModal`, `UTree`, `UCommandPalette`, `UPopover`, `UTooltip` all exist in the free package and all bring the focus trapping, focus return, `aria-*` wiring and keyboard handling that checklist §5 requires. A hand-rolled equivalent forfeits all of it and fails review.
+
+---
+
+## 13. Sources
+
+Token values in this document are taken from the following, not from memory:
+
+- `material-components/material-web` — `tokens/versions/v0_192/` (`md-sys-color`, `md-sys-typescale`, `md-sys-shape`, `md-sys-state`, `md-sys-motion`, `md-sys-elevation`, `md-ref-palette`, `md-ref-typeface`, and the `md-comp-*` component token files)
+- `material-foundation/material-color-utilities` — `typescript/dynamiccolor/color_spec_2021.ts` (role → tone mapping), `variant.ts`
+- `androidx/androidx` — `compose/material3/.../tokens/` (`ShapeTokens`, `TypeScaleTokens`, `StandardMotionTokens`, `ExpressiveMotionTokens`, `Button{XSmall,Small,Medium,Large,XLarge}Tokens`) for the M3 Expressive additions
+- `m3.material.io` — breakpoints, grids and spacing, tone-based surface colour
+- `tailwindcss.com/docs/theme` — `@theme` namespaces and options
+- The installed `@nuxt/ui@4.11.0` package: `dist/runtime/index.css`, `dist/runtime/plugins/colors.js`, and the resolved component theme in `apps/web/.nuxt/ui/`
+
+---
+
+## 14. Change log
+
+Amend this file in place when a rule turns out to be wrong, and record why here. A deviation from M3 that is not written down is a defect, not a decision.
+
+| Date | Change | Reason |
+| --- | --- | --- |
+| 2026-09-03 | Initial version. | — |
+</content>
+</invoke>

@@ -158,6 +158,12 @@ Derived from this project's actual stack and domain.
 - [ ] Errors from the model provider surface as the provider's actual failure (rate limit, invalid key, context length), not a generic "Something went wrong".
 - [ ] BYOK credentials are never rendered, logged to the console, or echoed back into the DOM.
 
+### 4.10 Visual design system
+
+- [ ] The screen follows [`docs/DESIGN-SYSTEM.md`](./DESIGN-SYSTEM.md), which is this project's Material Design 3 translation layer for Nuxt UI v4 and the **authority on colour roles, type scale, shape, elevation, state layers, motion, spacing and density**. Read it before building, not after.
+- [ ] **This checklist remains the authority on required states, the accessibility floor, and responsive behaviour.** Where the two disagree on any of those, this file wins and the design system gets corrected.
+- [ ] Any deviation from the design system is deliberate and recorded in that file's change log — not improvised in a component.
+
 ---
 
 ## 5. Accessibility floor
