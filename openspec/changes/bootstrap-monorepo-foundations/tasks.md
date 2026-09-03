@@ -38,18 +38,18 @@ Chain strategy: size-exception
 
 ## Phase 0: Pre-Flight Spike
 
-- [ ] 0.1 Spike (no commit): in a throwaway tree, install Astro + Nuxt 4 + Nuxt UI together, run both builds, confirm `@nuxt/test-utils` is Vitest-only. Discard the tree. — *proposal risk: Nuxt/Astro Vite conflict*
+- [x] 0.1 Spike (no commit): in a throwaway tree, install Astro + Nuxt 4 + Nuxt UI together, run both builds, confirm `@nuxt/test-utils` is Vitest-only. Discard the tree. — *proposal risk: Nuxt/Astro Vite conflict* — **Result: coexist cleanly.** `bun install` resolved both without conflict (Bun keeps isolated per-dependent copies of divergent transitive `vite` majors — 5.4.21, 6.4.3, 8.2.2 — instead of forcing one hoisted version); both `astro build` and `nuxt build` completed with exit 0. `@nuxt/test-utils`'s `package.json` exports only `./vitest-environment` (no `bun:test` integration anywhere in its dist output), confirming it is Vitest-only as design assumed. Tree discarded; fallback ladder not needed.
 
 ## Phase 1: Workspace Root and Structural Check Harness
 
-- [ ] 1.1 Create `package.json` — `workspaces: ["apps/*","packages/*"]`, root scripts (`build`,`test`,`lint`,`typecheck`,`check`), `overrides` escape hatch — *monorepo-workspace: Bun Workspace Topology*
-- [ ] 1.2 Create `tsconfig.base.json` — `strict`, `moduleResolution: bundler`, `verbatimModuleSyntax`
-- [ ] 1.3 Create `eslint.config.js` flat config shared by all members
-- [ ] 1.4 (RED) `scripts/checks/__tests__/workspace-shape.test.ts` — violating fixture (Vitest in two members) must fail — *monorepo-workspace: Task Graph via `bun run -F`*
-- [ ] 1.5 (GREEN) Implement `scripts/checks/workspace-shape.ts` — Vitest confined to exactly one member; no `pnpm-lock.yaml`/`turbo.json`
-- [ ] 1.6 (RED) `scripts/checks/__tests__/test-coverage.test.ts` against `scripts/checks/__fixtures__/placeholder-test/` (zero-assertion test file) — must report failing coverage, not pass — *test-infrastructure: "An uncovered package is detected"*
-- [ ] 1.7 (GREEN) Implement `scripts/checks/test-coverage.ts` — fails when any member's test file has zero real assertions; add a passing fixture too
-- [ ] 1.8 Wire `bun run check` to run `workspace-shape` + `test-coverage` (core-purity/compose/env-example land with their own units)
+- [x] 1.1 Create `package.json` — `workspaces: ["apps/*","packages/*"]`, root scripts (`build`,`test`,`lint`,`typecheck`,`check`), `overrides` escape hatch — *monorepo-workspace: Bun Workspace Topology*
+- [x] 1.2 Create `tsconfig.base.json` — `strict`, `moduleResolution: bundler`, `verbatimModuleSyntax`
+- [x] 1.3 Create `eslint.config.js` flat config shared by all members
+- [x] 1.4 (RED) `scripts/checks/__tests__/workspace-shape.test.ts` — violating fixture (Vitest in two members) must fail — *monorepo-workspace: Task Graph via `bun run -F`*
+- [x] 1.5 (GREEN) Implement `scripts/checks/workspace-shape.ts` — Vitest confined to exactly one member; no `pnpm-lock.yaml`/`turbo.json`
+- [x] 1.6 (RED) `scripts/checks/__tests__/test-coverage.test.ts` against `scripts/checks/__fixtures__/placeholder-test/` (zero-assertion test file) — must report failing coverage, not pass — *test-infrastructure: "An uncovered package is detected"*
+- [x] 1.7 (GREEN) Implement `scripts/checks/test-coverage.ts` — fails when any member's test file has zero real assertions; add a passing fixture too
+- [x] 1.8 Wire `bun run check` to run `workspace-shape` + `test-coverage` (core-purity/compose/env-example land with their own units)
 
 ## Phase 2: `packages/core`
 

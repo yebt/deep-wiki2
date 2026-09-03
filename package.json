@@ -1,0 +1,26 @@
+{
+  "name": "deep-wiki",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "bun run --filter '*' build",
+    "test": "bun run --filter '*' test && bun test scripts/checks",
+    "lint": "eslint .",
+    "typecheck": "bun run --filter '*' typecheck && tsc --noEmit -p tsconfig.json",
+    "check": "bun run scripts/checks/workspace-shape.ts && bun run scripts/checks/test-coverage.ts",
+    "db:migrate": "bun run --filter @deep-wiki/db migrate",
+    "db:seed": "bun run --filter @deep-wiki/db seed"
+  },
+  "overrides": {},
+  "devDependencies": {
+    "@eslint/js": "^9.19.0",
+    "@types/bun": "^1.1.14",
+    "eslint": "^9.19.0",
+    "typescript": "^5.7.3",
+    "typescript-eslint": "^8.21.0"
+  }
+}
