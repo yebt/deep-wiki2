@@ -1,0 +1,24 @@
+# Root Bun configuration.
+#
+# linker = "hoisted": Bun's default "isolated" linker gives every dependent
+# its own private node_modules tree, keyed by its exact resolved dependency
+# set. That is what lets apps/web (Nuxt, Vite 8.x) and apps/landing (Astro,
+# Vite 5.x/6.x) coexist with divergent transitive Vite majors with zero
+# configuration (see docs/TODO.md's Nuxt/Astro coexistence finding) — but it
+# also has a real gap for optional peer dependencies: @nuxt/test-utils
+# declares `happy-dom` as an optional peer, and under isolated linking a
+# fresh install does not reliably create a resolvable symlink for it inside
+# @nuxt/test-utils's own private scope, even though `happy-dom` is correctly
+# installed and listed in apps/web's own devDependencies. Verified directly:
+# a genuinely fresh `git clone` + `bun install --frozen-lockfile` fails
+# apps/web's component tests with "Could not resolve happy-dom imported by
+# @nuxt/test-utils" under the default isolated linker, but passes reliably
+# under the classic hoisted linker.
+#
+# Verified this does not reintroduce the Vite-major conflict hoisting is
+# supposed to protect against: with this setting, a fresh clone still
+# builds, typechecks, lints, and tests both apps/web and apps/landing
+# successfully — Bun's hoisting algorithm keeps genuinely divergent
+# transitive versions nested rather than forcing a single hoisted copy.
+[install]
+linker = "hoisted"
