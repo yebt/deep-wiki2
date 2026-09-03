@@ -93,8 +93,8 @@ Chain strategy: size-exception
 
 ## Phase 5: `packages/editor`
 
-- [ ] 5.1 (RED) `packages/editor/src/round-trip.test.ts` — corpus round-trip byte-identical
-- [ ] 5.2 (GREEN) Implement `packages/editor/src/round-trip.ts` `roundTrip(md): string` over markdown's pipeline
+- [x] 5.1 (RED) `packages/editor/src/round-trip.test.ts` — corpus round-trip byte-identical — corpus grown to 7 fixtures (heading, paragraph, list, ordered-list, code-fence, blockquote, link) in Phase 4's `packages/markdown/fixtures/`; `stringify()` pinned to `bullet: '-', emphasis: '_'` so canonical-style input round-trips exactly rather than being renormalized to remark's defaults
+- [x] 5.2 (GREEN) Implement `packages/editor/src/round-trip.ts` `roundTrip(md): string` over markdown's pipeline
 
 ## Phase 6: `packages/db`
 

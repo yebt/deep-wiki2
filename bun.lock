@@ -24,6 +24,13 @@
       "name": "@deep-wiki/core",
       "version": "0.0.0",
     },
+    "packages/editor": {
+      "name": "@deep-wiki/editor",
+      "version": "0.0.0",
+      "dependencies": {
+        "@deep-wiki/markdown": "workspace:*",
+      },
+    },
     "packages/markdown": {
       "name": "@deep-wiki/markdown",
       "version": "0.0.0",
@@ -39,6 +46,8 @@
     "@deep-wiki/contracts": ["@deep-wiki/contracts@workspace:packages/contracts"],
 
     "@deep-wiki/core": ["@deep-wiki/core@workspace:packages/core"],
+
+    "@deep-wiki/editor": ["@deep-wiki/editor@workspace:packages/editor"],
 
     "@deep-wiki/markdown": ["@deep-wiki/markdown@workspace:packages/markdown"],
 

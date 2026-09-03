@@ -11,7 +11,11 @@ import { unified } from 'unified';
  */
 
 const parseProcessor = unified().use(remarkParse);
-const stringifyProcessor = unified().use(remarkStringify);
+// `bullet`/`emphasis` pinned to this repo's canonical Markdown style ("-",
+// "_") so round-tripping fixture content that already uses that style is
+// byte-identical rather than silently renormalized to remark's defaults
+// ("*" for both).
+const stringifyProcessor = unified().use(remarkStringify, { bullet: '-', emphasis: '_' });
 
 /** Parses Markdown source into an mdast syntax tree. */
 export function parse(markdown: string): Root {
