@@ -21,6 +21,7 @@
     "zod": "^3.24.1"
   },
   "devDependencies": {
+    "@iconify-json/lucide": "^1.2.129",
     "@nuxt/eslint": "^1.17.0",
     "@nuxt/test-utils": "^4.2.0",
     "@playwright/test": "^1.62.1",

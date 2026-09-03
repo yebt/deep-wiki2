@@ -6,6 +6,17 @@ export default defineNuxtConfig({
 
   css: ['~/assets/css/main.css'],
 
+  icon: {
+    // Self-hosted product: air-gapped instances must not depend on the
+    // Iconify HTTP API. `@iconify-json/lucide` is installed as a dev
+    // dependency and explicitly bundled into the server output so every
+    // `i-lucide-*` icon this app or Nuxt UI's defaults use is served from
+    // the local bundle. See docs/UI-CHECKLIST.md §4.3's build gotcha.
+    serverBundle: {
+      collections: ['lucide'],
+    },
+  },
+
   typescript: {
     // Matches the strictness of the repository's shared tsconfig.base.json
     // (see apps/web/tsconfig.json for why this project does not extend it
