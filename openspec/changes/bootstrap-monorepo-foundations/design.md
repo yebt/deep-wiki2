@@ -39,10 +39,10 @@ Option A is the real alternative, and it fails the point of Phase 0. Under A, th
 | D1 | Packages ship TS source, no build step; only apps build | Removes cross-package build ordering as a class of problem; `bun run -F` never has to be a build orchestrator | A package must be published to a registry, or a consumer cannot process TS source |
 | D2 | Resolution via Bun workspace symlinks only — no `tsconfig` `paths` | Two resolution mechanisms drift silently; one cannot | A tool proves unable to follow workspace symlinks |
 | D3 | Purity enforced by `scripts/checks/core-purity.ts` using `Bun.Transpiler().scanImports()`, asserting every specifier in `packages/core/src` is relative, plus empty `dependencies` in its manifest | Deny-by-default beats a framework denylist that ages. AST-accurate (covers `import()` and `require`), no ESLint plugin, cannot be silenced by an inline `eslint-disable`. Zero new tooling | The rule needs per-file exceptions, which would mean the hexagon has leaked |
-| D4 | `packages/core` also declares `MailSender` and `BlobStore` port interfaces (types only, no adapters) | SPECS §12.3 calls them mandatory; without one interface, core has no shape for the purity check to protect. Two type files, no behaviour | — |
+| D4 | `packages/core` also declares `MailSender` and `BlobStore` port interfaces (types only, no adapters) | SPECS §12.3 calls them mandatory; without one interface, core has no shape for the purity check to protect. Two type files, no behaviour | Nothing foreseeable |
 | D5 | Compose portability checked statically by `scripts/checks/compose.ts` (bind mounts carry `:z`/`:Z`, host ports ≥1024, no non-spec keys) | Satisfies the container-stack spec's "validation rejects it" scenarios in the unit CI job, with no container runtime and no Docker on the dev machine | Compose gains a first-party spec linter covering the same rules |
 | D6 | Compose env uses `${VAR:?message}` interpolation | Fail-fast at the container layer mirrors fail-fast at the app layer | Podman's provider proves not to support `:?` (verified on first `podman compose config`) |
-| D7 | Named volumes for data, bind mount only for the postgres init script | `:z` applies to bind mounts; labelling named volumes is noise that obscures the one mount that needs it | — |
+| D7 | Named volumes for data, bind mount only for the postgres init script | `:z` applies to bind mounts; labelling named volumes is noise that obscures the one mount that needs it | Nothing foreseeable |
 | D8 | Add a `kroki-mermaid` sidecar alongside `kroki` | The base Kroki image cannot render Mermaid; SPECS §6 makes Mermaid primary. Discovering this in Phase 4 is the late failure Phase 0 exists to prevent. **Exceeds the proposal's literal four services** — see Open Questions | Kroki absorbs Mermaid into the base image |
 | D9 | Env schema (zod) in `packages/contracts`; `process.env` read only in each app's `src/config.ts` | Keeps `core` framework-free *and* environment-free; core receives plain typed values as arguments | — |
 | D10 | One CI `verify` job with named steps, plus `e2e` and `compose-smoke` | One install, one cache, one pass/fail; step names still identify the failing gate as the ci-pipeline spec requires | Step runtime grows enough that parallel jobs beat a single install |
@@ -97,7 +97,7 @@ Task graph: `bun run --filter '*' <script>` — root scripts `build`, `test`, `l
 | `scripts/checks/{core-purity,workspace-shape,compose,env-example}.ts` | Create | The four structural checks; each exits non-zero with an identifying message |
 | `scripts/checks/__fixtures__/` | Create | Violating fixtures that make each check testable without breaking the repo |
 | `packages/core/src/{result.ts,ports/mail-sender.ts,ports/blob-store.ts}` | Create | Framework-free primitives + the two mandatory ports |
-| `packages/contracts/src/env.ts` | Create | zod server-env schema, single source for `.env.example` |
+| `packages/contracts/src/env.ts` | Create | zod server-env schema, single source for `env.example` |
 | `packages/markdown/src/index.ts`, `fixtures/` | Create | `parse()` over unified/remark; GATE-2 corpus location |
 | `packages/editor/src/round-trip.ts` | Create | md → mdast → md byte-identity harness over the corpus (ProseMirror slots in later) |
 | `packages/db/src/{client.ts,schema.ts}`, `migrate.ts`, `seed.ts`, `drizzle.config.ts` | Create | Drizzle client factory taking a URL argument; migrate/seed entry points |
@@ -106,7 +106,7 @@ Task graph: `bun run --filter '*' <script>` — root scripts `build`, `test`, `l
 | `apps/web/vitest.config.ts` | Create | `defineVitestConfig({ test: { environment: 'nuxt' } })` |
 | `e2e/` + `playwright.config.ts` | Create | Playwright `webServer` boots `apps/web` |
 | `compose.yaml`, `infra/postgres/init/01-extensions.sql` | Create | Four services + Mermaid sidecar; `CREATE EXTENSION IF NOT EXISTS vector` |
-| `.env.example`, `README.md`, `.github/workflows/ci.yml` | Create | Config template, bootstrap path, pipeline |
+| `env.example`, `README.md`, `.github/workflows/ci.yml` | Create | Config template, bootstrap path, pipeline |
 | `openspec/config.yaml` | Modify | `strict_tdd: false → true`; fill `testing.projects` and `rules.apply.test_command` |
 
 ## Compose Topology
@@ -178,7 +178,7 @@ Each unit keeps its tests with its code, leaves the repository coherent on its o
 | 0 | *(spike, no commit)* Install Nuxt 4 + Astro together, run both builds, confirm `@nuxt/test-utils` is Vitest-only | Discard the tree |
 | 1 | `chore(repo): bun workspace root, shared tsconfig, eslint, workspace-shape check` | Root config files + `scripts/checks/workspace-shape.ts` |
 | 2 | `feat(core): framework-free core package with machine-enforced purity check` | `packages/core` + `core-purity.ts` |
-| 3 | `feat(contracts): typed env schema, .env.example, and template drift check` | `packages/contracts` + `.env.example` |
+| 3 | `feat(contracts): typed env schema, env.example, and template drift check` | `packages/contracts` + `env.example` |
 | 4 | `feat(markdown): shared unified/remark parse entry point and fixture corpus` | `packages/markdown` |
 | 5 | `feat(editor): markdown round-trip harness over the fixture corpus` | `packages/editor` |
 | 6 | `feat(db): drizzle client factory with migrate and seed entry points` | `packages/db` |
@@ -198,6 +198,6 @@ No data migration — additive greenfield. Rollback is `git revert` of the PR or
 
 ## Open Questions
 
-- [ ] **D8 adds a fifth container** (`kroki-mermaid`) beyond the proposal's literal four services. Recommended, because Mermaid is the primary diagram format and the base Kroki image cannot render it — but it is a scope delta the owner should acknowledge, or defer to Phase 4 with the risk recorded.
-- [ ] Whether `podman compose` (podman 5.8.4, delegating to an external provider) supports `${VAR:?message}` interpolation and `depends_on: { condition: service_healthy }`. Verified on the first `podman compose config` in unit 11; the fallback is plain `${VAR}` defaults plus a documented startup order.
+- [x] **D8 adds a fifth container** (`kroki-mermaid`, named `mermaid` in `compose.yaml`) beyond the proposal's literal four services. **Acknowledged as an accepted scope delta**, not deferred: Mermaid is the primary diagram format (docs/SPECS.md §6) and the base Kroki image cannot render it without this companion container and `KROKI_MERMAID_HOST` pointing at it — deferring to Phase 4 would repeat the exact late-failure pattern Phase 0 exists to prevent. Verified end to end, not just at container-start: a real Mermaid diagram POSTed to `kroki`'s `/mermaid/svg` endpoint returns a rendered SVG (`scripts/checks/compose-smoke.ts`), proving the sidecar is actually reachable through `KROKI_MERMAID_HOST=mermaid`.
+- [x] Whether `podman compose` (podman 5.8.4, delegating to an external `podman-compose` 1.6.0 provider) supports `${VAR:?message}` interpolation and `depends_on: { condition: service_healthy }`. **Verified supported, both of them** — `podman compose config -q` against `compose.yaml`'s `${POSTGRES_USER:?...}`-style interpolation exits 0, and a throwaway two-service probe file using `depends_on: { a: { condition: service_healthy } }` also exits 0 under `config -q`. No fallback was needed; `compose.yaml` keeps `:?message` interpolation exactly as D6 specifies.
 - [ ] Node 22 becomes a **development-only** prerequisite because of Vitest. Confirmed acceptable for contributors; it is explicitly not a requirement for self-hosters building or running the product.

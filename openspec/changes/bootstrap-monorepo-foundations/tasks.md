@@ -154,9 +154,9 @@ Note: `apps/web`'s `e2e` script and its `@playwright/test` devDependency are add
 
 ## Phase 12: Docs, Decision Cleanup, and `strict_tdd`
 
-- [ ] 12.1 Write `README.md`: clone → `bun install` → `podman compose up` → `bun run db:migrate` → `bun run db:seed` — *monorepo-workspace: Documented Local Bootstrap*
-- [ ] 12.2 Fill `design.md` D4 "Reverses if" with "Nothing foreseeable" per `docs/SPECS.md` §14 house style
-- [ ] 12.3 Fill `design.md` D7 "Reverses if" with "Nothing foreseeable" per `docs/SPECS.md` §14 house style
-- [ ] 12.4 Update `design.md` Open Questions: mark D8 (five services) acknowledged as an accepted scope delta; record the 10.6 `podman compose config` verification outcome
-- [ ] 12.5 Update `openspec/config.yaml`: `strict_tdd: false → true`; fill `testing.projects` (all apps/packages) and `rules.apply.test_command: "bun run test"` — *test-infrastructure: strict_tdd flips to true after infrastructure lands*
-- [ ] 12.6 Walk through all seven proposal Success Criteria end to end and confirm each passes: clean-clone build, workspace-wide `bun test`, Playwright smoke, deliberate core import fails CI, `podman compose up` starts all five services cleanly, README bootstrap path, `strict_tdd` true
+- [x] 12.1 Write `README.md`: clone → `bun install` → `podman compose up` → `bun run db:migrate` → `bun run db:seed` — *monorepo-workspace: Documented Local Bootstrap* — added a "Start the local services" section plus `db:migrate`/`db:seed`/`compose:smoke` rows to the commands table
+- [x] 12.2 Fill `design.md` D4 "Reverses if" with "Nothing foreseeable" per `docs/SPECS.md` §14 house style
+- [x] 12.3 Fill `design.md` D7 "Reverses if" with "Nothing foreseeable" per `docs/SPECS.md` §14 house style
+- [x] 12.4 Update `design.md` Open Questions: mark D8 (five services) acknowledged as an accepted scope delta; record the 10.6 `podman compose config` verification outcome
+- [x] 12.5 Update `openspec/config.yaml`: `strict_tdd: false → true`; fill `testing.projects` (all apps/packages) and `rules.apply.test_command: "bun run test"` — *test-infrastructure: strict_tdd flips to true after infrastructure lands*
+- [x] 12.6 Walk through all seven proposal Success Criteria end to end and confirm each passes: clean-clone build, workspace-wide `bun test`, Playwright smoke, deliberate core import fails CI, `podman compose up` starts all five services cleanly, README bootstrap path, `strict_tdd` true — **this walkthrough surfaced a real, pre-existing bug**: a genuinely fresh `git clone` + `bun install --frozen-lockfile` failed `apps/web`'s component tests (`Could not resolve happy-dom imported by @nuxt/test-utils`) under Bun's default isolated linker, reproduced back to commit `b596d5d` (predates this batch, unrelated to compose/CI/docs). Fixed at the root config level with `bunfig.toml`'s `install.linker = "hoisted"`, verified not to reintroduce the Nuxt/Astro Vite-major conflict isolated linking exists to avoid, then re-verified all seven criteria against a fresh clone of the fixed `HEAD`: install, build, typecheck, lint, check, test, and e2e all exit 0

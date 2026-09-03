@@ -57,50 +57,50 @@ These are hard gates. Work that depends on them does not start until they are gr
 
 Monorepo, containers, CI. Nothing user-facing.
 
-- [ ] Initialise Bun 1.4 workspace monorepo: root `package.json` with `workspaces`,
+- [x] Initialise Bun 1.4 workspace monorepo: root `package.json` with `workspaces`,
       task orchestration via `bun run -F` (explicitly **not** pnpm, **not** Turborepo —
       revisit Turborepo only when build times measurably hurt).
-- [ ] Scaffold `apps/landing` (Astro) — marketing surface, no app dependencies.
-- [ ] Scaffold `apps/web` (Nuxt 4) — the application shell.
-- [ ] Scaffold `apps/api` (Hono on Bun) — adapters only, no domain logic.
-- [ ] Create `packages/core` — domain entities and use cases. Enforce **zero framework
+- [x] Scaffold `apps/landing` (Astro) — marketing surface, no app dependencies.
+- [x] Scaffold `apps/web` (Nuxt 4) — the application shell.
+- [x] Scaffold `apps/api` (Hono on Bun) — adapters only, no domain logic.
+- [x] Create `packages/core` — domain entities and use cases. Enforce **zero framework
       imports**: no Hono, no Nuxt, no Bun-specific APIs. Add a lint rule or dependency-cruiser
       check that fails CI on a framework import inside `packages/core`.
-- [ ] Create `packages/markdown` — placeholder for the shared unified/remark pipeline.
-- [ ] Create `packages/contracts` — shared request/response schemas, the single source of
+- [x] Create `packages/markdown` — placeholder for the shared unified/remark pipeline.
+- [x] Create `packages/contracts` — shared request/response schemas, the single source of
       truth for the API surface consumed by `apps/web` and `apps/api`.
-- [ ] Create `packages/editor` — placeholder for Milkdown/ProseMirror integration.
-- [ ] Create `packages/db` — schema, migrations, and the query layer.
-- [ ] Write `compose.yaml` that runs unchanged under `podman compose` (local dev,
+- [x] Create `packages/editor` — placeholder for Milkdown/ProseMirror integration.
+- [x] Create `packages/db` — schema, migrations, and the query layer.
+- [x] Write `compose.yaml` that runs unchanged under `podman compose` (local dev,
       Fedora) and `docker compose` (production).
-- [ ] Compose service: `postgres` with the `pgvector` extension enabled in an init script.
-- [ ] Compose service: `mailpit` (SMTP on 1025, web UI on 8025) for local mail capture.
-- [ ] Compose service: `minio` for S3-compatible object storage in dev.
-- [ ] Compose service: `kroki` for server-side diagram rendering, plus the
+- [x] Compose service: `postgres` with the `pgvector` extension enabled in an init script.
+- [x] Compose service: `mailpit` (SMTP on 1025, web UI on 8025) for local mail capture.
+- [x] Compose service: `minio` for S3-compatible object storage in dev.
+- [x] Compose service: `kroki` for server-side diagram rendering, plus the
       `kroki-mermaid` companion container. The base image cannot render Mermaid, and
       Mermaid is the primary diagram format, so `kroki` must set
       `KROKI_MERMAID_HOST=mermaid` or the sidecar is never routed to.
-- [ ] Apply SELinux `:z` labels to every bind mount in `compose.yaml` (required on
+- [x] Apply SELinux `:z` labels to every bind mount in `compose.yaml` (required on
       Fedora under podman; harmless under docker).
-- [ ] Keep all published host ports at 1024 or above so rootless podman can bind them.
-- [ ] Document the local bootstrap in `README.md`: clone, `bun install`, `podman compose up`,
+- [x] Keep all published host ports at 1024 or above so rootless podman can bind them.
+- [x] Document the local bootstrap in `README.md`: clone, `bun install`, `podman compose up`,
       migrate, seed.
-- [ ] Base CI pipeline: install, typecheck, lint, unit tests, on every push.
-- [ ] Add the `packages/core` purity check to CI.
-- [ ] Define the `MailSender` and `BlobStore` port interfaces in `packages/core`
+- [x] Base CI pipeline: install, typecheck, lint, unit tests, on every push.
+- [x] Add the `packages/core` purity check to CI.
+- [x] Define the `MailSender` and `BlobStore` port interfaces in `packages/core`
       (interfaces only — adapters land in Phase 1). They give `packages/core` real
       content to test and exercise the purity check against a genuine boundary.
-- [ ] Workspace-wide test command covering every package and app, with at least one
+- [x] Workspace-wide test command covering every package and app, with at least one
       real executing test per member — a placeholder that asserts nothing does not count.
-- [ ] Scoped Vitest + `@nuxt/test-utils` for `apps/web` only. Nuxt component tests
+- [x] Scoped Vitest + `@nuxt/test-utils` for `apps/web` only. Nuxt component tests
       cannot run under `bun test`; see Findings. Add a structural check asserting Vitest
       appears in exactly one workspace member so the second runner cannot spread.
-- [ ] Wire Playwright for e2e and prove it boots `apps/web` with one smoke test.
-- [ ] Ensure CI exercises the build of all three apps, not only the two front-ends.
+- [x] Wire Playwright for e2e and prove it boots `apps/web` with one smoke test.
+- [x] Ensure CI exercises the build of all three apps, not only the two front-ends.
 - [x] Add `env.example` (copied to `.env` locally) and typed configuration loading that
       fails fast at startup with
       an actionable message naming the missing or malformed variable.
-- [ ] Re-resolve `strict_tdd` to `true` in `openspec/config.yaml` once the above lands.
+- [x] Re-resolve `strict_tdd` to `true` in `openspec/config.yaml` once the above lands.
 
 ### Phase 1 — Tenancy and permissions
 
@@ -343,6 +343,20 @@ makes conventions portable across projects.
 
 Discoveries and constraints. Newest first.
 
+### 2026-09-03 — `podman compose` (podman-compose 1.6.0) supports `:?` and `service_healthy`
+
+Verified directly on this machine rather than assumed: `podman compose config -q` against
+`compose.yaml`'s `${POSTGRES_USER:?message}`-style interpolation exits `0`, and a throwaway
+two-service probe file using `depends_on: { a: { condition: service_healthy } }` also exits
+`0` under `config -q`. Both were open questions in design.md's fallback ladder.
+
+**Impact:** `compose.yaml` keeps fail-fast `${VAR:?message}` interpolation exactly as
+originally designed — no fallback to plain `${VAR}` defaults was needed. Also confirmed
+`podman compose` here delegates to an external `podman-compose` provider (not a Go-native
+`podman compose`), which is why the compose file must stay strictly on Compose-specification
+syntax: `container_name`, `develop.watch`, and any other Docker-specific extension are
+rejected by `scripts/checks/compose.ts`, not merely discouraged by convention.
+
 ### 2026-09-03 — Nuxt component testing requires Vitest; `bun test` cannot do it
 
 Verified against the official Nuxt 4 testing documentation, which states that `@nuxt/test-utils`
@@ -371,7 +385,11 @@ Mermaid needs `yuzutech/kroki-mermaid`.
 **Impact:** the container stack carries five services, not four. This is not optional — `docs/SPECS.md`
 section 6 makes Mermaid the primary diagram format, so a Kroki deployment without its Mermaid
 companion cannot render the project's main diagram type. Discovering this during Phase 4 is
-precisely the late failure Phase 0 exists to prevent.
+precisely the late failure Phase 0 exists to prevent. The sidecar's compose service is named
+`mermaid` (not `kroki-mermaid`, which is only the image name) because `KROKI_MERMAID_HOST`
+must resolve as a hostname on the compose network — `kroki` sets `KROKI_MERMAID_HOST=mermaid`,
+and verified end to end (not just "the container starts"): a real Mermaid diagram POSTed to
+`kroki`'s `/mermaid/svg` endpoint returns a rendered SVG (`scripts/checks/compose-smoke.ts`).
 
 ### 2026-09-03 — An open-by-default self-hosted instance gets spam-registered
 

@@ -83,10 +83,10 @@ Bun 1.4+, podman 5.x with a compose provider, registry network access.
 
 ## Success Criteria
 
-- [ ] Clean clone: `bun install` then workspace build succeeds
-- [ ] `bun test` passes across every app and package
-- [ ] Playwright boots `apps/web` and passes one smoke test
-- [ ] A deliberate framework import in `packages/core` fails CI
-- [ ] `podman compose up` starts all four services without SELinux or port errors
-- [ ] `README.md` documents clone → install → compose up → migrate → seed
-- [ ] `strict_tdd` re-resolves to `true` in `openspec/config.yaml`
+- [x] Clean clone: `bun install` then workspace build succeeds — verified with a genuine `git clone` into a scratch directory, `bun install --frozen-lockfile`, then `bun run build`; both exit 0. A real bug surfaced during this exact check (see `bunfig.toml`'s commit: Bun's default isolated linker left `apps/web`'s `happy-dom` optional peer dependency unresolvable on a fresh install) and was fixed at the root config level, not worked around
+- [x] `bun test` passes across every app and package — verified in the same clean clone: `bun run test` exits 0, 20/20 `bun test` assertions plus `apps/web`'s 12/12 Vitest tests all pass
+- [x] Playwright boots `apps/web` and passes one smoke test — verified in the same clean clone: `bun run -F @deep-wiki/web e2e` exits 0, 1 passed
+- [x] A deliberate framework import in `packages/core` fails CI — `scripts/checks/core-purity.ts`, unit-tested against `scripts/checks/__fixtures__/violating-core/` and wired into `bun run check` and CI's `verify` job
+- [x] `podman compose up` starts all four services without SELinux or port errors — starts **five** services (D8: the Kroki Mermaid sidecar is a required, acknowledged scope delta) cleanly; verified with a real `podman compose up -d --wait` bring-up (remapped host ports, since this development machine already runs other projects on the default ports), confirmed `pgvector` installed, ran the real Mailpit send/retrieve and Kroki+Mermaid render assertions successfully, then tore the stack down with no stray containers or volumes left
+- [x] `README.md` documents clone → install → compose up → migrate → seed
+- [x] `strict_tdd` re-resolves to `true` in `openspec/config.yaml`

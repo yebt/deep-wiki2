@@ -7,7 +7,9 @@ context: |
   packages/core (framework-free domain), packages/markdown (unified/remark),
   packages/contracts (zod), packages/editor (Milkdown/ProseMirror), packages/db (Drizzle).
   Postgres + pgvector; podman compose (dev), docker (prod). Playwright for e2e.
-  No source code exists yet — pre-Phase-0. See docs/SPECS.md and docs/TODO.md.
+  Phase 0 (bootstrap-monorepo-foundations) is complete: the workspace, all
+  eight packages/apps, the compose stack, and CI exist. See docs/SPECS.md and
+  docs/TODO.md.
 
 artifact_store: hybrid
 
@@ -22,20 +24,30 @@ review:
   budget_lines: unlimited
   accepted_exception: "size:exception"
 
-strict_tdd: false
+strict_tdd: true
 strict_tdd_note: >
-  Fails closed to false at init because zero projects/test runners exist yet
-  (pre-Phase-0, no package.json anywhere in the workspace). Re-resolve once
-  Phase 0 scaffolding lands a workspace-level `bun test` command covering every
-  package/app, and Playwright is wired for e2e. Do not treat this as a
-  downgrade of the session's Strict TDD intent — it is the required no-runner
-  fallback.
+  Re-resolved to true: Phase 0 landed a workspace-level `bun run test` command
+  (`bun run --filter '*' test && bun test scripts/checks`) covering every
+  package and app with at least one real executing test, enforced by
+  `scripts/checks/test-coverage.ts`, and Playwright is wired for e2e
+  (`playwright.config.ts`, `e2e/smoke.spec.ts`, passing). This is no longer a
+  no-runner fallback — it is the session's actual Strict TDD intent, now that
+  the infrastructure it depends on genuinely exists.
 
 testing:
-  status: pending
+  status: ready
   expected_unit_integration_runner: "bun test"
   expected_e2e_runner: "playwright"
-  projects: []
+  projects:
+    - apps/api
+    - apps/web
+    - apps/landing
+    - packages/core
+    - packages/contracts
+    - packages/markdown
+    - packages/editor
+    - packages/db
+    - scripts/checks
 
 rules:
   proposal:
@@ -58,11 +70,11 @@ rules:
       - Follow the hexagonal boundaries from docs/SPECS.md (packages/core has zero
         framework imports; MailSender and BlobStore are ports with adapters).
       - Reuse packages/markdown as the single parser for editor, api, and indexer.
-    tdd: false
-    test_command: ""
+    tdd: true
+    test_command: "bun run test"
   verify:
-    test_command: ""
-    build_command: ""
+    test_command: "bun run test"
+    build_command: "bun run build"
     coverage_threshold: 0
   archive:
     - Warn before merging destructive deltas.
