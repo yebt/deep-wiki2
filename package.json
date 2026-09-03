@@ -11,7 +11,7 @@
     "test": "bun run --filter '*' test && bun test scripts/checks",
     "lint": "eslint .",
     "typecheck": "bun run --filter '*' typecheck && tsc --noEmit -p tsconfig.json",
-    "check": "bun run scripts/checks/workspace-shape.ts && bun run scripts/checks/test-coverage.ts && bun run scripts/checks/core-purity.ts",
+    "check": "bun run scripts/checks/workspace-shape.ts && bun run scripts/checks/test-coverage.ts && bun run scripts/checks/core-purity.ts && bun run scripts/checks/env-example.ts",
     "db:migrate": "bun run --filter @deep-wiki/db migrate",
     "db:seed": "bun run --filter @deep-wiki/db seed"
   },
