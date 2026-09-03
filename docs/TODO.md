@@ -76,7 +76,10 @@ Monorepo, containers, CI. Nothing user-facing.
 - [ ] Compose service: `postgres` with the `pgvector` extension enabled in an init script.
 - [ ] Compose service: `mailpit` (SMTP on 1025, web UI on 8025) for local mail capture.
 - [ ] Compose service: `minio` for S3-compatible object storage in dev.
-- [ ] Compose service: `kroki` for server-side diagram rendering.
+- [ ] Compose service: `kroki` for server-side diagram rendering, plus the
+      `kroki-mermaid` companion container. The base image cannot render Mermaid, and
+      Mermaid is the primary diagram format, so `kroki` must set
+      `KROKI_MERMAID_HOST=mermaid` or the sidecar is never routed to.
 - [ ] Apply SELinux `:z` labels to every bind mount in `compose.yaml` (required on
       Fedora under podman; harmless under docker).
 - [ ] Keep all published host ports at 1024 or above so rootless podman can bind them.
@@ -84,6 +87,19 @@ Monorepo, containers, CI. Nothing user-facing.
       migrate, seed.
 - [ ] Base CI pipeline: install, typecheck, lint, unit tests, on every push.
 - [ ] Add the `packages/core` purity check to CI.
+- [ ] Define the `MailSender` and `BlobStore` port interfaces in `packages/core`
+      (interfaces only — adapters land in Phase 1). They give `packages/core` real
+      content to test and exercise the purity check against a genuine boundary.
+- [ ] Workspace-wide test command covering every package and app, with at least one
+      real executing test per member — a placeholder that asserts nothing does not count.
+- [ ] Scoped Vitest + `@nuxt/test-utils` for `apps/web` only. Nuxt component tests
+      cannot run under `bun test`; see Findings. Add a structural check asserting Vitest
+      appears in exactly one workspace member so the second runner cannot spread.
+- [ ] Wire Playwright for e2e and prove it boots `apps/web` with one smoke test.
+- [ ] Ensure CI exercises the build of all three apps, not only the two front-ends.
+- [ ] Add `.env.example` and typed configuration loading that fails fast at startup with
+      an actionable message naming the missing or malformed variable.
+- [ ] Re-resolve `strict_tdd` to `true` in `openspec/config.yaml` once the above lands.
 
 ### Phase 1 — Tenancy and permissions
 
@@ -117,12 +133,12 @@ lives or dies; it is deliberately front-loaded.
 - [ ] Gate `open` mode behind a verified SMTP configuration; refuse to enable it otherwise
       so invitations and password resets cannot fail silently.
 - [ ] Add optional `open_registration_domains` allowlist for `open` mode.
-- [ ] Define the `MailSender` port in `packages/core`; implement an SMTP adapter and bind
-      Mailpit in dev.
+- [ ] Implement the `MailSender` SMTP adapter (port interface defined in Phase 0) and
+      bind Mailpit in dev.
 - [ ] Implement the invitation flow: create invite, send mail, accept, join workspace with
       a starting permission set.
-- [ ] Define the `BlobStore` port in `packages/core`; implement an S3 adapter (MinIO in
-      dev) and a local-filesystem adapter, selected by environment.
+- [ ] Implement the `BlobStore` adapters (port interface defined in Phase 0): S3-compatible
+      (MinIO in dev) and local filesystem, selected by environment.
 - [ ] Implement profile photos on top of `BlobStore`, including upload validation and
       resizing.
 - [ ] Authentication: sessions, password reset over the `MailSender` port.
@@ -325,6 +341,36 @@ makes conventions portable across projects.
 ## Findings
 
 Discoveries and constraints. Newest first.
+
+### 2026-09-03 — Nuxt component testing requires Vitest; `bun test` cannot do it
+
+Verified against the official Nuxt 4 testing documentation, which states that `@nuxt/test-utils`
+"currently only has support for vitest". The blocker is not Vue SFC compilation — it is the Nuxt
+runtime environment. A Nuxt component resolves virtual modules such as `#app`, `#imports` and
+`#components`, which exist only inside a Nuxt-built environment. A Bun SFC loader would compile
+the file and still fail to resolve those specifiers, which is worse than not solving it because
+it looks like it works. The same docs confirm Jest, Cucumber and Playwright are supported for
+end-to-end testing only.
+
+**Impact:** `apps/web` gets a scoped Vitest + `@nuxt/test-utils` adapter; every other workspace
+member stays on `bun test`. Node is a development-only prerequisite for that runner — `nuxt build`
+still runs under Bun, so self-hosters are unaffected. `bun run --filter '*' test` propagates any
+non-zero child exit, so two runners still report as a single CI gate. A structural check asserts
+Vitest appears in exactly one workspace member, so the second runner cannot spread silently.
+The rejected alternative was TypeScript-only tests for `apps/web`, which would have made the
+red-green loop for any component a full Playwright run against a booted server — too slow to
+drive design, leaving the entire UI phase structurally exempt from Strict TDD.
+
+### 2026-09-03 — The base Kroki image cannot render Mermaid
+
+Verified against the official Kroki installation documentation: the `yuzutech/kroki` image does
+not render Mermaid by itself, and additional diagram libraries require companion containers.
+Mermaid needs `yuzutech/kroki-mermaid`.
+
+**Impact:** the container stack carries five services, not four. This is not optional — `docs/SPECS.md`
+section 6 makes Mermaid the primary diagram format, so a Kroki deployment without its Mermaid
+companion cannot render the project's main diagram type. Discovering this during Phase 4 is
+precisely the late failure Phase 0 exists to prevent.
 
 ### 2026-09-03 — An open-by-default self-hosted instance gets spam-registered
 
