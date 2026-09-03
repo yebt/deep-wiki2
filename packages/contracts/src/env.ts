@@ -4,7 +4,8 @@ import { z } from 'zod';
 /**
  * Single source of truth for server-side environment variables. Every
  * variable declared here MUST also appear in the repository root's
- * `.env.example` (enforced by `scripts/checks/env-example.ts`).
+ * `env.example` (enforced by `scripts/checks/env-example.ts`), which is
+ * copied to `.env` for local use.
  */
 export const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),

@@ -47,7 +47,7 @@ export function checkEnvExample(templatePath: string, requiredKeys: readonly str
 
 if (import.meta.main) {
   const root = process.argv[2] ?? process.cwd();
-  const templatePath = join(root, '.env.example');
+  const templatePath = join(root, 'env.example');
   const requiredKeys = Object.keys(envSchema.shape);
   const result = checkEnvExample(templatePath, requiredKeys);
 

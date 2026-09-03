@@ -119,7 +119,7 @@ Task graph: `bun run --filter '*' <script>` — root scripts `build`, `test`, `l
 | `kroki` | `yuzutech/kroki` | `8000:8000` | none | none — CI asserts HTTP 200 from the host |
 | `kroki-mermaid` | `yuzutech/kroki-mermaid` | not published | none | none |
 
-All host ports ≥1024. Exactly one bind mount, carrying `:z`. No `container_name`, no `develop.watch`, no profiles — Compose spec only. README documents: `cp .env.example .env` → `podman compose up -d` → `bun run db:migrate` → `bun run db:seed`. Both delegate to `packages/db`; in Phase 0 they run for real against an empty migration journal and a no-op seed, so the entry points are stable before there is schema to move.
+All host ports ≥1024. Exactly one bind mount, carrying `:z`. No `container_name`, no `develop.watch`, no profiles — Compose spec only. README documents: `cp env.example .env` → `podman compose up -d` → `bun run db:migrate` → `bun run db:seed`. Both delegate to `packages/db`; in Phase 0 they run for real against an empty migration journal and a no-op seed, so the entry points are stable before there is schema to move.
 
 ## Package Skeletons at End of Phase 0
 

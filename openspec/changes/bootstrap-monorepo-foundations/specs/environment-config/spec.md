@@ -8,11 +8,11 @@ Provides a documented, typed configuration surface so misconfiguration is caught
 
 ### Requirement: Documented Environment Template
 
-The repository MUST provide a `.env.example` file listing every environment variable required by any app or package, with a description or example value for each.
+The repository MUST provide an `env.example` file listing every environment variable required by any app or package, with a description or example value for each.
 
 #### Scenario: New environment matches the template
 
-- GIVEN `.env.example` at the repository root
+- GIVEN `env.example` at the repository root
 - WHEN a developer copies it to `.env` and fills in values
 - THEN every variable the running apps read at startup is present in the template
 

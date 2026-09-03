@@ -97,7 +97,8 @@ Monorepo, containers, CI. Nothing user-facing.
       appears in exactly one workspace member so the second runner cannot spread.
 - [ ] Wire Playwright for e2e and prove it boots `apps/web` with one smoke test.
 - [ ] Ensure CI exercises the build of all three apps, not only the two front-ends.
-- [ ] Add `.env.example` and typed configuration loading that fails fast at startup with
+- [x] Add `env.example` (copied to `.env` locally) and typed configuration loading that
+      fails fast at startup with
       an actionable message naming the missing or malformed variable.
 - [ ] Re-resolve `strict_tdd` to `true` in `openspec/config.yaml` once the above lands.
 
