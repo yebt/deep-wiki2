@@ -48,15 +48,17 @@ Every published host port in `compose.yaml` MUST be 1024 or above.
 - WHEN the compose file is validated
 - THEN the validation fails and identifies the offending port mapping
 
-### Requirement: Four Services Start Cleanly
+### Requirement: Five Services Start Cleanly
 
-`compose.yaml` MUST define `postgres` (with the `pgvector` extension enabled), `mailpit` (SMTP on 1025, web UI on 8025), `minio`, and `kroki`, and all four MUST reach a healthy running state together.
+`compose.yaml` MUST define `postgres` (with the `pgvector` extension enabled), `mailpit` (SMTP on 1025, web UI on 8025), `minio`, `kroki`, and `mermaid` (the `yuzutech/kroki-mermaid` companion), and all five MUST reach a healthy running state together.
+
+The `kroki` service MUST set `KROKI_MERMAID_HOST` to the compose service name of the Mermaid sidecar. The base `yuzutech/kroki` image cannot render Mermaid on its own, and Mermaid is this product's primary diagram format (`docs/SPECS.md` §6), so without the sidecar and that variable the service starts and silently never renders the project's main diagram type. This fifth service is the accepted scope delta recorded as D8 in `design.md`.
 
 #### Scenario: Full stack starts without errors
 
 - GIVEN a clean checkout with `compose.yaml` present
 - WHEN a developer runs `podman compose up`
-- THEN `postgres`, `mailpit`, `minio`, and `kroki` all reach a running/healthy state with no SELinux or port errors
+- THEN `postgres`, `mailpit`, `minio`, `kroki` and `mermaid` all reach a running/healthy state with no SELinux or port errors
 
 #### Scenario: pgvector is enabled on postgres
 
