@@ -53,13 +53,13 @@ Chain strategy: size-exception
 
 ## Phase 2: `packages/core`
 
-- [ ] 2.1 (RED) `packages/core/src/result.test.ts` — `Result<T,E>`/`ok`/`err` behavior
-- [ ] 2.2 (GREEN) Implement `packages/core/src/result.ts`
-- [ ] 2.3 Add `packages/core/src/ports/mail-sender.ts` — `MailSender` interface only, no adapter (adapter lands Phase 1 per `docs/TODO.md`)
-- [ ] 2.4 Add `packages/core/src/ports/blob-store.ts` — `BlobStore` interface only, no adapter (adapter lands Phase 1)
-- [ ] 2.5 (RED) `scripts/checks/__fixtures__/violating-core/` (deliberate `hono` import) + failing test asserting rejection — *core-purity-enforcement: Deliberate framework import fails CI*
-- [ ] 2.6 (GREEN) Implement `scripts/checks/core-purity.ts` via `Bun.Transpiler().scanImports()` — all specifiers relative, manifest `dependencies: {}`; error names file + import — *core-purity-enforcement: Failure identifies the offending import*
-- [ ] 2.7 Set `packages/core/package.json` `dependencies: {}`
+- [x] 2.1 (RED) `packages/core/src/result.test.ts` — `Result<T,E>`/`ok`/`err` behavior
+- [x] 2.2 (GREEN) Implement `packages/core/src/result.ts`
+- [x] 2.3 Add `packages/core/src/ports/mail-sender.ts` — `MailSender` interface only, no adapter (adapter lands Phase 1 per `docs/TODO.md`)
+- [x] 2.4 Add `packages/core/src/ports/blob-store.ts` — `BlobStore` interface only, no adapter (adapter lands Phase 1)
+- [x] 2.5 (RED) `scripts/checks/__fixtures__/violating-core/` (deliberate `hono` import) + failing test asserting rejection — *core-purity-enforcement: Deliberate framework import fails CI*
+- [x] 2.6 (GREEN) Implement `scripts/checks/core-purity.ts` via `Bun.Transpiler().scanImports()` — all specifiers relative, manifest `dependencies: {}`; error names file + import — *core-purity-enforcement: Failure identifies the offending import*
+- [x] 2.7 Set `packages/core/package.json` `dependencies: {}`
 
 ## Phase 3: `packages/contracts`
 

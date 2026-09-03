@@ -1,0 +1,6 @@
+{
+  "name": "fixture-violating-core",
+  "dependencies": {
+    "hono": "^4.0.0"
+  }
+}

@@ -3,5 +3,6 @@
   "compilerOptions": {
     "types": ["@types/bun"]
   },
-  "include": ["scripts/**/*.ts"]
+  "include": ["scripts/**/*.ts"],
+  "exclude": ["scripts/checks/__fixtures__/**"]
 }
