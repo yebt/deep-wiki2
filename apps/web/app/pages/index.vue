@@ -70,7 +70,9 @@ const healthColor = computed(() => {
           <UButton
             class="mt-4"
             icon="i-lucide-refresh-cw"
-            variant="soft"
+            variant="ghost"
+            color="neutral"
+            size="sm"
             :loading="status === 'loading'"
             @click="check"
           >
