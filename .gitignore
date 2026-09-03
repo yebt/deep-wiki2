@@ -1,1 +1,28 @@
 /.atl
+
+# dependencies
+node_modules/
+
+# build output
+dist/
+.output/
+.nuxt/
+.astro/
+*.tsbuildinfo
+
+# env & secrets
+.env
+.env.*
+!.env.example
+
+# test & tooling
+coverage/
+playwright-report/
+test-results/
+.turbo/
+
+# editors & os
+.DS_Store
+*.swp
+# Local AI runtime state
+.atl/
