@@ -3,7 +3,7 @@
 // accessible, and can reach apps/api — not a product screen. See
 // docs/UI-CHECKLIST.md's scope note and design.md's Package Skeletons
 // table ("web: one smoke page, one composable").
-const { status, message, check } = useApiHealth();
+const { status, message, detail, check } = useApiHealth();
 
 onMounted(() => {
   void check();
@@ -56,7 +56,12 @@ const healthColor = computed(() => {
             themed, and is reachable — it is not a product feature.
           </p>
 
-          <div class="mt-6" role="status" aria-live="polite">
+          <div
+            class="mt-6"
+            role="status"
+            aria-live="polite"
+            :title="detail ?? undefined"
+          >
             <UBadge :color="healthColor" variant="subtle" :icon="healthIcon">
               {{ message }}
             </UBadge>

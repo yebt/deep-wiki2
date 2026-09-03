@@ -19,23 +19,41 @@ describe('useApiHealth', () => {
     expect(health.checkedAt.value).not.toBeNull();
   });
 
-  test('transitions to error and names the failure when the request rejects', async () => {
+  test('reports a human-readable, non-technical message when the request cannot reach the API', async () => {
     const health = useApiHealth(async () => {
-      throw new Error('network down');
+      throw new Error('Failed to fetch');
     });
 
     await health.check();
 
     expect(health.status.value).toBe('error');
-    expect(health.message.value).toMatch(/network down/i);
+    expect(health.message.value).toMatch(/cannot reach the api/i);
+    expect(health.message.value).not.toMatch(/failed to fetch/i);
+    expect(health.detail.value).toMatch(/failed to fetch/i);
   });
 
-  test('transitions to error when the response reports a non-ok status', async () => {
+  test('distinguishes a response error from a network error in the user-facing message', async () => {
+    const health = useApiHealth(async () => {
+      throw Object.assign(new Error('Internal Server Error'), {
+        response: { status: 500 },
+      });
+    });
+
+    await health.check();
+
+    expect(health.status.value).toBe('error');
+    expect(health.message.value).toMatch(/api responded with an error/i);
+    expect(health.detail.value).toMatch(/internal server error/i);
+  });
+
+  test('transitions to error when the response reports a non-ok status, without a bare status code in the message', async () => {
     const health = useApiHealth(async () => ({ status: 'degraded' }));
 
     await health.check();
 
     expect(health.status.value).toBe('error');
+    expect(health.message.value).not.toMatch(/degraded/i);
+    expect(health.detail.value).toMatch(/degraded/i);
   });
 
   test('reports loading synchronously while the check is in flight', () => {
