@@ -98,9 +98,9 @@ Chain strategy: size-exception
 
 ## Phase 6: `packages/db`
 
-- [ ] 6.1 (RED) `packages/db/src/client.test.ts` — `createDb(url)` returns a client without connecting
-- [ ] 6.2 (GREEN) Implement `packages/db/src/{client.ts,schema.ts}`, `drizzle.config.ts`
-- [ ] 6.3 Add `packages/db/migrate.ts` and `seed.ts` CLI entry points (empty journal, no-op seed)
+- [x] 6.1 (RED) `packages/db/src/client.test.ts` — `createDb(url)` returns a client without connecting
+- [x] 6.2 (GREEN) Implement `packages/db/src/{client.ts,schema.ts}`, `drizzle.config.ts` — `drizzle-orm/postgres-js` + `postgres` (lazy connection, verified no network I/O against an unreachable URL); `schema.ts` intentionally empty (domain model is Phase 1)
+- [x] 6.3 Add `packages/db/migrate.ts` and `seed.ts` CLI entry points (empty journal, no-op seed) — `migrate.ts` fails fast when `DATABASE_URL` is unset (verified); actually running a migration needs a live database, deferred to the Phase 10 compose stack
 
 ## Phase 7: `apps/api`
 

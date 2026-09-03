@@ -1,0 +1,22 @@
+{
+  "name": "@deep-wiki/db",
+  "private": true,
+  "type": "module",
+  "version": "0.0.0",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "migrate": "bun run migrate.ts",
+    "seed": "bun run seed.ts"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.38.3",
+    "postgres": "^3.4.5"
+  },
+  "devDependencies": {
+    "drizzle-kit": "^0.30.1"
+  }
+}
