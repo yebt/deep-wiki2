@@ -12,6 +12,15 @@
         "typescript-eslint": "^8.21.0",
       },
     },
+    "apps/api": {
+      "name": "@deep-wiki/api",
+      "version": "0.0.0",
+      "dependencies": {
+        "@deep-wiki/contracts": "workspace:*",
+        "@deep-wiki/core": "workspace:*",
+        "hono": "^4.6.16",
+      },
+    },
     "packages/contracts": {
       "name": "@deep-wiki/contracts",
       "version": "0.0.0",
@@ -54,6 +63,8 @@
     },
   },
   "packages": {
+    "@deep-wiki/api": ["@deep-wiki/api@workspace:apps/api"],
+
     "@deep-wiki/contracts": ["@deep-wiki/contracts@workspace:packages/contracts"],
 
     "@deep-wiki/core": ["@deep-wiki/core@workspace:packages/core"],
@@ -281,6 +292,8 @@
     "globals": ["globals@14.0.0", "", {}, "sha512-oahGvuMGQlPw/ivIYBjVSrWAfWLBeku5tpPE2fOPLi+WHffIWbuh2tCjhyQhTBPMf5E9jDEH4FOmTYgYwbKwtQ=="],
 
     "has-flag": ["has-flag@4.0.0", "", {}, "sha512-EykJT/Q1KjTWctppgIAgfSO0tKVuZUjhgMr17kqTumMl6Afv3EISleU7qZUzoXDFTAHTDC4NOoG/ZxU3EvlMPQ=="],
+
+    "hono": ["hono@4.13.5", "", {}, "sha512-O6+/eCYRkzzzy0rPWwKLiGBR1nFuUPZynnwjxN1MBA62NNqbT0wQEzQyK2gSO5yDIDB336sXQleAhOHrzlYyKw=="],
 
     "ignore": ["ignore@5.3.2", "", {}, "sha512-hsBTNUqQTDwkWtcdYI2i06Y/nUBEsNEDJKjWdigLvegy8kDuJAS8uRlpkkcQpyEXL0Z/pjDy5HBmMjRCJ2gq+g=="],
 

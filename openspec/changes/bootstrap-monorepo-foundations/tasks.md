@@ -104,11 +104,11 @@ Chain strategy: size-exception
 
 ## Phase 7: `apps/api`
 
-- [ ] 7.1 Create `apps/api/src/config.ts` — fail-fast typed loader over `packages/contracts` env schema — *environment-config: Typed Configuration Loading*
-- [ ] 7.2 (RED) `apps/api/src/index.test.ts` — `app.request('/health')` returns 200
-- [ ] 7.3 (GREEN) Implement `apps/api/src/index.ts` Hono `GET /health`
-- [ ] 7.4 Remove the `build` script from `apps/api/package.json`; add a comment/README note stating Hono-on-Bun runs TS directly with no bundling step in Phase 0 — closes the "apps/api build never exercised" gap explicitly rather than leaving it implied
-- [ ] 7.5 Update `design.md`'s "Only the three apps have a build script" sentence to name `apps/landing` and `apps/web` only
+- [x] 7.1 Create `apps/api/src/config.ts` — fail-fast typed loader over `packages/contracts` env schema — *environment-config: Typed Configuration Loading* — also covered by a RED→GREEN test (`config.test.ts`, not separately listed in this task but required by the test-first discipline once the runner exists) proving fail-fast behavior for both a missing and a malformed variable
+- [x] 7.2 (RED) `apps/api/src/index.test.ts` — `app.request('/health')` returns 200
+- [x] 7.3 (GREEN) Implement `apps/api/src/index.ts` Hono `GET /health` — config is loaded (and can fail fast) only when the module runs as the actual server entry point (`import.meta.main`), not merely when imported by a test exercising `app` directly; runtime harness verified: `bun run start` with a valid env boots and `curl :PORT/health` returns `200 {"status":"ok"}`
+- [x] 7.4 Remove the `build` script from `apps/api/package.json`; add a comment/README note stating Hono-on-Bun runs TS directly with no bundling step in Phase 0 — closes the "apps/api build never exercised" gap explicitly rather than leaving it implied — package.json was authored without a `build` script from the start; `apps/api/README.md` documents why
+- [x] 7.5 Update `design.md`'s "Only the three apps have a build script" sentence to name `apps/landing` and `apps/web` only
 
 ## Phase 8: `apps/web` + `apps/landing` — human review checkpoint (new UI screen)
 

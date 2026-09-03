@@ -4,7 +4,7 @@
 
 Phase 0 builds machinery, not features. The design principle throughout is **structural checks over conventions**: every constraint the proposal states as a rule (`packages/core` purity, compose portability, workspace test coverage, env template drift) becomes a small TypeScript check under `scripts/checks/`, unit-tested against fixtures, runnable individually and wired into CI as a named step. One mechanism, four constraints, no new tooling.
 
-Internal packages are consumed as **TypeScript source** (`exports: { ".": "./src/index.ts" }`), so `packages/*` have no build step at all in Phase 0 — only `lint`, `typecheck`, `test`. Bun, Vite (Nuxt), and Astro all transpile TS on the fly, so build ordering across the workspace becomes a non-problem instead of something `bun run -F` has to guarantee. Only the three apps have a `build` script.
+Internal packages are consumed as **TypeScript source** (`exports: { ".": "./src/index.ts" }`), so `packages/*` have no build step at all in Phase 0 — only `lint`, `typecheck`, `test`. Bun, Vite (Nuxt), and Astro all transpile TS on the fly, so build ordering across the workspace becomes a non-problem instead of something `bun run -F` has to guarantee. Only `apps/landing` and `apps/web` have a `build` script — `apps/api` runs Hono directly under Bun with no bundling step, so it has none (see task 7.4/7.5).
 
 `packages/core` imports nothing — not even a workspace sibling. The dependency direction is strictly inward: `apps/* → contracts, markdown, editor, db → core → ∅`. Config parsing lives in `apps/*` composition roots, never in `core`.
 
