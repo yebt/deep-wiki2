@@ -26,13 +26,24 @@ const NEW_RESET_PASSWORD = 'brand-new-password-123';
 
 /**
  * Nuxt renders every page server-side first, then hydrates it in the
- * browser; a click before hydration attaches its handler is a no-op.
- * Waiting for network idle after navigation is this repo's established
- * fix for that race (see e2e/smoke.spec.ts's identical comment).
+ * browser; a click before hydration attaches its handler is a no-op, and
+ * a field filled before hydration is silently emptied when `UAuthForm`
+ * rebuilds its reactive state from the fields' `defaultValue`.
+ *
+ * Network idle alone does not close that window: the dev server holds an
+ * open HMR socket and Vite serves the app graph in many small requests,
+ * so idle can be reached with hydration still pending — which showed up
+ * under parallel load as a filled invitation form submitting empty. Nuxt
+ * exposes the authoritative signal (`nuxtApp.isHydrating`) on `window`,
+ * so wait for that instead of approximating it.
  */
 async function goto(page: Page, path: string): Promise<void> {
   await page.goto(path);
   await page.waitForLoadState('networkidle');
+  await page.waitForFunction(() => {
+    const nuxt = (globalThis as { useNuxtApp?: () => { isHydrating?: boolean } }).useNuxtApp;
+    return typeof nuxt === 'function' && nuxt().isHydrating === false;
+  });
 }
 
 test.describe.serial('invitation accept -> sign in (happy path)', () => {
