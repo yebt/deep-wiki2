@@ -16,6 +16,8 @@ This file has three working sections plus a parking lot.
    constraint should also leave a Finding behind.
 4. **Open Questions** — decisions still owed. Move an entry out of this section the
    moment it is answered, and record the answer in Findings.
+5. **Known gaps carried forward** — accepted, not fixed. Do not "clean up" one of these
+   without discussion; it is there deliberately.
 
 **Entry conventions**
 
@@ -29,6 +31,23 @@ This file has three working sections plus a parking lot.
 
 ---
 
+## Status
+
+_Last updated 2026-09-04 — HEAD `f92e242`, 53 commits._
+
+| Phase | State |
+| --- | --- |
+| 0 — Foundations | Complete and archived (`openspec/changes/archive/2026-09-03-bootstrap-monorepo-foundations/`) |
+| 1 — Tenancy and permissions | In progress — 76/85 tasks done, work units 1–16 of 18. GATE-1 satisfied |
+| 2 — Content and editor | Not started |
+| 3–9 | Not started |
+
+Next up: WU-17 (sign-in, invitation-accept and password-reset **screens** — the
+composables landed in `f92e242`, the UI does not exist yet) and WU-18 (docs sync), both
+in `openspec/changes/tenancy-and-permissions/tasks.md`.
+
+---
+
 ## Cross-cutting gates
 
 These are hard gates. Work that depends on them does not start until they are green.
@@ -38,6 +57,13 @@ These are hard gates. Work that depends on them does not start until they are gr
 > (subject types x resource levels x allow/deny precedence) passing before a single
 > permission-aware screen is built. Permission bugs discovered after the UI exists are
 > found by users, not by tests.
+>
+> **Status: SATISFIED (2026-09-04).** The 30-case truth table (33 tests,
+> `packages/db/src/permissions/truth-table.test.ts`) is green against real Postgres.
+> Alongside it, `packages/db/src/permissions/resolver.explain.test.ts` proves the cost
+> claim rather than assuming it: it fails on a sequential scan over `nodes` or
+> `permissions`, and it asserts `enable_seqscan` is still `on` so the proof cannot be
+> made vacuous by disabling the planner's seq-scan option.
 
 > **GATE-2 — Markdown round-trip suite before the editor ships.**
 > `markdown -> ProseMirror doc -> markdown` must be byte-identical across the full
@@ -48,6 +74,12 @@ These are hard gates. Work that depends on them does not start until they are gr
 > Tenant isolation in retrieval is a security boundary, not a convenience. The filter
 > belongs in the SQL `WHERE` clause of the similarity search. Post-filtering results in
 > application code is a data leak across tenants and must fail review.
+>
+> **Phase 1 groundwork:** every tenant-scoped table carries a non-nullable
+> `workspace_id` (`packages/db/src/schema.ts`), tied in by composite foreign keys rather
+> than left to a `WHERE` clause to remember — see `docs/SPECS.md` §14, "Tenant isolation
+> by composite foreign key". The vector-query half of this gate is still open: no
+> similarity search exists yet (Phase 5).
 
 ---
 
@@ -107,43 +139,56 @@ Monorepo, containers, CI. Nothing user-facing.
 The multi-tenant skeleton and the authorisation model. This phase is where the product
 lives or dies; it is deliberately front-loaded.
 
-- [ ] Design and migrate the `nodes` table: `id`, `workspace_id`, `parent_id`, `type`
-      (`shelf` | `book` | `chapter` | `page`), `position`, and a materialised path column
-      stored as `text` for cheap subtree queries.
-- [ ] Index the path column with `text_pattern_ops` so prefix matching stays indexed.
+- [x] Design and migrate the `nodes` table: `id`, `workspace_id`, `parent_id`, `type`
+      (`workspace` | `shelf` | `book` | `chapter` | `page` — five values: the workspace
+      is a real `nodes` row, not an implicit ancestor; see the Findings entry below),
+      `position`, and a materialised path column stored as `text` for cheap subtree
+      queries.
+- [x] Index the path column with `text_pattern_ops` so prefix matching stays indexed.
       Deliberately not `ltree` + GiST — see the engine-portability decision.
-- [ ] Migrate `workspaces` with per-workspace settings (formats, defaults, AI config
+- [x] Migrate `workspaces` with per-workspace settings (formats, defaults, AI config
       references, theme default).
-- [ ] Migrate `users`, `cells` (teams), and `cell_members`.
-- [ ] Migrate the Super Root concept: instance-level operator identity, distinct from any
+- [x] Migrate `users`, `cells` (teams), and `cell_members`.
+- [x] Migrate the Super Root concept: instance-level operator identity, distinct from any
       workspace membership.
 - [ ] Migrate `plans` and per-workspace plan limits (workspace count per owner, seats,
-      storage, AI token budget) — authored by Super Root.
-- [ ] Migrate the single `permissions` table:
-      `(subject_type, subject_id, resource_type, resource_id, action, effect)` where
-      `subject_type` is `user` | `cell` | `role` | `agent` and `effect` is `allow` | `deny`.
-- [ ] Implement the resolver as one recursive CTE that walks the resource ancestor chain
-      and returns the effective grant. Precedence: `deny` wins over `allow`; the most
-      specific resource level wins over ancestors.
-- [ ] **GATE-1**: write the permission truth-table test suite covering every
+      storage, AI token budget) — authored by Super Root. The `plans` table and the
+      workspace-limit check landed (`packages/db/src/schema.ts`); there is no Super Root
+      authoring path yet — no admin route creates or edits a plan.
+- [x] Migrate the single `permissions` table:
+      `(subject_type, subject_id, resource_id, action, effect)` where `subject_type` is
+      `user` | `cell` | `role` | `agent` and `effect` is `allow` | `deny`. **Amended:**
+      `resource_type` is deliberately not a column — it is `nodes.type` of `resource_id`;
+      see the Findings entry below and `docs/SPECS.md` §14.
+- [x] Implement the resolver as one recursive CTE that walks the resource ancestor chain
+      via `parent_id` (never the derived `path` cache — see Findings) and returns the
+      effective grant. Precedence: `deny` wins over `allow`; the most specific resource
+      level wins over ancestors.
+- [x] **GATE-1**: write the permission truth-table test suite covering every
       subject-type x resource-level x precedence combination, including inherited deny
       overriding a nearer allow, and cell membership overlapping a direct user grant.
-- [ ] Expose a single `can(subject, action, resource)` entry point in `packages/core`.
-      Every read and write path — HTTP, MCP, background jobs — goes through it.
-- [ ] Implement `registration_mode` as an instance setting: `closed` | `invitation_only` |
+      **Satisfied 2026-09-04** — see "Cross-cutting gates" above.
+- [x] Expose a single `can(subject, action, resource)` entry point in `packages/core`.
+      Every read and write path — HTTP, MCP, background jobs — goes through it. Super
+      Root does not bypass `can()`; instance-level operations use a separate
+      `canOperateInstance()` (see `docs/SPECS.md` §14).
+- [x] Implement `registration_mode` as an instance setting: `closed` | `invitation_only` |
       `open`, defaulting to `invitation_only`.
-- [ ] Gate `open` mode behind a verified SMTP configuration; refuse to enable it otherwise
+- [x] Gate `open` mode behind a verified SMTP configuration; refuse to enable it otherwise
       so invitations and password resets cannot fail silently.
-- [ ] Add optional `open_registration_domains` allowlist for `open` mode.
-- [ ] Implement the `MailSender` SMTP adapter (port interface defined in Phase 0) and
+- [x] Add optional `open_registration_domains` allowlist for `open` mode.
+- [x] Implement the `MailSender` SMTP adapter (port interface defined in Phase 0) and
       bind Mailpit in dev.
-- [ ] Implement the invitation flow: create invite, send mail, accept, join workspace with
+- [x] Implement the invitation flow: create invite, send mail, accept, join workspace with
       a starting permission set.
-- [ ] Implement the `BlobStore` adapters (port interface defined in Phase 0): S3-compatible
+- [x] Implement the `BlobStore` adapters (port interface defined in Phase 0): S3-compatible
       (MinIO in dev) and local filesystem, selected by environment.
-- [ ] Implement profile photos on top of `BlobStore`, including upload validation and
+- [x] Implement profile photos on top of `BlobStore`, including upload validation and
       resizing.
-- [ ] Authentication: sessions, password reset over the `MailSender` port.
+- [x] Authentication: sessions, password reset over the `MailSender` port.
+- [ ] Sign-in, invitation-accept and password-reset **screens** in `apps/web` (WU-17).
+      The composables they wire to landed (`f92e242`); the markup and the owner-review
+      checkpoint have not.
 
 ### Phase 2 — Content and editor
 
@@ -343,6 +388,30 @@ makes conventions portable across projects.
 ## Findings
 
 Discoveries and constraints. Newest first.
+
+### 2026-09-04 — Login and password-reset have no rate limiting
+
+The non-disclosure response on both routes (Phase 1, `apps/api/src/routes/auth.ts`)
+already closes the account-enumeration oracle: a failed login and a request for a
+non-existent account return the same shape. It does nothing against online brute force
+— an attacker can still hammer the endpoint with password guesses.
+
+**Impact:** deliberately deferred, not an oversight. Tracked as a known gap (see "Known
+gaps carried forward") that must be closed before any public deployment. Do not treat
+its absence here as something to silently fix; it needs a real rate-limiting design
+(per-account and per-IP, with a store that survives a restart), not a quick patch.
+
+### 2026-09-04 — `role` reserved as a `subject_kind` with no Phase 1 producer
+
+`subject_kind` was defined as `user` | `cell` | `role` | `agent` (`packages/db/drizzle/0001_tenancy.sql`)
+even though nothing in Phase 1 ever grants a `role`-typed permission — there is no
+producer for it yet.
+
+**Impact:** deliberate, not scope creep. Adding a Postgres enum value later is a cheap
+`ALTER TYPE … ADD VALUE`; removing one is not, so the value is committed now while the
+enum is still young rather than deferred and paid for at a worse time. The reasoning is
+recorded as a SQL comment on the enum declaration itself, so it survives independently
+of this file.
 
 ### 2026-09-04 — `packages/contracts` was not carrying the API contract
 
@@ -573,7 +642,69 @@ Fix: what changed, with the commit or PR reference.
 Impact: what else this touches, or "contained".
 ```
 
-_No entries yet — implementation has not started._
+### 2026-09-04 — `permissions` unique key could not represent an allow and a deny together
+
+Symptom: truth-table cases B1–B4 (a subject must hold both an allow and a deny row on
+the same resource and action, for `decide()` to have anything to arbitrate) were
+structurally unrepresentable — inserting the second row conflicted with the first.
+Cause: the migration's unique constraint was `(workspace_id, subject_type, subject_id,
+resource_id, action)`, one column short.
+Fix: `effect` added to `permissions_unique_grant`
+(`packages/db/drizzle/0003_permissions.sql`). Caught by writing the truth-table tests
+before the migration, per Strict TDD — the RED test could not even seed its fixture.
+Impact: contained to the migration; nothing else depended on the narrower key.
+
+### 2026-09-04 — Allow/deny action filters were crossed backwards in the resolver's query layer
+
+Symptom: the action lattice comparison in `resolveGrants` used
+`impliedAllowActions`/`impliedDenyActions` uncrossed against the requested action, which
+would have widened the effective grant beyond what a stored row actually authorises.
+Cause: `impliedAllowActions(action)`/`impliedDenyActions(action)` describe the lattice
+from the *stored row's* point of view; applying them directly to the *requested* action
+instead of swapping them mixes up which stored rows qualify as a covering allow versus a
+blocking deny.
+Fix: `packages/db/src/permissions/queries.ts` crosses them —
+`allowActions: impliedDenyActions(query.action)`, `denyActions:
+impliedAllowActions(query.action)` — with the reasoning kept as a code comment so the
+crossing survives the next reader.
+Impact: caught by the GATE-1 truth table before merge; no production exposure.
+
+### 2026-09-04 — `substring(text FROM <untyped number>)` resolved to postgres.js's regex overload
+
+Symptom: reparenting a node risked silently producing a NULL `path` for the moved
+subtree.
+Cause: `postgres.js` resolves an untyped numeric bind parameter in
+`substring(path FROM $1)` to the TEXT/regex overload instead of the integer-position
+overload, so the position argument was treated as a pattern rather than an offset.
+Fix: explicit `::int` cast on the bind parameter
+(`packages/db/src/nodes/subtree.ts`, `rewriteDescendantPaths`). Verified directly
+against this `postgres.js` version and this Postgres.
+Impact: contained to that one query.
+
+### 2026-09-04 — Fresh-clone install could not resolve `happy-dom` under Bun's isolated linker
+
+Symptom: `git clone` + `bun install --frozen-lockfile` failed `apps/web`'s component
+tests with "Could not resolve happy-dom imported by @nuxt/test-utils", even though
+`happy-dom` was correctly listed in `apps/web`'s own `devDependencies`.
+Cause: Bun's default isolated linker gives every dependent its own private
+`node_modules` tree; it does not reliably create a resolvable symlink for
+`@nuxt/test-utils`'s optional peer dependency on `happy-dom`.
+Fix: `bunfig.toml` sets `install.linker = "hoisted"`. Verified this does not
+reintroduce the Nuxt/Astro divergent-Vite-major conflict the isolated linker was
+originally relied on to avoid.
+Impact: contained to install configuration; the reasoning is documented in
+`bunfig.toml` itself.
+
+### 2026-09-04 — `getInstanceSettings` clobbered an explicit `closed` mode on SMTP config drift
+
+Symptom: reconciling a changed SMTP configuration reverted `registration_mode` to
+`invitation_only` unconditionally on any hash mismatch, even when an operator had
+explicitly chosen `closed`.
+Cause: the revert branch always wrote `invitation_only` without first checking what
+mode was actually in effect.
+Fix: `packages/db/src/auth/instance-settings.ts` now reverts only when the current mode
+is `open`; an explicit `closed` (or `invitation_only`) passes through unchanged.
+Impact: contained to `getInstanceSettings`.
 
 ---
 
@@ -590,8 +721,34 @@ in Findings.
 - **Embedding provider and model to standardise on.** Drives the default `dimensions`, the
   pgvector column definition, index sizing, and what the local fallback must match. Needs
   the per-provider embedding-support verification from Phase 5 first.
+- **`packages/ai-tools` discrepancy between `docs/SPECS.md` §13 and the roadmap.** §13's
+  repository layout lists `packages/ai-tools` as already part of the tree; the roadmap
+  does not create it until Phase 7 (MCP and agent surface). Flagged as a known doc
+  discrepancy in `openspec/changes/tenancy-and-permissions/proposal.md` and in Phase 0's
+  archive report; deliberately left unresolved so it does not pull Phase 7 scope forward.
+  Reconcile the two documents when Phase 7 actually creates the package.
 - ~~**Single-binary + SQLite appliance distribution.**~~ **Answered 2026-09-03: no, but do
   not close the door.** Postgres is the engine. The Bun-versus-Go backend decision stands.
   Engine-specific features are avoided where the cost of avoiding them is low, and accepted
   where they buy something the product genuinely needs — see the Findings entry for the
   reasoning and the exact line between the two.
+
+---
+
+## Known gaps carried forward
+
+Accepted, not fixed. Do not "clean up" one of these without discussion.
+
+- **No rate limiting on login or password reset.** The non-disclosure response closes
+  the account-enumeration oracle but not online brute force. Deferred deliberately; see
+  the Findings entry above. Must be addressed before any public deployment.
+- **CI cannot run.** There is no git remote, so `.github/workflows/ci.yml` never
+  executes. Enforcement is local: `.githooks/pre-commit` runs `bun run check` on every
+  commit, and `bun run verify` runs all four gates before tagging.
+- **Icon rendering verified with only the `lucide` collection.** The UI checklist's
+  two-icon-pack requirement (`docs/UI-CHECKLIST.md` §11.1) is untested; carried forward
+  from Phase 0's archive report.
+- **The live-region screen-reader announcement was verified structurally, not with a
+  real screen reader.** ARIA (`role="status" aria-live="polite"`) is present and
+  correct; no screen-reader tooling (NVDA, JAWS, VoiceOver) has confirmed it is actually
+  announced. Carried forward from Phase 0's archive report.
