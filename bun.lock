@@ -24,6 +24,7 @@
         "hono": "^4.6.16",
         "nodemailer": "^9.1.1",
         "postgres": "^3.4.5",
+        "sharp": "^0.35.4",
       },
       "devDependencies": {
         "@types/nodemailer": "^8.0.1",

@@ -374,14 +374,14 @@ differently:
 
 ## Phase 16 (WU-16) — `feat(api): profile photo upload with byte sniffing, resize and re-encode`
 
-- [ ] 16.1 RED (executable-file-classification threat matrix) —
+- [x] 16.1 RED (executable-file-classification threat matrix) —
       `apps/api/src/routes/uploads.test.ts`: a `.png`-named PHP/HTML polyglot is
       rejected by magic-byte classification; a valid image with a lying
       `Content-Type` is accepted, classified by its bytes.
-- [ ] 16.2 RED — an oversized upload is rejected before reaching `BlobStore`
+- [x] 16.2 RED — an oversized upload is rejected before reaching `BlobStore`
       *(blob-storage: Profile Photo Upload Validated, size scenario)*; an unsupported
       file type is rejected before reaching `BlobStore` *(type scenario)*.
-- [ ] 16.3 GREEN — `apps/api/src/routes/uploads.ts`: server-generated key
+- [x] 16.3 GREEN — `apps/api/src/routes/uploads.ts`: server-generated key
       (`workspaces/{ws}/avatars/{userId}/{uuid}.webp`), 5 MiB cap, magic-byte sniffing,
       `sharp` resize to 256×256 and re-encode to webp (strips EXIF, neutralises
       polyglots).
