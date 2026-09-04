@@ -400,7 +400,7 @@ differently:
       required states, accessibility floor, responsive behaviour per the checklist.
 - [x] 17.3 GREEN — implement the three screens in `apps/web`, wired to the Phase
       10/11/14 routes.
-- [ ] 17.4 **Owner-review checkpoint** — stop; do not proceed to Phase 18 until the
+- [x] 17.4 **Owner-review checkpoint** — stop; do not proceed to Phase 18 until the
       owner reviews these screens against `docs/UI-CHECKLIST.md` and
       `docs/DESIGN-SYSTEM.md`.
 

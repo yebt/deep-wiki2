@@ -310,4 +310,62 @@ Append a new entry after every owner review. **Never delete an entry** — if a 
 
 ### Entries
 
-*No real entries yet — this project has not yet presented a screen for review. The first entry goes here.*
+### 2026-09-04 — Authentication screens (sign-in, password reset, invitation accept)
+
+**Reviewer:** Eduardo
+**Verdict:** Pass with follow-ups
+
+**Findings** (ordered by user impact)
+
+1. **Every auth page carried permanent vertical scroll, pushing the footer below the fold.**
+   - *Observable evidence:* spotted as a stray horizontal rule at the bottom edge of the sign-in
+     screen. Measured: at 1280x900 `body.scrollHeight` 949 against `innerHeight` 900; at 320x900,
+     1021 against 900. The rule was the footer's top border peeking above the fold.
+   - *Root cause:* Nuxt UI's `UMain` carries `min-h-[calc(100vh-var(--ui-header-height))]`, which
+     subtracts the header and never the footer. Any page pairing the two overflows by exactly the
+     footer's height. No existing test measured rendered geometry, so the suite stayed green.
+   - *Correction applied:* `AuthShell` is `min-h-svh flex flex-col` with `flex-1` on the main
+     region. `e2e/auth-layout.spec.ts` (10 tests) now asserts `scrollHeight === innerHeight` and
+     no horizontal overflow on all four pages at both viewports.
+   - *Rule added:* §6 — a layout that pairs `UMain` with `UFooter` must be verified by measuring
+     the rendered box, not by looking at it. Screenshots hide vertical overflow.
+
+2. **The dark theme rendered surface containers as near-black, and the primary button read washed out.**
+   - *Observable evidence:* the card measured **1.14:1** against the page ground in dark theme and
+     read as a hole punched in the page. App ground against header measured 1.04:1.
+   - *Root cause:* an M3 *tone* is a CIE L\*, not an oklch lightness. The token block wrote
+     `oklch(<tone>%)`, which is close above tone 90 and badly wrong below tone 25 — tone 4 landed
+     at L\* 0.4, effectively pure black. Separately, two neutral rungs were tonally adjacent.
+   - *Correction applied:* all tones recomputed from the exact transform; card now 1.48:1. The
+     three dark container rungs each moved up one M3 tone. Dark `--ui-primary` moved from tone 80
+     to tone 70 — at tone 80 the palette was already at the sRGB gamut ceiling for that hue
+     (max chroma 0.0793, in use 0.078), so the button could not be made less washed out without
+     changing tone. Now 6.35:1 against its label.
+   - *Rule added:* §4.2 — never write an M3 tone as an oklch percentage; convert it. The formula
+     and this failure are recorded in `docs/DESIGN-SYSTEM.md` §11 and its §14 change log.
+
+3. **Redundant eyebrow, and required-field asterisks that carried no information.**
+   - *Observable evidence:* the eyebrow read "Sign in" above an `h1` reading "Sign in to
+     deep-wiki". Both fields on the form were required and both were asterisked.
+   - *Root cause:* the shell provided an eyebrow slot and every screen filled it because it was
+     there. The asterisks came from `UFormField`'s `required` prop.
+   - *Correction applied:* eyebrow removed from the shell and all four screens; each form states
+     "All fields are required" once.
+   - *Rule added:* §4.4 — an eyebrow must add context the heading does not; repeating the heading
+     spends hierarchy for nothing. Mark the exception, not the rule, on required fields.
+
+**Follow-ups carried forward, not fixed**
+
+- `UFormField`'s `required` prop renders only a glyph: `UAuthForm`'s `omitFieldProps` strips it
+  before it reaches the input, so `required` and `aria-required` are absent. This predates the
+  review. Recorded in `docs/TODO.md` Findings; any future form must set the attribute itself and
+  test it.
+- The mobile footer stacking order was fixed with CSS `order`, so at narrow widths a screen reader
+  reads the two static paragraphs in the opposite order to how they appear.
+- The two-icon-pack requirement (§4.3) remains untested — only `lucide` is installed.
+- Contrast was measured on the specific pairs named above, not audited exhaustively across every
+  component.
+
+---
+
+*The next entry goes below this one.*
