@@ -6,3 +6,13 @@ export { impliedAllowActions, impliedDenyActions } from './permissions/actions';
 export { can } from './permissions/can';
 export { decide } from './permissions/decide';
 export type { Action, Effect, GrantLookup, GrantQuery, ResolvedGrant, SubjectKind } from './permissions/types';
+export { normalizeEmail } from './email';
+export {
+  buildPath,
+  isDescendantPath,
+  isStrictDescendantPath,
+  isWithinPathBound,
+  MAX_PATH_LENGTH,
+  parsePath,
+  PATH_DELIMITER,
+} from './paths';

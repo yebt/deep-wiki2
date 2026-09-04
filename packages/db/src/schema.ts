@@ -1,7 +1,87 @@
 /**
- * Drizzle schema. Empty in Phase 0: the domain model (`nodes`, `workspaces`,
- * `permissions`, ...) is Phase 1 scope (docs/TODO.md). This file exists so
- * `createDb()` and the migration tooling have a real, if empty, schema
- * module to point at rather than being wired up later.
+ * Drizzle schema for the tenancy and permissions domain
+ * (openspec/changes/tenancy-and-permissions/design.md — "Schema").
+ *
+ * This file declares column shapes, enums, and the constraints Drizzle's
+ * DSL can express cleanly (single-column references, plain unique/index).
+ * The `nodes_set_path` trigger, the composite tenant-isolation foreign
+ * keys, the `path` CHECK constraints, and the partial/functional indexes
+ * are NOT modelled here — Drizzle's table DSL cannot express a
+ * self-referential composite foreign key or a BEFORE-trigger, and
+ * `drizzle-kit generate` is deliberately never run against this file (it
+ * would silently drop what it cannot express). Every migration under
+ * `packages/db/drizzle/` is hand-written SQL; `migration.test.ts` asserts
+ * the hand-written objects exist after `migrate()` runs, so a future drift
+ * between this file and the migrations fails the suite, not the tenant.
  */
-export {};
+import { boolean, integer, jsonb, pgEnum, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
+
+export const nodeType = pgEnum('node_type', ['workspace', 'shelf', 'book', 'chapter', 'page']);
+
+/**
+ * `role` is reserved with no producer in this phase (design.md — Open
+ * Questions; task 3.8): adding a Postgres enum value later is a cheap
+ * `ALTER TYPE ... ADD VALUE`, removing one is not, so it is committed now
+ * rather than deferred. See `0001_tenancy.sql` for the enum DDL comment
+ * and `docs/TODO.md` Findings for the recorded reasoning.
+ */
+export const subjectKind = pgEnum('subject_kind', ['user', 'cell', 'role', 'agent']);
+
+export const permAction = pgEnum('perm_action', ['read', 'comment', 'write', 'manage']);
+export const permEffect = pgEnum('perm_effect', ['allow', 'deny']);
+export const registrationMode = pgEnum('registration_mode', ['closed', 'invitation_only', 'open']);
+
+export const plans = pgTable('plans', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  name: text('name').notNull().unique(),
+  maxWorkspaces: integer('max_workspaces').notNull(),
+  maxSeats: integer('max_seats').notNull(),
+  maxStorageBytes: text('max_storage_bytes').notNull(),
+  maxAiTokensMonthly: text('max_ai_tokens_monthly').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const users = pgTable('users', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  email: text('email').notNull().unique(),
+  passwordHash: text('password_hash').notNull(),
+  displayName: text('display_name').notNull(),
+  avatarKey: text('avatar_key'),
+  planId: uuid('plan_id').references(() => plans.id),
+  isSuperRoot: boolean('is_super_root').notNull().default(false),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const workspaces = pgTable('workspaces', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  ownerId: uuid('owner_id')
+    .notNull()
+    .references(() => users.id),
+  name: text('name').notNull(),
+  slug: text('slug').notNull().unique(),
+  settings: jsonb('settings').notNull().default({}),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * `parent_id` and the composite `(id, workspace_id)`/`(parent_id,
+ * workspace_id)` foreign keys are declared only in the migration SQL — see
+ * the module doc comment above.
+ */
+export const nodes = pgTable('nodes', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  workspaceId: uuid('workspace_id')
+    .notNull()
+    .references(() => workspaces.id, { onDelete: 'cascade' }),
+  parentId: uuid('parent_id'),
+  type: nodeType('type').notNull(),
+  path: text('path').notNull(),
+  position: integer('position').notNull(),
+  slug: text('slug').notNull(),
+  title: text('title').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});

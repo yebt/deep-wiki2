@@ -105,14 +105,14 @@ differently:
 
 ## Phase 3 (WU-3) — `feat(db): tenancy schema — plans, users, workspaces, and the nodes tree`
 
-- [ ] 3.1 RED — `packages/core/src/paths.test.ts`: build/parse/containment for the
+- [x] 3.1 RED — `packages/core/src/paths.test.ts`: build/parse/containment for the
       `/{id}/…/{id}/` encoding — leading+trailing delimiter, self-inclusive descendant
       check, 256-char bound. *(tenancy-model: Materialised Path as Text with
       `text_pattern_ops`)*
-- [ ] 3.2 RED — `packages/core/src/email.test.ts`: normalisation is idempotent and
+- [x] 3.2 RED — `packages/core/src/email.test.ts`: normalisation is idempotent and
       lower-cases (backs the `users` `CHECK (email = lower(email))`).
-- [ ] 3.3 GREEN — implement `packages/core/src/{paths,email}.ts`; export from index.
-- [ ] 3.4 RED — `packages/db/src/schema.test.ts`: insert rejected when `workspace_id` is
+- [x] 3.3 GREEN — implement `packages/core/src/{paths,email}.ts`; export from index.
+- [x] 3.4 RED — `packages/db/src/schema.test.ts`: insert rejected when `workspace_id` is
       null on `nodes`/`cells` *(tenancy-model: Workspace Isolation on Every
       Tenant-Scoped Table)*; `CHECK ((parent_id IS NULL) = (type='workspace'))` rejects
       both violating shapes; the partial unique index enforces exactly one `workspace`
@@ -120,26 +120,26 @@ differently:
       and under a chapter *(tenancy-model: Node Tree Structure, both scenarios)*; a new
       sibling receives a `position` greater than all existing siblings *(tenancy-model:
       Sibling Ordering)*.
-- [ ] 3.5 GREEN — write `packages/db/src/schema.ts`: enums `node_type`
+- [x] 3.5 GREEN — write `packages/db/src/schema.ts`: enums `node_type`
       (`workspace,shelf,book,chapter,page`), `subject_kind` (`user,cell,role,agent` —
       see 3.8), `perm_action`, `perm_effect`, `registration_mode`; tables `plans`,
       `users`, `workspaces`, `nodes`; hand-written `nodes_set_path` trigger (D3) and
       CHECKs (D2), since Drizzle's DSL cannot express them.
-- [ ] 3.6 GREEN — `packages/db/drizzle/0000_extensions.sql`
+- [x] 3.6 GREEN — `packages/db/drizzle/0000_extensions.sql`
       (`CREATE EXTENSION IF NOT EXISTS vector` only — D1/D18; **no `ltree`**, per the
       settled reconciliation) and `0001_tenancy.sql`, each with a tested `down`.
-- [ ] 3.7 RED — `packages/db/drizzle/migration.test.ts`: asserts the trigger, CHECKs,
+- [x] 3.7 RED — `packages/db/drizzle/migration.test.ts`: asserts the trigger, CHECKs,
       partial index, and `text_pattern_ops` index all exist **after migrate**, so a
       silent `drizzle-kit generate` drop fails the suite, not the tenant.
-- [ ] 3.8 **Decision task** — add `role` to `subject_kind` now even though Phase 1 has
+- [x] 3.8 **Decision task** — add `role` to `subject_kind` now even though Phase 1 has
       no producer for it; record the reasoning as a SQL comment on the enum
       declaration and a `docs/TODO.md` entry (see 18.2): adding a Postgres enum value
       later is a cheap `ALTER TYPE … ADD VALUE`, removing one is not, so it is
       committed now rather than deferred.
-- [ ] 3.9 RED/GREEN — `users.is_super_root`; test that Super Root does not appear as a
+- [x] 3.9 RED/GREEN — `users.is_super_root`; test that Super Root does not appear as a
       member of any single workspace by virtue of the flag *(tenancy-model: Super Root
       Global Identity)*.
-- [ ] 3.10 RED/GREEN — `plans` table; workspace creation within limit succeeds, at limit
+- [x] 3.10 RED/GREEN — `plans` table; workspace creation within limit succeeds, at limit
       is refused naming the plan limit, using the `SELECT … FOR UPDATE` row lock (D12)
       *(tenancy-model: Plan Limits Bound Workspace Creation, both scenarios)*.
 

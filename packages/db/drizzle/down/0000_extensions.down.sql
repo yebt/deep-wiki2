@@ -1,0 +1,2 @@
+-- No down: dropping a shared extension is destructive, and it is inert if
+-- unused. See design.md — Migration / Rollout.

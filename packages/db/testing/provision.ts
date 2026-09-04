@@ -198,7 +198,7 @@ function withDatabase(url: string, databaseName: string): string {
 }
 
 async function withMaintenanceConnection<T>(adminUrl: string, fn: (sql: postgres.Sql) => Promise<T>): Promise<T> {
-  const sql = postgres(withDatabase(adminUrl, 'postgres'), { max: 1 });
+  const sql = postgres(withDatabase(adminUrl, 'postgres'), { max: 1, onnotice: () => {} });
   try {
     return await fn(sql);
   } finally {
@@ -222,7 +222,7 @@ export async function ensureTemplateDatabase(adminUrl: string, migrationsFolder:
   });
 
   const templateUrl = withDatabase(adminUrl, TEMPLATE_DB_NAME);
-  const client = postgres(templateUrl, { max: 1 });
+  const client = postgres(templateUrl, { max: 1, onnotice: () => {} });
   try {
     await migrate(drizzle(client), { migrationsFolder });
   } finally {
