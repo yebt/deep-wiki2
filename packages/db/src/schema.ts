@@ -128,3 +128,19 @@ export const permissions = pgTable('permissions', {
   effect: permEffect('effect').notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
+
+/**
+ * Server-side, revocable sessions (design.md D14). Only the SHA-256 hash
+ * of the token is ever stored; the raw token exists only in the client's
+ * cookie and the brief return value of `createSession()`.
+ */
+export const sessions = pgTable('sessions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  tokenHash: text('token_hash').notNull().unique(),
+  idleExpiresAt: timestamp('idle_expires_at', { withTimezone: true }).notNull(),
+  absoluteExpiresAt: timestamp('absolute_expires_at', { withTimezone: true }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});

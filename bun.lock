@@ -20,6 +20,7 @@
       "dependencies": {
         "@deep-wiki/contracts": "workspace:*",
         "@deep-wiki/core": "workspace:*",
+        "@deep-wiki/db": "workspace:*",
         "hono": "^4.6.16",
       },
     },

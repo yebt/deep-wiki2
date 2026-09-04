@@ -263,28 +263,28 @@ differently:
 
 ## Phase 10 (WU-10) — `feat(api): argon2id hashing and revocable server-side sessions`
 
-- [ ] 10.1 RED — `packages/core/src/secret.test.ts`: `Secret<T>.toString()`/`toJSON()`
+- [x] 10.1 RED — `packages/core/src/secret.test.ts`: `Secret<T>.toString()`/`toJSON()`
       return `'[redacted]'`; `JSON.stringify` and template interpolation never leak the
       wrapped value.
-- [ ] 10.2 GREEN — implement `packages/core/src/secret.ts`; export from index.
-- [ ] 10.3 RED — `packages/core/src/ports/password-hasher.ts` port-contract test with a
+- [x] 10.2 GREEN — implement `packages/core/src/secret.ts`; export from index.
+- [x] 10.3 RED — `packages/core/src/ports/password-hasher.ts` port-contract test with a
       stub `PasswordHasher`.
-- [ ] 10.4 GREEN — `apps/api/src/adapters/crypto/argon2id-password-hasher.ts`
+- [x] 10.4 GREEN — `apps/api/src/adapters/crypto/argon2id-password-hasher.ts`
       (`Bun.password`, m=19456 KiB, t=2, p=1 — D13) satisfying the port.
-- [ ] 10.5 RED — `packages/db/src/auth/sessions.test.ts`: token stored SHA-256 hashed
+- [x] 10.5 RED — `packages/db/src/auth/sessions.test.ts`: token stored SHA-256 hashed
       and looked up by hash; sliding `idle_expires_at` and hard `absolute_expires_at`;
       logout deletes the row; a password change or a consumed reset deletes all
       sessions for that user.
-- [ ] 10.6 GREEN — `packages/db/src/auth/sessions.ts`; `sessions` table in
+- [x] 10.6 GREEN — `packages/db/src/auth/sessions.ts`; `sessions` table in
       `packages/db/drizzle/0004_auth.sql`, tested `down`.
-- [ ] 10.7 RED — `apps/api/src/middleware/session.test.ts`: a valid session lets a
+- [x] 10.7 RED — `apps/api/src/middleware/session.test.ts`: a valid session lets a
       request proceed with the subject derived from it *(authentication: Session
       Issuance and Validation, both scenarios)*; the session token appears only in the
       cookie header, never duplicated in the JSON body *(authentication: Session token
       absent from response body)*.
-- [ ] 10.8 GREEN — `apps/api/src/middleware/session.ts`
+- [x] 10.8 GREEN — `apps/api/src/middleware/session.ts`
       (`HttpOnly; Secure; SameSite=Lax; Path=/`).
-- [ ] 10.9 RED — a logged login attempt, success or failure, contains no plaintext
+- [x] 10.9 RED — a logged login attempt, success or failure, contains no plaintext
       password and no password hash *(authentication: Credentials, Hashes, and Tokens
       Are Never Exposed, logging scenario)*.
 

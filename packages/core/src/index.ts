@@ -7,6 +7,8 @@ export { can } from './permissions/can';
 export { decide } from './permissions/decide';
 export type { Action, Effect, GrantLookup, GrantQuery, ResolvedGrant, SubjectKind } from './permissions/types';
 export { normalizeEmail } from './email';
+export { Secret } from './secret';
+export type { PasswordHasher } from './ports/password-hasher';
 export {
   buildPath,
   isDescendantPath,
