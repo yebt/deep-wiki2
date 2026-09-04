@@ -343,6 +343,22 @@ makes conventions portable across projects.
 
 Discoveries and constraints. Newest first.
 
+### 2026-09-03 — The CI pipeline had no way to run
+
+`.github/workflows/ci.yml` targets GitHub Actions runners, but this repository has no git
+remote configured at all. The `ci-pipeline` capability was therefore declared in the baseline
+specs while nothing actually enforced it: the four gates passed only when run by hand.
+This was originally logged as "CI has never run on Actions", which understated it — it was
+not unverified, it was unenforceable.
+
+**Impact:** enforcement is local until a remote exists. `.githooks/pre-commit` runs
+`bun run check` on every commit (0.3s — the structural gates that catch a framework import in
+`packages/core`, an uncovered package, a drifted env template, a non-portable compose file),
+and `bun run verify` runs all four gates before tagging a milestone. The workflow file is
+kept and stays correct for the day a remote is added. The slow gates stay out of the commit
+hook deliberately: a hook costing over a minute gets bypassed with `--no-verify`, and a
+bypassed gate is worse than an honest manual one.
+
 ### 2026-09-03 — `podman compose` (podman-compose 1.6.0) supports `:?` and `service_healthy`
 
 Verified directly on this machine rather than assumed: `podman compose config -q` against

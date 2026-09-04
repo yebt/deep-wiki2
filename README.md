@@ -81,6 +81,27 @@ Run from the repository root:
 Docker/Podman-specific extension, an unlabelled bind mount, or a published port below
 1024.
 
+### Enforcement
+
+This repository has **no git remote**, so `.github/workflows/ci.yml` never executes — it is
+kept for the day the project gains a GitHub remote, and it is inert until then. Enforcement
+today is local:
+
+| When | What runs | Cost |
+|---|---|---|
+| Every commit | `bun run check` via the `.githooks/pre-commit` hook | under a second |
+| Before tagging a milestone | `bun run verify` — check, lint, typecheck, test | about 76 seconds |
+
+Enable the hook once per clone:
+
+```bash
+bun run setup:hooks
+```
+
+The slow gates are deliberately kept out of the commit hook. A pre-commit hook that costs
+over a minute gets bypassed with `--no-verify`, and a bypassed gate is worse than an honest
+manual one.
+
 ## Layout
 
 | Path | Purpose |

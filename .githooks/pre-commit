@@ -1,0 +1,24 @@
+#!/bin/sh
+# Structural gates, run on every commit.
+#
+# Only `bun run check` lives here: it takes well under a second and it is the
+# gate that catches architectural violations — a framework import in
+# packages/core, a package with no real test, a second test runner spreading,
+# an env template that drifted from the schema, a compose file that would
+# break under podman.
+#
+# The slower gates (lint, typecheck, test — roughly 76s together) are not run
+# here on purpose: a pre-commit hook that costs over a minute gets bypassed
+# with --no-verify, and a bypassed gate is worse than an honest manual one.
+# Run `bun run verify` before tagging a milestone.
+#
+# Enabled with: git config core.hooksPath .githooks
+set -e
+
+if ! command -v bun >/dev/null 2>&1; then
+  echo "pre-commit: bun not found on PATH; skipping structural checks" >&2
+  exit 0
+fi
+
+echo "pre-commit: running structural checks…"
+bun run check
