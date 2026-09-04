@@ -7,8 +7,13 @@
  * strips EXIF and neutralises polyglot files by construction — the
  * output bytes are always a `sharp`-produced webp, never a byte of the
  * original upload.
+ *
+ * The request is `multipart/form-data`, which `@deep-wiki/contracts`
+ * does not model as a zod object (see packages/contracts/src/uploads.ts);
+ * the JSON response is validated against its shared schema.
  */
 import type { BlobStore } from '@deep-wiki/core';
+import { ErrorResponseSchema, UploadAvatarResponseSchema } from '@deep-wiki/contracts';
 import { Hono } from 'hono';
 import type postgres from 'postgres';
 import sharp from 'sharp';
@@ -76,32 +81,32 @@ export function createUploadRoutes(deps: UploadRouteDeps): Hono<{ Variables: Ses
     try {
       form = await c.req.formData();
     } catch {
-      return c.json({ error: 'expected multipart/form-data with a file field' }, 400);
+      return c.json(ErrorResponseSchema.parse({ error: 'expected multipart/form-data with a file field' }), 400);
     }
 
     const workspaceId = form.get('workspaceId');
     const file = form.get('file');
 
     if (typeof workspaceId !== 'string' || !workspaceId) {
-      return c.json({ error: 'workspaceId is required' }, 400);
+      return c.json(ErrorResponseSchema.parse({ error: 'workspaceId is required' }), 400);
     }
     if (!(file instanceof File)) {
-      return c.json({ error: 'file is required' }, 400);
+      return c.json(ErrorResponseSchema.parse({ error: 'file is required' }), 400);
     }
 
     // Enforced before any BlobStore call, and before the (relatively
     // expensive) sharp decode/resize below.
     if (file.size > deps.maxUploadBytes) {
-      return c.json({ error: `file exceeds the maximum allowed size of ${deps.maxUploadBytes} bytes` }, 413);
+      return c.json(ErrorResponseSchema.parse({ error: `file exceeds the maximum allowed size of ${deps.maxUploadBytes} bytes` }), 413);
     }
 
     const bytes = new Uint8Array(await file.arrayBuffer());
     if (bytes.byteLength > deps.maxUploadBytes) {
-      return c.json({ error: `file exceeds the maximum allowed size of ${deps.maxUploadBytes} bytes` }, 413);
+      return c.json(ErrorResponseSchema.parse({ error: `file exceeds the maximum allowed size of ${deps.maxUploadBytes} bytes` }), 413);
     }
 
     if (!sniffImageType(bytes)) {
-      return c.json({ error: 'unsupported or unrecognised file type' }, 415);
+      return c.json(ErrorResponseSchema.parse({ error: 'unsupported or unrecognised file type' }), 415);
     }
 
     const resized = await sharp(Buffer.from(bytes))
@@ -112,12 +117,12 @@ export function createUploadRoutes(deps: UploadRouteDeps): Hono<{ Variables: Ses
     const key = `workspaces/${workspaceId}/avatars/${session.userId}/${crypto.randomUUID()}.webp`;
     const putResult = await deps.blobStore.put({ key, data: new Uint8Array(resized), contentType: 'image/webp' });
     if (!putResult.ok) {
-      return c.json({ error: 'failed to store the upload' }, 502);
+      return c.json(ErrorResponseSchema.parse({ error: 'failed to store the upload' }), 502);
     }
 
     await deps.sql`UPDATE users SET avatar_key = ${key}, updated_at = now() WHERE id = ${session.userId}`;
 
-    return c.json({ ok: true, key });
+    return c.json(UploadAvatarResponseSchema.parse({ ok: true, key }));
   });
 
   return app;

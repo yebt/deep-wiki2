@@ -3,9 +3,22 @@
  * — design.md "Authentication"). All authorisation-relevant identity
  * derives from the session issued here; nothing in this file logs or
  * serialises a plaintext password, a password hash, or a raw token.
+ *
+ * Request and response shapes are validated against `@deep-wiki/contracts`
+ * — the single source of truth for this route's wire shape, shared with
+ * `apps/web`.
  */
 import type { MailSender, PasswordHasher } from '@deep-wiki/core';
 import { normalizeEmail } from '@deep-wiki/core';
+import {
+  ErrorResponseSchema,
+  LoginRequestSchema,
+  LoginResponseSchema,
+  PasswordResetConfirmRequestSchema,
+  PasswordResetConfirmResponseSchema,
+  PasswordResetRequestSchema,
+  PasswordResetResponseSchema,
+} from '@deep-wiki/contracts';
 import {
   consumePasswordReset,
   createPasswordReset,
@@ -46,32 +59,31 @@ export interface AuthRouteDeps {
   readonly logger?: Logger;
 }
 
-interface LoginBody {
-  readonly email?: unknown;
-  readonly password?: unknown;
-}
-
-interface PasswordResetRequestBody {
-  readonly email?: unknown;
-}
-
-interface PasswordResetConfirmBody {
-  readonly token?: unknown;
-  readonly newPassword?: unknown;
-}
-
 /** The one generic acknowledgement — identical for a known and an unknown account. */
 const RESET_ACKNOWLEDGEMENT = {
   ok: true,
   message: 'If an account exists for that email, a reset link has been sent.',
 } as const;
 
-async function readJsonBody<T>(request: Request): Promise<T | Record<string, never>> {
+async function readJsonBody(request: Request): Promise<Record<string, unknown>> {
   try {
-    return (await request.json()) as T;
+    return (await request.json()) as Record<string, unknown>;
   } catch {
     return {};
   }
+}
+
+/**
+ * Extracts one field as a string per the contract's field type, falling
+ * back to `''` on anything else — preserves this route's long-standing
+ * "missing/malformed fields fail the attempt, never the request" shape
+ * (e.g. an unknown-email login still runs the full dummy-hash comparison
+ * and returns 401, rather than a validation 400 that would itself leak a
+ * signal) while still validating every field against the shared contract.
+ */
+function stringField(schema: { safeParse(value: unknown): { success: boolean; data?: unknown } }, value: unknown): string {
+  const parsed = schema.safeParse(value);
+  return parsed.success && typeof parsed.data === 'string' ? parsed.data : '';
 }
 
 export function createAuthRoutes(deps: AuthRouteDeps): Hono {
@@ -79,9 +91,9 @@ export function createAuthRoutes(deps: AuthRouteDeps): Hono {
   const app = new Hono();
 
   app.post('/auth/login', async (c) => {
-    const body = await readJsonBody<LoginBody>(c.req.raw);
-    const email = typeof body.email === 'string' ? normalizeEmail(body.email) : '';
-    const password = typeof body.password === 'string' ? body.password : '';
+    const body = await readJsonBody(c.req.raw);
+    const email = normalizeEmail(stringField(LoginRequestSchema.shape.email, body.email));
+    const password = stringField(LoginRequestSchema.shape.password, body.password);
 
     const user = email ? await findUserByEmail(deps.sql, email) : null;
     const hashToVerify = user?.passwordHash ?? DUMMY_PASSWORD_HASH;
@@ -92,7 +104,7 @@ export function createAuthRoutes(deps: AuthRouteDeps): Hono {
     logger.info('login_attempt', { email, outcome: succeeded ? 'success' : 'failure' });
 
     if (!succeeded || !user) {
-      return c.json({ error: 'invalid credentials' }, 401);
+      return c.json(ErrorResponseSchema.parse({ error: 'invalid credentials' }), 401);
     }
 
     const { token } = await createSession(deps.sql, {
@@ -102,15 +114,15 @@ export function createAuthRoutes(deps: AuthRouteDeps): Hono {
     });
     setSessionCookie(c, token);
 
-    return c.json({ ok: true });
+    return c.json(LoginResponseSchema.parse({ ok: true }));
   });
 
   // Reset link hygiene (design.md): the token unavoidably rides in a URL,
   // so every password-reset response carries Referrer-Policy: no-referrer.
   app.post('/auth/password-reset', async (c) => {
     c.header('Referrer-Policy', 'no-referrer');
-    const body = await readJsonBody<PasswordResetRequestBody>(c.req.raw);
-    const email = typeof body.email === 'string' ? normalizeEmail(body.email) : '';
+    const body = await readJsonBody(c.req.raw);
+    const email = normalizeEmail(stringField(PasswordResetRequestSchema.shape.email, body.email));
 
     const user = email ? await findUserByEmail(deps.sql, email) : null;
 
@@ -130,27 +142,27 @@ export function createAuthRoutes(deps: AuthRouteDeps): Hono {
 
     // Always the same body, shape, and status — the response never
     // discloses whether `email` corresponds to an existing account.
-    return c.json(RESET_ACKNOWLEDGEMENT, 202);
+    return c.json(PasswordResetResponseSchema.parse(RESET_ACKNOWLEDGEMENT), 202);
   });
 
   app.post('/auth/password-reset/confirm', async (c) => {
     c.header('Referrer-Policy', 'no-referrer');
-    const body = await readJsonBody<PasswordResetConfirmBody>(c.req.raw);
-    const token = typeof body.token === 'string' ? body.token : '';
-    const newPassword = typeof body.newPassword === 'string' ? body.newPassword : '';
+    const body = await readJsonBody(c.req.raw);
+    const token = stringField(PasswordResetConfirmRequestSchema.shape.token, body.token);
+    const newPassword = stringField(PasswordResetConfirmRequestSchema.shape.newPassword, body.newPassword);
 
     if (!token || !newPassword) {
-      return c.json({ error: 'invalid request' }, 400);
+      return c.json(ErrorResponseSchema.parse({ error: 'invalid request' }), 400);
     }
 
     const newPasswordHash = await deps.passwordHasher.hash(newPassword);
     const result = await consumePasswordReset(deps.sql, token, newPasswordHash);
 
     if (result !== 'ok') {
-      return c.json({ error: 'invalid or expired token' }, 400);
+      return c.json(ErrorResponseSchema.parse({ error: 'invalid or expired token' }), 400);
     }
 
-    return c.json({ ok: true });
+    return c.json(PasswordResetConfirmResponseSchema.parse({ ok: true }));
   });
 
   return app;
