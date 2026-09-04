@@ -228,6 +228,19 @@ M3 tones 98, 99 and 100 fall outside this ladder; they are carried by `--ui-bg` 
 
 **Rule:** a deep-wiki theme is authored by writing the 11 tones of each palette into a `@theme static` block, then pointing the aliases at it. Do not attempt to force a stock Tailwind palette to behave like an M3 tonal palette — the lightness steps do not line up.
 
+> **An M3 tone is a CIE L\*, not an oklch lightness. Do not write `oklch(<tone>%)`.**
+>
+> The two scales coincide near white and diverge badly below tone 25. Written naively, tone 4 lands at L\* 0.4 — `#010202`, effectively pure black — so a dark surface container renders as a hole punched in the page instead of a container sitting on it. This is not hypothetical: it shipped, and the owner caught it on review (see §14, 2026-09-04).
+>
+> For a neutral, Oklab L is the cube root of relative luminance and CIE L\* → Y is the standard piecewise transform, so the conversion collapses to:
+>
+> ```
+> tone  > 8  →  oklch L = (tone + 16) / 116
+> tone <= 8  →  oklch L = cbrt(tone / 903.2963)
+> ```
+>
+> The literal percentages in the block below are the *converted* values, not the tone numbers. If you regenerate a palette, run the conversion — do not transcribe tones.
+
 ```css
 /* apps/web/app/assets/css/main.css — AFTER both imports */
 @theme static {
@@ -1753,6 +1766,9 @@ Amend this file in place when a rule turns out to be wrong, and record why here.
 | Date | Change | Reason |
 | --- | --- | --- |
 | 2026-09-03 | Initial version. | — |
+| 2026-09-04 | §11: tone→lightness conversion stated explicitly; an M3 tone is a CIE L\*, not an oklch lightness. | Written as `oklch(<tone>%)`, tone 4 rendered at L\* 0.4 — effectively pure black. The dark auth card measured **1.14:1** against the page ground and read as a hole rather than a container. All tones recomputed from the exact transform; the card now measures 1.48:1. The document's own token block carried the error, so every future theme would have inherited it. |
+| 2026-09-04 | Dark neutral container rungs moved up one M3 tone each (12→17, 17→22, 22→24). | Tones 10 and 12 measured **1.04:1** between the app ground and the header butting against it — the collapsed rung §1.4 exists to prevent. All replacement tones come from §1.1's list. |
+| 2026-09-04 | Dark `--ui-primary` moves from tone 80 to tone 70. | M3 specifies tone 80 for dark primary, but at oklch L 0.84 / hue 262 the maximum sRGB chroma is 0.0793 and the palette already sat at 0.078 — the gamut ceiling, so the button could not be made less washed out at that tone. Tone 70 raises chroma to 0.120 (+54%) and still measures 6.35:1 against its label, above the §5 floor of 4.5:1. Deviates from M3 deliberately; the checklist wins on how a control reads. |
 | 2026-09-03 | §5.2: `solid` pressed/hover states now use a `currentColor` compositing overlay instead of stepping the shade. | Measured against this project's tone tables, the shade step put a white label on tone 60 at 3.15:1, below the checklist's 4.5:1 floor. The checklist wins on accessibility per §0. One shade slot spans ten M3 tones, about 2.5x an 0.12 state layer, so the step overshoots. |
 | 2026-09-03 | Dark `outline-variant` moved from tone 20 to tone 30; `text-muted` moved to `on-surface-variant` tone 30/80. | At tone 20 the border was invisible on a tone-12 panel. Nuxt UI's default muted text measured 3.9:1 on `bg-muted`, failing the §5 body-text floor. |
 </content>
