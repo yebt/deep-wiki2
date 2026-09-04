@@ -108,9 +108,10 @@ The multi-tenant skeleton and the authorisation model. This phase is where the p
 lives or dies; it is deliberately front-loaded.
 
 - [ ] Design and migrate the `nodes` table: `id`, `workspace_id`, `parent_id`, `type`
-      (`shelf` | `book` | `chapter` | `page`), `position`, and an `ltree` path column for
-      cheap subtree queries.
-- [ ] Add the `ltree` extension and index the path column (GiST).
+      (`shelf` | `book` | `chapter` | `page`), `position`, and a materialised path column
+      stored as `text` for cheap subtree queries.
+- [ ] Index the path column with `text_pattern_ops` so prefix matching stays indexed.
+      Deliberately not `ltree` + GiST — see the engine-portability decision.
 - [ ] Migrate `workspaces` with per-workspace settings (formats, defaults, AI config
       references, theme default).
 - [ ] Migrate `users`, `cells` (teams), and `cell_members`.
@@ -343,6 +344,33 @@ makes conventions portable across projects.
 
 Discoveries and constraints. Newest first.
 
+### 2026-09-03 — The appliance question is answered: Postgres, door left ajar
+
+`docs/TODO.md` carried an Open Question — whether "download one binary, run it, no Postgres"
+is a distribution goal — that explicitly demanded an answer before Phase 1 hardened the
+persistence layer. Phase 1 is that hardening, so `sdd-propose` stopped and surfaced it rather
+than deciding it.
+
+**Answer: no appliance, but do not close the door.** The deciding argument is that deep-wiki
+already requires five services — Kroki renders diagrams, MinIO stores blobs, Mailpit relays
+mail. None of those fit in a binary. Swapping the database for SQLite would therefore not buy
+the one-click install that motivates an appliance; it would only cost `pgvector`.
+
+**Impact:** the rule is a cost test, not a purity test. Avoid a Postgres-only feature when the
+portable equivalent is nearly as good; accept one when it buys something the product needs.
+Concretely: the `nodes` materialised path is `text` with a `text_pattern_ops` index, **not**
+`ltree` with GiST — the portable form is barely worse and `ltree` would have been a third hard
+lock-in for little gain. Recursive CTEs stay, because SQLite supports them and they cost no
+portability at all. `pgvector` stays and is accepted as a real lock-in, because RAG over the
+corpus is core and has no equivalent-maturity alternative. The Bun + Hono backend decision
+stands unchanged.
+
+A related defect surfaced while verifying this: `infra/postgres/init/01-extensions.sql` lives
+in `/docker-entrypoint-initdb.d`, which Postgres runs **only against a fresh data directory**.
+Any developer with an existing `pgdata` volume would silently never receive a new extension.
+Extension creation therefore belongs in a migration; the init script covers fresh bootstraps
+only.
+
 ### 2026-09-03 — The CI pipeline had no way to run
 
 `.github/workflows/ci.yml` targets GitHub Actions runners, but this repository has no git
@@ -521,8 +549,8 @@ in Findings.
 - **Embedding provider and model to standardise on.** Drives the default `dimensions`, the
   pgvector column definition, index sizing, and what the local fallback must match. Needs
   the per-provider embedding-support verification from Phase 5 first.
-- **Single-binary + SQLite appliance distribution.** Is "download one binary, run it, no
-  Postgres" a distribution goal? If it is, it reverses the Bun-versus-Go backend decision —
-  the markdown-parser argument loses to the operational simplicity argument, and the
-  hexagonal boundary in `packages/core` becomes the migration path rather than an
-  abstraction exercise. Answer this before Phase 1 hardens the persistence layer.
+- ~~**Single-binary + SQLite appliance distribution.**~~ **Answered 2026-09-03: no, but do
+  not close the door.** Postgres is the engine. The Bun-versus-Go backend decision stands.
+  Engine-specific features are avoided where the cost of avoiding them is low, and accepted
+  where they buy something the product genuinely needs — see the Findings entry for the
+  reasoning and the exact line between the two.

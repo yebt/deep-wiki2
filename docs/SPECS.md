@@ -115,8 +115,9 @@ BookStack is a strict hierarchy. Obsidian is a link graph. deep-wiki needs both,
 must **not** be forced into one table.
 
 - **Tree = navigation.** A single `nodes` table with `parent_id`, `position`, and a
-  materialised path (`ltree`) for cheap subtree queries. This is what the sidebar renders
-  and what permissions cascade over.
+  materialised path stored as **`text`** for cheap subtree queries. This is what the
+  sidebar renders and what permissions cascade over. The path is deliberately *not*
+  Postgres `ltree`: see the engine-portability decision in §14.
 - **Graph = meaning.** A `links` table derived by parsing the Markdown **on every save**.
   Backlinks become an index lookup rather than a scan.
 
@@ -131,7 +132,7 @@ nodes (
   workspace_id  uuid not null,
   parent_id     uuid references nodes(id),
   type          node_type not null,        -- shelf | book | chapter | page
-  path          ltree not null,            -- materialised ancestry
+  path          text not null,             -- materialised ancestry, '/'-delimited ids
   position      integer not null,          -- sibling ordering
   slug          text not null,
   title         text not null,
@@ -738,6 +739,7 @@ API, and the indexer, and it is the reason the backend is TypeScript (§14).
 | **Agent writes are pending revisions** | The corpus is user-authored text, making direct agent writes a prompt-injection vector into the team's source of truth | Nothing foreseeable |
 | **Rule packs are shareable entities authored as documents** | Sharing across projects requires independent identity; authoring them as documents inherits versioning, diffing, and commenting for free | Nothing foreseeable |
 | **Bun workspaces without Turborepo** | `bun run -F` covers the task graph; fewer build dependencies matters for a self-hosted product | Build times that measurably hurt |
+| **Postgres is the engine, but engine-specific features are paid for, not assumed** | The appliance question is answered: no single-binary/SQLite distribution, so the Bun + Hono decision stands. But the door stays open at low cost. The rule is a cost test, not a purity test: avoid a Postgres-only feature when a portable equivalent is nearly as good, accept one when it buys something the product genuinely needs. Applied: the `nodes` path is a `text` materialised path with `text_pattern_ops`, **not** `ltree` — the portable form is barely worse and `ltree` would have been the third hard lock-in. Recursive CTEs stay, because SQLite supports them too and they cost nothing in portability. `pgvector` stays and is accepted as a genuine lock-in, because RAG over the corpus is a core product function with no equivalent-maturity alternative | A decision to ship an appliance after all, which would reopen the backend choice as well |
 | **`invitation_only` registration by default** | An open-by-default self-hosted instance gets discovered and spam-registered, and the operator blames the software | Nothing — `open` remains available as an explicit choice |
 
 ---
