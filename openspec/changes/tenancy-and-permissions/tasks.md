@@ -212,7 +212,7 @@ differently:
 
 ## Phase 7 (WU-7) — `test(db): EXPLAIN assertion that the resolver never sequentially scans`
 
-- [ ] 7.1 RED — `packages/db/src/permissions/resolver.explain.test.ts`: generate ~20k
+- [x] 7.1 RED — `packages/db/src/permissions/resolver.explain.test.ts`: generate ~20k
       `nodes` and ~60k `permissions` rows in-database (`generate_series`), `ANALYZE`;
       run `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)` at a depth-0 (workspace root) and a
       depth-4 (page) resource; walk the JSON plan tree and fail if any node is a
@@ -220,9 +220,9 @@ differently:
       (forcing the planner would make the assertion tautological, D16); assert
       `Shared Hit + Shared Read < 200` blocks. A 30-row fixture would make a sequential
       scan the *correct* plan, so the fixture size is load-bearing to the assertion.
-- [ ] 7.2 RED — same file: the subtree query from 4.5 uses `nodes_ws_path_idx` under
+- [x] 7.2 RED — same file: the subtree query from 4.5 uses `nodes_ws_path_idx` under
       `EXPLAIN`, proving `text_pattern_ops` is sargable under the non-`C` collation.
-- [ ] 7.3 GREEN — fix indexing or query shape only if 7.1/7.2 fail; no production change
+- [x] 7.3 GREEN — fix indexing or query shape only if 7.1/7.2 fail; no production change
       is expected if Phases 3–6 built the indexes as specified.
 
 ## Phase 8 (WU-8) — `feat(checks): single decision path, path sargability, and secret-field guards`
