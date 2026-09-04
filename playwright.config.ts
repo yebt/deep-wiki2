@@ -14,9 +14,14 @@ const baseURL = `http://localhost:${PORT}`;
  * startup path and this suite only needs the smoke page to render, not a
  * production bundle (the production build is separately exercised by
  * `bun run build`, task 8.12, and by CI's `verify` job).
+ *
+ * `globalSetup` provisions the real backend e2e/auth.spec.ts needs — a
+ * migrated, seeded database and a live `apps/api` instance — which the
+ * Phase 0 smoke suite never required. See e2e/global-setup.ts.
  */
 export default defineConfig({
   testDir: './e2e',
+  globalSetup: './e2e/global-setup.ts',
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
