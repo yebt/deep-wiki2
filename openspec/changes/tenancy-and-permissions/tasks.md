@@ -290,19 +290,19 @@ differently:
 
 ## Phase 11 (WU-11) — `feat(api): password reset that does not disclose account existence`
 
-- [ ] 11.1 RED — `packages/db/src/auth/password-resets.test.ts`: an expired token is
+- [x] 11.1 RED — `packages/db/src/auth/password-resets.test.ts`: an expired token is
       rejected and the password unchanged; a replayed (already-consumed) token is
       rejected on the second attempt; issuing a new token revokes prior unconsumed ones
       *(authentication: Password Reset Tokens Are Hashed, Single-Use, Expiring, both
       scenarios)*.
-- [ ] 11.2 GREEN — `packages/db/src/auth/password-resets.ts`; `password_resets` table
+- [x] 11.2 GREEN — `packages/db/src/auth/password-resets.ts`; `password_resets` table
       in `0004_auth.sql`.
-- [ ] 11.3 RED — `apps/api/src/routes/auth.test.ts` (`app.request()`):
+- [x] 11.3 RED — `apps/api/src/routes/auth.test.ts` (`app.request()`):
       `POST /auth/password-reset` returns a byte-identical `202` body for an existing
       and a nonexistent account, with equivalent timing via a dummy hash on a miss
       *(authentication: Password Reset Responses Do Not Disclose Account Existence,
       both scenarios)*.
-- [ ] 11.4 GREEN — implement the reset route: lookup by hash then `timingSafeEqual`;
+- [x] 11.4 GREEN — implement the reset route: lookup by hash then `timingSafeEqual`;
       `Referrer-Policy: no-referrer` on the reset page response.
 
 ## Phase 12 (WU-12) — `feat(api): SMTP MailSender adapter bound to mailpit in development`

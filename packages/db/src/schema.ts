@@ -144,3 +144,19 @@ export const sessions = pgTable('sessions', {
   absoluteExpiresAt: timestamp('absolute_expires_at', { withTimezone: true }).notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
+
+/**
+ * Password reset tokens (design.md — "Authentication"). Single-use via
+ * `consumedAt`; issuing a new token for a user revokes prior unconsumed
+ * ones at the application layer, not by a DB constraint.
+ */
+export const passwordResets = pgTable('password_resets', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  tokenHash: text('token_hash').notNull().unique(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  consumedAt: timestamp('consumed_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
