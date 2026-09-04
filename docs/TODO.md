@@ -33,18 +33,17 @@ This file has three working sections plus a parking lot.
 
 ## Status
 
-_Last updated 2026-09-04 — HEAD `f92e242`, 53 commits._
+_Last updated 2026-09-04 — HEAD `60521d8`, 63 commits._
 
 | Phase | State |
 | --- | --- |
 | 0 — Foundations | Complete and archived (`openspec/changes/archive/2026-09-03-bootstrap-monorepo-foundations/`) |
-| 1 — Tenancy and permissions | In progress — 76/85 tasks done, work units 1–16 of 18. GATE-1 satisfied |
+| 1 — Tenancy and permissions | SDD change complete — 85/85 tasks, all 18 work units. GATE-1 satisfied. Owner-reviewed and approved (`docs/UI-CHECKLIST.md` Review Log). One broader roadmap item stays open past this change: Super Root plan-authoring admin route (see the unticked bullet below) |
 | 2 — Content and editor | Not started |
 | 3–9 | Not started |
 
-Next up: WU-17 (sign-in, invitation-accept and password-reset **screens** — the
-composables landed in `f92e242`, the UI does not exist yet) and WU-18 (docs sync), both
-in `openspec/changes/tenancy-and-permissions/tasks.md`.
+`openspec/changes/tenancy-and-permissions/` is ready to archive; see that change's
+`tasks.md` for the full 18-work-unit breakdown and traceability matrix.
 
 ---
 
@@ -69,6 +68,14 @@ These are hard gates. Work that depends on them does not start until they are gr
 > `markdown -> ProseMirror doc -> markdown` must be byte-identical across the full
 > fixture corpus, running in CI, before Milkdown is wired into a user-facing screen.
 > Markdown is the source of truth; a lossy serializer silently corrupts user documents.
+>
+> **Status: UNSTARTED.** `packages/editor/src/round-trip.ts` today is
+> `stringify(parse(markdown))` — markdown to mdast and back through `packages/markdown`
+> on both legs, proving the `remark-stringify` pin holds (see the Findings entry) but
+> nothing about a ProseMirror schema, which does not exist yet. Its 7-fixture corpus
+> contains none of the classes that would make the guarantee meaningful (nested lists,
+> tables, code fences, footnotes, HTML blocks, hard breaks, entities, mixed emphasis).
+> Only the serialiser half of this gate exists.
 
 > **GATE-3 — `workspace_id` filtered inside every vector query.**
 > Tenant isolation in retrieval is a security boundary, not a convenience. The filter
@@ -186,14 +193,26 @@ lives or dies; it is deliberately front-loaded.
 - [x] Implement profile photos on top of `BlobStore`, including upload validation and
       resizing.
 - [x] Authentication: sessions, password reset over the `MailSender` port.
-- [ ] Sign-in, invitation-accept and password-reset **screens** in `apps/web` (WU-17).
-      The composables they wire to landed (`f92e242`); the markup and the owner-review
-      checkpoint have not.
+- [x] Sign-in, invitation-accept and password-reset **screens** in `apps/web` (WU-17).
+      Built on Nuxt UI's `UAuthForm` per the "check the library first" rule
+      (`AuthShell.vue` + `pages/{login,forgot-password,reset-password}.vue` and
+      `pages/invite/accept.vue`), covered by 12 Playwright e2e tests
+      (`e2e/auth.spec.ts`). Owner-reviewed and approved against
+      `docs/UI-CHECKLIST.md`/`docs/DESIGN-SYSTEM.md` — see that checklist's Review Log
+      for the findings raised and fixed during the review (CIE L\* tone conversion,
+      `UFormField`'s missing `required` attribute, the `UMain` vertical-overflow
+      defect).
 
 ### Phase 2 — Content and editor
 
 The markdown pipeline and the two document modes.
 
+- [ ] Add page content storage to the schema. After Phase 1, `packages/db/src/schema.ts`
+      holds 11 tables and every one of them is tenancy or auth (`plans`, `users`,
+      `workspaces`, `nodes`, `cells`, `cell_members`, `permissions`, `sessions`,
+      `password_resets`, `instance_settings`, `invitations`) — there is no column
+      anywhere that stores a page's markdown. This must land before the editor can
+      persist anything; see the Findings entry below.
 - [ ] Build `packages/markdown` as the single unified/remark pipeline, imported by the
       editor, the API and the future indexer. No second parser anywhere in the codebase.
 - [ ] Implement stable block IDs: every block-level node (paragraph, heading, list item,
@@ -388,6 +407,33 @@ makes conventions portable across projects.
 ## Findings
 
 Discoveries and constraints. Newest first.
+
+### 2026-09-04 — `packages/db/src/schema.ts` has no page-content storage
+
+After Phase 1, the schema holds 11 tables (`plans`, `users`, `workspaces`, `nodes`,
+`cells`, `cell_members`, `permissions`, `sessions`, `password_resets`,
+`instance_settings`, `invitations`) and every one of them is tenancy or authentication.
+`nodes` models the tree structure (id, `workspace_id`, `parent_id`, `type`, `position`,
+path) but carries no column for a page's markdown body.
+
+**Impact:** the Phase 2 roadmap did not previously name content storage as its own
+task, leaving a hole between "the tree exists" and "the editor can persist a document" —
+added as an explicit Phase 2 task above so the gap is closed in the plan, not just
+noted.
+
+### 2026-09-04 — The `remark-stringify` list/emphasis pin has no Findings entry
+
+`packages/markdown/src/index.ts` pins the serialiser with
+`unified().use(remarkStringify, { bullet: '-', emphasis: '_' })`. This is load-bearing:
+remark's own defaults silently renormalise `-` list markers to `*` and `_` emphasis
+markers to `*`, which would make any byte-identical round-trip guarantee impossible.
+Until now the constraint existed only as a code comment and in Phase 0's archived
+`tasks.md` (line 96) — not discoverable here.
+
+**Impact:** serialiser options must be pinned and asserted by test, never left to
+remark's defaults, and GATE-2's eventual byte-identical guarantee depends on this
+pin holding. A constraint that lives only in a code comment is not findable by whoever
+needs it once Phase 2 grows the fixture corpus — hence this entry.
 
 ### 2026-09-04 — Nuxt UI's `required` prop sets no `required` attribute on the input
 

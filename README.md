@@ -51,9 +51,11 @@ This starts five containers: `postgres` (with the `pgvector` extension enabled),
 `mailpit` (dev SMTP capture — SMTP on `1025`, web UI on `8025`), `minio` (S3-compatible
 object storage), and `kroki` with its `mermaid` sidecar (server-side diagram rendering —
 `kroki` alone cannot render Mermaid; see `compose.yaml`). `bun run db:migrate` runs the
-(currently empty) Drizzle migration journal, and `bun run db:seed` runs the (currently
-no-op) seed script — both are stable entry points, ready for real schema and data once
-Phase 1 lands it.
+Phase 1 tenancy and permissions schema (`packages/db/drizzle/`: nodes, workspaces,
+users, cells, permissions, sessions, password resets, registration and invitations).
+`bun run db:seed` remains a no-op — Phase 1 has no producer that authors baseline rows
+yet (see `docs/TODO.md`, "Migrate `plans`...") — but it stays a stable entry point for
+when one lands.
 
 Tear the stack down with `podman compose down -v` (the `-v` also removes the named
 volumes, so the next `up` starts from a clean database).

@@ -406,24 +406,43 @@ differently:
 
 ## Phase 18 (WU-18) — `docs: record the phase-1 schema and resolver in SPECS and TODO`
 
-- [ ] 18.1 Sync `docs/TODO.md`'s Phase 1 checklist bullets to the settled schema
+- [x] 18.1 Sync `docs/TODO.md`'s Phase 1 checklist bullets to the settled schema
       (workspace-as-node, `parent_id` walk, `resource_type` not stored, no `ltree`) —
       `docs/SPECS.md` §14 and the Findings log are already reconciled; only the Phase 1
       task-list bullets still carry the pre-reconciliation phrasing.
-- [ ] 18.2 Add a `docs/TODO.md` Findings entry recording the `role` subject_kind
+      **Done.** Reconciled by `9e86246` (an earlier session on this branch); confirmed
+      current — `docs/TODO.md`'s Phase 1 bullets already read "five values: the
+      workspace is a real `nodes` row", "Deliberately not `ltree` + GiST", and
+      "`resource_type` is deliberately not a column". This batch additionally ticked
+      the WU-17 sign-in/invitation/password-reset screens bullet (owner-approved) and
+      refreshed the Status table (85/85 tasks, HEAD `60521d8`).
+- [x] 18.2 Add a `docs/TODO.md` Findings entry recording the `role` subject_kind
       decision (task 3.8): added to the enum now with no Phase 1 producer, because
       adding a Postgres enum value later is cheap and removing one is not.
-- [ ] 18.3 Add a `docs/TODO.md` Findings entry recording login/password-reset rate
+      **Done.** Already present ("`role` reserved as a `subject_kind` with no Phase 1
+      producer", added by `9e86246`); confirmed current, not duplicated.
+- [x] 18.3 Add a `docs/TODO.md` Findings entry recording login/password-reset rate
       limiting as a **known, deliberately deferred gap**: the non-disclosure response
       (Phase 11) closes the account-enumeration oracle but not online brute force;
       mitigation is deferred to before any public deployment. Do not implement rate
       limiting as part of this change.
-- [ ] 18.4 Confirm no edit is made to `openspec/specs/container-stack/spec.md` (or its
+      **Done.** Already present as both a Findings entry ("Login and password-reset
+      have no rate limiting") and a "Known gaps carried forward" bullet, added by
+      `9e86246`; confirmed current, not duplicated.
+- [x] 18.4 Confirm no edit is made to `openspec/specs/container-stack/spec.md` (or its
       archived equivalent) — the proposal's `ltree`-assertion amendment is withdrawn
       per the settled reconciliation; this task is a checked no-op, not a schedule
       item.
-- [ ] 18.5 Run `bun run verify` (`check && lint && typecheck && test`) green on the
+      **Confirmed.** `git log --oneline -- openspec/specs/container-stack/` shows a
+      single commit (the Phase 0 archive), no edits since; `grep -r ltree` across
+      `openspec/specs/` and `openspec/changes/archive/` returns nothing. The
+      `ltree`-amendment language survives only inside this change's own
+      `proposal.md`/`design.md` narrative (documenting the withdrawn idea and why),
+      never applied to the baseline spec.
+- [x] 18.5 Run `bun run verify` (`check && lint && typecheck && test`) green on the
       full branch before requesting owner review.
+      **Done.** `bun run verify` exit code 0 on HEAD `60521d8` — see the apply-progress
+      record for the full per-package breakdown.
 
 ---
 
