@@ -344,6 +344,24 @@ makes conventions portable across projects.
 
 Discoveries and constraints. Newest first.
 
+### 2026-09-04 — `packages/contracts` was not carrying the API contract
+
+Phase 0 defined `packages/contracts` as "shared request/response schemas, the single source of
+truth for the API surface consumed by `apps/web` and `apps/api`". After Phase 1 work units 9-16
+it held only the environment schema, and **no route imported it**: the login, password-reset,
+registration, invitation and upload routes each declared inline TypeScript interfaces instead.
+
+Nothing failed, which is the problem. A package can quietly stop doing its job while every gate
+stays green, because "is this package fulfilling its stated purpose" is not something typecheck,
+lint or tests can ask.
+
+**Impact:** caught before the UI work unit rather than after. Had it shipped, `apps/web` would
+have hand-written a second copy of every request and response shape, and the two would drift the
+first time a field was renamed — the API would change, the web app would keep compiling against
+the stale shape, and the failure would surface at runtime in production rather than in the build.
+The request and response schemas move into `packages/contracts` as zod, both apps consume them,
+and the UI is built on the shared types from its first line.
+
 ### 2026-09-03 — Spec and design disagreed on whether the workspace is a row
 
 `sdd-spec` and `sdd-design` ran in parallel on Phase 1 and reached opposite conclusions about
