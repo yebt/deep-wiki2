@@ -344,6 +344,29 @@ makes conventions portable across projects.
 
 Discoveries and constraints. Newest first.
 
+### 2026-09-03 — Spec and design disagreed on whether the workspace is a row
+
+`sdd-spec` and `sdd-design` ran in parallel on Phase 1 and reached opposite conclusions about
+the same structure. The spec followed `docs/SPECS.md` §3.1 literally and made the workspace an
+implicit ancestor that is never materialised. The design added a fifth `node_type` so the
+workspace is a real row.
+
+The disagreement exposed that `docs/SPECS.md` was already self-contradictory: line 134 declared
+`node_type` with four values while line 234 used that same enum listing five. Neither agent was
+wrong about the document; the document was wrong.
+
+**Impact:** the design's position is adopted. The workspace is a real `nodes` row, because a
+special case inside the authorisation query is precisely where an isolation bug hides, and one
+extra row per workspace is a trivial price. Two related rulings adopted with it: authorisation
+walks `parent_id` rather than the derived `path` cache, since a stale cache would grant or deny
+silently; and `resource_type` is not stored on `permissions` at all, because a duplicated value
+that can disagree with the tree is an authorisation bug waiting to happen. `docs/SPECS.md` §3
+and §14 and the delta spec are reconciled.
+
+The general lesson is worth keeping: running spec and design in parallel is cheap and it
+surfaces contradictions in the source documents that a sequential run would have inherited
+silently, because the second phase would simply have followed the first.
+
 ### 2026-09-03 — The appliance question is answered: Postgres, door left ajar
 
 `docs/TODO.md` carried an Open Question — whether "download one binary, run it, no Postgres"

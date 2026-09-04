@@ -131,7 +131,7 @@ nodes (
   id            uuid primary key,
   workspace_id  uuid not null,
   parent_id     uuid references nodes(id),
-  type          node_type not null,        -- shelf | book | chapter | page
+  type          node_type not null,        -- workspace | shelf | book | chapter | page
   path          text not null,             -- materialised ancestry, '/'-delimited ids
   position      integer not null,          -- sibling ordering
   slug          text not null,
@@ -231,8 +231,9 @@ permissions (
   workspace_id  uuid not null,
   subject_type  subject_kind not null,     -- user | team | role | agent
   subject_id    uuid not null,
-  resource_type node_type not null,        -- workspace | shelf | book | chapter | page
-  resource_id   uuid not null,
+  -- resource_type is deliberately NOT stored: it is `nodes.type` of `resource_id`.
+  -- Storing it twice creates a value that can disagree with the tree.
+  resource_id   uuid not null references nodes(id),
   action        perm_action not null,      -- read | comment | write | manage
   effect        perm_effect not null       -- allow | deny
 );
@@ -740,6 +741,11 @@ API, and the indexer, and it is the reason the backend is TypeScript (§14).
 | **Rule packs are shareable entities authored as documents** | Sharing across projects requires independent identity; authoring them as documents inherits versioning, diffing, and commenting for free | Nothing foreseeable |
 | **Bun workspaces without Turborepo** | `bun run -F` covers the task graph; fewer build dependencies matters for a self-hosted product | Build times that measurably hurt |
 | **Postgres is the engine, but engine-specific features are paid for, not assumed** | The appliance question is answered: no single-binary/SQLite distribution, so the Bun + Hono decision stands. But the door stays open at low cost. The rule is a cost test, not a purity test: avoid a Postgres-only feature when a portable equivalent is nearly as good, accept one when it buys something the product genuinely needs. Applied: the `nodes` path is a `text` materialised path with `text_pattern_ops`, **not** `ltree` — the portable form is barely worse and `ltree` would have been the third hard lock-in. Recursive CTEs stay, because SQLite supports them too and they cost nothing in portability. `pgvector` stays and is accepted as a genuine lock-in, because RAG over the corpus is a core product function with no equivalent-maturity alternative | A decision to ship an appliance after all, which would reopen the backend choice as well |
+| **Authorisation walks `parent_id`, never the `path` cache** | `nodes.path` is a trigger-maintained denormalised cache that exists for subtree *navigation* queries. If it goes stale or corrupt, a resolver reading it grants or denies access silently and wrongly. `parent_id` is the authoritative structure, depth is bounded at five, and each step is a primary-key lookup. Correctness of the cache is then a separate, testable concern instead of a security dependency | A measured cost difference at realistic depth, which would require the path integrity check to run continuously rather than per test |
+| **The workspace is a real `nodes` row** | Materialising it as a fifth `node_type` gives the ancestor chain a genuine root, makes the resource foreign key unconditional, and deletes the workspace-level special case from the resolver. A branch in the authorisation query is exactly where an isolation bug hides. It also resolves a latent contradiction in this document, which previously declared `node_type` with four values in one place and five in another | Nothing foreseeable |
+| **Tenant isolation by composite foreign key `(id, workspace_id)`** | A cross-tenant row becomes *unrepresentable* rather than merely unqueried. A `WHERE workspace_id = ?` is one forgotten clause away from a leak; a composite FK cannot be forgotten. GATE-3 will rely on this | Nothing foreseeable |
+| **Super Root does not bypass `can()`** | An operator is not a reader. A bypass path is the same failure mode as any unchecked machine read. Instance-level operations go through a separate `canOperateInstance()` so operating the platform and reading a tenant's documents stay different authorities | A break-glass requirement, which would need its own audit trail |
+| **`resource_type` is not stored on `permissions`** | It is `nodes.type` of `resource_id`. Storing it twice creates a second value that can disagree with the tree, and the disagreement would be an authorisation bug | A resource that is not a node |
 | **`invitation_only` registration by default** | An open-by-default self-hosted instance gets discovered and spam-registered, and the operator blames the software | Nothing — `open` remains available as an explicit choice |
 
 ---
