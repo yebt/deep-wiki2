@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { Hono } from 'hono';
+import { cors } from 'hono/cors';
 import postgres from 'postgres';
 import { Argon2idPasswordHasher } from './adapters/crypto/argon2id-password-hasher';
 import { createBlobStore } from './adapters/blob';
@@ -40,6 +41,20 @@ const DEFAULT_MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 if (import.meta.main) {
   const config = loadConfig();
   const sql = postgres(config.DATABASE_URL);
+
+  // apps/web and apps/api are served from different origins in every
+  // environment (different ports in dev, different hosts in
+  // production). A session cookie only reaches the browser's request if
+  // the API opts that exact origin into CORS with credentials — a
+  // wildcard origin cannot carry `Access-Control-Allow-Credentials`.
+  app.use(
+    '*',
+    cors({
+      origin: config.APP_URL,
+      credentials: true,
+      allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    }),
+  );
 
   // `refineEnv()` (packages/contracts) already guarantees these are set —
   // `loadConfig()` above would have thrown otherwise.
