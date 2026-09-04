@@ -14,6 +14,7 @@
     "e2e": "playwright test --config ../../playwright.config.ts"
   },
   "dependencies": {
+    "@deep-wiki/contracts": "workspace:*",
     "@nuxt/ui": "^4.11.0",
     "nuxt": "^4.5.2",
     "tailwindcss": "^4.3.3",
