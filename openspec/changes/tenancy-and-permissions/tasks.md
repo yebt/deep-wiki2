@@ -145,20 +145,20 @@ differently:
 
 ## Phase 4 (WU-4) — `feat(db): node move with locked subtree path rewrite and cycle rejection`
 
-- [ ] 4.1 RED — `packages/db/src/nodes/move.test.ts`: a reparented chapter carries both
+- [x] 4.1 RED — `packages/db/src/nodes/move.test.ts`: a reparented chapter carries both
       its pages' rewritten paths *(tenancy-model: Subtree Move Rewrites Path, scenario
       1)*; a cross-workspace move is rejected rather than changing `workspace_id`
       *(scenario 2)*; a cycle (new parent is a descendant of the moved node) is
       rejected; an illegal parent-type is rejected; concurrent moves serialise on the
       `FOR UPDATE` lock (D12).
-- [ ] 4.2 GREEN — implement `packages/db/src/nodes/move.ts` per the design's
+- [x] 4.2 GREEN — implement `packages/db/src/nodes/move.ts` per the design's
       lock → cycle-check → capture-prefix → update → uniform-prefix-rewrite sequence.
-- [ ] 4.3 RED — `packages/db/src/nodes/verify-paths.test.ts`: `verifyPaths()` returns
+- [x] 4.3 RED — `packages/db/src/nodes/verify-paths.test.ts`: `verifyPaths()` returns
       empty after every move test in 4.1.
-- [ ] 4.4 GREEN — implement `packages/db/src/nodes/verify-paths.ts` (recursive CTE
+- [x] 4.4 GREEN — implement `packages/db/src/nodes/verify-paths.ts` (recursive CTE
       recomputing `path` from `parent_id`); add `verify:paths` to
       `packages/db/package.json`.
-- [ ] 4.5 GREEN — `packages/db/src/nodes/subtree.ts`, the one module allowed to write a
+- [x] 4.5 GREEN — `packages/db/src/nodes/subtree.ts`, the one module allowed to write a
       `path` predicate; a populated multi-workspace query plan uses the
       `text_pattern_ops` index rather than a sequential scan *(tenancy-model:
       Materialised Path, index scenario — confirmed again under load in Phase 7)*.

@@ -10,9 +10,11 @@
     "test": "bun test",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "migrate": "bun run migrate.ts",
-    "seed": "bun run seed.ts"
+    "seed": "bun run seed.ts",
+    "verify:paths": "bun run verify-paths.ts"
   },
   "dependencies": {
+    "@deep-wiki/core": "workspace:*",
     "drizzle-orm": "^0.38.3",
     "postgres": "^3.4.5"
   },

@@ -73,6 +73,7 @@
       "name": "@deep-wiki/db",
       "version": "0.0.0",
       "dependencies": {
+        "@deep-wiki/core": "workspace:*",
         "drizzle-orm": "^0.38.3",
         "postgres": "^3.4.5",
       },
