@@ -389,6 +389,21 @@ makes conventions portable across projects.
 
 Discoveries and constraints. Newest first.
 
+### 2026-09-04 — Nuxt UI's `required` prop sets no `required` attribute on the input
+
+Found while removing the redundant red asterisks from the auth forms. `UFormField`'s `required`
+prop in Nuxt UI v4 renders an `after:content-['*']` glyph and nothing else: `UAuthForm`'s
+`omitFieldProps` strips `required` before the field props reach the input component, so
+`input.required` is `false` and `aria-required` is `null`. This was already the case before the
+asterisks were touched — removing them changed the visuals, not the semantics.
+
+**Impact:** every form in this product needs the required semantics asserted explicitly rather
+than assumed from the prop. A screen reader is currently not told which fields are required on
+the auth screens. This is an accessibility floor item (§5, "every form input has a
+programmatically associated label" and its neighbours) and it is open, not fixed. Any form work
+in a later phase must set the attribute itself and cover it with a test, because the library's
+prop name promises something it does not deliver.
+
 ### 2026-09-04 — Login and password-reset have no rate limiting
 
 The non-disclosure response on both routes (Phase 1, `apps/api/src/routes/auth.ts`)
