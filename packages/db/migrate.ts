@@ -15,8 +15,16 @@ async function main(): Promise<void> {
   }
 
   const db = createDb(url);
-  await migrate(db, { migrationsFolder: './drizzle' });
-  console.log('migrate: done');
+  try {
+    await migrate(db, { migrationsFolder: './drizzle' });
+    console.log('migrate: done');
+  } finally {
+    // postgres.js keeps its pool open, so without this the process applies
+    // the migrations, prints "done", and then hangs forever. Anyone
+    // following the documented bootstrap sequence would read that as a
+    // failure and kill a run that had already succeeded.
+    await db.$client.end();
+  }
 }
 
 if (import.meta.main) {

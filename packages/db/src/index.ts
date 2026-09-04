@@ -32,6 +32,8 @@ export type {
   CreateInvitationInput,
   InvitationRecord,
 } from './auth/invitations';
+export { createWorkspace, PlanLimitExceededError } from './workspaces/create-workspace';
+export type { CreatedWorkspace, CreateWorkspaceInput } from './workspaces/create-workspace';
 export { can, createGrantLookup } from './permissions/queries';
 export { insertGrants } from './permissions/grants';
 export type { GrantInput } from './permissions/grants';

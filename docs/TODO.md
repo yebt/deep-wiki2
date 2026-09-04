@@ -408,6 +408,30 @@ makes conventions portable across projects.
 
 Discoveries and constraints. Newest first.
 
+### 2026-09-04 — `bun run db:migrate` applied the schema and then hung forever
+
+Found by running the documented bootstrap sequence end to end for the first time rather than
+reading it. `migrate.ts` created the client, applied all 11 tables successfully, printed
+`migrate: done` — and never exited. `postgres.js` keeps its connection pool open, and nothing
+closed it.
+
+**Impact:** anyone following `README.md`'s bootstrap would see a terminal sitting still after a
+success message, read it as a failure, and kill a run that had already worked. Fixed by closing
+the pool in a `finally`. The lesson generalises: an entry point that a human runs by hand needs
+its exit path tested, and no unit test covers "the process terminates".
+
+### 2026-09-04 — The compose stack cannot start on a machine already running other projects
+
+`compose.yaml` publishes postgres on 5432, mailpit on 1025/8025 and minio on 9000. On this
+development machine all four are already taken by unrelated containers, so `podman compose up`
+fails on port binding before anything starts.
+
+**Impact:** not a defect in the compose file — those are the conventional ports and a fresh
+machine works. But the documented bootstrap assumes an empty host, and a developer running more
+than one project cannot follow it as written. Either the published ports move into environment
+variables with those defaults, or `README.md` documents a `compose.override.yaml`. Until then the
+first-run experience on a busy machine is a failure with no explanation.
+
 ### 2026-09-04 — `packages/db/src/schema.ts` has no page-content storage
 
 After Phase 1, the schema holds 11 tables (`plans`, `users`, `workspaces`, `nodes`,
