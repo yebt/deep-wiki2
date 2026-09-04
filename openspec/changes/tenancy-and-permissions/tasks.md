@@ -355,20 +355,20 @@ differently:
 
 ## Phase 15 (WU-15) — `feat(api): BlobStore adapters for S3-compatible and filesystem storage`
 
-- [ ] 15.1 RED (documentation-like-paths threat matrix) —
+- [x] 15.1 RED (documentation-like-paths threat matrix) —
       `apps/api/src/adapters/blob/fs-blob-store.test.ts`: one test per rejected key
       class (`../`, an absolute path, a backslash, a NUL byte) plus a
       containment-escape attempt outside `BLOB_STORE_FS_ROOT`.
-- [ ] 15.2 GREEN — `apps/api/src/adapters/blob/fs-blob-store.ts`.
-- [ ] 15.3 RED — `apps/api/src/adapters/blob/s3-blob-store.test.ts`: type-checks
+- [x] 15.2 GREEN — `apps/api/src/adapters/blob/fs-blob-store.ts`.
+- [x] 15.3 RED — `apps/api/src/adapters/blob/s3-blob-store.test.ts`: type-checks
       against the same `BlobStore` port with no storage-specific type leaking into
       `packages/core` *(blob-storage: Two Adapters Behind One Port)*; a misconfigured
       adapter fails startup naming the missing config *(blob-storage: Adapter
       Selection by Environment, both scenarios)*.
-- [ ] 15.4 GREEN — `apps/api/src/adapters/blob/s3-blob-store.ts` (`Bun.S3Client`,
+- [x] 15.4 GREEN — `apps/api/src/adapters/blob/s3-blob-store.ts` (`Bun.S3Client`,
       explicit `endpoint` — D17) and `apps/api/src/adapters/blob/index.ts`
       (`BLOB_STORE_DRIVER` selection).
-- [ ] 15.5 RED/GREEN — round-trip test: the same photo bytes return through each
+- [x] 15.5 RED/GREEN — round-trip test: the same photo bytes return through each
       adapter independently *(blob-storage: Adapter-Independent Retrieval, both
       scenarios)*.
 

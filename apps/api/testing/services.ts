@@ -6,6 +6,7 @@
  * token) — but there is nothing to provision per-suite or drop here, both
  * containers are stateless dev tooling.
  */
+import { createHash, createHmac } from 'node:crypto';
 import { connect } from 'node:net';
 
 export const COMPOSE_DIR = import.meta.dir;
@@ -19,6 +20,7 @@ export const MINIO_ENDPOINT = 'http://localhost:19000';
 export const MINIO_REGION = 'us-east-1';
 export const MINIO_ACCESS_KEY_ID = 'dw_test';
 export const MINIO_SECRET_ACCESS_KEY = 'dw_test_password';
+export const MINIO_TEST_BUCKET = 'deep-wiki-test';
 
 export type ContainerRuntime = 'podman' | 'docker';
 
@@ -101,5 +103,66 @@ export async function ensureTestServices(): Promise<void> {
         `${COMPOSE_TIMEOUT_MS}ms. Run (cd apps/api/testing && ${binary} compose up -d --wait) manually ` +
         'to see the underlying error.',
     );
+  }
+}
+
+const EMPTY_PAYLOAD_SHA256 = createHash('sha256').update('').digest('hex');
+
+function hmac(key: Buffer | string, data: string): Buffer {
+  return createHmac('sha256', key).update(data).digest();
+}
+
+function amzDates(): { amzDate: string; dateStamp: string } {
+  const iso = new Date().toISOString().replace(/[:-]|\.\d{3}/g, '');
+  return { amzDate: iso, dateStamp: iso.slice(0, 8) };
+}
+
+/**
+ * Signs and issues a bare `PUT /{bucket}` (S3 `CreateBucket`) against
+ * MinIO. Bun's `S3Client` has no bucket-management API (it assumes the
+ * bucket already exists — see s3-blob-store.ts), and no S3 SDK is a
+ * dependency of this project (design.md D17), so this hand-rolled SigV4
+ * signature is test-only plumbing to make the bucket exist before the
+ * adapter round-trip test runs against it.
+ */
+export async function ensureMinioBucket(bucket: string = MINIO_TEST_BUCKET): Promise<void> {
+  const host = new URL(MINIO_ENDPOINT).host;
+  const { amzDate, dateStamp } = amzDates();
+  const canonicalHeaders = `host:${host}\nx-amz-content-sha256:${EMPTY_PAYLOAD_SHA256}\nx-amz-date:${amzDate}\n`;
+  const signedHeaders = 'host;x-amz-content-sha256;x-amz-date';
+  const canonicalRequest = ['PUT', `/${bucket}`, '', canonicalHeaders, signedHeaders, EMPTY_PAYLOAD_SHA256].join('\n');
+
+  const credentialScope = `${dateStamp}/${MINIO_REGION}/s3/aws4_request`;
+  const stringToSign = [
+    'AWS4-HMAC-SHA256',
+    amzDate,
+    credentialScope,
+    createHash('sha256').update(canonicalRequest).digest('hex'),
+  ].join('\n');
+
+  const kDate = hmac(`AWS4${MINIO_SECRET_ACCESS_KEY}`, dateStamp);
+  const kRegion = hmac(kDate, MINIO_REGION);
+  const kService = hmac(kRegion, 's3');
+  const kSigning = hmac(kService, 'aws4_request');
+  const signature = hmac(kSigning, stringToSign).toString('hex');
+
+  const authorization =
+    `AWS4-HMAC-SHA256 Credential=${MINIO_ACCESS_KEY_ID}/${credentialScope}, ` +
+    `SignedHeaders=${signedHeaders}, Signature=${signature}`;
+
+  const res = await fetch(`${MINIO_ENDPOINT}/${bucket}`, {
+    method: 'PUT',
+    headers: {
+      host,
+      'x-amz-content-sha256': EMPTY_PAYLOAD_SHA256,
+      'x-amz-date': amzDate,
+      authorization,
+    },
+  });
+
+  // 200 = created, 409 = already owned by us — both mean the bucket exists.
+  if (!res.ok && res.status !== 409) {
+    const body = await res.text();
+    throw new Error(`apps/api/testing: failed to create MinIO bucket "${bucket}": ${res.status} ${body}`);
   }
 }
