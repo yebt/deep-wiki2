@@ -71,15 +71,15 @@ differently:
 
 ## Phase 1 (WU-1) — `feat(core): permission precedence as a pure total function`
 
-- [ ] 1.1 RED — `packages/core/src/permissions/decide.test.ts`: `decide()` is total
+- [x] 1.1 RED — `packages/core/src/permissions/decide.test.ts`: `decide()` is total
       (no grants → `deny`), smallest depth wins, deny wins at equal depth regardless of
       subject kind (D8). *(permission-resolver: Default Deny — pure half)*
-- [ ] 1.2 RED — `packages/core/src/permissions/actions.test.ts`: `impliedAllowActions`/
+- [x] 1.2 RED — `packages/core/src/permissions/actions.test.ts`: `impliedAllowActions`/
       `impliedDenyActions` lattice property test — `allow(X)` covers actions ≤ X,
       `deny(X)` covers actions ≥ X (D9).
-- [ ] 1.3 GREEN — implement `packages/core/src/permissions/{types,actions,decide,can}.ts`:
+- [x] 1.3 GREEN — implement `packages/core/src/permissions/{types,actions,decide,can}.ts`:
       `Action`, `Effect`, `ResolvedGrant`, `GrantLookup` port, `can(lookup, q)`.
-- [ ] 1.4 GREEN — export from `packages/core/src/index.ts`; `bun run -F @deep-wiki/core test`
+- [x] 1.4 GREEN — export from `packages/core/src/index.ts`; `bun run -F @deep-wiki/core test`
       and `bun run scripts/checks/core-purity.ts` stay green (zero imports).
 
 ## Phase 2 (WU-2) — `test(db): deterministic postgres provisioning for database-backed tests`
