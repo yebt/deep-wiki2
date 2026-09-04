@@ -198,3 +198,104 @@ describe('super root global identity', () => {
     expect(membership).toHaveLength(0);
   });
 });
+
+async function seedUser(): Promise<string> {
+  const [user] = await sql`
+    INSERT INTO users (email, password_hash, display_name)
+    VALUES (${`u-${crypto.randomUUID()}@example.com`}, 'hash', 'U')
+    RETURNING id
+  `;
+  return user!.id as string;
+}
+
+describe('cells as group subjects', () => {
+  test("a cell membership's workspace_id must match the named cell's own workspace (structural isolation)", async () => {
+    const { workspaceId: workspaceA } = await seedWorkspace();
+    const { workspaceId: workspaceB } = await seedWorkspace();
+    const [cellA] = await sql`INSERT INTO cells (workspace_id, name) VALUES (${workspaceA}, ${`Team-${crypto.randomUUID()}`}) RETURNING id`;
+    const userId = await seedUser();
+
+    await assertRejects(
+      sql`INSERT INTO cell_members (cell_id, user_id, workspace_id) VALUES (${cellA!.id}, ${userId}, ${workspaceB})`,
+    );
+  });
+
+  test("a membership recorded under the cell's own workspace succeeds", async () => {
+    const { workspaceId } = await seedWorkspace();
+    const [cell] = await sql`INSERT INTO cells (workspace_id, name) VALUES (${workspaceId}, ${`Team-${crypto.randomUUID()}`}) RETURNING id`;
+    const userId = await seedUser();
+
+    const rows = await sql`
+      INSERT INTO cell_members (cell_id, user_id, workspace_id) VALUES (${cell!.id}, ${userId}, ${workspaceId})
+      RETURNING cell_id
+    `;
+    expect(rows).toHaveLength(1);
+  });
+});
+
+describe('permissions — cross-workspace isolation (structural half)', () => {
+  test('a grant naming a resource outside its own workspace is rejected by the composite FK', async () => {
+    const { rootId: rootA } = await seedWorkspace();
+    const { workspaceId: workspaceB } = await seedWorkspace();
+    const userId = await seedUser();
+
+    await assertRejects(
+      sql`INSERT INTO permissions (workspace_id, subject_type, subject_id, resource_id, action, effect)
+          VALUES (${workspaceB}, 'user', ${userId}, ${rootA}, 'read', 'allow')`,
+    );
+  });
+
+  test('a grant naming a cell outside its own workspace is rejected by the composite FK', async () => {
+    const { workspaceId: workspaceA, rootId: rootA } = await seedWorkspace();
+    const { workspaceId: workspaceB } = await seedWorkspace();
+    const [cellB] = await sql`INSERT INTO cells (workspace_id, name) VALUES (${workspaceB}, ${`Team-${crypto.randomUUID()}`}) RETURNING id`;
+
+    await assertRejects(
+      sql`INSERT INTO permissions (workspace_id, subject_type, subject_id, resource_id, action, effect)
+          VALUES (${workspaceA}, 'cell', ${cellB!.id}, ${rootA}, 'read', 'allow')`,
+    );
+  });
+});
+
+describe('permissions — resource_type is not a stored column (D10)', () => {
+  test('the permissions table has no resource_type column', async () => {
+    const rows = await sql`
+      SELECT column_name FROM information_schema.columns
+       WHERE table_name = 'permissions' AND column_name = 'resource_type'
+    `;
+    expect(rows).toHaveLength(0);
+  });
+});
+
+describe('permissions — supported subject types', () => {
+  test('subject_type accepts user, cell, and agent, each resolving through the same table', async () => {
+    const { workspaceId, rootId, userId } = await seedWorkspace();
+    const [cell] = await sql`INSERT INTO cells (workspace_id, name) VALUES (${workspaceId}, ${`Team-${crypto.randomUUID()}`}) RETURNING id`;
+    const agentId = crypto.randomUUID();
+
+    const cases = [
+      ['user', userId],
+      ['cell', cell!.id as string],
+      ['agent', agentId],
+    ] as const;
+
+    for (const [subjectType, subjectId] of cases) {
+      const rows = await sql`
+        INSERT INTO permissions (workspace_id, subject_type, subject_id, resource_id, action, effect)
+        VALUES (${workspaceId}, ${subjectType}::subject_kind, ${subjectId}, ${rootId}, 'read', 'allow')
+        RETURNING subject_type
+      `;
+      expect(rows[0]!.subject_type).toBe(subjectType);
+    }
+  });
+
+  test('the reserved role subject_kind value exists with zero producers this phase', async () => {
+    const enumRows = await sql<{ enumlabel: string }[]>`
+      SELECT enumlabel FROM pg_enum WHERE enumtypid = 'subject_kind'::regtype ORDER BY enumlabel
+    `;
+    expect(enumRows.map((r) => r.enumlabel)).toContain('role');
+
+    const roleGrants = await sql`SELECT 1 FROM permissions WHERE subject_type = 'role'`;
+    expect(roleGrants).toHaveLength(0);
+  });
+});

@@ -77,4 +77,30 @@ describe('after migrate: hand-written objects exist', () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]!.indexdef).toContain('text_pattern_ops');
   });
+
+  test('the composite tenant-isolation foreign key exists on cell_members (cell_id, workspace_id)', async () => {
+    const rows = await sql<{ conname: string }[]>`
+      SELECT conname FROM pg_constraint
+      WHERE conrelid = 'cell_members'::regclass AND conname = 'cell_members_cell_fk' AND contype = 'f'
+    `;
+    expect(rows).toHaveLength(1);
+  });
+
+  test('the permissions lookup index exists', async () => {
+    const rows = await sql<{ indexdef: string }[]>`
+      SELECT indexdef FROM pg_indexes WHERE tablename = 'permissions' AND indexname = 'permissions_lookup_idx'
+    `;
+    expect(rows).toHaveLength(1);
+  });
+
+  test('the permissions table carries the composite resource and subject-cell foreign keys', async () => {
+    const rows = await sql<{ conname: string }[]>`
+      SELECT conname FROM pg_constraint
+      WHERE conrelid = 'permissions'::regclass AND contype = 'f'
+      ORDER BY conname
+    `;
+    const names = rows.map((r) => r.conname);
+    expect(names).toContain('permissions_resource_fk');
+    expect(names).toContain('permissions_subject_cell_fk');
+  });
 });

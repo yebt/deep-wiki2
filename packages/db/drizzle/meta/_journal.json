@@ -15,6 +15,20 @@
       "when": 1735689600001,
       "tag": "0001_tenancy",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1735689600002,
+      "tag": "0002_cells",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1735689600003,
+      "tag": "0003_permissions",
+      "breakpoints": true
     }
   ]
 }

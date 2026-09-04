@@ -85,3 +85,46 @@ export const nodes = pgTable('nodes', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
+
+export const cells = pgTable('cells', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  workspaceId: uuid('workspace_id')
+    .notNull()
+    .references(() => workspaces.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * The composite `(cell_id, workspace_id)` foreign key into `cells` — the
+ * structural half of "cell membership is workspace-scoped" — is declared
+ * only in the migration SQL (see the module doc comment above).
+ */
+export const cellMembers = pgTable('cell_members', {
+  cellId: uuid('cell_id').notNull(),
+  userId: uuid('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  workspaceId: uuid('workspace_id').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * `resource_type` is deliberately not a column here (design.md D10) — it
+ * is `nodes.type` of `resource_id`. The generated `subject_cell_id` /
+ * `subject_agent_id` columns and the composite tenant-isolation foreign
+ * keys exist only in the migration SQL.
+ */
+export const permissions = pgTable('permissions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  workspaceId: uuid('workspace_id')
+    .notNull()
+    .references(() => workspaces.id, { onDelete: 'cascade' }),
+  subjectType: subjectKind('subject_type').notNull(),
+  subjectId: uuid('subject_id').notNull(),
+  resourceId: uuid('resource_id').notNull(),
+  action: permAction('action').notNull(),
+  effect: permEffect('effect').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});

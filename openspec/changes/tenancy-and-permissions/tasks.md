@@ -165,18 +165,18 @@ differently:
 
 ## Phase 5 (WU-5) — `feat(db): cells, cell members, and the single permissions table`
 
-- [ ] 5.1 RED — schema additions to `packages/db/src/schema.test.ts`: a cell membership
+- [x] 5.1 RED — schema additions to `packages/db/src/schema.test.ts`: a cell membership
       naming a user from a different workspace is rejected *(tenancy-model: Cells as
       Group Subjects)*; a grant naming a resource outside its workspace is rejected by
       the composite FK, and a grant naming a cell outside its workspace is rejected
       *(permission-resolver: Cross-Workspace Isolation, structural half)*.
-- [ ] 5.2 RED — a schema-shape assertion that `permissions` has **no** `resource_type`
+- [x] 5.2 RED — a schema-shape assertion that `permissions` has **no** `resource_type`
       column (D10).
-- [ ] 5.3 GREEN — `packages/db/drizzle/0002_cells.sql` (`cells`, `cell_members`) and
+- [x] 5.3 GREEN — `packages/db/drizzle/0002_cells.sql` (`cells`, `cell_members`) and
       `0003_permissions.sql` (`permissions`, generated `subject_cell_id`/
       `subject_agent_id`, composite FKs, `permissions_lookup_idx`), each with a tested
       `down`.
-- [ ] 5.4 RED — `subject_type` accepts `user`|`cell`|`agent` in populated Phase 1 flows,
+- [x] 5.4 RED — `subject_type` accepts `user`|`cell`|`agent` in populated Phase 1 flows,
       resolving through the same table and path *(permission-resolver: Single
       Permissions Table, Supported Subject Types)*; the reserved `role` value from 3.8
       is present with zero producers this phase.
