@@ -12,6 +12,11 @@
     "@deep-wiki/contracts": "workspace:*",
     "@deep-wiki/core": "workspace:*",
     "@deep-wiki/db": "workspace:*",
-    "hono": "^4.6.16"
+    "hono": "^4.6.16",
+    "nodemailer": "^9.1.1",
+    "postgres": "^3.4.5"
+  },
+  "devDependencies": {
+    "@types/nodemailer": "^8.0.1"
   }
 }

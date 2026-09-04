@@ -1,0 +1,36 @@
+# Test-only Mailpit and MinIO, for apps/api's adapter tests (SMTP against
+# Mailpit — Phase 12; S3-compatible storage against MinIO — Phase 15).
+#
+# Deliberately separate from the repository root's compose.yaml and from
+# packages/db/testing/compose.yaml: this machine (like any self-hoster's)
+# may already run unrelated services on the dev stack's ports (1025, 8025,
+# 9000 — verified occupied by unrelated projects during this change), so
+# this stack uses dedicated test-only ports instead.
+name: deep-wiki-api-test
+
+services:
+  mailpit:
+    image: axllent/mailpit
+    ports:
+      - "11025:1025"
+      - "18025:8025"
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  minio:
+    image: minio/minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: dw_test
+      MINIO_ROOT_PASSWORD: dw_test_password
+    ports:
+      - "19000:9000"
+      - "19001:9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 2s
+      timeout: 2s
+      retries: 30

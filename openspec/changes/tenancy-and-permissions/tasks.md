@@ -307,16 +307,16 @@ differently:
 
 ## Phase 12 (WU-12) — `feat(api): SMTP MailSender adapter bound to mailpit in development`
 
-- [ ] 12.1 RED — `apps/api/src/adapters/mail/smtp-mail-sender.test.ts`: type-checks
+- [x] 12.1 RED — `apps/api/src/adapters/mail/smtp-mail-sender.test.ts`: type-checks
       against the `MailSender` port with no framework type leaking into
       `packages/core` *(mail-delivery: SMTP Adapter Implements the MailSender Port)*; a
       connection failure is logged without the plaintext SMTP password *(mail-delivery:
       SMTP Credentials Never Logged)*.
-- [ ] 12.2 GREEN — `apps/api/src/adapters/mail/smtp-mail-sender.ts` (`nodemailer`,
+- [x] 12.2 GREEN — `apps/api/src/adapters/mail/smtp-mail-sender.ts` (`nodemailer`,
       STARTTLS/auth optional for Mailpit's no-auth 1025).
-- [ ] 12.3 RED — a message sent through the adapter is retrievable from Mailpit's inbox
+- [x] 12.3 RED — a message sent through the adapter is retrievable from Mailpit's inbox
       *(mail-delivery: Development Binding to Mailpit)*.
-- [ ] 12.4 GREEN — wire the adapter at the `apps/api` composition root.
+- [x] 12.4 GREEN — wire the adapter at the `apps/api` composition root.
 
 ## Phase 13 (WU-13) — `feat(api): registration mode with SMTP-verified open registration`
 
