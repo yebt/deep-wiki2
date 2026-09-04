@@ -17,3 +17,10 @@ export {
   simulatePasswordResetWork,
 } from './auth/password-resets';
 export type { ConsumePasswordResetResult, CreatedPasswordReset, PasswordResetRecord } from './auth/password-resets';
+export {
+  getInstanceSettings,
+  recordSmtpVerification,
+  setOpenRegistrationDomains,
+  setRegistrationMode,
+} from './auth/instance-settings';
+export type { InstanceSettings, RegistrationMode, SetRegistrationModeResult } from './auth/instance-settings';

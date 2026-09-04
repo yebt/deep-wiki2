@@ -320,10 +320,10 @@ differently:
 
 ## Phase 13 (WU-13) — `feat(api): registration mode with SMTP-verified open registration`
 
-- [ ] 13.1 RED — a fresh instance reads `registration_mode = invitation_only`
+- [x] 13.1 RED — a fresh instance reads `registration_mode = invitation_only`
       *(registration-policy: Registration Mode Setting)*.
-- [ ] 13.2 GREEN — `instance_settings` singleton row in `0004_auth.sql`.
-- [ ] 13.3 RED — `apps/api/src/routes/admin.test.ts`: self-registration rejected while
+- [x] 13.2 GREEN — `instance_settings` singleton row in `0004_auth.sql`.
+- [x] 13.3 RED — `apps/api/src/routes/admin.test.ts`: self-registration rejected while
       `closed`, no account created *(registration-policy: Registration Blocked in
       `closed` Mode)*; switching to `open` without a recorded SMTP test send is
       refused, naming the requirement *(registration-policy: `open` Mode Requires
@@ -331,10 +331,10 @@ differently:
       `smtp_verified_at` stamped only on `ok` *(acceptance scenario)*; changing SMTP
       config clears `smtp_verified_at` and reverts to `invitation_only` with an
       operator notice.
-- [ ] 13.4 RED — registration from an allowed domain succeeds; from a disallowed domain
+- [x] 13.4 RED — registration from an allowed domain succeeds; from a disallowed domain
       is rejected naming the restriction *(registration-policy: Optional Domain
       Allowlist, both scenarios)*.
-- [ ] 13.5 GREEN — `apps/api/src/routes/admin.ts` against `MailSender` and
+- [x] 13.5 GREEN — `apps/api/src/routes/admin.ts` against `MailSender` and
       `instance_settings`.
 
 ## Phase 14 (WU-14) — `feat(api): invitation lifecycle — create, send, accept, join`

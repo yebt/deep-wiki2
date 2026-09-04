@@ -43,6 +43,13 @@
       "when": 1735689600005,
       "tag": "0005_password_resets",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1735689600006,
+      "tag": "0006_registration",
+      "breakpoints": true
     }
   ]
 }

@@ -160,3 +160,16 @@ export const passwordResets = pgTable('password_resets', {
   consumedAt: timestamp('consumed_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
+
+/**
+ * Instance-wide registration policy (design.md — "Registration mode";
+ * registration-policy spec). A singleton row — the `id = 1` CHECK in the
+ * migration SQL makes a second row structurally impossible.
+ */
+export const instanceSettings = pgTable('instance_settings', {
+  id: integer('id').primaryKey().default(1),
+  registrationMode: registrationMode('registration_mode').notNull().default('invitation_only'),
+  openRegistrationDomains: text('open_registration_domains').array().notNull().default([]),
+  smtpVerifiedAt: timestamp('smtp_verified_at', { withTimezone: true }),
+  smtpConfigHash: text('smtp_config_hash'),
+});
