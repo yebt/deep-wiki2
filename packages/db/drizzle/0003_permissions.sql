@@ -24,8 +24,15 @@ CREATE TABLE "permissions" (
   -- subject_agent_id's FK target (the agents table) lands with agent
   -- identities in a later phase; adding that FK then is a one-line
   -- migration rather than a table rewrite.
+  --
+  -- `effect` is part of this key, not just (workspace_id, subject_type,
+  -- subject_id, resource_id, action): the truth table requires a subject
+  -- to carry BOTH an allow and a deny row for the same action at the same
+  -- resource (permission-resolver spec, "Deny Wins Over Allow at Equal
+  -- Specificity") so decide() has something to arbitrate. A unique key
+  -- without `effect` would make that scenario structurally unrepresentable.
   CONSTRAINT "permissions_unique_grant" UNIQUE
-    ("workspace_id", "subject_type", "subject_id", "resource_id", "action")
+    ("workspace_id", "subject_type", "subject_id", "resource_id", "action", "effect")
 );
 --> statement-breakpoint
 CREATE INDEX "permissions_lookup_idx" ON "permissions"

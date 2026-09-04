@@ -186,7 +186,7 @@ differently:
 > GATE-1 applies here. This phase must be fully green before Phase 17 (the only
 > permission-aware UI) may start. See "GATE-1 — binding sequencing" above.
 
-- [ ] 6.1 RED — `packages/db/src/permissions/truth-table.test.ts`: one seeded fixture
+- [x] 6.1 RED — `packages/db/src/permissions/truth-table.test.ts`: one seeded fixture
       tree (workspace→shelf→book→chapter→page, 2 users, 2 cells, 1 agent), one seed, no
       per-case teardown, covering the proposal's ~30 cases:
       - Inheritance down each level (6) — permission-resolver scenarios A1–A6.
@@ -198,17 +198,17 @@ differently:
       - No matching grant → `deny` (2) — G1–G2.
       - Plus the differential case (D5): path-derived and CTE-derived ancestors agree
         (not counted in the 30).
-- [ ] 6.2 RED — same file: exactly one SQL statement is issued per `can()` resolution,
+- [x] 6.2 RED — same file: exactly one SQL statement is issued per `can()` resolution,
       even for a page five levels deep *(permission-resolver: Single-Query
       Resolution)*.
-- [ ] 6.3 RED — same file: a request body's `workspace_id` is ignored; the
+- [x] 6.3 RED — same file: a request body's `workspace_id` is ignored; the
       session-bound workspace is what the resolver uses *(permission-resolver: Tenant
       Scope Derived from the Authenticated Subject)*.
-- [ ] 6.4 GREEN — implement `packages/db/src/permissions/resolver.ts` (the
+- [x] 6.4 GREEN — implement `packages/db/src/permissions/resolver.ts` (the
       `WITH RECURSIVE ancestors … subjects …` query, walking `parent_id` per D5) and
       `packages/db/src/permissions/queries.ts`; wire to `packages/core`'s `can()`
       through the `GrantLookup` port.
-- [ ] 6.5 Verify — all cases in 6.1–6.3 green. **GATE-1 complete.**
+- [x] 6.5 Verify — all cases in 6.1–6.3 green. **GATE-1 complete.**
 
 ## Phase 7 (WU-7) — `test(db): EXPLAIN assertion that the resolver never sequentially scans`
 
