@@ -15,6 +15,7 @@
  * between this file and the migrations fails the suite, not the tenant.
  */
 import { boolean, integer, jsonb, pgEnum, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
+import type { Action, Effect } from '@deep-wiki/core';
 
 export const nodeType = pgEnum('node_type', ['workspace', 'shelf', 'book', 'chapter', 'page']);
 
@@ -172,4 +173,28 @@ export const instanceSettings = pgTable('instance_settings', {
   openRegistrationDomains: text('open_registration_domains').array().notNull().default([]),
   smtpVerifiedAt: timestamp('smtp_verified_at', { withTimezone: true }),
   smtpConfigHash: text('smtp_config_hash'),
+});
+
+export interface StartingGrant {
+  readonly resourceId: string;
+  readonly action: Action;
+  readonly effect: Effect;
+}
+
+/**
+ * Workspace invitations (invitations spec). `startingGrants` is applied
+ * verbatim to the `permissions` table on acceptance.
+ */
+export const invitations = pgTable('invitations', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  workspaceId: uuid('workspace_id')
+    .notNull()
+    .references(() => workspaces.id, { onDelete: 'cascade' }),
+  email: text('email').notNull(),
+  tokenHash: text('token_hash').notNull().unique(),
+  startingGrants: jsonb('starting_grants').$type<StartingGrant[]>().notNull().default([]),
+  invitedByUserId: uuid('invited_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  acceptedAt: timestamp('accepted_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });

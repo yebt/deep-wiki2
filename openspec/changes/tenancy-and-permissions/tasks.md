@@ -339,19 +339,19 @@ differently:
 
 ## Phase 14 (WU-14) — `feat(api): invitation lifecycle — create, send, accept, join`
 
-- [ ] 14.1 RED — `packages/db/src/auth/invitations.test.ts`: creation stores workspace,
+- [x] 14.1 RED — `packages/db/src/auth/invitations.test.ts`: creation stores workspace,
       target email, and starting grants *(invitations: Invitation Creation)*; an
       expired invitation is rejected without creating membership *(Invitation
       Expiry)*; a second acceptance on an accepted invitation is rejected without a
       duplicate membership *(Single-Use Invitation)*.
-- [ ] 14.2 GREEN — `packages/db/src/auth/invitations.ts`; `invitations` table in
+- [x] 14.2 GREEN — `packages/db/src/auth/invitations.ts`; `invitations` table in
       `0004_auth.sql`.
-- [ ] 14.3 RED — `apps/api/src/routes/invitations.test.ts`: the send step delivers
+- [x] 14.3 RED — `apps/api/src/routes/invitations.test.ts`: the send step delivers
       through `MailSender` *(Invitation Delivery via `MailSender`)*; a valid acceptance
       attaches the user to the workspace and `can(user, read, book)` resolves `allow`
       immediately after *(Acceptance Joins the Workspace with Starting Grants)* — the
       first route-level proof that GATE-1's resolver is load-bearing end to end.
-- [ ] 14.4 GREEN — `apps/api/src/routes/invitations.ts`.
+- [x] 14.4 GREEN — `apps/api/src/routes/invitations.ts`.
 
 ## Phase 15 (WU-15) — `feat(api): BlobStore adapters for S3-compatible and filesystem storage`
 

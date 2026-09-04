@@ -24,3 +24,14 @@ export {
   setRegistrationMode,
 } from './auth/instance-settings';
 export type { InstanceSettings, RegistrationMode, SetRegistrationModeResult } from './auth/instance-settings';
+export { acceptInvitation, createInvitation, findInvitationByToken } from './auth/invitations';
+export type {
+  AcceptInvitationInput,
+  AcceptInvitationResult,
+  CreatedInvitation,
+  CreateInvitationInput,
+  InvitationRecord,
+} from './auth/invitations';
+export { can, createGrantLookup } from './permissions/queries';
+export { insertGrants } from './permissions/grants';
+export type { GrantInput } from './permissions/grants';
