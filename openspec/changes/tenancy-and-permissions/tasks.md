@@ -227,14 +227,14 @@ differently:
 
 ## Phase 8 (WU-8) — `feat(checks): single decision path, path sargability, and secret-field guards`
 
-- [ ] 8.1 RED — `scripts/checks/query-boundaries.test.ts` against violating fixtures: a
+- [x] 8.1 RED — `scripts/checks/query-boundaries.test.ts` against violating fixtures: a
       file outside `packages/db/src/permissions/` referencing `permissions`; a `path`
       `LIKE`/`like()` call outside `packages/db/src/nodes/subtree.ts`; a pattern
       literal starting with `%`; a `lower(path)`/`upper(path)` call; a zod **response**
       schema in `packages/contracts` declaring a denylisted field (`password_hash`,
       `token_hash`, raw session/reset/invitation tokens, `SMTP_PASSWORD`,
       `BLOB_STORE_S3_SECRET_ACCESS_KEY`, the `DATABASE_URL` password).
-- [ ] 8.2 GREEN — implement `scripts/checks/query-boundaries.ts`; add it to root
+- [x] 8.2 GREEN — implement `scripts/checks/query-boundaries.ts`; add it to root
       `package.json`'s `check` script.
 
 ## Phase 9 (WU-9) — `feat(contracts): auth, invitation and storage environment schema`
