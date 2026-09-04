@@ -239,22 +239,22 @@ differently:
 
 ## Phase 9 (WU-9) — `feat(contracts): auth, invitation and storage environment schema`
 
-- [ ] 9.1 RED — `packages/contracts/src/env.test.ts`: `envSchema` stays a plain
+- [x] 9.1 RED — `packages/contracts/src/env.test.ts`: `envSchema` stays a plain
       `ZodObject` (`Object.keys(envSchema.shape)` must keep working — the
       `env-example.ts` drift check reads it directly, and wrapping in `.superRefine()`
       would turn it into a `ZodEffects` with no `.shape` and silently break the check);
       `refineEnv()` rejects `BLOB_STORE_DRIVER=s3` missing any of the four S3
       variables; mail/S3 vars stay `.optional()` so a fresh clone boots without them.
-- [ ] 9.2 GREEN — extend `packages/contracts/src/env.ts`: `APP_URL`,
+- [x] 9.2 GREEN — extend `packages/contracts/src/env.ts`: `APP_URL`,
       `SESSION_IDLE_TIMEOUT_MINUTES`, `SESSION_ABSOLUTE_TIMEOUT_DAYS`,
       `PASSWORD_RESET_TTL_MINUTES`, `INVITATION_TTL_DAYS`, `SMTP_*`, `MAIL_FROM`,
       `BLOB_STORE_*`; add `refineEnv()`, called by `parseEnv()` **after** the object
       parse — never `.superRefine()` on `envSchema` itself. Any future task adding
       conditional env validation MUST follow this same pattern.
-- [ ] 9.3 GREEN — mirror every new variable into `env.example` (empty or committed
+- [x] 9.3 GREEN — mirror every new variable into `env.example` (empty or committed
       local-MinIO values, never a real secret); `bun run scripts/checks/env-example.ts`
       green.
-- [ ] 9.4 RED — missing SMTP host fails startup naming the variable
+- [x] 9.4 RED — missing SMTP host fails startup naming the variable
       *(mail-delivery: Configuration via Environment, Fail Fast)*; a misconfigured
       filesystem or S3 adapter fails startup naming the missing config *(blob-storage:
       Adapter Selection by Environment, both scenarios)* — asserted here against
