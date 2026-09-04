@@ -70,7 +70,7 @@ async function onSubmit(event: FormSubmitEvent<{ displayName: string; password: 
 </script>
 
 <template>
-  <AuthShell eyebrow="Invitation" heading="Join your workspace">
+  <AuthShell heading="Join your workspace">
     <div v-if="!token" class="flex items-start gap-3 rounded-md bg-error-container p-4">
       <UIcon name="i-lucide-link-2-off" class="size-5 shrink-0 text-on-error-container" aria-hidden="true" />
       <div>
@@ -120,6 +120,7 @@ async function onSubmit(event: FormSubmitEvent<{ displayName: string; password: 
 
     <UAuthForm
       v-else
+      description="All fields are required."
       :schema="acceptSchema"
       :fields="fields"
       :loading="status === 'loading'"

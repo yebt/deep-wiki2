@@ -161,6 +161,61 @@ export default defineAppConfig({
       compoundVariants: badgeCompoundVariants,
     },
 
+    // M3's Filled card: `surface-container-highest`, elevation 0, no
+    // outline (§9.4's table maps it to `UCard variant="soft"`, retargeted
+    // to `bg-emphasized`). Nuxt UI ships `soft` as `bg-elevated/50` —
+    // alpha over an unknown ground, the §12.8 defect — which also left
+    // it tonally indistinguishable from the pane behind it.
+    card: {
+      variants: {
+        variant: {
+          soft: {
+            root: 'bg-emphasized divide-y divide-default',
+          },
+        },
+      },
+    },
+
+    // docs/UI-CHECKLIST.md §5 asks that required fields be conveyed
+    // programmatically; it does not ask for a glyph on every label. When
+    // every field on a form is required, an asterisk on each one carries
+    // no information — the form states the rule once instead. The
+    // `required` prop stays on the field (it is the semantic
+    // declaration, and it is what this variant keys off); only its
+    // decorative `::after` glyph is suppressed, centrally, so no screen
+    // has to remember to. `content-none` is what removes it — the
+    // sibling `after:*` utilities are inert without content.
+    formField: {
+      variants: {
+        required: {
+          true: {
+            label: 'after:content-none',
+          },
+        },
+      },
+    },
+
+    // The one-line form-level note that replaces the per-field
+    // asterisks. `UAuthForm` centres its header and sets it at 16px; this
+    // is supporting text for the fields below it, so it reads
+    // left-aligned and one step quieter than the 16px input text.
+    authForm: {
+      slots: {
+        header: 'text-start',
+        // Nuxt UI's own internal scale, deliberately, not a project
+        // `--text-*` role: slot overrides are resolved by tailwind-merge,
+        // which has no knowledge of this project's `--text-*` tokens and
+        // therefore reads `text-body-small` as a text *colour*. It would
+        // drop it against the neighbouring `text-muted` and silently
+        // leave the library's `text-base` in place, rendering this note
+        // larger than the field labels under it. `text-sm` is one of the
+        // classes tailwind-merge does understand, and using the library's
+        // internal scale inside the library's own slot is sanctioned by
+        // docs/DESIGN-SYSTEM.md §2.5.
+        description: 'text-sm text-muted',
+      },
+    },
+
     // The top app bar is `surface-container`, elevation 0, no shadow
     // (§9.3). Nuxt UI ships it as a translucent `bg-default/75`, which is
     // alpha over an unknown ground — §12.8 — and leaves it tonally
@@ -174,6 +229,19 @@ export default defineAppConfig({
     footer: {
       slots: {
         root: 'bg-elevated border-t border-default',
+        // `UFooter` renders its slots right → center → left in the DOM
+        // so that `lg:order-1/2/3` can put them back in reading order on
+        // wide viewports. Below `lg` the container is not a flex box at
+        // all, so DOM order wins and the brand ends up *under* the
+        // trailing meta. Making the container a reversed column at every
+        // width below `lg` restores left → center → right; `lg:flex-row`
+        // hands it back to the library's own ordering. The `mt-3` the
+        // theme puts on the (previously last) left and center slots is
+        // dropped in favour of one `gap-y-3` on the container, so the
+        // spacing does not depend on which item happens to be first.
+        container: 'flex flex-col-reverse gap-y-3 lg:flex-row',
+        left: 'mt-0',
+        center: 'mt-0',
       },
     },
 

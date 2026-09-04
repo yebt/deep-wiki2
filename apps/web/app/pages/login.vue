@@ -55,7 +55,7 @@ async function onSubmit(event: FormSubmitEvent<{ email: string; password: string
 </script>
 
 <template>
-  <AuthShell eyebrow="Sign in" heading="Sign in to deep-wiki">
+  <AuthShell heading="Sign in to deep-wiki">
     <div v-if="status === 'success'" role="status" aria-live="polite" class="flex items-start gap-3 rounded-md bg-success-container p-4">
       <UIcon name="i-lucide-circle-check" class="size-5 shrink-0 text-on-success-container" aria-hidden="true" />
       <div>
@@ -66,6 +66,7 @@ async function onSubmit(event: FormSubmitEvent<{ email: string; password: string
 
     <UAuthForm
       v-else
+      description="All fields are required."
       :schema="loginSchema"
       :fields="fields"
       :loading="status === 'loading'"

@@ -64,7 +64,7 @@ async function onSubmit(event: FormSubmitEvent<{ newPassword: string; confirmPas
 </script>
 
 <template>
-  <AuthShell eyebrow="Password reset" heading="Set a new password">
+  <AuthShell heading="Set a new password">
     <div v-if="!token" class="flex items-start gap-3 rounded-md bg-error-container p-4">
       <UIcon name="i-lucide-link-2-off" class="size-5 shrink-0 text-on-error-container" aria-hidden="true" />
       <div>
@@ -103,6 +103,7 @@ async function onSubmit(event: FormSubmitEvent<{ newPassword: string; confirmPas
 
     <UAuthForm
       v-else
+      description="All fields are required."
       :schema="confirmSchema"
       :fields="fields"
       :loading="status === 'loading'"

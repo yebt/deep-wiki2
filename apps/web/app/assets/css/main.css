@@ -138,23 +138,41 @@
 
    The extra neutral tones exist for one purpose: to feed the five
    surface-container rungs. They are not a second palette.
+
+   CORRECTION (2026-09-04, owner review finding 6.2). An M3 "tone" is a
+   CIE L* value, not an oklch lightness — the two scales only coincide
+   near white. These tones were previously written as `oklch(<tone>% …)`
+   plus a small fudge, which is close enough above tone 90 and badly
+   wrong below tone 25: tone 4 rendered at L* 0.4 (#010202, effectively
+   pure black) instead of L* 4, so the auth card read as a hole punched
+   in the page rather than a container on it.
+
+   For a neutral, Oklab L is exactly the cube root of relative
+   luminance, and CIE L* → Y is the standard piecewise transform, so the
+   conversion collapses to:
+
+       tone > 8   →  oklch L = (tone + 16) / 116
+       tone ≤ 8   →  oklch L = cbrt(tone / 903.2963)
+
+   Every value below is that formula evaluated at the M3 tone named in
+   its own variable. Nothing here is eyeballed.
    ───────────────────────────────────────────────────────────── */
 :root,
 :host,
 .light {
-  --dw-neutral-tone-100: oklch(100.0% 0.002 262);
-  --dw-neutral-tone-98: oklch(98.4% 0.002 262);
-  --dw-neutral-tone-94: oklch(95.2% 0.002 262);
-  --dw-neutral-tone-92: oklch(93.6% 0.002 262);
-  --dw-neutral-tone-90: oklch(92.0% 0.002 262);
+  --dw-neutral-tone-100: oklch(100.000% 0.002 262);
+  --dw-neutral-tone-98: oklch(98.276% 0.002 262);
+  --dw-neutral-tone-94: oklch(94.828% 0.002 262);
+  --dw-neutral-tone-92: oklch(93.103% 0.002 262);
+  --dw-neutral-tone-90: oklch(91.379% 0.002 262);
 }
 
 .dark {
-  --dw-neutral-tone-22: oklch(30.9% 0.004 262);
-  --dw-neutral-tone-17: oklch(26.2% 0.004 262);
-  --dw-neutral-tone-12: oklch(21.4% 0.004 262);
-  --dw-neutral-tone-10: oklch(19.5% 0.004 262);
-  --dw-neutral-tone-4: oklch(7.8% 0.004 262);
+  --dw-neutral-tone-24: oklch(34.483% 0.004 262);
+  --dw-neutral-tone-22: oklch(32.759% 0.004 262);
+  --dw-neutral-tone-17: oklch(28.448% 0.004 262);
+  --dw-neutral-tone-10: oklch(22.414% 0.004 262);
+  --dw-neutral-tone-4: oklch(16.421% 0.004 262);
 }
 
 /* ─────────────────────────────────────────────────────────────
@@ -237,8 +255,21 @@
 }
 
 .dark {
-  /* Accent roles — M3 tone 80. Nuxt UI defaults to shade 400 (tone 60). */
-  --ui-primary: var(--ui-color-primary-200);
+  /* Accent roles — M3 tone 80. Nuxt UI defaults to shade 400 (tone 60).
+     DEVIATION for `primary` only (owner review finding 6.1), recorded
+     here because docs/DESIGN-SYSTEM.md is not this agent's to edit:
+     `--ui-primary` reads shade 300 (tone 70), not shade 200 (tone 80).
+     M3's dark primary is tone 80, and at tone 80 this hue is *already*
+     at the sRGB gamut ceiling — the maximum chroma at oklch L 0.84,
+     hue 262 is 0.0793, and the palette carries 0.078 — so the filled
+     button could not be made less pale without leaving tone 80. It
+     measured 8.63:1 against its label, i.e. correct and legible but
+     visibly washed out, and the lightest thing on a dark screen. Tone
+     70 carries chroma 0.120 (+54%) and still measures 6.35:1 against
+     `on-primary` (tone 20), comfortably above the checklist §5 floor of
+     4.5:1, which is the constraint that actually binds. The other
+     accents keep tone 80: only `primary` fills a large surface. */
+  --ui-primary: var(--ui-color-primary-300);
   --ui-secondary: var(--ui-color-secondary-200);
   --ui-success: var(--ui-color-success-200);
   --ui-info: var(--ui-color-info-200);
@@ -259,16 +290,28 @@
   --ui-error-container: var(--ui-color-error-700);
   --ui-on-error-container: var(--ui-color-error-100);
 
-  /* Surface ladder — tones 4 / 10 / 12 / 17 / 22.
+  /* Surface ladder — tones 4 / 10 / 17 / 22 / 24.
      MANDATORY (§1.4): Nuxt UI's dark defaults collapse `--ui-bg-muted`
      and `--ui-bg-elevated` onto the same shade, so a panel has zero
      tonal separation from the app ground. Two of five rungs gone before
-     anyone writes markup — the §12.1 "flat dark UI" failure. */
+     anyone writes markup — the §12.1 "flat dark UI" failure.
+
+     DEVIATION from §1.4's literal dark mapping (4/10/12/17/22),
+     recorded here because docs/DESIGN-SYSTEM.md is not this agent's to
+     edit — owner review finding 6.2. Tone 10 and tone 12 are two points
+     apart, which measured 1.04:1 between the app ground and the header
+     it butts against: the same collapsed rung §1.4 exists to prevent,
+     reintroduced by M3's own tone choice rather than by Nuxt UI's. The
+     three container rungs move up one M3 neutral tone each (12→17,
+     17→22, 22→24 — all from §1.1's neutral tone list), which takes
+     ground↔chrome to 1.19:1 and ground↔filled-card to 1.48:1. `--ui-bg`
+     (the document canvas) and `--ui-bg-muted` (the app ground) keep
+     M3's tones 4 and 10, so the canvas-on-ground pair is untouched. */
   --ui-bg: var(--dw-neutral-tone-4);
   --ui-bg-muted: var(--dw-neutral-tone-10);
-  --ui-bg-elevated: var(--dw-neutral-tone-12);
-  --ui-bg-accented: var(--dw-neutral-tone-17);
-  --ui-bg-emphasized: var(--dw-neutral-tone-22);
+  --ui-bg-elevated: var(--dw-neutral-tone-17);
+  --ui-bg-accented: var(--dw-neutral-tone-22);
+  --ui-bg-emphasized: var(--dw-neutral-tone-24);
 
   /* inverse-surface / inverse-on-surface — tones 90 / 20.
      Tone 20 is also M3's `on-primary` in dark, which is what

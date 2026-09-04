@@ -34,7 +34,6 @@ async function onSubmit(event: FormSubmitEvent<{ email: string }>) {
 
 <template>
   <AuthShell
-    eyebrow="Password reset"
     heading="Reset your password"
     description="Enter the email address on your account and we'll send a link to reset your password."
   >
@@ -50,6 +49,7 @@ async function onSubmit(event: FormSubmitEvent<{ email: string }>) {
 
     <UAuthForm
       v-else
+      description="All fields are required."
       :schema="requestSchema"
       :fields="fields"
       :loading="status === 'loading'"
