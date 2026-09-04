@@ -441,7 +441,12 @@ chunks (
   page_id         uuid not null references nodes(id) on delete cascade,
   block_ids       text[] not null,          -- provenance, for citation back to the document
   content         text not null,
-  embedding       vector not null,
+  -- The dimension MUST be declared. Verified against pgvector 0.8.6: an ANN index over an
+  -- undimensioned column is refused with `ERROR: column does not have dimensions`, so an
+  -- undimensioned `vector` stores embeddings that can never be indexed and every similarity
+  -- search degrades to a sequential scan of the corpus. The literal below is illustrative;
+  -- the real value follows from the chosen embedding model (see §14).
+  embedding       vector(1536) not null,
   embedding_model text not null,
   dimensions      integer not null,
   created_at      timestamptz not null
@@ -736,7 +741,8 @@ API, and the indexer, and it is the reason the backend is TypeScript (§14).
 | **Block IDs as the universal anchor** | One primitive serves comments, AI selections, diffs, and RAG chunk provenance. Character offsets break on every edit above them | Nothing foreseeable |
 | **Read mode / edit mode with a soft lock** | Read mode serves cached HTML and keeps the wiki fast at scale. The soft lock covers the real collision rate of a documentation tool at a fraction of the cost of CRDTs, and it makes AI proposals fit naturally as pending revisions | Demand for genuine simultaneous editing, which is already a planned later phase |
 | **Mermaid/D2 over Excalidraw as the primary diagram format** | Text diffs, the AI can generate it, RAG can index it, and it round-trips inside Markdown | Nothing — Excalidraw is additive, as an escape hatch |
-| **`chat_provider` and `embedding_provider` separate** | Not every chat provider offers embeddings. Coupling them silently disables RAG for some configurations | Nothing. This is a hard requirement |
+| **`chat_provider` and `embedding_provider` separate** | Not every chat provider offers embeddings. **Verified 2026-09-04 against official documentation: DeepSeek documents a single endpoint, `chat/completions`, and offers no first-party embeddings API.** Coupling the two would silently disable RAG for any workspace that picked it | Nothing. This is a hard requirement |
+| **The pgvector column carries an explicit dimension** | Verified against pgvector 0.8.6 on this project's own image: `CREATE INDEX … USING hnsw` over an undimensioned `vector` column fails with `column does not have dimensions`, while `vector(1536)` succeeds. An undimensioned column therefore stores embeddings that can never be indexed, and every similarity search becomes a sequential scan — invisible at twenty documents, fatal at ten thousand. This makes the embedding model a **schema-level** decision, not a runtime setting | Supporting several embedding models per deployment, which would need one table per dimension or a per-deployment migration input rather than a schema constant |
 | **Agent writes are pending revisions** | The corpus is user-authored text, making direct agent writes a prompt-injection vector into the team's source of truth | Nothing foreseeable |
 | **Rule packs are shareable entities authored as documents** | Sharing across projects requires independent identity; authoring them as documents inherits versioning, diffing, and commenting for free | Nothing foreseeable |
 | **Bun workspaces without Turborepo** | `bun run -F` covers the task graph; fewer build dependencies matters for a self-hosted product | Build times that measurably hurt |
