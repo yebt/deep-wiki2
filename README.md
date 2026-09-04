@@ -69,7 +69,7 @@ Run from the repository root:
 |---|---|
 | `bun run typecheck` | Type-checks every workspace member and the root scripts |
 | `bun run lint` | ESLint across the repository |
-| `bun run test` | Runs the test suite for every package and app |
+| `bun run test` | Runs the test suite for every package and app. Database-backed suites in `packages/db` auto-provision a disposable test Postgres — see below |
 | `bun run check` | Structural checks: workspace shape, test coverage, core purity, env drift, compose portability |
 | `bun run db:migrate` | Runs Drizzle migrations against `DATABASE_URL` |
 | `bun run db:seed` | Runs the seed script against `DATABASE_URL` |
@@ -80,6 +80,26 @@ Run from the repository root:
 `apps/web`, when `env.example` drifts from the schema, or when `compose.yaml` uses a
 Docker/Podman-specific extension, an unlabelled bind mount, or a published port below
 1024.
+
+### Database-backed tests
+
+`packages/db`'s suites need a real Postgres. `bun run test` provisions one automatically
+via `packages/db/testing/provision.ts`:
+
+1. `TEST_DATABASE_URL` set → used directly (the CI path).
+2. Otherwise it probes a dedicated local test Postgres and, if unreachable, brings one up
+   with `podman compose up -d --wait postgres` (or `docker`) against
+   `packages/db/testing/compose.yaml` — a file separate from the repository root's, on its
+   own port, so it never contends with your dev stack or with unrelated containers on the
+   same host.
+3. A shared `deepwiki_test_template` database is migrated once; each suite gets its own
+   `dw_test_<n>` database created `TEMPLATE deepwiki_test_template` and dropped in
+   `afterAll`.
+
+Set `DEEPWIKI_TEST_NO_AUTOSTART=1` to opt out of step 2 and fail fast with an actionable
+message instead — useful when you want to manage the test container yourself. This harness
+never silently skips a database-backed test: a total provisioning failure throws with the
+exact command to run. `bun run check` and the pre-commit hook stay database-free.
 
 ### Enforcement
 

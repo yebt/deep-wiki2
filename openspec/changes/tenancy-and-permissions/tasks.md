@@ -84,23 +84,23 @@ differently:
 
 ## Phase 2 (WU-2) — `test(db): deterministic postgres provisioning for database-backed tests`
 
-- [ ] 2.1 RED — `packages/db/testing/provision.test.ts`: refuses to operate on any
+- [x] 2.1 RED — `packages/db/testing/provision.test.ts`: refuses to operate on any
       database whose name does not start with `dw_test_`; on total failure throws with
       the exact command to run (never `describe.skipIf` — D15).
-- [ ] 2.2 RED (subprocess threat matrix) — same file: the compose spawn uses a fixed
+- [x] 2.2 RED (subprocess threat matrix) — same file: the compose spawn uses a fixed
       argument vector with no shell and no user-supplied token (only ever
       `compose up -d --wait postgres`); asserts a clean timeout message at the 90s bound
       when no container runtime exists.
-- [ ] 2.3 GREEN — implement `packages/db/testing/provision.ts`: `TEST_DATABASE_URL` set
+- [x] 2.3 GREEN — implement `packages/db/testing/provision.ts`: `TEST_DATABASE_URL` set
       → use it (CI path); else probe `localhost:5432`, else
       `podman compose up -d --wait postgres` (docker fallback), bounded at 90s; migrate
       once into `deepwiki_test_template`, then `CREATE DATABASE dw_test_<n> TEMPLATE …`
       per suite, dropped in `afterAll`; `DEEPWIKI_TEST_NO_AUTOSTART=1` opts out and fails
       fast.
-- [ ] 2.4 Docs — update `README.md` (Commands table) and `CLAUDE.md`: `bun run test` now
+- [x] 2.4 Docs — update `README.md` (Commands table) and `CLAUDE.md`: `bun run test` now
       provisions containers via the harness; document `DEEPWIKI_TEST_NO_AUTOSTART=1` as
       the escape hatch; `bun run check` and the pre-commit hook stay database-free.
-- [ ] 2.5 CI — `.github/workflows/ci.yml`: add a `pgvector/pgvector:pg17` Postgres service
+- [x] 2.5 CI — `.github/workflows/ci.yml`: add a `pgvector/pgvector:pg17` Postgres service
       container and `TEST_DATABASE_URL`.
 
 ## Phase 3 (WU-3) — `feat(db): tenancy schema — plans, users, workspaces, and the nodes tree`

@@ -1,0 +1,28 @@
+# Dedicated compose file for auto-provisioned test Postgres.
+#
+# Deliberately separate from the repository root's compose.yaml and its
+# dev-stack ports: this machine already runs unrelated services on 5432,
+# 1025, 8025 and 9000, so test provisioning must not assume those ports are
+# free. A distinct host port (55432) and distinct test-only credentials mean
+# `bun run test` never contends with a developer's own dev stack, or with
+# any other project's containers on the same host.
+#
+# `podman compose` (or `docker compose`) resolves this file automatically
+# because packages/db/testing/provision.ts spawns the compose command with
+# this directory as its cwd — the argument vector itself never names a file.
+name: deep-wiki-test
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_USER: dw_test
+      POSTGRES_PASSWORD: dw_test
+      POSTGRES_DB: postgres
+    ports:
+      - "55432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dw_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
