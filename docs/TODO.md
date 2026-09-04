@@ -642,6 +642,21 @@ Fix: what changed, with the commit or PR reference.
 Impact: what else this touches, or "contained".
 ```
 
+### 2026-09-04 — `setRegistrationMode` reconciled SMTP verification only on the way to `open`
+
+Symptom: none observed in use — found by reading the reconciliation path while auditing
+registration policy.
+Cause: `setRegistrationMode` called the reconciling read only when the target mode was `open`,
+on the assumption that a stale SMTP verification only matters where `open` depends on it. It
+also matters everywhere else, because the stale value stays readable and the next caller that
+does depend on it inherits it.
+Fix: the reconciling `getInstanceSettings` call is now unconditional, so a verification
+invalidated by an SMTP config change is cleared regardless of which mode is being set. Note
+that the clear is keyed to a config-hash change, not to the mode switch itself — an unchanged
+SMTP configuration keeps its verification, which is correct.
+Impact: contained to `packages/db/src/auth/instance-settings.ts`.
+
+
 ### 2026-09-04 — `permissions` unique key could not represent an allow and a deny together
 
 Symptom: truth-table cases B1–B4 (a subject must hold both an allow and a deny row on
