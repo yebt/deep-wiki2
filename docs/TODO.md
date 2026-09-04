@@ -794,6 +794,12 @@ in Findings.
   their own ownership and permission model rather than inheriting a workspace's. A related
   question: is a public rule-pack registry (importable convention sets) a product goal?
   This is architecturally decisive and blocks the Phase 6 data model.
+- ~~**Embedding provider and model to standardise on.**~~ **Answered 2026-09-04: 1536 dimensions.**
+  `text-embedding-3-small` native; `text-embedding-3-large` reachable via OpenAI's `dimensions`
+  parameter. The open part that remains is narrower and belongs to Phase 5: **find a local embedding
+  model that emits exactly 1536 dimensions, or record that self-hosted air-gapped RAG is unavailable.**
+  bge-m3 and e5-large emit 1024 and cannot fill the role. See `docs/SPECS.md` §14.
+  Superseded original text follows.
 - **Embedding provider and model to standardise on.** Drives the default `dimensions`, the
   pgvector column definition, index sizing, and what the local fallback must match. Needs
   the per-provider embedding-support verification from Phase 5 first.

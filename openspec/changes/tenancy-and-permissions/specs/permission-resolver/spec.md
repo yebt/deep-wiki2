@@ -17,16 +17,29 @@ machines is the failure this design exists to prevent.
 ### Requirement: Single Permissions Table
 
 The system MUST store every grant in one `permissions` table with columns
-`subject_type`, `subject_id`, `resource_type`, `resource_id`, `action`, and `effect`,
-where `effect` is `allow` or `deny`. The system MUST NOT introduce per-level or
-per-subject-type variant tables.
+`subject_type`, `subject_id`, `resource_id`, `action`, and `effect`, where `effect`
+is `allow` or `deny`. The system MUST NOT introduce per-level or per-subject-type
+variant tables.
+
+The resource's type MUST NOT be stored on the grant. It is `nodes.type` of
+`resource_id`, and `resource_id` carries a foreign key into `nodes`. Storing it
+a second time would create a value that can disagree with the tree, and a grant
+whose recorded type disagrees with the resource it points at is an authorisation
+bug by construction. See `design.md` decision D10 and `docs/SPECS.md` §14.
 
 #### Scenario: Grant recorded in the single table
 
 - GIVEN a workspace admin grants a user `read` on a book
 - WHEN the grant is persisted
-- THEN it is stored as one row in `permissions` with `resource_type = book`,
-  `action = read`, `effect = allow`
+- THEN it is stored as one row in `permissions` with `resource_id` referencing that
+  book's `nodes` row, `action = read`, `effect = allow`
+
+#### Scenario: The grant does not duplicate the resource's type
+
+- GIVEN the `permissions` table
+- WHEN its columns are inspected
+- THEN there is no `resource_type` column, and the resource's type is obtained by
+  joining `resource_id` to `nodes`
 
 ### Requirement: Supported Subject Types
 
