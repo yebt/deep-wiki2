@@ -7,6 +7,11 @@
 # self-hoster never chose (see design.md D6; verified supported by this
 # machine's `podman-compose` provider via `podman compose config -q`).
 #
+# Published host ports come from the environment with the conventional
+# defaults, using `:-` rather than `:?`: a fresh clone needs no configuration,
+# and a developer whose machine already runs another project on 5432 can move
+# them in `.env` instead of editing this file. Container-side ports are fixed.
+#
 # Bring the stack up:   podman compose up -d --wait
 # Tear it down:         podman compose down -v
 name: deep-wiki
@@ -19,7 +24,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set — see env.example}
       POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB must be set — see env.example}
     ports:
-      - "5432:5432"
+      - "${POSTGRES_HOST_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
       # Named volumes need no SELinux label; this is the one bind mount in
@@ -34,8 +39,8 @@ services:
   mailpit:
     image: axllent/mailpit
     ports:
-      - "1025:1025"
-      - "8025:8025"
+      - "${MAILPIT_SMTP_HOST_PORT:-1025}:1025"
+      - "${MAILPIT_UI_HOST_PORT:-8025}:8025"
     healthcheck:
       test: ["CMD", "/mailpit", "readyz"]
       interval: 5s
@@ -49,8 +54,8 @@ services:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:?MINIO_ROOT_USER must be set — see env.example}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD must be set — see env.example}
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "${MINIO_HOST_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_HOST_PORT:-9001}:9001"
     volumes:
       - miniodata:/data
     healthcheck:
@@ -68,7 +73,7 @@ services:
     environment:
       KROKI_MERMAID_HOST: mermaid
     ports:
-      - "8000:8000"
+      - "${KROKI_HOST_PORT:-8000}:8000"
     depends_on:
       mermaid:
         condition: service_started

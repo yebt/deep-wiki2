@@ -103,6 +103,24 @@ message instead — useful when you want to manage the test container yourself. 
 never silently skips a database-backed test: a total provisioning failure throws with the
 exact command to run. `bun run check` and the pre-commit hook stay database-free.
 
+### The container stack
+
+```bash
+podman compose up -d --wait     # postgres+pgvector, mailpit, minio, kroki, mermaid
+bun run db:migrate
+bun run db:seed                 # prints the sign-in credentials it creates
+podman compose down -v          # tear down, including volumes
+```
+
+The published host ports default to the conventional ones (5432, 1025, 8025, 9000, 9001, 8000).
+**`podman compose up` fails on a port collision before any service starts**, so if your machine
+already runs another project on one of them, move the published port in `.env` — the variables
+are at the top of `env.example`. The container-side ports never change, so nothing else needs
+adjusting.
+
+Note that `bun run test` provisions its own throwaway containers on separate ports and leaves
+them running for reuse. Run `podman ps` if a port you expected to be free is not.
+
 ### Enforcement
 
 This repository has **no git remote**, so `.github/workflows/ci.yml` never executes — it is

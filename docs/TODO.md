@@ -408,6 +408,22 @@ makes conventions portable across projects.
 
 Discoveries and constraints. Newest first.
 
+### 2026-09-04 — The dev stack and the test harness compete for ports
+
+Bringing the documented stack up on a working machine failed twice for the same reason in two
+different ways. First, all six conventional ports (5432, 1025, 8025, 9000, 9001, 8000) were held
+by unrelated projects. Then, after shifting them, mailpit and minio failed again — this time
+against `deep-wiki-api-test_mailpit_1` and `deep-wiki-api-test_minio_1`, containers **this
+project's own test harness** had left running for fifteen hours.
+
+**Impact:** the published host ports now come from the environment with the conventional
+defaults (`${VAR:-5432}` rather than a literal), so a fresh clone is unchanged and a busy machine
+can move them in `.env` without editing a tracked file. Documented in `README.md`. The deeper
+issue is unresolved: the test harness reuses long-lived containers deliberately, but nothing
+tells a developer they are there, and its ports are not derived from the same variables as the
+dev stack. A `podman compose up` that fails on a port the same repository is holding is a
+confusing first-run experience.
+
 ### 2026-09-04 — `bun run db:migrate` applied the schema and then hung forever
 
 Found by running the documented bootstrap sequence end to end for the first time rather than
