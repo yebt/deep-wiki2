@@ -15,8 +15,9 @@
     "db:migrate": "bun run --filter @deep-wiki/db migrate",
     "db:seed": "bun run --filter @deep-wiki/db seed",
     "compose:smoke": "bun run scripts/checks/compose-smoke.ts",
-    "verify": "bun run check && bun run lint && bun run typecheck && bun run test",
-    "setup:hooks": "git config core.hooksPath .githooks"
+    "verify": "bun run check && bun run scripts/checks/env-consistency.ts && bun run lint && bun run typecheck && bun run test",
+    "setup:hooks": "git config core.hooksPath .githooks",
+    "env:check": "bun run scripts/checks/env-consistency.ts"
   },
   "overrides": {},
   "devDependencies": {
