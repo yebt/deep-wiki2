@@ -408,6 +408,24 @@ makes conventions portable across projects.
 
 Discoveries and constraints. Newest first.
 
+### 2026-09-04 — Two env vars held the same fact and nothing checked they agreed
+
+Making the compose host ports configurable fixed one problem and created another. `.env` now
+carries the same fact twice: `POSTGRES_HOST_PORT` tells compose where to publish, the port inside
+`DATABASE_URL` tells the app where to connect.
+
+The failure mode is confusing rather than merely wrong. The app connects successfully to whatever
+unrelated service owns the old port, so the error that comes back is *that server's* — naming a
+database and a role the developer never configured. The owner hit exactly this:
+`POSTGRES_HOST_PORT=25432` with `DATABASE_URL` still on 5432, which on that machine is another
+project's Postgres. The same trap sits between `MAILPIT_SMTP_HOST_PORT` and `SMTP_PORT`.
+
+**Impact:** `scripts/checks/env-consistency.ts` compares the pairs and names both values when they
+disagree. It runs in `bun run verify` and as `bun run env:check`, deliberately **not** in the
+pre-commit hook — `.env` is local developer state, and blocking a docs commit over a local
+misconfiguration is over-reach. The deeper fix is to derive `DATABASE_URL` from its parts so the
+fact is written once; that is larger and is not done.
+
 ### 2026-09-04 — The dev stack and the test harness compete for ports
 
 Bringing the documented stack up on a working machine failed twice for the same reason in two

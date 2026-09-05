@@ -73,6 +73,7 @@ Run from the repository root:
 | `bun run lint` | ESLint across the repository |
 | `bun run test` | Runs the test suite for every package and app. Database-backed suites in `packages/db` auto-provision a disposable test Postgres — see below |
 | `bun run check` | Structural checks: workspace shape, test coverage, core purity, env drift, compose portability |
+| `bun run env:check` | Verifies your local `.env`'s ports agree with what compose publishes |
 | `bun run db:migrate` | Runs Drizzle migrations against `DATABASE_URL` |
 | `bun run db:seed` | Runs the seed script against `DATABASE_URL` |
 | `bun run compose:smoke` | Against a running compose stack: sends a real message over Mailpit's SMTP port and retrieves it via its API, and renders a real Mermaid diagram through Kroki — proves those two services actually work, not merely that they started |
@@ -114,6 +115,14 @@ podman compose down -v          # tear down, including volumes
 
 The published host ports default to the conventional ones (5432, 1025, 8025, 9000, 9001, 8000).
 **`podman compose up` fails on a port collision before any service starts**, so if your machine
+**If you move `POSTGRES_HOST_PORT`, move the port inside `DATABASE_URL` to match**, and likewise
+`MAILPIT_SMTP_HOST_PORT` with `SMTP_PORT`. Each pair is the same fact written twice: one tells
+compose where to publish, the other tells the app where to connect. Change only one and the app
+connects to whatever else owns the old port — the error then comes back from *that* server,
+naming a database and a role you never configured. `bun run env:check` catches it in a second and
+names both values. It runs in `bun run verify` but deliberately not in the pre-commit hook, since
+`.env` is your local state rather than the repository's.
+
 already runs another project on one of them, move the published port in `.env` — the variables
 are at the top of `env.example`. The container-side ports never change, so nothing else needs
 adjusting.
