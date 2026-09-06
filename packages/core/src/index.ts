@@ -18,3 +18,8 @@ export {
   parsePath,
   PATH_DELIMITER,
 } from './paths';
+export type { InvalidModelId, InvalidModelIdReason, ModelRef, ProviderId } from './ai/ids';
+export { parseModelId } from './ai/ids';
+export type { ModelCapabilities, ModelPricing, StructuredOutputLevel, UnknownModel } from './ai/registry';
+export { capabilitiesOf, MODEL_REGISTRY } from './ai/registry';
+export { degrade } from './ai/degrade';

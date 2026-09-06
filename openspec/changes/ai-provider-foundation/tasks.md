@@ -70,14 +70,14 @@ further decision gate blocks `sdd-apply`.
 
 ## Phase 2: Core — Provider Identity, Capability Registry, Degradation Ladder
 
-- [ ] 2.1 RED: `packages/core/src/ai/ids.test.ts` — `parseModelId` accepts `<providerId>:<slug>` for the closed `ProviderId` union; refuses a slug containing `https://`, `..`, or whitespace; refuses an unknown `providerId`.
-- [ ] 2.2 GREEN: `packages/core/src/ai/ids.ts` — `ProviderId`, `ModelRef`, `parseModelId(raw): Result<ModelRef, InvalidModelId>`.
-- [ ] 2.3 RED: `packages/core/src/ai/registry.test.ts` — `capabilitiesOf` returns capabilities for a registered `<provider>:<model>`; returns a typed `UnknownModel` refusal for an unregistered one, with no default branch.
-- [ ] 2.4 GREEN: `packages/core/src/ai/registry.ts` — frozen `ModelCapabilities` record, `capabilitiesOf(ref): Result<ModelCapabilities, UnknownModel>`; every entry carries `verifiedAt` and `source` (provenance fields, spec — ai-provider-registry).
-- [ ] 2.5 RED: `packages/core/src/ai/degrade.test.ts` — `degrade('schema')` ladders `schema → tool-call → prompted → none` in that fixed order and never skips a rung; `degrade('none')` returns `null`.
-- [ ] 2.6 GREEN: `packages/core/src/ai/degrade.ts` — pure `degrade(level): StructuredOutputLevel | null`.
-- [ ] 2.7 RED: `packages/core/src/ai/registry.test.ts` — a provenance-assertion test: an entry missing `verifiedAt` or `source` fails the suite (design.md — Drift detection, mechanism 2).
-- [ ] 2.8 GREEN: enforce the provenance assertion at module load or via a dedicated test iterating the registry.
+- [x] 2.1 RED: `packages/core/src/ai/ids.test.ts` — `parseModelId` accepts `<providerId>:<slug>` for the closed `ProviderId` union; refuses a slug containing `https://`, `..`, or whitespace; refuses an unknown `providerId`.
+- [x] 2.2 GREEN: `packages/core/src/ai/ids.ts` — `ProviderId`, `ModelRef`, `parseModelId(raw): Result<ModelRef, InvalidModelId>`.
+- [x] 2.3 RED: `packages/core/src/ai/registry.test.ts` — `capabilitiesOf` returns capabilities for a registered `<provider>:<model>`; returns a typed `UnknownModel` refusal for an unregistered one, with no default branch.
+- [x] 2.4 GREEN: `packages/core/src/ai/registry.ts` — frozen `ModelCapabilities` record, `capabilitiesOf(ref): Result<ModelCapabilities, UnknownModel>`; every entry carries `verifiedAt` and `source` (provenance fields, spec — ai-provider-registry).
+- [x] 2.5 RED: `packages/core/src/ai/degrade.test.ts` — `degrade('schema')` ladders `schema → tool-call → prompted → none` in that fixed order and never skips a rung; `degrade('none')` returns `null`.
+- [x] 2.6 GREEN: `packages/core/src/ai/degrade.ts` — pure `degrade(level): StructuredOutputLevel | null`.
+- [x] 2.7 RED: `packages/core/src/ai/registry.test.ts` — a provenance-assertion test: an entry missing `verifiedAt` or `source` fails the suite (design.md — Drift detection, mechanism 2).
+- [x] 2.8 GREEN: enforce the provenance assertion at module load or via a dedicated test iterating the registry.
 
 ## Phase 3: Core — Cost Model and Budget State Machine
 
