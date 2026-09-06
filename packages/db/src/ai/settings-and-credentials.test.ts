@@ -6,7 +6,6 @@
  * `packages/db/src/schema.test.ts`.
  */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import postgres from 'postgres';
 import { provisionTestDatabase, type ProvisionedTestDatabase } from '../../testing/provision';

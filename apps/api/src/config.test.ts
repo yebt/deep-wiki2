@@ -1,6 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import { loadConfig } from './config';
 
+// A 32-byte key, base64-encoded (Buffer.alloc(32, 7).toString('base64')).
+const TEST_KEK = 'BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=';
+
 function validRawEnv(overrides: Record<string, string | undefined> = {}): Record<string, string | undefined> {
   return {
     NODE_ENV: 'test',
@@ -9,6 +12,8 @@ function validRawEnv(overrides: Record<string, string | undefined> = {}): Record
     SMTP_HOST: 'localhost',
     MAIL_FROM: 'noreply@deep-wiki.local',
     BLOB_STORE_FS_ROOT: './.data/blobs',
+    AI_KEK_KEYRING: `k1:${TEST_KEK}`,
+    AI_KEK_ACTIVE_ID: 'k1',
     ...overrides,
   };
 }
