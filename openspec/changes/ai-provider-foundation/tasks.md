@@ -110,12 +110,12 @@ further decision gate blocks `sdd-apply`.
 
 ## Phase 7: Envelope Cipher and Key-Provider Adapters
 
-- [ ] 7.1 RED: `apps/api/src/adapters/ai/cipher/aes-gcm-cipher.test.ts` — seal/open round trip; `open` with a wrong AAD fails; `open` with a wrong `key_id` fails; the sealed blob contains no plaintext substring.
-- [ ] 7.2 GREEN: `apps/api/src/adapters/ai/cipher/aes-gcm-cipher.ts` implementing `CredentialCipher` with `node:crypto` AES-256-GCM.
-- [ ] 7.3 RED: `apps/api/src/adapters/ai/key-provider/env-key-provider.test.ts` — `wrap`/`unwrap` round trip against the parsed keyring; `activeKeyId()` matches `AI_KEK_ACTIVE_ID`.
-- [ ] 7.4 GREEN: `apps/api/src/adapters/ai/key-provider/env-key-provider.ts` implementing `KeyProvider`.
-- [ ] 7.5 RED: `apps/api/src/adapters/ai/key-provider/env-key-provider.test.ts` — rekey preserves plaintext and leaves `ciphertext` byte-identical (only `wrapped_dek`/`key_id` change).
-- [ ] 7.6 GREEN: expose the rewrap primitive used later by `ai:rekey` (Phase 17).
+- [x] 7.1 RED: `apps/api/src/adapters/ai/cipher/aes-gcm-cipher.test.ts` — seal/open round trip; `open` with a wrong AAD fails; `open` with a wrong `key_id` fails; the sealed blob contains no plaintext substring.
+- [x] 7.2 GREEN: `apps/api/src/adapters/ai/cipher/aes-gcm-cipher.ts` implementing `CredentialCipher` with `node:crypto` AES-256-GCM.
+- [x] 7.3 RED: `apps/api/src/adapters/ai/key-provider/env-key-provider.test.ts` — `wrap`/`unwrap` round trip against the parsed keyring; `activeKeyId()` matches `AI_KEK_ACTIVE_ID`.
+- [x] 7.4 GREEN: `apps/api/src/adapters/ai/key-provider/env-key-provider.ts` implementing `KeyProvider`.
+- [x] 7.5 RED: `apps/api/src/adapters/ai/key-provider/env-key-provider.test.ts` — rekey preserves plaintext and leaves `ciphertext` byte-identical (only `wrapped_dek`/`key_id` change).
+- [x] 7.6 GREEN: expose the rewrap primitive used later by `ai:rekey` (Phase 17).
 
 ## Phase 8: Schema — Settings and Credentials
 

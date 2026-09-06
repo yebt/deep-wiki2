@@ -94,15 +94,19 @@ const REQUIRED_S3_VARS = [
 
 const KEK_LENGTH_BYTES = 32;
 
-type ParsedKeyring = { readonly ok: true; readonly keys: ReadonlyMap<string, Uint8Array> } | { readonly ok: false; readonly message: string };
+export type ParsedKeyring =
+  | { readonly ok: true; readonly keys: ReadonlyMap<string, Uint8Array> }
+  | { readonly ok: false; readonly message: string };
 
 /**
  * `id:base64key[,id:base64key…]`. Every entry must parse, and every key
  * must decode to exactly 32 bytes — AES-256-GCM's key length
  * (design.md — "Credentials: envelope encryption a self-hoster can
- * operate").
+ * operate"). Exported so `apps/api`'s `EnvKeyProvider` adapter (Phase 7)
+ * builds its runtime keyring from the same parser `refineEnv()` already
+ * validated against at startup, rather than a second implementation.
  */
-function parseKeyring(raw: string): ParsedKeyring {
+export function parseKeyring(raw: string): ParsedKeyring {
   const entries = raw
     .split(',')
     .map((entry) => entry.trim())

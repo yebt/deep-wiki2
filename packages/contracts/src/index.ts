@@ -1,5 +1,5 @@
-export { envSchema, parseEnv, refineEnv } from './env';
-export type { Env, EnvIssue } from './env';
+export { envSchema, parseEnv, parseKeyring, refineEnv } from './env';
+export type { Env, EnvIssue, ParsedKeyring } from './env';
 
 export { ErrorResponseSchema } from './errors';
 export type { ErrorResponse } from './errors';
