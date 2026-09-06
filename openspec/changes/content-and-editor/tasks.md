@@ -265,25 +265,25 @@ dependency graph, not only by intent.
 
 ## Phase 10 (WU-10) — `feat(db): soft lock with server-evaluated expiry and explicit takeover`
 
-- [ ] 10.1 RED — `page-lock.test.ts`: first entry with no active lock creates one
+- [x] 10.1 RED — `page-lock.test.ts`: first entry with no active lock creates one
       naming the holder; a second user cannot silently seize an active lock; a
       heartbeat before expiry extends the window; a lock heartbeated past TTL is
       reported expired on the next read with no sweeper job, and this holds even
       with no presence channel running. *(document-modes: Acquires A Soft Lock On
       Entry, both scenarios; Heartbeat Keeps The Lock Alive; Lock Expiry Is
       Evaluated Server-Side On Read, both scenarios)*
-- [ ] 10.2 RED — take-over transfers the holder; the prior holder's next heartbeat
+- [x] 10.2 RED — take-over transfers the holder; the prior holder's next heartbeat
       returns `lost`; read-only entry takes no lock and leaves an existing lock's
       holder/heartbeat unchanged. *(document-modes: "Take Over" transfers the lock;
       Read-Only Entry Takes No Lock)*
-- [ ] 10.3 RED — two concurrent acquisitions: the atomic
+- [x] 10.3 RED — two concurrent acquisitions: the atomic
       `INSERT … ON CONFLICT … RETURNING` guard returns zero rows for the loser —
       no read-then-write race.
-- [ ] 10.4 GREEN — `packages/db/drizzle/0010_page_locks.sql` (+ tested `down`);
+- [x] 10.4 GREEN — `packages/db/drizzle/0010_page_locks.sql` (+ tested `down`);
       `packages/db/src/locks/page-lock.ts`.
-- [ ] 10.5 RED — `packages/contracts/src/env.test.ts`: `PAGE_LOCK_TTL_SECONDS`,
+- [x] 10.5 RED — `packages/contracts/src/env.test.ts`: `PAGE_LOCK_TTL_SECONDS`,
       `PAGE_LOCK_HEARTBEAT_SECONDS` parse with sane defaults.
-- [ ] 10.6 GREEN — extend `env.ts` + `env.example`; `bun run scripts/checks/env-example.ts`
+- [x] 10.6 GREEN — extend `env.ts` + `env.example`; `bun run scripts/checks/env-example.ts`
       green.
 
 ## Phase 11 (WU-11) — `feat(core,db): set-shaped permission folds for list endpoints`

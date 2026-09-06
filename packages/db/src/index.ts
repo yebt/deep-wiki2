@@ -38,3 +38,18 @@ export type { CreatedWorkspace, CreateWorkspaceInput } from './workspaces/create
 export { can, createGrantLookup } from './permissions/queries';
 export { insertGrants } from './permissions/grants';
 export type { GrantInput } from './permissions/grants';
+export { NotCanonicalError, savePage, StaleContentError } from './content/save-page';
+export type { SavePageInput as SavePageDbInput, SavePageResult } from './content/save-page';
+export { readPageHtml, readPageMarkdown } from './content/read-page';
+export type { PageContentRef, PageHtml, PageMarkdown } from './content/read-page';
+export { acquireLock, heartbeatLock, readLockStatus, takeOverLock } from './locks/page-lock';
+export type {
+  AcquireLockInput,
+  AcquireLockResult,
+  HeartbeatLockInput,
+  HeartbeatLockResult,
+  LockStatus,
+  ReadLockStatusInput,
+  TakeOverLockInput,
+  TakeOverLockResult,
+} from './locks/page-lock';

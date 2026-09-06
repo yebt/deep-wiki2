@@ -287,3 +287,22 @@ export const pageTags = pgTable('page_tags', {
   workspaceId: uuid('workspace_id').notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
+
+/**
+ * The soft lock (content-and-editor design.md "The soft lock, coherent
+ * without presence"). No expiry column: a lock is held iff
+ * `heartbeat_at > now() - PAGE_LOCK_TTL_SECONDS`, computed on read by
+ * `packages/db/src/locks/page-lock.ts`. The composite FK into
+ * `page_content` is declared only in the migration SQL.
+ */
+export const pageLocks = pgTable('page_locks', {
+  nodeId: uuid('node_id').primaryKey(),
+  workspaceId: uuid('workspace_id').notNull(),
+  holderUserId: uuid('holder_user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  acquiredAt: timestamp('acquired_at', { withTimezone: true }).notNull().defaultNow(),
+  heartbeatAt: timestamp('heartbeat_at', { withTimezone: true }).notNull().defaultNow(),
+  takenOverFrom: uuid('taken_over_from').references(() => users.id, { onDelete: 'set null' }),
+  takenOverAt: timestamp('taken_over_at', { withTimezone: true }),
+});

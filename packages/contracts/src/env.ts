@@ -34,6 +34,14 @@ export const envSchema = z.object({
   PASSWORD_RESET_TTL_MINUTES: z.coerce.number().int().positive().default(30),
   INVITATION_TTL_DAYS: z.coerce.number().int().positive().default(7),
 
+  // The page soft lock (content-and-editor design.md "The soft lock,
+  // coherent without presence"): a lock is held iff
+  // `heartbeat_at > now() - PAGE_LOCK_TTL_SECONDS`, evaluated on read, with
+  // no sweeper job and no client clock. The client heartbeats well inside
+  // the TTL so an active editor's lock never lapses on its own.
+  PAGE_LOCK_TTL_SECONDS: z.coerce.number().int().positive().default(120),
+  PAGE_LOCK_HEARTBEAT_SECONDS: z.coerce.number().int().positive().default(20),
+
   // SMTP (mail-delivery spec). SMTP_HOST and MAIL_FROM are required by
   // `refineEnv()` unconditionally — there is no "mail disabled" mode, the
   // application always needs a MailSender for invitations and password

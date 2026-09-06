@@ -56,6 +56,28 @@ describe('parseEnv', () => {
       expect(result.value.NODE_ENV).toBe('development');
     }
   });
+
+  // document-modes: Edit Mode Acquires A Soft Lock On Entry; Heartbeat Keeps
+  // The Lock Alive (design.md "The soft lock, coherent without presence").
+  test('PAGE_LOCK_TTL_SECONDS and PAGE_LOCK_HEARTBEAT_SECONDS default to sane values when omitted', () => {
+    const result = parseEnv(validRawEnv());
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.PAGE_LOCK_TTL_SECONDS).toBe(120);
+      expect(result.value.PAGE_LOCK_HEARTBEAT_SECONDS).toBe(20);
+    }
+  });
+
+  test('PAGE_LOCK_TTL_SECONDS and PAGE_LOCK_HEARTBEAT_SECONDS parse an explicit override', () => {
+    const result = parseEnv(validRawEnv({ PAGE_LOCK_TTL_SECONDS: '60', PAGE_LOCK_HEARTBEAT_SECONDS: '10' }));
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.PAGE_LOCK_TTL_SECONDS).toBe(60);
+      expect(result.value.PAGE_LOCK_HEARTBEAT_SECONDS).toBe(10);
+    }
+  });
 });
 
 describe('envSchema stays a plain ZodObject', () => {

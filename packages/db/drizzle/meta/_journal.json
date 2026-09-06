@@ -71,6 +71,13 @@
       "when": 1735689600009,
       "tag": "0009_knowledge_graph",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1735689600010,
+      "tag": "0010_page_locks",
+      "breakpoints": true
     }
   ]
 }
