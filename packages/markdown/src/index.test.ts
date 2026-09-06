@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parse } from './index';
 
-const FIXTURES_DIR = join(import.meta.dir, '..', 'fixtures');
+const FIXTURES_DIR = join(import.meta.dir, '..', 'fixtures', 'modelled');
 
 test('parse() turns a heading fixture into the expected mdast', () => {
   const markdown = readFileSync(join(FIXTURES_DIR, 'heading.md'), 'utf8');

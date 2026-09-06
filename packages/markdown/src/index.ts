@@ -1,7 +1,24 @@
 import type { Root } from 'mdast';
+import remarkFrontmatter from 'remark-frontmatter';
+import remarkGfm from 'remark-gfm';
 import remarkParse from 'remark-parse';
 import remarkStringify from 'remark-stringify';
 import { unified } from 'unified';
+import {
+  applyBlockAnchors,
+  blockAnchorToMarkdown,
+  markCaretsForEscaping,
+  protectEscapedCarets,
+  restoreEscapedCarets,
+} from './extensions/block-anchor';
+import { applyBreakSpellings, breakToMarkdown } from './extensions/hard-break';
+import { applyListMarkers, listToMarkdown } from './extensions/list-marker';
+import { applyTags, tagToMarkdown } from './extensions/tag';
+import { applyWikiLinks, wikiLinkToMarkdown, type WikiLinkResolver } from './extensions/wiki-link';
+
+export type { WikiLinkNode, WikiLinkResolver, WikiLinkTarget } from './extensions/wiki-link';
+export type { TagNode } from './extensions/tag';
+export type { BlockAnchorNode } from './extensions/block-anchor';
 
 /**
  * The single shared unified/remark pipeline (docs/SPECS.md §13, §14):
@@ -47,17 +64,47 @@ export const PINNED_OPTIONS = {
   tightDefinitions: true,
 } as const;
 
-const parseProcessor = unified().use(remarkParse);
-const stringifyProcessor = unified().use(remarkStringify, PINNED_OPTIONS);
+const parseProcessor = unified().use(remarkParse).use(remarkGfm).use(remarkFrontmatter, ['yaml']);
+const stringifyProcessor = unified().use(remarkStringify, {
+  ...PINNED_OPTIONS,
+  handlers: {
+    blockAnchor: blockAnchorToMarkdown,
+    break: breakToMarkdown,
+    list: listToMarkdown,
+    tag: tagToMarkdown,
+    wikiLink: wikiLinkToMarkdown,
+  },
+});
+stringifyProcessor.use(remarkGfm).use(remarkFrontmatter, ['yaml']);
 
-/** Parses Markdown source into an mdast syntax tree. */
-export function parse(markdown: string): Root {
-  return parseProcessor.parse(markdown) as Root;
+export interface ParseOptions {
+  /** Resolves a wiki-link's target title to a page identity, if one exists. */
+  resolveWikiLink?: WikiLinkResolver;
+}
+
+/**
+ * Parses Markdown source into an mdast syntax tree, including this
+ * pipeline's custom syntax: GFM (tables, footnotes, strikethrough, task
+ * lists), wiki-links, `#tag`s, and persisted block-ID anchors.
+ */
+export function parse(markdown: string, options: ParseOptions = {}): Root {
+  const protectedMarkdown = protectEscapedCarets(markdown);
+  const tree = parseProcessor.parse(protectedMarkdown) as Root;
+  applyListMarkers(tree, protectedMarkdown);
+  applyBreakSpellings(tree, protectedMarkdown);
+  applyBlockAnchors(tree);
+  applyWikiLinks(tree, options.resolveWikiLink);
+  applyTags(tree);
+  return tree;
 }
 
 /** Serializes an mdast syntax tree back into Markdown source. */
 export function stringify(tree: Root): string {
-  return stringifyProcessor.stringify(tree);
+  // Operate on a clone: callers should not see their tree mutated by the
+  // pre-stringify anchor bookkeeping below.
+  const clone = structuredClone(tree);
+  markCaretsForEscaping(clone);
+  return restoreEscapedCarets(stringifyProcessor.stringify(clone));
 }
 
 /**
