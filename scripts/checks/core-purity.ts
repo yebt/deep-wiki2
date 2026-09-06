@@ -76,6 +76,25 @@ export function checkManifest(pkg: CoreManifest): CorePurityResult {
       };
 }
 
+/**
+ * `Bun.Transpiler().scanImports()` elides type-only imports (measured — see
+ * `core-purity.test.ts`'s "type-only imports" suite). A supplementary raw
+ * regex sweep over `import type … from "…"` and `export type … from "…"`
+ * closes that gap independently of the AST scan; it cannot be fooled by
+ * whatever scanImports() does or does not consider a "real" import (D19: no
+ * mdast type crosses into packages/core, ever).
+ */
+const TYPE_ONLY_IMPORT_PATTERN = /^\s*(?:import|export)\s+type\s+[^;]*?\bfrom\s+["']([^"']+)["']/gm;
+
+function findTypeOnlyImports(code: string): string[] {
+  const specifiers: string[] = [];
+  for (const match of code.matchAll(TYPE_ONLY_IMPORT_PATTERN)) {
+    const specifier = match[1];
+    if (specifier) specifiers.push(specifier);
+  }
+  return specifiers;
+}
+
 export function checkCorePurity(coreDir: string): CorePurityResult {
   const errors: string[] = [];
 
@@ -93,6 +112,14 @@ export function checkCorePurity(coreDir: string): CorePurityResult {
       if (!isRelativeSpecifier(imp.path)) {
         errors.push(
           `${relative(coreDir, file)}: disallowed non-relative import "${imp.path}" (packages/core must import nothing but its own relative modules)`,
+        );
+      }
+    }
+
+    for (const specifier of findTypeOnlyImports(code)) {
+      if (!isRelativeSpecifier(specifier)) {
+        errors.push(
+          `${relative(coreDir, file)}: disallowed non-relative type-only import "${specifier}" (packages/core must import nothing but its own relative modules, including \`import type\`/\`export type\`)`,
         );
       }
     }

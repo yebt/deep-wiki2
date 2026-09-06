@@ -27,6 +27,34 @@ describe('checkCorePurity', () => {
   });
 });
 
+// content-and-editor WU-8 task 8.0 — confirms the gap D19 depends on is real,
+// not merely theoretical: a type-only import from a non-relative specifier,
+// with no manifest entry at all (the specifier resolves via a hoisted
+// workspace node_modules), passed both of the checks above before the
+// supplementary regex sweep existed.
+describe('type-only imports (D19: no mdast type crosses into core)', () => {
+  test('rejects `import type … from` a non-relative specifier with no manifest entry', () => {
+    const result = checkCorePurity(join(FIXTURES_DIR, 'type-only-import-core'));
+
+    expect(result.ok).toBe(false);
+    expect(result.errors.some((e) => e.includes('mdast'))).toBe(true);
+    expect(result.errors.some((e) => e.includes('src/index.ts'))).toBe(true);
+  });
+
+  test('rejects `export type … from` a non-relative specifier the same way', () => {
+    const result = checkCorePurity(join(FIXTURES_DIR, 'type-only-export-core'));
+
+    expect(result.ok).toBe(false);
+    expect(result.errors.some((e) => e.includes('mdast'))).toBe(true);
+  });
+
+  test('a relative `import type` is untouched', () => {
+    const result = checkCorePurity(join(FIXTURES_DIR, 'clean-core'));
+
+    expect(result.ok).toBe(true);
+  });
+});
+
 // scanImports() elides type-only imports (measured), so an `import type` from a
 // framework is invisible to the AST scan. If that framework were declared only
 // under devDependencies, nothing checked it either. Both holes had to be open at
