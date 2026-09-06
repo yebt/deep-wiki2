@@ -17,12 +17,16 @@ import { applyTags, tagToMarkdown } from './extensions/tag';
 import { verbatimInlineToMarkdown, verbatimToMarkdown } from './extensions/verbatim';
 import { applyWikiLinks, wikiLinkToMarkdown, type WikiLinkResolver } from './extensions/wiki-link';
 
-export type { WikiLinkNode, WikiLinkResolver, WikiLinkTarget } from './extensions/wiki-link';
+export { collectWikiLinks } from './extensions/wiki-link';
+export type { CollectedWikiLink, WikiLinkNode, WikiLinkResolver, WikiLinkTarget } from './extensions/wiki-link';
+export { collectTags } from './extensions/tag';
 export type { TagNode } from './extensions/tag';
 export type { BlockAnchorNode } from './extensions/block-anchor';
 export type { VerbatimInlineNode, VerbatimNode } from './extensions/verbatim';
 export { buildBlockIndex } from './block-index';
 export type { BlockIndex, BlockIndexEntry } from './block-index';
+export { sliceBlocks } from './blocks';
+export type { BlockSlice } from './blocks';
 export { chunk } from './chunk';
 export type { Chunk, ChunkOptions } from './chunk';
 export { deriveBlockId, matchBlocks, mintBlockId, MATCH_THRESHOLD } from './match-blocks';

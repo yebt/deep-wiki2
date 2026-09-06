@@ -3,7 +3,7 @@
  * secret-field guards (design.md — "Preventing the non-sargable `text`
  * path"; "Credentials that must never be logged, serialised or rendered").
  *
- * Five rules, each independently testable against a fixture:
+ * Six rules, each independently testable against a fixture:
  *   1. No file outside `packages/db/src/permissions/` may reference the
  *      `permissions` table via a SQL verb (FROM/JOIN/INTO/UPDATE) — `can()`
  *      is the single decision point; a second read path for machines is
@@ -21,10 +21,17 @@
  *      redundant or actively harmful.
  *   5. No zod schema exported under a `*Response*` name in
  *      `packages/contracts` may declare a denylisted secret-shaped field.
+ *   6. No file outside `packages/db/src/content/` may write (INSERT/UPDATE/
+ *      DELETE) to `links` or `page_tags` — content-and-editor design.md
+ *      "The save transaction" replaces both wholesale from the save
+ *      pipeline; a second writer is exactly the direct-edit path
+ *      knowledge-graph spec's "Links Are Never User-Editable Directly"
+ *      forbids.
  *
- * Rules 1 and 2 exclude `*.test.ts`/`*.spec.ts` files: verifying the
- * resolver's or the subtree query's real SQL behaviour (the truth table,
- * the EXPLAIN cost proof) legitimately embeds these exact patterns.
+ * Rules 1, 2 and 6 exclude `*.test.ts`/`*.spec.ts` files: verifying the
+ * resolver's, the subtree query's, or the save transaction's real SQL
+ * behaviour (the truth table, the EXPLAIN cost proof, the replace-wholesale
+ * assertions) legitimately embeds these exact patterns.
  */
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
@@ -42,6 +49,7 @@ const PERMISSIONS_TABLE_PATTERN = /\b(FROM|JOIN|INTO|UPDATE)\s+permissions\b/i;
 const PATH_LIKE_PATTERN = /\bpath\s+LIKE\b|\.like\(/i;
 const LEADING_WILDCARD_PATTERN = /(['"`])%[^%'"`]+\1/;
 const LOWER_UPPER_PATH_PATTERN = /\b(lower|upper)\s*\(\s*path\s*\)/i;
+const LINKS_WRITE_PATTERN = /\b(INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+(links|page_tags)\b/i;
 
 const DENYLISTED_FIELDS = [
   'password_hash',
@@ -167,6 +175,23 @@ function checkSecretFields(root: string, errors: string[]): void {
   }
 }
 
+function checkLinksWriteBoundary(root: string, errors: string[]): void {
+  const contentDir = join(root, 'packages', 'db', 'src', 'content');
+  const files = findFiles(root, SOURCE_FILE_PATTERN).filter(
+    (f) => !TEST_FILE_PATTERN.test(f) && !isUnderPath(f, contentDir) && !isSelfFile(f),
+  );
+
+  for (const file of files) {
+    const content = readFileSync(file, 'utf8');
+    if (LINKS_WRITE_PATTERN.test(content)) {
+      errors.push(
+        `${relative(root, file)}: writes to links/page_tags outside packages/db/src/content/ — ` +
+          `derived rows are replaced wholesale by the save transaction, never patched elsewhere`,
+      );
+    }
+  }
+}
+
 export function checkQueryBoundaries(root: string): QueryBoundariesResult {
   const errors: string[] = [];
 
@@ -175,6 +200,7 @@ export function checkQueryBoundaries(root: string): QueryBoundariesResult {
   checkLeadingWildcard(root, errors);
   checkLowerUpperPath(root, errors);
   checkSecretFields(root, errors);
+  checkLinksWriteBoundary(root, errors);
 
   return { ok: errors.length === 0, errors };
 }

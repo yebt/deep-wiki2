@@ -244,22 +244,22 @@ dependency graph, not only by intent.
 
 ## Phase 9 (WU-9) — `feat(db): derived links and tags replaced wholesale inside the save transaction`
 
-- [ ] 9.1 RED — save-transaction test: `links` rows sourced from a page are fully
+- [x] 9.1 RED — save-transaction test: `links` rows sourced from a page are fully
       replaced (not patched) on save, including full removal when a link is dropped;
       an unresolved wiki-link does not fail the save and records no resolved target.
       *(knowledge-graph: Links Are Rebuilt Not Patched, both scenarios; Wiki-Link To
       A Non-Existent Page Resolves As Unresolved)*
-- [ ] 9.2 RED — tags/`page_tags` replaced wholesale on save: a new tag is created; a
+- [x] 9.2 RED — tags/`page_tags` replaced wholesale on save: a new tag is created; a
       removed tag drops its association. *(knowledge-graph: Tags And Page-Tag
       Associations Are Rebuilt On Save, both scenarios)*
-- [ ] 9.3 RED — a direct write to `links` outside the save pipeline is rejected by
+- [x] 9.3 RED — a direct write to `links` outside the save pipeline is rejected by
       the extended `scripts/checks/query-boundaries.ts` rule. *(knowledge-graph:
       Links Are Never User-Editable Directly)*
-- [ ] 9.4 GREEN — `packages/db/drizzle/0009_knowledge_graph.sql` (+ tested `down`):
+- [x] 9.4 GREEN — `packages/db/drizzle/0009_knowledge_graph.sql` (+ tested `down`):
       `links`, `tags`, `page_tags`; extend `src/content/{save-page,rebuild-derived}.ts`
       to reconcile `page_blocks` via `matchBlocks`, replace `links`/`page_tags`, and
       write `rendered_html`, all in one transaction.
-- [ ] 9.5 GREEN — extend `scripts/checks/query-boundaries.ts`: a `links`/`page_tags`
+- [x] 9.5 GREEN — extend `scripts/checks/query-boundaries.ts`: a `links`/`page_tags`
       write-boundary rule (only `packages/db/src/content/` may write them), in the
       idiom already used for `permissions`.
 

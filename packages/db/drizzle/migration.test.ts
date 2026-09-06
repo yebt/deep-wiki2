@@ -132,6 +132,51 @@ describe('after migrate: hand-written objects exist', () => {
     `;
     expect(rows).toHaveLength(1);
   });
+
+  test('links, tags and page_tags exist with their tenant-scoped uniqueness', async () => {
+    const tables = await sql<{ tablename: string }[]>`
+      SELECT tablename FROM pg_tables WHERE tablename IN ('links', 'tags', 'page_tags') ORDER BY tablename
+    `;
+    expect(tables.map((r) => r.tablename)).toEqual(['links', 'page_tags', 'tags']);
+
+    const fk = await sql<{ conname: string }[]>`
+      SELECT conname FROM pg_constraint
+      WHERE conrelid = 'links'::regclass AND conname = 'links_source_fk' AND contype = 'f'
+    `;
+    expect(fk).toHaveLength(1);
+
+    const tagUnique = await sql<{ conname: string }[]>`
+      SELECT conname FROM pg_constraint
+      WHERE conrelid = 'tags'::regclass AND conname = 'tags_workspace_name_unique' AND contype = 'u'
+    `;
+    expect(tagUnique).toHaveLength(1);
+  });
+});
+
+/**
+ * Rollback order is `0010 -> 0009 -> 0008` (design.md "Migration /
+ * Rollout"): `links`/`page_tags` carry foreign keys into `page_content`,
+ * so 0008's down migration can only run cleanly once 0009's own down has
+ * already dropped them — the same dependency order the up migrations
+ * establish, in reverse.
+ */
+describe('0009_knowledge_graph down migration', () => {
+  test('reverses cleanly: links, tags and page_tags are all gone', async () => {
+    const rollback = await provisionTestDatabase();
+    const rollbackSql = postgres(rollback.url, { max: 1 });
+    try {
+      const downSql = await Bun.file(new URL('./down/0009_knowledge_graph.down.sql', import.meta.url)).text();
+      await rollbackSql.unsafe(downSql);
+
+      const tables = await rollbackSql<{ tablename: string }[]>`
+        SELECT tablename FROM pg_tables WHERE tablename IN ('links', 'tags', 'page_tags')
+      `;
+      expect(tables).toHaveLength(0);
+    } finally {
+      await rollbackSql.end({ timeout: 1 }).catch(() => {});
+      await rollback.drop();
+    }
+  });
 });
 
 describe('0008_page_content down migration', () => {
@@ -139,6 +184,13 @@ describe('0008_page_content down migration', () => {
     const rollback = await provisionTestDatabase();
     const rollbackSql = postgres(rollback.url, { max: 1 });
     try {
+      // 0009's tables carry foreign keys into page_content — its down
+      // migration must run first, exactly as a real rollback would.
+      const knowledgeGraphDown = await Bun.file(
+        new URL('./down/0009_knowledge_graph.down.sql', import.meta.url),
+      ).text();
+      await rollbackSql.unsafe(knowledgeGraphDown);
+
       const downSql = await Bun.file(
         new URL('./down/0008_page_content.down.sql', import.meta.url),
       ).text();

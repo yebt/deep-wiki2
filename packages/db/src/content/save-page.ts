@@ -2,16 +2,17 @@
  * The page save transaction (content-and-editor design.md "The save
  * transaction", page-content spec). Assert canonical -> compute the
  * derived render and block index from the new content only -> write, guarded
- * by `content_hash` optimistic concurrency (D16). `rendered_html` and
- * `block_index` have no place in this function's own input type: they are
- * always regenerated from `markdown`, never accepted from the caller.
- *
- * Block reconciliation via `matchBlocks` against `page_blocks` is a later
- * phase (WU-9) — this function writes `page_content` only.
+ * by `content_hash` optimistic concurrency (D16) -> reconcile the derived
+ * knowledge graph and block registry (`reconcileDerived`) in the same
+ * transaction, so a failure there rolls back the content write too.
+ * `rendered_html` and `block_index` have no place in this function's own
+ * input type: they are always regenerated from `markdown`, never accepted
+ * from the caller.
  */
 import { createHash } from 'node:crypto';
 import { buildBlockIndex, canonicalise, parse, render, type BlockIndex } from '@deep-wiki/markdown';
 import type postgres from 'postgres';
+import { reconcileDerived } from './rebuild-derived';
 
 export class NotCanonicalError extends Error {
   constructor(readonly canonical: string) {
@@ -53,10 +54,13 @@ export async function savePage(sql: postgres.Sql, input: SavePageInput): Promise
   }
 
   const contentHash = contentHashOf(canonical);
+  const tree = parse(canonical);
   const renderedHtml = render(canonical);
-  const blockIndex = buildBlockIndex(parse(canonical), canonical);
+  const blockIndex = buildBlockIndex(tree, canonical);
 
   return sql.begin(async (tx) => {
+    let previousMarkdown: string | null = null;
+
     if (input.expectedContentHash === null) {
       const rows = await tx`
         INSERT INTO page_content (node_id, workspace_id, markdown, rendered_html, block_index, content_hash, updated_by)
@@ -69,6 +73,13 @@ export async function savePage(sql: postgres.Sql, input: SavePageInput): Promise
       `;
       if (rows.length === 0) throw new StaleContentError(input.nodeId);
     } else {
+      const [existing] = await tx<{ markdown: string }[]>`
+        SELECT markdown FROM page_content
+         WHERE node_id = ${input.nodeId} AND workspace_id = ${input.workspaceId}
+         FOR UPDATE
+      `;
+      previousMarkdown = existing?.markdown ?? null;
+
       const rows = await tx`
         UPDATE page_content
            SET markdown = ${canonical},
@@ -84,6 +95,14 @@ export async function savePage(sql: postgres.Sql, input: SavePageInput): Promise
       `;
       if (rows.length === 0) throw new StaleContentError(input.nodeId);
     }
+
+    await reconcileDerived(tx, {
+      nodeId: input.nodeId,
+      workspaceId: input.workspaceId,
+      tree,
+      canonicalMarkdown: canonical,
+      previousMarkdown,
+    });
 
     return { contentHash, renderedHtml, blockIndex };
   });

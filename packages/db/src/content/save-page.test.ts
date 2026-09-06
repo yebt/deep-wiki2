@@ -16,7 +16,7 @@ afterAll(async () => {
   await db.drop();
 });
 
-async function seedPageNode() {
+async function seedWorkspace() {
   const [plan] = await sql`
     INSERT INTO plans (name, max_workspaces, max_seats, max_storage_bytes, max_ai_tokens_monthly)
     VALUES (${`plan-${crypto.randomUUID()}`}, 3, 5, '1000000', '1000') RETURNING id
@@ -33,11 +33,21 @@ async function seedPageNode() {
     INSERT INTO nodes (workspace_id, parent_id, type, path, position, slug, title)
     VALUES (${workspace!.id}, NULL, 'workspace', '', 0, 'root', 'Root') RETURNING id
   `;
+  return { workspaceId: workspace!.id as string, rootId: root!.id as string };
+}
+
+async function seedPage(workspaceId: string, rootId: string, title = `Page ${crypto.randomUUID()}`): Promise<string> {
   const [page] = await sql`
     INSERT INTO nodes (workspace_id, parent_id, type, path, position, slug, title)
-    VALUES (${workspace!.id}, ${root!.id}, 'page', '', 0, ${`page-${crypto.randomUUID()}`}, 'A Page') RETURNING id
+    VALUES (${workspaceId}, ${rootId}, 'page', '', 0, ${`page-${crypto.randomUUID()}`}, ${title}) RETURNING id
   `;
-  return { workspaceId: workspace!.id as string, nodeId: page!.id as string };
+  return page!.id as string;
+}
+
+async function seedPageNode() {
+  const { workspaceId, rootId } = await seedWorkspace();
+  const nodeId = await seedPage(workspaceId, rootId);
+  return { workspaceId, nodeId };
 }
 
 // content-and-editor page-content spec: Saving persists unchanged; Single
@@ -111,5 +121,112 @@ describe('savePage', () => {
     await expect(
       savePage(sql, { nodeId, workspaceId, markdown: '* one\n* two\n', expectedContentHash: null }),
     ).rejects.toThrow(NotCanonicalError);
+  });
+});
+
+// knowledge-graph: Links Are Rebuilt, Not Patched, On Every Save; Wiki-Link
+// To A Non-Existent Page Resolves As Unresolved.
+describe('savePage — derived links', () => {
+  test('save replaces the source page’s link rows with the newly parsed set, including full removal', async () => {
+    const { workspaceId, rootId } = await seedWorkspace();
+    const nodeId = await seedPage(workspaceId, rootId, 'Source');
+    const targetA = await seedPage(workspaceId, rootId, 'Target A');
+    const targetB = await seedPage(workspaceId, rootId, 'Target B');
+
+    const first = await savePage(sql, {
+      nodeId,
+      workspaceId,
+      markdown: 'See [[Target A]] and [[Target B]].\n',
+      expectedContentHash: null,
+    });
+
+    let rows = await sql<{ target_page_id: string }[]>`
+      SELECT target_page_id FROM links WHERE source_page_id = ${nodeId} ORDER BY target_page_id
+    `;
+    expect(rows.map((r) => r.target_page_id).sort()).toEqual([targetA, targetB].sort());
+
+    await savePage(sql, {
+      nodeId,
+      workspaceId,
+      markdown: 'Only [[Target A]] remains.\n',
+      expectedContentHash: first.contentHash,
+    });
+
+    rows = await sql`SELECT target_page_id FROM links WHERE source_page_id = ${nodeId}`;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.target_page_id).toBe(targetA);
+  });
+
+  test('an unresolved wiki-link does not fail the save and records no resolved target', async () => {
+    const { workspaceId, nodeId } = await seedPageNode();
+
+    const result = await savePage(sql, {
+      nodeId,
+      workspaceId,
+      markdown: 'See [[No Such Page]].\n',
+      expectedContentHash: null,
+    });
+
+    expect(result.contentHash).toBeTruthy();
+    const [row] = await sql<{ target_page_id: string | null; target_raw: string }[]>`
+      SELECT target_page_id, target_raw FROM links WHERE source_page_id = ${nodeId}
+    `;
+    expect(row!.target_page_id).toBeNull();
+    expect(row!.target_raw).toBe('No Such Page');
+  });
+});
+
+// knowledge-graph: Tags And Page-Tag Associations Are Rebuilt On Save.
+describe('savePage — derived tags', () => {
+  test('a new tag is created on save and the page is linked to it', async () => {
+    const { workspaceId, nodeId } = await seedPageNode();
+
+    await savePage(sql, { nodeId, workspaceId, markdown: 'Body #project text.\n', expectedContentHash: null });
+
+    const [tag] = await sql<{ id: string }[]>`SELECT id FROM tags WHERE workspace_id = ${workspaceId} AND name = 'project'`;
+    expect(tag).toBeTruthy();
+    const [pageTag] = await sql`SELECT 1 AS x FROM page_tags WHERE page_id = ${nodeId} AND tag_id = ${tag!.id}`;
+    expect(pageTag).toBeTruthy();
+  });
+
+  test('a removed tag drops its page_tags association', async () => {
+    const { workspaceId, nodeId } = await seedPageNode();
+    const first = await savePage(sql, { nodeId, workspaceId, markdown: 'Body #project text.\n', expectedContentHash: null });
+
+    await savePage(sql, { nodeId, workspaceId, markdown: 'Body without the tag.\n', expectedContentHash: first.contentHash });
+
+    const rows = await sql`SELECT 1 AS x FROM page_tags WHERE page_id = ${nodeId}`;
+    expect(rows).toHaveLength(0);
+  });
+});
+
+// design.md "Block identity" / "The save transaction" — the reconciliation
+// wiring itself; matchBlocks' own threshold algorithm is unit-tested in
+// match-blocks.test.ts (WU-3) and is not re-derived here.
+describe('savePage — block reconciliation', () => {
+  test('an anchored block registers active on first save and tombstones once its content is fully replaced', async () => {
+    const { workspaceId, nodeId } = await seedPageNode();
+
+    const first = await savePage(sql, {
+      nodeId,
+      workspaceId,
+      markdown: 'This is the tracked paragraph with enough distinct words to match reliably. ^abc123\n',
+      expectedContentHash: null,
+    });
+
+    let rows = await sql<{ status: string }[]>`SELECT status FROM page_blocks WHERE page_id = ${nodeId} AND block_id = 'abc123'`;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.status).toBe('active');
+
+    await savePage(sql, {
+      nodeId,
+      workspaceId,
+      markdown: 'Nothing here resembles that original wording whatsoever anymore.\n',
+      expectedContentHash: first.contentHash,
+    });
+
+    rows = await sql`SELECT status FROM page_blocks WHERE page_id = ${nodeId} AND block_id = 'abc123'`;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.status).toBe('tombstoned');
   });
 });

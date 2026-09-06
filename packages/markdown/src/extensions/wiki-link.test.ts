@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
 import { parse } from '../index';
+import { collectWikiLinks } from './wiki-link';
 import type { WikiLinkNode } from './wiki-link';
 
 function findWikiLink(markdown: string, resolve?: (title: string) => { id: string } | undefined) {
@@ -47,4 +48,24 @@ test('an unresolvable target carries no resolved identity and keeps the raw text
 
   expect(node.resolved).toBeUndefined();
   expect(node.raw).toBe('[[Nonexistent Page]]');
+});
+
+// knowledge-graph: Links Are Rebuilt, Not Patched, On Every Save
+
+test('collectWikiLinks walks the whole tree in document order', () => {
+  const tree = parse('See [[Target A]] and [[Target B|B]].\n\nAnother [[Target A]] here.\n');
+
+  const links = collectWikiLinks(tree);
+
+  expect(links.map((l) => l.target)).toEqual(['Target A', 'Target B', 'Target A']);
+  expect(links[1]!.alias).toBe('B');
+});
+
+test('collectWikiLinks reports the owning block anchor when the block carries one, else null', () => {
+  const tree = parse('Anchored paragraph with [[Target]]. ^abc123\n\nPlain paragraph with [[Other]].\n');
+
+  const links = collectWikiLinks(tree);
+
+  expect(links[0]!.sourceBlockId).toBe('abc123');
+  expect(links[1]!.sourceBlockId).toBeNull();
 });

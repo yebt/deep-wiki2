@@ -239,3 +239,51 @@ export const pageBlocks = pgTable('page_blocks', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
+
+/**
+ * The derived, save-triggered knowledge graph (content-and-editor design.md
+ * "Schema"; knowledge-graph spec). `source_page_id`'s composite FK into
+ * `page_content` and `target_page_id`'s nullable composite FK into `nodes`
+ * are declared only in the migration SQL — see the module doc comment
+ * above. Rows here are replaced wholesale by
+ * `packages/db/src/content/rebuild-derived.ts` on every save; no other
+ * module may write them (`scripts/checks/query-boundaries.ts`).
+ */
+export const links = pgTable('links', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  workspaceId: uuid('workspace_id')
+    .notNull()
+    .references(() => workspaces.id, { onDelete: 'cascade' }),
+  sourcePageId: uuid('source_page_id').notNull(),
+  targetPageId: uuid('target_page_id'),
+  targetRaw: text('target_raw').notNull(),
+  sourceBlockId: text('source_block_id'),
+  anchor: text('anchor'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * A workspace-scoped `#tag` name (knowledge-graph spec). The
+ * `(workspace_id, name)` and `(id, workspace_id)` unique constraints are
+ * declared only in the migration SQL.
+ */
+export const tags = pgTable('tags', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  workspaceId: uuid('workspace_id')
+    .notNull()
+    .references(() => workspaces.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * A page's association with a tag (knowledge-graph spec: Tags And
+ * Page-Tag Associations Are Rebuilt On Save). The composite primary key
+ * and both composite foreign keys are declared only in the migration SQL.
+ */
+export const pageTags = pgTable('page_tags', {
+  pageId: uuid('page_id').notNull(),
+  tagId: uuid('tag_id').notNull(),
+  workspaceId: uuid('workspace_id').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});

@@ -63,3 +63,21 @@ export function applyTags(tree: Root): Root {
 export function tagToMarkdown(node: TagNode): string {
   return `#${node.name}`;
 }
+
+/**
+ * Walks `tree` and returns every distinct tag name, in first-seen order
+ * (knowledge-graph: Tags And Page-Tag Associations Are Rebuilt On Save).
+ */
+export function collectTags(tree: Root): string[] {
+  const seen = new Set<string>();
+  const names: string[] = [];
+
+  visit(tree, 'tag', (node: TagNode) => {
+    if (!seen.has(node.name)) {
+      seen.add(node.name);
+      names.push(node.name);
+    }
+  });
+
+  return names;
+}

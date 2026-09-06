@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
 import { parse } from '../index';
+import { collectTags } from './tag';
 
 // markdown-pipeline: Tag Parsing
 
@@ -39,4 +40,20 @@ test('a # inside inline code is not parsed as a tag', () => {
   if (inlineCode?.type !== 'inlineCode') throw new Error('expected inline code');
   expect(inlineCode.value).toBe('#include');
   expect(paragraph.children.some((child) => child.type === 'tag')).toBe(false);
+});
+
+// knowledge-graph: Tags And Page-Tag Associations Are Rebuilt On Save
+
+test('collectTags returns the distinct tag names in first-seen order', () => {
+  const tree = parse('Body with #project and #urgent, mentioning #project again.\n');
+
+  const tags = collectTags(tree);
+
+  expect(tags).toEqual(['project', 'urgent']);
+});
+
+test('collectTags returns an empty array for a document with no tags', () => {
+  const tree = parse('Plain body with no tags at all.\n');
+
+  expect(collectTags(tree)).toEqual([]);
 });

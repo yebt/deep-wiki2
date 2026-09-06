@@ -388,3 +388,87 @@ describe('page_blocks: a tombstoned id can never be reused', () => {
     );
   });
 });
+
+// content-and-editor design.md "Schema" — knowledge-graph spec.
+describe('links: source pins to page_content, target is nullable and inert while unresolved', () => {
+  async function seedPageContent(workspaceId: string, parentId: string) {
+    const [page] = await sql`
+      INSERT INTO nodes (workspace_id, parent_id, type, path, position, slug, title)
+      VALUES (${workspaceId}, ${parentId}, 'page', '', 0, ${`page-${crypto.randomUUID()}`}, 'A Page')
+      RETURNING id
+    `;
+    await sql`
+      INSERT INTO page_content (node_id, workspace_id, markdown, content_hash)
+      VALUES (${page!.id}, ${workspaceId}, '# Hello', 'hash-1')
+    `;
+    return page!.id as string;
+  }
+
+  test('a link from a page with content is accepted, with a null target recorded as unresolved', async () => {
+    const { workspaceId, rootId } = await seedWorkspace();
+    const pageId = await seedPageContent(workspaceId, rootId);
+
+    const rows = await sql`
+      INSERT INTO links (workspace_id, source_page_id, target_raw)
+      VALUES (${workspaceId}, ${pageId}, 'Some Title')
+      RETURNING target_page_id
+    `;
+    expect(rows[0]!.target_page_id).toBeNull();
+  });
+
+  test('a link whose source page has no content row is rejected', async () => {
+    const { workspaceId, rootId } = await seedWorkspace();
+    const [page] = await sql`
+      INSERT INTO nodes (workspace_id, parent_id, type, path, position, slug, title)
+      VALUES (${workspaceId}, ${rootId}, 'page', '', 0, ${`page-${crypto.randomUUID()}`}, 'No Content')
+      RETURNING id
+    `;
+
+    await assertRejects(
+      sql`INSERT INTO links (workspace_id, source_page_id, target_raw) VALUES (${workspaceId}, ${page!.id}, 'x')`,
+    );
+  });
+});
+
+describe('tags and page_tags: workspace-scoped uniqueness', () => {
+  async function seedPageContent(workspaceId: string, parentId: string) {
+    const [page] = await sql`
+      INSERT INTO nodes (workspace_id, parent_id, type, path, position, slug, title)
+      VALUES (${workspaceId}, ${parentId}, 'page', '', 0, ${`page-${crypto.randomUUID()}`}, 'A Page')
+      RETURNING id
+    `;
+    await sql`
+      INSERT INTO page_content (node_id, workspace_id, markdown, content_hash)
+      VALUES (${page!.id}, ${workspaceId}, '# Hello', 'hash-1')
+    `;
+    return page!.id as string;
+  }
+
+  test('the same tag name cannot be created twice in one workspace', async () => {
+    const { workspaceId } = await seedWorkspace();
+    await sql`INSERT INTO tags (workspace_id, name) VALUES (${workspaceId}, 'project')`;
+
+    await assertRejects(sql`INSERT INTO tags (workspace_id, name) VALUES (${workspaceId}, 'project')`);
+  });
+
+  test('the same tag name is allowed again in a different workspace', async () => {
+    const { workspaceId: workspaceA } = await seedWorkspace();
+    const { workspaceId: workspaceB } = await seedWorkspace();
+    await sql`INSERT INTO tags (workspace_id, name) VALUES (${workspaceA}, 'project')`;
+
+    const rows = await sql`INSERT INTO tags (workspace_id, name) VALUES (${workspaceB}, 'project') RETURNING id`;
+    expect(rows).toHaveLength(1);
+  });
+
+  test('a page_tags row requires both the page and the tag to exist', async () => {
+    const { workspaceId, rootId } = await seedWorkspace();
+    const pageId = await seedPageContent(workspaceId, rootId);
+    const [tag] = await sql`INSERT INTO tags (workspace_id, name) VALUES (${workspaceId}, 'project') RETURNING id`;
+
+    const rows = await sql`
+      INSERT INTO page_tags (page_id, tag_id, workspace_id) VALUES (${pageId}, ${tag!.id}, ${workspaceId})
+      RETURNING page_id
+    `;
+    expect(rows).toHaveLength(1);
+  });
+});

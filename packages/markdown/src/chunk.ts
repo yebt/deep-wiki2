@@ -1,6 +1,4 @@
-import type { Root, RootContent } from 'mdast';
-import { findBlockAnchor } from './extensions/block-anchor';
-import { deriveBlockId } from './match-blocks';
+import { sliceBlocks } from './blocks';
 import { parse } from './index';
 
 export interface Chunk {
@@ -17,35 +15,6 @@ export interface ChunkOptions {
 function tokenCount(text: string): number {
   const trimmed = text.trim();
   return trimmed.length === 0 ? 0 : trimmed.split(/\s+/).length;
-}
-
-interface BlockSlice {
-  id: string;
-  text: string;
-  tokens: number;
-}
-
-/** Assigns each top-level block its id: the persisted anchor if present, otherwise the derived identity. */
-function sliceBlocks(tree: Root, source: string): BlockSlice[] {
-  const occurrenceCounts = new Map<string, number>();
-
-  return tree.children.map((node: RootContent) => {
-    const start = node.position?.start.offset;
-    const end = node.position?.end.offset;
-    const text = start !== undefined && end !== undefined ? source.slice(start, end) : '';
-
-    const anchor = findBlockAnchor(node);
-    let id: string;
-    if (anchor) {
-      id = anchor.id;
-    } else {
-      const occurrence = occurrenceCounts.get(text) ?? 0;
-      occurrenceCounts.set(text, occurrence + 1);
-      id = deriveBlockId(text, occurrence);
-    }
-
-    return { id, text, tokens: tokenCount(text) };
-  });
 }
 
 /**
@@ -73,17 +42,18 @@ export function chunk(markdown: string, options: ChunkOptions): Chunk[] {
   };
 
   for (const block of blocks) {
-    const wouldExceed = currentTokens + block.tokens > options.maxTokens;
+    const tokens = tokenCount(block.text);
+    const wouldExceed = currentTokens + tokens > options.maxTokens;
     if (wouldExceed && currentIds.length > 0) {
       flush();
     }
     currentIds.push(block.id);
     currentTexts.push(block.text);
-    currentTokens += block.tokens;
+    currentTokens += tokens;
 
     // An oversized block (exceeds the budget on its own) becomes its own
     // chunk rather than being cut mid-content or absorbing neighbours.
-    if (block.tokens > options.maxTokens) {
+    if (tokens > options.maxTokens) {
       flush();
     }
   }

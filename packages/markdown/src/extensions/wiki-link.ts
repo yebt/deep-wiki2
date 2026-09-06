@@ -1,5 +1,6 @@
-import type { Parent, PhrasingContent, Root, Text } from 'mdast';
+import type { Parent, PhrasingContent, Root, RootContent, Text } from 'mdast';
 import { visit } from 'unist-util-visit';
+import { findBlockAnchor } from './block-anchor';
 
 /** The resolved identity of a page a wiki-link points at. */
 export interface WikiLinkTarget {
@@ -84,6 +85,49 @@ export function applyWikiLinks(tree: Root, resolve?: WikiLinkResolver): Root {
   });
 
   return tree;
+}
+
+/** One wiki-link occurrence, as returned by `collectWikiLinks`. */
+export interface CollectedWikiLink {
+  readonly raw: string;
+  readonly target: string;
+  readonly anchor?: string;
+  readonly alias?: string;
+  readonly resolved?: WikiLinkTarget;
+  /**
+   * The persisted block-anchor id of the top-level block this wiki-link
+   * lives in, or `null` when that block carries no anchor. Used by
+   * `packages/db`'s save transaction to populate `links.source_block_id`
+   * without duplicating tree-walking logic outside this pipeline.
+   */
+  readonly sourceBlockId: string | null;
+}
+
+/**
+ * Walks `tree` and returns every wiki-link occurrence in document order,
+ * each tagged with its owning top-level block's persisted anchor id, if any
+ * (knowledge-graph: Links Are Rebuilt, Not Patched, On Every Save).
+ */
+export function collectWikiLinks(tree: Root): CollectedWikiLink[] {
+  const links: CollectedWikiLink[] = [];
+
+  for (const block of tree.children as RootContent[]) {
+    const anchor = findBlockAnchor(block);
+    const sourceBlockId = anchor?.id ?? null;
+
+    visit(block, 'wikiLink', (node: WikiLinkNode) => {
+      links.push({
+        raw: node.raw,
+        target: node.target,
+        anchor: node.anchor,
+        alias: node.alias,
+        resolved: node.resolved,
+        sourceBlockId,
+      });
+    });
+  }
+
+  return links;
 }
 
 /**
