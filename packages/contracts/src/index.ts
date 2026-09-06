@@ -62,3 +62,14 @@ export type {
 
 export { UploadAvatarResponseSchema } from './uploads';
 export type { UploadAvatarResponse } from './uploads';
+
+export { SaveAiCredentialRequestSchema } from './ai-credentials-request';
+export type { SaveAiCredentialRequest } from './ai-credentials-request';
+
+export {
+  AiCredentialProviderSchema,
+  AiCredentialSummarySchema,
+  ListAiCredentialsResponseSchema,
+  SaveAiCredentialResponseSchema,
+} from './ai-credentials';
+export type { AiCredentialProvider, AiCredentialSummary, ListAiCredentialsResponse, SaveAiCredentialResponse } from './ai-credentials';
