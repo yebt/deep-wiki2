@@ -81,12 +81,12 @@ further decision gate blocks `sdd-apply`.
 
 ## Phase 3: Core — Cost Model and Budget State Machine
 
-- [ ] 3.1 RED: `packages/core/src/ai/pricing.test.ts` — cost arithmetic from token counts and the price table (input/output/cached-input, distinct rates).
-- [ ] 3.2 GREEN: `packages/core/src/ai/pricing.ts`.
-- [ ] 3.3 RED: `packages/core/src/ai/budget.test.ts` — pure transition function: `reserve → settle` releases the reservation and records actual cost; `reserve → void` releases with no settlement; `reserve` past `expires_at` is excluded from the outstanding sum with no sweep.
-- [ ] 3.4 GREEN: `packages/core/src/ai/budget.ts` — the reserve/settle/void/expire state machine as a pure function over rows, mirroring the `UPDATE ... RETURNING` semantics in `design.md`.
-- [ ] 3.5 RED: `packages/core/src/ai/budget.test.ts` — **under-reservation bound test**: given a provider that reports actual usage above `maxOutputTokens` (or an underestimated input count), assert the resulting overspend is bounded to exactly one call — the *next* admission is refused, not retroactively corrected. Asserts the design's claimed bound rather than trusting the narrative (open item).
-- [ ] 3.6 GREEN: implement the "actual exceeds reserve is recorded truthfully, next admission refused" rule in `budget.ts` covered by 3.5.
+- [x] 3.1 RED: `packages/core/src/ai/pricing.test.ts` — cost arithmetic from token counts and the price table (input/output/cached-input, distinct rates).
+- [x] 3.2 GREEN: `packages/core/src/ai/pricing.ts`.
+- [x] 3.3 RED: `packages/core/src/ai/budget.test.ts` — pure transition function: `reserve → settle` releases the reservation and records actual cost; `reserve → void` releases with no settlement; `reserve` past `expires_at` is excluded from the outstanding sum with no sweep.
+- [x] 3.4 GREEN: `packages/core/src/ai/budget.ts` — the reserve/settle/void/expire state machine as a pure function over rows, mirroring the `UPDATE ... RETURNING` semantics in `design.md`.
+- [x] 3.5 RED: `packages/core/src/ai/budget.test.ts` — **under-reservation bound test**: given a provider that reports actual usage above `maxOutputTokens` (or an underestimated input count), assert the resulting overspend is bounded to exactly one call — the *next* admission is refused, not retroactively corrected. Asserts the design's claimed bound rather than trusting the narrative (open item).
+- [x] 3.6 GREEN: implement the "actual exceeds reserve is recorded truthfully, next admission refused" rule in `budget.ts` covered by 3.5.
 
 ## Phase 4: Core — Stable Prompt Prefix
 

@@ -23,3 +23,14 @@ export { parseModelId } from './ai/ids';
 export type { ModelCapabilities, ModelPricing, StructuredOutputLevel, UnknownModel } from './ai/registry';
 export { capabilitiesOf, MODEL_REGISTRY } from './ai/registry';
 export { degrade } from './ai/degrade';
+export type { ChatUsage } from './ai/pricing';
+export { computeCostMicroUsd } from './ai/pricing';
+export type {
+  AdmissionInput,
+  BudgetPeriod,
+  BudgetRefusal,
+  Reservation,
+  ReservationState,
+  VoidReason,
+} from './ai/budget';
+export { outstandingMicroUsd, reserve, settle, voidReservation } from './ai/budget';
