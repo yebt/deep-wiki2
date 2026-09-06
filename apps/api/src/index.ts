@@ -11,9 +11,39 @@ import { createAuthRoutes } from './routes/auth';
 import { createInvitationRoutes } from './routes/invitations';
 import { createUploadRoutes } from './routes/uploads';
 
-export const app = new Hono();
+/**
+ * Builds the application with CORS installed **before** any route.
+ *
+ * Hono applies `app.use()` middleware only to routes registered after it.
+ * `/health` used to be registered at module scope while the CORS middleware
+ * was installed later inside the entry-point block, so `/health` answered
+ * 200 with no `Access-Control-Allow-Origin` and the browser refused to read
+ * it — while every other route, registered after the middleware, worked.
+ * Building the app in one place makes that ordering impossible to get wrong
+ * silently, and testable: see index.test.ts.
+ *
+ * apps/web and apps/api are served from different origins in every
+ * environment (different ports in dev, different hosts in production). A
+ * session cookie only reaches the browser's request if the API opts that
+ * exact origin into CORS with credentials — a wildcard origin cannot carry
+ * `Access-Control-Allow-Credentials`.
+ */
+export function createApp(options: { readonly appUrl: string }): Hono {
+  const app = new Hono();
 
-app.get('/health', (c) => c.json({ status: 'ok' }));
+  app.use(
+    '*',
+    cors({
+      origin: options.appUrl,
+      credentials: true,
+      allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    }),
+  );
+
+  app.get('/health', (c) => c.json({ status: 'ok' }));
+
+  return app;
+}
 
 /** Reconciliation key for `instance_settings.smtp_config_hash` — changing
  * any of these values must revert a previously-verified `open` mode
@@ -42,19 +72,7 @@ if (import.meta.main) {
   const config = loadConfig();
   const sql = postgres(config.DATABASE_URL);
 
-  // apps/web and apps/api are served from different origins in every
-  // environment (different ports in dev, different hosts in
-  // production). A session cookie only reaches the browser's request if
-  // the API opts that exact origin into CORS with credentials — a
-  // wildcard origin cannot carry `Access-Control-Allow-Credentials`.
-  app.use(
-    '*',
-    cors({
-      origin: config.APP_URL,
-      credentials: true,
-      allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    }),
-  );
+  const app = createApp({ appUrl: config.APP_URL });
 
   // `refineEnv()` (packages/contracts) already guarantees these are set —
   // `loadConfig()` above would have thrown otherwise.

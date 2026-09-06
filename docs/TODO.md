@@ -408,6 +408,35 @@ makes conventions portable across projects.
 
 Discoveries and constraints. Newest first.
 
+### 2026-09-06 — `/health` bypassed CORS because Hono applies middleware only to later routes
+
+`/health` was registered at module scope, while the CORS middleware was installed further down
+inside the entry-point block. Hono's `app.use()` applies only to routes registered **after** it, so
+`/health` answered 200 with no `Access-Control-Allow-Origin` and the browser refused to read the
+response — while every other route, registered after the middleware, worked normally. The symptom
+is deceptive: a 200 in the network tab next to a CORS error in the console.
+
+The existing test could not catch it. It imported the module-level `app` and called `/health`
+directly, which never executes the `import.meta.main` block where the middleware was installed —
+so the test exercised an app that had no CORS at all and passed.
+
+**Impact:** `createApp({ appUrl })` now builds the application in one place with the middleware
+installed before any route, and the test asserts `/health` carries `Access-Control-Allow-Origin`
+and rejects a foreign origin. The general rule: when middleware order is load-bearing, express it
+as construction order in a factory rather than as statement order in a module, or a later edit
+reintroduces the bug silently.
+
+### 2026-09-06 — Killing `bun run -F <pkg> start` leaves the real server running
+
+While verifying the CORS fix, a live request kept returning the pre-fix response. The cause was
+not the fix: `bun run --filter` spawns a child that runs the actual entry point, and killing the
+wrapper leaves that child holding the port. The next run then binds nothing and every request
+reaches the stale process.
+
+**Impact:** worth knowing during any manual verification — check `ss -ltnp | grep :<port>` and kill
+the listed pid, not the shell job. A measurement taken against a stale server looks exactly like a
+fix that did not work, which is the most expensive kind of false negative.
+
 ### 2026-09-06 — `APP_URL` is the web origin, and treating it as the API's broke CORS
 
 `APP_URL` feeds three things, and all three are the browser's view of **apps/web**: the single
