@@ -114,6 +114,14 @@ const buttonCompoundVariants = [
   { color: 'neutral' as const, variant: 'link' as const, class: 'hover:text-muted active:text-muted' },
 ];
 
+/**
+ * DESIGN-SYSTEM §7.4 — the horizontal half of M3's text-field rhythm.
+ * `md-comp-outlined-field` insets its content 16dp from the container edge
+ * (`leading-space` / `trailing-space: 16px`); Nuxt UI's `xl` ships 12px.
+ * Shared so the whole text-field family carries one inset.
+ */
+const FIELD_INSET = { base: 'px-4', leading: 'ps-4', trailing: 'pe-4' } as const;
+
 /** Badges are M3 chips: a labelled container, never an alpha tint (§9.7). */
 const badgeCompoundVariants = [
   ...CHROMATIC.flatMap((color) => [
@@ -154,6 +162,29 @@ export default defineAppConfig({
         // ladder (§3.3). Paired with the state layer above.
         base: `${STATE_LAYER} transition-[border-radius,background-color,color] duration-100 ease-standard active:rounded-sm`,
       },
+      // §7.2's density table names three button heights — 32px for chrome,
+      // 40px for content-area and primary actions — and maps each onto a
+      // Nuxt UI `size`. Measured against the installed v4.11.0 theme, none
+      // of those mappings is true: `sm` renders 28px (py-1.5 + 16px line),
+      // `md` 32px, `lg` 36px. Only `xl` reaches 40px, and it does so by
+      // taking the label to 16px, one step above M3's `label-large`.
+      //
+      // This is §9.5's trap in a second component: a size variant is a
+      // calibrated bundle of padding *and* font size, so the height cannot
+      // be had by choosing a size — it has to be stated. Naming it here is
+      // what makes §7.2's table describe the buttons this app actually
+      // renders, and it is the reason no auth screen carries a `size` prop.
+      //
+      // `min-h-*` rather than `h-*`: a button's label can wrap (a long
+      // action in a narrow pane, a translated string, 200% zoom), and a
+      // fixed height would clip it — checklist §6.
+      variants: {
+        size: {
+          sm: { base: 'min-h-8' }, // chrome / toolbars — §7.2
+          md: { base: 'min-h-10' }, // content-area actions — §7.2
+          lg: { base: 'min-h-10' }, // primary action; §7.2 distinguishes it by variant, not size
+        },
+      },
       compoundVariants: buttonCompoundVariants,
     },
 
@@ -192,11 +223,31 @@ export default defineAppConfig({
         // it labels. `text-base` rather than `text-body-large` for the same
         // tailwind-merge reason documented on `authForm.description` below.
         label: 'text-base text-muted',
+        // §7.4 — M3's field puts its supporting text 4dp below the
+        // container (`supporting-text-top-space: 4px`). The library
+        // default is 8px, which is the *label* distance; using the same
+        // number above and below the field makes the trio read as three
+        // unrelated lines instead of one object.
+        error: 'mt-1',
+        help: 'mt-1',
       },
       variants: {
         required: {
           true: {
             label: 'after:content-none',
+          },
+        },
+        // §7.4 — 8dp from the label to the field it names, M3's
+        // `label-text-padding-bottom`. The library ships `mt-1` (4px),
+        // which is M3's *supporting-text* distance and the tightest space
+        // in the whole field spec; at 4px the label reads as floating
+        // between two fields rather than belonging to the one under it.
+        // Overridden on the variant, not the slot: `orientation.vertical`
+        // sets `container` and variants resolve after slots, so a slot
+        // override of the same property loses.
+        orientation: {
+          vertical: {
+            container: 'mt-2',
           },
         },
       },
@@ -225,6 +276,16 @@ export default defineAppConfig({
       slots: {
         base: 'h-14 rounded-md',
       },
+      // §7.4 — M3's outlined field insets its content 16dp from the
+      // container edge (`leading-space`/`trailing-space: 16px`). Nuxt UI's
+      // `xl` ships 12px, which is the one horizontal number on this screen
+      // that is not a 4dp step off the card's own 24px inset. Stated on
+      // the size variant for the reason recorded above `defaultVariants`:
+      // the variant resolves after the slot, so `px-4` written on `base`
+      // would lose to the variant's `px-3`.
+      variants: {
+        size: { xl: FIELD_INSET },
+      },
       // The size variant sets the font size and is applied after the slot
       // override, so `text-base` on `base` loses to it. `xl` is the size
       // whose text is 16px; the height comes from the slot above, because
@@ -245,12 +306,15 @@ export default defineAppConfig({
     // `h-14` goes only on the single-line controls. A textarea's height is
     // its `rows`, and `UInputTags` grows as tags wrap; pinning either to
     // 56px would clip its own content.
-    textarea: { defaultVariants: { size: 'xl' } },
-    inputTags: { defaultVariants: { size: 'xl' } },
-    select: { slots: { base: 'h-14' }, defaultVariants: { size: 'xl' } },
-    selectMenu: { slots: { base: 'h-14' }, defaultVariants: { size: 'xl' } },
-    inputMenu: { slots: { base: 'h-14' }, defaultVariants: { size: 'xl' } },
-    inputNumber: { slots: { base: 'h-14' }, defaultVariants: { size: 'xl' } },
+    //
+    // The 16dp content inset (§7.4) travels with them for the same
+    // reason: it is a property of M3's field, not of `UInput`.
+    textarea: { variants: { size: { xl: { base: 'px-4' } } }, defaultVariants: { size: 'xl' } },
+    inputTags: { variants: { size: { xl: { base: 'px-4' } } }, defaultVariants: { size: 'xl' } },
+    select: { slots: { base: 'h-14' }, variants: { size: { xl: FIELD_INSET } }, defaultVariants: { size: 'xl' } },
+    selectMenu: { slots: { base: 'h-14' }, variants: { size: { xl: FIELD_INSET } }, defaultVariants: { size: 'xl' } },
+    inputMenu: { slots: { base: 'h-14' }, variants: { size: { xl: FIELD_INSET } }, defaultVariants: { size: 'xl' } },
+    inputNumber: { slots: { base: 'h-14' }, variants: { size: { xl: FIELD_INSET } }, defaultVariants: { size: 'xl' } },
 
     // The one-line form-level note that replaces the per-field
     // asterisks. `UAuthForm` centres its header and sets it at 16px; this
@@ -270,6 +334,16 @@ export default defineAppConfig({
         // internal scale inside the library's own slot is sanctioned by
         // docs/DESIGN-SYSTEM.md §2.5.
         description: 'text-sm text-muted',
+        // §7.4 — 24dp between stacked field groups, and between the last
+        // field and the submit action. The library ships `space-y-5`
+        // (20px): on-grid, but the only 20px rhythm on a screen whose
+        // every other step is 24 — the card's padding, the header-to-body
+        // gap, the submit-to-footer gap. It is also too little to hold a
+        // field group that has grown: a validation message is 4px of
+        // supporting-text space plus a 20px line, so an invalid field
+        // consumed the entire gap and left its error touching the next
+        // field's label.
+        form: 'space-y-6',
       },
     },
 

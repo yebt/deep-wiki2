@@ -1142,6 +1142,12 @@ The correct adaptation is **not** to abandon the grid. It is to step down one de
 | Toolbar / secondary button height | 40dp | **32px** (`size="sm"`) | |
 | Content-area button height | 40dp | **40px** (`size="md"`) | Unchanged |
 | Primary action button height | 40dp | **40px** (`size="lg"`) | Unchanged; distinguished by variant, not size |
+
+> **The three button rows above name heights the Nuxt UI sizes do not produce.** Measured against the installed `@nuxt/ui@4.11.0` theme, a `UButton` is `py-*` plus its size's line height: `xs` 24px, `sm` **28px**, `md` **32px**, `lg` **36px**, `xl` 40px. Only `xl` reaches M3's 40dp, and it does so by taking the label to 16px — one step above M3's `label-large`.
+>
+> This is §9.5's trap in a second component: a size variant is a calibrated bundle of padding *and* font size, so a height cannot be had by choosing a size; it has to be stated. `app.config.ts` therefore pins `sm → min-h-8`, `md → min-h-10`, `lg → min-h-10`, which makes the three rows above true of what renders. `min-h-*` rather than `h-*` because a button label can wrap and a fixed height would clip it (checklist §6).
+
+
 | Pane gutter | 24dp | **16px** | |
 | Document column padding | 24dp | **24px** (`p-6`) | Unchanged — reading comfort wins here |
 | Paragraph spacing in document | — | **16px** (`space-y-4`) | Checklist §4.4 vertical rhythm |
@@ -1196,6 +1202,59 @@ export default defineNuxtConfig({
 - Don't copy M3's dp values literally into a desktop three-pane shell.
 - Don't compress below 32px row height or below the 24×24 target minimum. Density that fails checklist §5 is not density, it is a defect.
 - Don't mix `gap-4` in one list and `gap-5` in the next. Pick one per context and put it in the component.
+
+### 7.4 Form and container rhythm
+
+Added 2026-09-06 because §7.1–§7.3 could not answer the question a review asked of them. They gave the grid (4dp), the layout margins (16 / 24dp), the pane gap (24dp) and a table of *component sizes* — and then stopped. Nothing above says how far a label sits from the field it names, how much space separates two stacked fields, how much padding a card holding a form gets, or how far a page heading sits from the container below it. Every one of those had to be chosen by eye on `/login`, and the screen that resulted read as cramped. **A section that gives sizes but no rhythm is under-specified; this is the rhythm.**
+
+Every value below is a real M3 number, not an interpolation. The sources are the component token files listed in §13; where M3 has no component for the case (a form, a page heading above a card), the M3 number for the nearest thing it *does* specify is used and the substitution is named.
+
+#### Inside one field group
+
+M3 has no external-label text field — its label lives in the outline notch — so the numbers come from `md-comp-outlined-field`, whose internal spaces are what the notched layout is built from.
+
+| Distance | Value | M3 token | Why |
+| --- | --- | --- | --- |
+| Field container height | **56px** | `container-height` 56dp | `top-space` 16 + `body-large` line 24 + `bottom-space` 16 = 56. The 56dp field *is* the 16/24/16 rhythm; it is not an arbitrary height with text floated in it. |
+| Field content inset, left and right | **16px** (`px-4`) | `leading-space` / `trailing-space` 16px | Nuxt UI's `xl` ships 12px. |
+| Label → its field | **8px** (`mt-2`) | `label-text-padding-bottom` 8px | Nuxt UI's `UFormField` ships `mt-1` (4px), which is M3's *supporting-text* distance — the tightest space in the field spec, and the wrong one to put above a label. |
+| Field → supporting / error text | **4px** (`mt-1`) | `supporting-text-top-space` 4px | Nuxt UI ships 8px. |
+
+Note the asymmetry, and keep it: **8px above the field, 4px below it.** It is M3's, and it is what makes label + field + supporting text read as one object rather than three lines.
+
+#### Between field groups, and around the form
+
+M3 ships no form component. Its closest specified analogue is the **dialog** — a container whose whole job is to hold a short form — so the dialog's internal spacing is what these rows are taken from (`dialog/internal/_dialog.scss`: headline `padding: 24px 24px 0`; content `padding: 24px`, `padding-bottom: 8px` when actions follow; actions `padding: 16px 24px 24px`).
+
+| Distance | Value | Source | Why |
+| --- | --- | --- | --- |
+| Stacked field group → field group | **24px** (`space-y-6`) | dialog headline → content = 24dp; M3 pane spacing 24dp | Nuxt UI's `UAuthForm` ships `space-y-5` (20px). On-grid, but the only 20px step on a screen whose every other step is 24, and too little to hold a field group that has grown: a validation message is 4px of supporting-text space plus a 20px line, so an invalid field consumed the whole gap. |
+| Last field → submit action | **24px** | dialog content-bottom 8 + actions-top 16 = 24dp | Falls out of the row above; do not state it separately. |
+| Card / container padding, compact | **16px** (`p-4`) | layout margin, compact window | Nuxt UI's `UCard` default. Correct as shipped. |
+| Card / container padding, medium and up | **24px** (`sm:p-6`) | layout margin 24dp; dialog padding 24dp | Nuxt UI's `UCard` default. Correct as shipped. |
+| Page heading block → the container below it | **32px** (`mt-8`) | 4dp grid, one step above the container's own 24px inset | M3 has no page-heading-above-a-card pattern. 32px is the next grid step past the card's internal 24, which is what keeps the heading reading as outside the card rather than as its title. |
+
+#### The ordering trap, again
+
+Three of these had to be written on a **size variant**, not on a slot, and getting that wrong silently produces the library's value:
+
+| Property | Where it must go | What happens if written on the slot |
+| --- | --- | --- |
+| Field content inset | `input.variants.size.xl.base` | The size variant's `px-3` resolves after the slot and wins |
+| Label → field | `formField.variants.orientation.vertical.container` | `orientation.vertical` sets `container: mt-1` and wins |
+| Button height | `button.variants.size.*.base` | No slot expresses height per size at all |
+
+This is the same failure §9.5 records for the 16px input text: **a size variant is a calibrated bundle, applied last.** A value that a variant also sets must be set on that variant.
+
+**Do**
+- Take a form's rhythm from this table, not from what looks balanced in a screenshot.
+- Keep 8px above the field and 4px below it. Within-object tight, between-object generous.
+- Put all of it in `app.config.ts` so the next form inherits it without a single spacing class in its markup.
+
+**Don't**
+- Don't state a height or an inset on a slot when a size variant also sets it.
+- Don't let one component keep a 20px rhythm on a screen built on 24px. §12.6.
+- Don't reach for a number between two grid steps because 24 felt tight and 32 felt loose. The answer is which object the space belongs to, not where the midpoint is.
 
 ---
 
@@ -1867,6 +1926,7 @@ Token values in this document are taken from the following, not from memory:
 - `material-foundation/material-color-utilities` — `typescript/dynamiccolor/color_spec_2021.ts` (role → tone mapping), `variant.ts`
 - `androidx/androidx` — `compose/material3/.../tokens/` (`ShapeTokens`, `TypeScaleTokens`, `StandardMotionTokens`, `ExpressiveMotionTokens`, `Button{XSmall,Small,Medium,Large,XLarge}Tokens`) for the M3 Expressive additions
 - `androidx/androidx` — `compose/material3/material3/src/commonMain/kotlin/androidx/compose/material3/tokens/{OutlinedTextFieldTokens,FilledTextFieldTokens,ShapeTokens}.kt` and `.../material3/Shapes.kt`, read on `androidx-main` on **2026-09-06** for §3.2's text-field verification. `Shapes.kt`'s KDoc is the only machine-readable copy of M3's shape overview prose; `m3.material.io` renders that page in JavaScript and cannot be fetched.
+- `material-components/material-web` — `tokens/_md-comp-outlined-field.scss` and `tokens/_md-comp-outlined-text-field.scss` (`top-space` / `bottom-space` 16px, `leading-space` / `trailing-space` 16px, `label-text-padding-bottom` 8px, `supporting-text-top-space` 4px, `content-space` 16px) and `dialog/internal/_dialog.scss` (headline `padding: 24px 24px 0`; content `padding: 24px` with `padding-bottom: 8px` before actions; actions `padding: 16px 24px 24px`), read on `main` on **2026-09-06** for §7.4's form rhythm. Dialog spacing is hardcoded in the component stylesheet, not exposed as tokens — `_md-comp-dialog.scss` carries colour and type only.
 - `m3.material.io` — breakpoints, grids and spacing, tone-based surface colour. **Not fetchable**: it is a client-rendered SPA and returns an empty shell. Verify token claims against the platform token files above, never against a summary of this site.
 - `tailwindcss.com/docs/theme` — `@theme` namespaces and options
 - The installed `@nuxt/ui@4.11.0` package: `dist/runtime/index.css`, `dist/runtime/plugins/colors.js`, and the resolved component theme in `apps/web/.nuxt/ui/`
@@ -1889,6 +1949,8 @@ Amend this file in place when a rule turns out to be wrong, and record why here.
 | 2026-09-06 | §3.2: added the verification that **M3 Expressive did not change text-field shape**, with the token evidence. | The rejection rested on a belief that current M3 rounds its fields. It does not. `FilledTextFieldTokens.kt` is at token version **v0_210** — regenerated after this document's v0.192 baseline — and still emits `CornerExtraSmallTop`; `OutlinedTextFieldTokens.kt` still emits `CornerExtraSmall` at 56dp; `Shapes.kt`, the file that *carries* the Expressive additions, still names text fields under `extraSmall`; and no Expressive text-field token file exists. Recorded so the claim is not re-litigated from memory. |
 | 2026-09-06 | §9.5: "outlined everywhere" **reaffirmed**, with a measured reason replacing the stylistic one. | The owner's reference showed *filled* fields. M3's filled field container is `surface-container-highest`, which on this ladder is `bg-emphasized` — and §9.4 already puts the auth card on that exact role. A filled field on the auth card would be **the same tone as the card**, with no rung above it to escape to (§1.4 forbids a sixth surface level). On `bg-elevated` it is 4 tones away, on `bg-accented` 2. The outlined field's `outline` role is ground-independent and holds 3:1 on all five rungs. Also noted: M3's filled field is `corner-extra-small-**top**` — square-bottomed, the least rounded thing in the catalogue — so a rounded filled field is evidence for the shape ruling, not for the fill. |
 | 2026-09-06 | §9.5: `size: 'xl'` extended to `textarea`, `select`, `selectMenu`, `inputMenu`, `inputNumber`, `inputTags`. | The 16px floor is a property of text entry, not of `UInput`. Only `UInput` had it, so the first form to reach for a `USelect` would have silently reintroduced the iOS-zoom defect §9.5 already caught once. `h-14` deliberately not applied to `textarea` or `inputTags`, whose height is their content. |
+| 2026-09-06 | **New §7.4 — form and container rhythm.** Label→field 4px → **8px**; field content inset 12px → **16px**; stacked field gap 20px → **24px**; field→supporting text 8px → **4px**. Field height (56px), control radius (12px), container radius (16px), card padding (16 / 24px) and heading→card (32px) all measured on-spec and left alone. | Owner reviewed `/login` after the shape fix and reported that the spacing "feels short". §7 could not answer why: §7.1–§7.3 gave the 4dp grid, the layout margins, the pane gap and a table of component *sizes*, and said nothing about the distance between a label and its field, between two stacked fields, or between a heading and the container under it. Every one of those had been chosen by eye. Measured on the running screen, the form carried a 4px label gap (M3's *supporting-text* distance, the tightest space in the field spec, used above the label), a 12px field inset against M3's 16dp, and a 20px field rhythm on a screen whose every other step was 24px. Each replacement is a literal M3 token from the field and dialog sources now listed in §13. An under-specified section that produced a rejected screen is itself the finding. |
+| 2026-09-06 | §7.2: the three button-height rows now carry the measured Nuxt UI heights and a pinned `min-h-*` per size. | The rows claimed 32px from `size="sm"` and 40px from `size="md"` / `size="lg"`. Measured against the installed `@nuxt/ui@4.11.0`: `sm` is 28px, `md` 32px, `lg` 36px; only `xl` reaches 40px, and only by taking the label to 16px, above M3's `label-large`. `/login`'s primary action was therefore rendering at **32px** under 56px fields, which is most of what "the spacing feels short" was seeing. This is §9.5's trap in a second component — a size variant is a calibrated bundle of padding *and* font size, applied after the slot, so a height must be stated, not chosen. `min-h-*` rather than `h-*`: a wrapping label under a fixed height is a checklist §6 clipping failure. |
 | 2026-09-03 | Dark `outline-variant` moved from tone 20 to tone 30; `text-muted` moved to `on-surface-variant` tone 30/80. | At tone 20 the border was invisible on a tone-12 panel. Nuxt UI's default muted text measured 3.9:1 on `bg-muted`, failing the §5 body-text floor. |
 </content>
 </invoke>
