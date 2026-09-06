@@ -78,7 +78,12 @@ const nodes: Record<string, NodeSpec> = {
 
   // --- Bucket A: inline nodes --------------------------------------------
   text: { group: 'inline' },
-  break: { inline: true, group: 'inline' },
+  break: {
+    inline: true,
+    group: 'inline',
+    atom: true,
+    attrs: { spelling: { default: 'backslash' as 'space' | 'backslash' } },
+  },
   footnoteReference: {
     inline: true,
     group: 'inline',
@@ -124,9 +129,26 @@ const nodes: Record<string, NodeSpec> = {
   },
 };
 
+/**
+ * Declaration order fixes each mark's rank in ProseMirror's internal mark
+ * set (`Mark.addToSet` always sorts by rank, regardless of application
+ * order), and `to-markdown.ts`'s mark-stack algorithm treats that same
+ * fixed rank order as the outer-to-inner wrapping order it reconstructs.
+ *
+ * **Known limitation.** A ProseMirror mark is a *set* over a text range,
+ * not a nested stack — it has no memory of which of two overlapping marks
+ * was written as the outer one. `strong` is ranked before `emphasis` here
+ * (bold conventionally wraps outside italic), so `**bold with *nested
+ * italic* text**` round-trips byte-identical, but the reverse nesting
+ * (`*italic with **nested bold** text*`) reconstructs as the same fixed
+ * order and would not. Every corpus fixture combining the two uses the
+ * supported convention; this is the one place GATE-2's guarantee is
+ * convention-scoped rather than universal, and it is the same limitation
+ * `prosemirror-markdown` has for the identical reason.
+ */
 const marks: Record<string, MarkSpec> = {
-  emphasis: {},
   strong: {},
+  emphasis: {},
   delete: {},
   inlineCode: {},
   link: {

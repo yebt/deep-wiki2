@@ -14,11 +14,13 @@ import {
 import { applyBreakSpellings, breakToMarkdown } from './extensions/hard-break';
 import { applyListMarkers, listToMarkdown } from './extensions/list-marker';
 import { applyTags, tagToMarkdown } from './extensions/tag';
+import { verbatimInlineToMarkdown, verbatimToMarkdown } from './extensions/verbatim';
 import { applyWikiLinks, wikiLinkToMarkdown, type WikiLinkResolver } from './extensions/wiki-link';
 
 export type { WikiLinkNode, WikiLinkResolver, WikiLinkTarget } from './extensions/wiki-link';
 export type { TagNode } from './extensions/tag';
 export type { BlockAnchorNode } from './extensions/block-anchor';
+export type { VerbatimInlineNode, VerbatimNode } from './extensions/verbatim';
 
 /**
  * The single shared unified/remark pipeline (docs/SPECS.md §13, §14):
@@ -72,6 +74,8 @@ const stringifyProcessor = unified().use(remarkStringify, {
     break: breakToMarkdown,
     list: listToMarkdown,
     tag: tagToMarkdown,
+    verbatim: verbatimToMarkdown,
+    verbatimInline: verbatimInlineToMarkdown,
     wikiLink: wikiLinkToMarkdown,
   },
 });

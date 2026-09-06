@@ -1,13 +1,14 @@
-import { parse, stringify } from '@deep-wiki/markdown';
+import { fromMarkdown } from './from-markdown';
+import { toMarkdown } from './to-markdown';
 
 /**
- * md -> mdast -> md byte-identity harness (GATE-2, docs/TODO.md). This is
- * a placeholder for the eventual md -> ProseMirror doc -> md round trip:
- * it reuses `packages/markdown` for both directions so there is still
- * exactly one parser/serializer pair in the codebase. ProseMirror slots
- * into this same corpus once `packages/editor` grows a real editing
- * surface — the harness and fixtures do not change shape when that lands.
+ * GATE-2's md -> ProseMirror doc -> md byte-identity harness
+ * (docs/TODO.md; markdown-round-trip spec). Routes through
+ * `packages/editor`'s own schema functions, not only
+ * `packages/markdown`'s `parse`/`stringify` — a construct the schema does
+ * not yet model (a footnote before this phase modelled it, for example)
+ * fails here even though a naive mdast-only round trip would pass.
  */
 export function roundTrip(markdown: string): string {
-  return stringify(parse(markdown));
+  return toMarkdown(fromMarkdown(markdown));
 }
