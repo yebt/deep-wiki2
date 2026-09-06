@@ -408,6 +408,25 @@ makes conventions portable across projects.
 
 Discoveries and constraints. Newest first.
 
+### 2026-09-06 — Two parallel changes both claim migration numbers 0008-0010
+
+`content-and-editor` and `ai-provider-foundation` were designed concurrently and each planned its
+migrations as `0008`-`0010`. Migrations `0000`-`0007` exist. Whichever change applies second must
+renumber from `packages/db/drizzle/meta/_journal.json` rather than from its own design document.
+
+**Impact:** this is the predictable cost of parallel planning, and it is cheap to pay as long as it
+is paid deliberately. The rule for any future parallel track: **a design may fix a migration's
+name, never its number.** The number is repository state, not a design decision, and it is only
+knowable at apply time.
+
+### 2026-09-06 — A secret-field denylist that fires on legitimate fields gets suppressed
+
+Surfaced while designing the AI credential guard. `query-boundaries.ts` protects secrets by field
+name, and the obvious rule — flag anything ending in `Token` — collides head-on with the
+`inputTokens` and `outputTokens` counters the usage-accounting tables need. A guard that cries wolf
+on legitimate fields does not get fixed; it gets an exception, then a broader exception, then it is
+noise. The denylist has to name credential shapes precisely rather than pattern-match a suffix.
+
 ### 2026-09-06 — Two structural checks had holes that only lined up together
 
 Phase 2's task breakdown found both, and both are now closed.
