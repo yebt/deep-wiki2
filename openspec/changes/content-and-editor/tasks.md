@@ -72,35 +72,35 @@ dependency graph, not only by intent.
 
 ## Phase 1 (WU-1) — `feat(markdown): canonical form with pinned spelling options and pin coverage`
 
-- [ ] 1.1 RED — `packages/markdown/src/index.test.ts`: `canonicalise(md)` is idempotent
+- [x] 1.1 RED — `packages/markdown/src/index.test.ts`: `canonicalise(md)` is idempotent
       across every corpus fixture, including deliberately non-canonical ones.
-- [ ] 1.2 RED — `packages/markdown/fixtures/pins/pin-<k>.md` coverage test: a fixture
+- [x] 1.2 RED — `packages/markdown/fixtures/pins/pin-<k>.md` coverage test: a fixture
       must exist for every key in `PINNED_OPTIONS` (`bullet`, `emphasis`,
       `bulletOrdered`, `fence`, `fences`, `listItemIndent`, `rule`, `strong`,
       `tightDefinitions`, `resourceLink`, `setext`); reads the object's keys so it
       cannot drift. *(markdown-round-trip: Pinned Serialiser Options Are
       Test-Enforced — coverage half)*
-- [ ] 1.3 RED — pin-efficacy test: removing the bullet-marker pin makes
+- [x] 1.3 RED — pin-efficacy test: removing the bullet-marker pin makes
       `pin-bullet.md` fail, naming it as the cause. *(markdown-round-trip: Removing
       a pin fails a named fixture)*
-- [ ] 1.4 GREEN — implement `packages/markdown/src/index.ts`: export the grown
+- [x] 1.4 GREEN — implement `packages/markdown/src/index.ts`: export the grown
       `PINNED_OPTIONS`, `canonicalise()`.
 
 ## Phase 2 (WU-2) — `feat(markdown): gfm, wiki-links, tags and block anchors in the one pipeline`
 
-- [ ] 2.1 RED — `src/extensions/wiki-link.test.ts`: plain/aliased/anchored forms;
+- [x] 2.1 RED — `src/extensions/wiki-link.test.ts`: plain/aliased/anchored forms;
       resolved target carries page identity, unresolved retains raw text.
       *(markdown-pipeline: Wiki-Link Parsing And Normalisation, both scenarios)*
-- [ ] 2.2 RED — `src/extensions/tag.test.ts`: `#tag` distinguished from a `#`
+- [x] 2.2 RED — `src/extensions/tag.test.ts`: `#tag` distinguished from a `#`
       heading and from code content. *(markdown-pipeline: Tag Parsing)*
-- [ ] 2.3 RED — `src/extensions/block-anchor.test.ts`: trailing ` ^id` parses to a
+- [x] 2.3 RED — `src/extensions/block-anchor.test.ts`: trailing ` ^id` parses to a
       `blockAnchor` mdast node; `\^` escape preserved; both spellings fixture-covered.
-- [ ] 2.4 RED — `remark-gfm` wiring test: table syntax parses with rows/alignment;
+- [x] 2.4 RED — `remark-gfm` wiring test: table syntax parses with rows/alignment;
       `[text](url)` still parses as a standard link with the wiki-link extension
       enabled. *(markdown-pipeline: GFM And Custom Syntax Extensions, both scenarios)*
-- [ ] 2.5 GREEN — implement `src/extensions/{wiki-link,tag,block-anchor}.ts`; wire
+- [x] 2.5 GREEN — implement `src/extensions/{wiki-link,tag,block-anchor}.ts`; wire
       `remark-gfm` into `src/index.ts`.
-- [ ] 2.6 Corpus — create `packages/markdown/fixtures/{modelled,verbatim,refused}/`;
+- [x] 2.6 Corpus — create `packages/markdown/fixtures/{modelled,verbatim,refused}/`;
       move the existing 7 fixtures into `modelled/`; add nested-list (mixed marker,
       loose/tight), ragged table, fence with/without a language hint, footnote
       (placement/ordering), hard break (both spellings), entity+escape, mixed/nested
@@ -109,29 +109,29 @@ dependency graph, not only by intent.
       block+inline, reference link/image, and YAML frontmatter to `verbatim/`; setext
       heading, indented code block, and one non-canonical spelling per pinned option
       to `refused/`.
-- [ ] 2.7 RED — mdast-level round-trip regression (`canonicalise` is a fixed point)
+- [x] 2.7 RED — mdast-level round-trip regression (`canonicalise` is a fixed point)
       across the grown corpus; superseded by WU-7's ProseMirror-level suite but
       catches a pipeline-only regression earlier.
 
 ## Phase 3 (WU-3) — `feat(markdown): block identity, split/merge matching and the derived index`
 
-- [ ] 3.1 RED — `src/match-blocks.test.ts`: property tests over generated edit
+- [x] 3.1 RED — `src/match-blocks.test.ts`: property tests over generated edit
       sequences (insert-above, split, merge, delete, reorder, edit-in-place); a
       persisted id ends `active` on a block scoring ≥ τ, or ends
       `superseded`/`tombstoned` — never `active` below τ. *(markdown-pipeline: Block
       Split Assigns The Original ID, Block Merge Keeps One ID x2, Block Delete
       Tombstones The ID)*
-- [ ] 3.2 RED — derived-identity test: an unreferenced document assigns no persisted
+- [x] 3.2 RED — derived-identity test: an unreferenced document assigns no persisted
       IDs; `d:` + 12-hex-`sha256` + `#n` is stable under edits above the block.
       *(markdown-pipeline: Block IDs Are Assigned Lazily, scenario 1)*
-- [ ] 3.3 RED — minting test: first reference mints a 10-char Crockford base32 id
+- [x] 3.3 RED — minting test: first reference mints a 10-char Crockford base32 id
       from `crypto.getRandomValues`, checked unique against the page's registry.
       *(markdown-pipeline: Block IDs Are Assigned Lazily, scenario 2)*
-- [ ] 3.4 RED — `src/block-index.test.ts`: the index reflects every persisted anchor,
+- [x] 3.4 RED — `src/block-index.test.ts`: the index reflects every persisted anchor,
       and every persisted anchor appears in the index, both directions.
       *(markdown-pipeline: Block Index And In-Text Anchors Stay In Sync)*
-- [ ] 3.5 GREEN — implement `src/{match-blocks,block-index}.ts`.
-- [ ] 3.6 **Decision task** — record `τ = 0.5` as a judgement, not a measurement, in
+- [x] 3.5 GREEN — implement `src/{match-blocks,block-index}.ts`.
+- [x] 3.6 **Decision task** — record `τ = 0.5` as a judgement, not a measurement, in
       a code comment on the constant in `match-blocks.ts` and a `docs/TODO.md`
       Finding: state the bias (an orphan is preferred over a misattribution) and the
       reversal criterion — a measured mis-assignment rate at τ from real edit
@@ -139,48 +139,48 @@ dependency graph, not only by intent.
 
 ## Phase 4 (WU-4) — `feat(markdown): deterministic chunk boundaries with golden files`
 
-- [ ] 4.1 RED — `src/chunk.test.ts`: `chunk(x)` run twice is deep-equal; no chunk
+- [x] 4.1 RED — `src/chunk.test.ts`: `chunk(x)` run twice is deep-equal; no chunk
       boundary falls inside a block; an oversized block becomes its own chunk rather
       than being cut mid-content. *(markdown-pipeline: Deterministic Chunk
       Boundaries, both scenarios)*
-- [ ] 4.2 RED — one golden chunk file per corpus fixture; a boundary change must
+- [x] 4.2 RED — one golden chunk file per corpus fixture; a boundary change must
       produce a visible golden diff in review.
-- [ ] 4.3 GREEN — implement `src/chunk.ts`.
+- [x] 4.3 GREEN — implement `src/chunk.ts`.
 
 ## Phase 5 (WU-5) — `feat(markdown): sanitised html rendering separate from canonical storage`
 
-- [ ] 5.1 RED (executable-file/active-content threat matrix) — `src/render.test.ts`:
+- [x] 5.1 RED (executable-file/active-content threat matrix) — `src/render.test.ts`:
       a fixture containing `<script>`, an `onerror` attribute, and a `javascript:`
       href round-trips byte-identical in Markdown **and** renders inert HTML.
-- [ ] 5.2 RED — URL-scheme allowlist test for `link` and `image` targets.
-- [ ] 5.3 GREEN — implement `src/render.ts` (`remark-rehype` + `rehype-sanitize`,
+- [x] 5.2 RED — URL-scheme allowlist test for `link` and `image` targets.
+- [x] 5.3 GREEN — implement `src/render.ts` (`remark-rehype` + `rehype-sanitize`,
       explicit allowlist; sanitising at render time only, never at save — D12).
 
 ## Phase 6 (WU-6) — `feat(editor): prosemirror schema with verbatim carry and bucket classification`
 
-- [ ] 6.1 RED — `packages/editor/src/schema.test.ts`: bucket-A node/mark shapes
+- [x] 6.1 RED — `packages/editor/src/schema.test.ts`: bucket-A node/mark shapes
       (paragraph, heading, blockquote, list/listItem, code, thematicBreak, table
       family, footnote family, break, marks, `wikiLink`, `tag`; `blockAnchor` as a
       block attr) and the bucket-B `verbatim`/`verbatimInline` atoms (`raw: string`,
       `atom: true`, `selectable: true`, `contentEditable=false`).
-- [ ] 6.2 RED — `src/classify.test.ts`: `classify()` walks the mdast tree and asks
+- [x] 6.2 RED — `src/classify.test.ts`: `classify()` walks the mdast tree and asks
       the schema whether it names each node type — moving a node's schema membership
       must move which fixture directory it belongs in.
-- [ ] 6.3 GREEN — implement `src/schema.ts`, `src/classify.ts`.
+- [x] 6.3 GREEN — implement `src/schema.ts`, `src/classify.ts`.
 
 ## Phase 7 (WU-7) — `feat(editor): GATE-2 — byte-identical markdown round trip across the corpus`
 
 > **GATE-2 lands here.** Must be green before WU-15 begins (see "GATE-2 — binding
 > sequencing" above).
 
-- [ ] 7.1 RED — `src/round-trip.ts` becomes the real `md → PM doc → md` harness,
+- [x] 7.1 RED — `src/round-trip.ts` becomes the real `md → PM doc → md` harness,
       calling `packages/editor`'s `fromMarkdown`/`toMarkdown` (which reuse
       `packages/markdown` for their Markdown-side work), not only
       `packages/markdown`'s `parse`/`stringify`; a footnote fixture that a naive
       mdast-only round trip would pass but the schema does not yet model must fail
       the suite. *(markdown-round-trip: Round Trip Exercises The ProseMirror Schema,
       both scenarios)*
-- [ ] 7.2 RED — every `modelled/` fixture round-trips byte-identical through the PM
+- [x] 7.2 RED — every `modelled/` fixture round-trips byte-identical through the PM
       doc: nested lists (mixed marker + loose/tight), ragged GFM tables, fences
       with/without a language hint (fence character preserved), footnotes (placement
       preserved), hard breaks (both spellings preserved distinctly), entities and
@@ -189,25 +189,25 @@ dependency graph, not only by intent.
       heading), the block-anchor syntax itself, and diagram fences (Mermaid/D2,
       untouched). *(markdown-round-trip: the 12 corpus-class preservation
       requirements, table-driven over `modelled/`)*
-- [ ] 7.3 RED — every `verbatim/` fixture (raw HTML block/inline, reference
+- [x] 7.3 RED — every `verbatim/` fixture (raw HTML block/inline, reference
       links/images, YAML frontmatter) round-trips byte-identical and `classify()`
       reports `verbatim` naming the carried node type. *(markdown-round-trip: Raw
       HTML Preservation, scenario 1)*
-- [ ] 7.4 RED — every `refused/` fixture (setext heading, indented code block, one
+- [x] 7.4 RED — every `refused/` fixture (setext heading, indented code block, one
       non-canonical spelling per pin) makes the probe return `refused` with the
       expected reason code. *(markdown-round-trip: Unsupported HTML refuses edit
       mode; Unrepresentable Content Fails Closed, both scenarios)*
-- [ ] 7.5 RED — pin-removal regression at the PM level: removing the bullet-marker
+- [x] 7.5 RED — pin-removal regression at the PM level: removing the bullet-marker
       pin fails the same named fixture through the full editor round trip, not only
       WU-1's mdast-level test.
-- [ ] 7.6 GREEN — implement `src/{from-markdown,to-markdown,probe}.ts`; finish the
+- [x] 7.6 GREEN — implement `src/{from-markdown,to-markdown,probe}.ts`; finish the
       `round-trip.ts` rewrite from 7.1.
-- [ ] 7.7 Verify — 7.1–7.5 fully green across `modelled/`, `verbatim/`, `refused/`.
+- [x] 7.7 Verify — 7.1–7.5 fully green across `modelled/`, `verbatim/`, `refused/`.
       **GATE-2 complete; unlocks WU-15 and WU-16.**
 
 ## Phase 8 (WU-8) — `feat(db): page content and the block registry behind a page-typed foreign key`
 
-- [ ] 8.0 RED/GREEN (structural, precedes any core content entity) — close the
+- [x] 8.0 RED/GREEN (structural, precedes any core content entity) — close the
       core-purity type-import elision gap: a scratch fixture with
       `import type { Node } from 'mdast'` inside `packages/core/src` currently
       passes both `scripts/checks/core-purity.ts`'s `scanImports()` sweep (which
@@ -218,29 +218,29 @@ dependency graph, not only by intent.
       from`/`export type … from` specifiers so the fixture fails, then delete the
       fixture. This is what makes D19 ("no mdast type crosses into core") verified
       rather than assumed.
-- [ ] 8.1 RED — `packages/core/src/content/*.test.ts`: `BlockId`, `BlockStatus`,
+- [x] 8.1 RED — `packages/core/src/content/*.test.ts`: `BlockId`, `BlockStatus`,
       `PageContentRef` primitives; `ContentStore`/`BlockRegistry` port-contract tests
       against stub implementations — no mdast type anywhere.
-- [ ] 8.2 GREEN — implement `packages/core/src/content/*.ts`; export from index;
+- [x] 8.2 GREEN — implement `packages/core/src/content/*.ts`; export from index;
       `core-purity` and `single-parser` stay green.
-- [ ] 8.3 RED — `packages/db/src/schema.test.ts` additions: `nodes` gains
+- [x] 8.3 RED — `packages/db/src/schema.test.ts` additions: `nodes` gains
       `UNIQUE (id, workspace_id, type)`; content on a non-`page` node type is
       rejected by the three-column FK; `page_blocks`
       `UNIQUE (page_id, block_id)` spans every status so a tombstoned id cannot be
       reused. *(page-content: Row without a workspace rejected; design D10)*
-- [ ] 8.4 GREEN — `packages/db/drizzle/0008_page_content.sql` (+ tested `down`): the
+- [x] 8.4 GREEN — `packages/db/drizzle/0008_page_content.sql` (+ tested `down`): the
       unique constraint, `page_content`, `page_blocks`; `migration.test.ts` asserts
       both tables and the FK exist after `migrate()`.
-- [ ] 8.5 RED — `save-page.test.ts`: saving persists the submitted Markdown
+- [x] 8.5 RED — `save-page.test.ts`: saving persists the submitted Markdown
       unchanged; re-saving overwrites with no historical row; save regenerates
       `rendered_html` and `block_index` from the new content, never accepted as
       client-supplied input. *(page-content: Saving persists unchanged; Single
       Current Row; Save Regenerates Render/Index, both scenarios)*
-- [ ] 8.6 RED — `read-page.test.ts`: a read-mode request returns cached HTML without
+- [x] 8.6 RED — `read-page.test.ts`: a read-mode request returns cached HTML without
       invoking the parser; an edit-mode request returns canonical Markdown.
       *(page-content: Read Mode And Edit Mode Read Different Representations, both
       scenarios)*
-- [ ] 8.7 GREEN — implement `packages/db/src/content/{save-page,read-page}.ts`.
+- [x] 8.7 GREEN — implement `packages/db/src/content/{save-page,read-page}.ts`.
 
 ## Phase 9 (WU-9) — `feat(db): derived links and tags replaced wholesale inside the save transaction`
 
