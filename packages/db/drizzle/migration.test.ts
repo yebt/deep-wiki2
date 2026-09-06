@@ -103,4 +103,65 @@ describe('after migrate: hand-written objects exist', () => {
     expect(names).toContain('permissions_resource_fk');
     expect(names).toContain('permissions_subject_cell_fk');
   });
+
+  test('nodes gains the three-column (id, workspace_id, type) unique key', async () => {
+    const rows = await sql<{ conname: string }[]>`
+      SELECT conname FROM pg_constraint
+      WHERE conrelid = 'nodes'::regclass AND conname = 'nodes_id_workspace_id_type_key' AND contype = 'u'
+    `;
+    expect(rows).toHaveLength(1);
+  });
+
+  test('page_content and page_blocks exist with the three-column tenant-and-type foreign key', async () => {
+    const tables = await sql<{ tablename: string }[]>`
+      SELECT tablename FROM pg_tables WHERE tablename IN ('page_content', 'page_blocks') ORDER BY tablename
+    `;
+    expect(tables.map((r) => r.tablename)).toEqual(['page_blocks', 'page_content']);
+
+    const fk = await sql<{ conname: string }[]>`
+      SELECT conname FROM pg_constraint
+      WHERE conrelid = 'page_content'::regclass AND conname = 'page_content_node_fk' AND contype = 'f'
+    `;
+    expect(fk).toHaveLength(1);
+  });
+
+  test('page_blocks carries the workspace/page/status index', async () => {
+    const rows = await sql<{ indexname: string }[]>`
+      SELECT indexname FROM pg_indexes
+      WHERE tablename = 'page_blocks' AND indexname = 'page_blocks_workspace_page_status_idx'
+    `;
+    expect(rows).toHaveLength(1);
+  });
+});
+
+describe('0008_page_content down migration', () => {
+  test('reverses cleanly: page_content, page_blocks, block_status and the unique key are all gone', async () => {
+    const rollback = await provisionTestDatabase();
+    const rollbackSql = postgres(rollback.url, { max: 1 });
+    try {
+      const downSql = await Bun.file(
+        new URL('./down/0008_page_content.down.sql', import.meta.url),
+      ).text();
+      await rollbackSql.unsafe(downSql);
+
+      const tables = await rollbackSql<{ tablename: string }[]>`
+        SELECT tablename FROM pg_tables WHERE tablename IN ('page_content', 'page_blocks')
+      `;
+      expect(tables).toHaveLength(0);
+
+      const uniqueKey = await rollbackSql<{ conname: string }[]>`
+        SELECT conname FROM pg_constraint
+        WHERE conrelid = 'nodes'::regclass AND conname = 'nodes_id_workspace_id_type_key'
+      `;
+      expect(uniqueKey).toHaveLength(0);
+
+      const enumType = await rollbackSql<{ typname: string }[]>`
+        SELECT typname FROM pg_type WHERE typname = 'block_status'
+      `;
+      expect(enumType).toHaveLength(0);
+    } finally {
+      await rollbackSql.end({ timeout: 1 }).catch(() => {});
+      await rollback.drop();
+    }
+  });
 });

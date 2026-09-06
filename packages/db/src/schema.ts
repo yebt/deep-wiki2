@@ -31,6 +31,7 @@ export const subjectKind = pgEnum('subject_kind', ['user', 'cell', 'role', 'agen
 export const permAction = pgEnum('perm_action', ['read', 'comment', 'write', 'manage']);
 export const permEffect = pgEnum('perm_effect', ['allow', 'deny']);
 export const registrationMode = pgEnum('registration_mode', ['closed', 'invitation_only', 'open']);
+export const blockStatus = pgEnum('block_status', ['active', 'superseded', 'tombstoned']);
 
 export const plans = pgTable('plans', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -197,4 +198,44 @@ export const invitations = pgTable('invitations', {
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
   acceptedAt: timestamp('accepted_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * A page's canonical Markdown and its derived render/index (content-and-editor
+ * design.md "Schema"). The three-column FK `(node_id, workspace_id,
+ * node_type)` into `nodes (id, workspace_id, type)` — and the
+ * `nodes_id_workspace_id_type_key` unique key it targets — are declared
+ * only in the migration SQL (see the module doc comment above).
+ */
+export const pageContent = pgTable('page_content', {
+  nodeId: uuid('node_id').primaryKey(),
+  workspaceId: uuid('workspace_id')
+    .notNull()
+    .references(() => workspaces.id, { onDelete: 'cascade' }),
+  nodeType: nodeType('node_type').notNull().default('page'),
+  markdown: text('markdown').notNull(),
+  renderedHtml: text('rendered_html').notNull().default(''),
+  blockIndex: jsonb('block_index').notNull().default({}),
+  contentHash: text('content_hash').notNull(),
+  pipelineVersion: integer('pipeline_version').notNull().default(1),
+  updatedBy: uuid('updated_by').references(() => users.id, { onDelete: 'set null' }),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * The durable record of persisted block ids (design.md "Block identity" —
+ * Registry). The composite primary key, the composite FK into
+ * `page_content`, and the self-referential `superseded_by` FK are declared
+ * only in the migration SQL.
+ */
+export const pageBlocks = pgTable('page_blocks', {
+  pageId: uuid('page_id').notNull(),
+  workspaceId: uuid('workspace_id').notNull(),
+  blockId: text('block_id').notNull(),
+  status: blockStatus('status').notNull(),
+  supersededBy: text('superseded_by'),
+  contentHash: text('content_hash').notNull(),
+  excerpt: text('excerpt').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });

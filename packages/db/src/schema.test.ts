@@ -299,3 +299,92 @@ describe('permissions — supported subject types', () => {
     expect(roleGrants).toHaveLength(0);
   });
 });
+
+// content-and-editor design.md D10 — page-content: "Row without a workspace rejected".
+describe('page_content three-column tenant-and-type foreign key', () => {
+  async function seedPage(workspaceId: string, parentId: string) {
+    const [page] = await sql`
+      INSERT INTO nodes (workspace_id, parent_id, type, path, position, slug, title)
+      VALUES (${workspaceId}, ${parentId}, 'page', '', 0, ${`page-${crypto.randomUUID()}`}, 'A Page')
+      RETURNING id
+    `;
+    return page!.id as string;
+  }
+
+  test('content is accepted on a page node', async () => {
+    const { workspaceId, rootId } = await seedWorkspace();
+    const pageId = await seedPage(workspaceId, rootId);
+
+    const rows = await sql`
+      INSERT INTO page_content (node_id, workspace_id, markdown, content_hash)
+      VALUES (${pageId}, ${workspaceId}, '# Hello', 'hash-1')
+      RETURNING node_id
+    `;
+    expect(rows).toHaveLength(1);
+  });
+
+  test('content on a non-page node type is rejected by the three-column foreign key', async () => {
+    const { workspaceId, rootId } = await seedWorkspace();
+    const [book] = await sql`
+      INSERT INTO nodes (workspace_id, parent_id, type, path, position, slug, title)
+      VALUES (${workspaceId}, ${rootId}, 'book', '', 0, ${`book-${crypto.randomUUID()}`}, 'A Book')
+      RETURNING id
+    `;
+
+    await assertRejects(
+      sql`INSERT INTO page_content (node_id, workspace_id, markdown, content_hash)
+          VALUES (${book!.id}, ${workspaceId}, '# Hello', 'hash-1')`,
+    );
+  });
+
+  test('content pointed at a mismatched workspace_id is rejected', async () => {
+    const { workspaceId, rootId } = await seedWorkspace();
+    const pageId = await seedPage(workspaceId, rootId);
+    const other = await seedWorkspace();
+
+    await assertRejects(
+      sql`INSERT INTO page_content (node_id, workspace_id, markdown, content_hash)
+          VALUES (${pageId}, ${other.workspaceId}, '# Hello', 'hash-1')`,
+    );
+  });
+});
+
+describe('page_blocks: a tombstoned id can never be reused', () => {
+  async function seedPageContent(workspaceId: string, parentId: string) {
+    const [page] = await sql`
+      INSERT INTO nodes (workspace_id, parent_id, type, path, position, slug, title)
+      VALUES (${workspaceId}, ${parentId}, 'page', '', 0, ${`page-${crypto.randomUUID()}`}, 'A Page')
+      RETURNING id
+    `;
+    await sql`
+      INSERT INTO page_content (node_id, workspace_id, markdown, content_hash)
+      VALUES (${page!.id}, ${workspaceId}, '# Hello', 'hash-1')
+    `;
+    return page!.id as string;
+  }
+
+  test('the same (page_id, block_id) cannot be inserted twice, regardless of status', async () => {
+    const { workspaceId, rootId } = await seedWorkspace();
+    const pageId = await seedPageContent(workspaceId, rootId);
+
+    await sql`
+      INSERT INTO page_blocks (page_id, workspace_id, block_id, status, content_hash, excerpt)
+      VALUES (${pageId}, ${workspaceId}, 'block-1', 'tombstoned', 'h', 'excerpt')
+    `;
+
+    await assertRejects(
+      sql`INSERT INTO page_blocks (page_id, workspace_id, block_id, status, content_hash, excerpt)
+          VALUES (${pageId}, ${workspaceId}, 'block-1', 'active', 'h2', 'new excerpt')`,
+    );
+  });
+
+  test('a superseded_by pointer must name a real block on the same page', async () => {
+    const { workspaceId, rootId } = await seedWorkspace();
+    const pageId = await seedPageContent(workspaceId, rootId);
+
+    await assertRejects(
+      sql`INSERT INTO page_blocks (page_id, workspace_id, block_id, status, superseded_by, content_hash, excerpt)
+          VALUES (${pageId}, ${workspaceId}, 'block-1', 'superseded', 'does-not-exist', 'h', 'excerpt')`,
+    );
+  });
+});
