@@ -186,12 +186,38 @@ export default defineAppConfig({
     // has to remember to. `content-none` is what removes it — the
     // sibling `after:*` utilities are inert without content.
     formField: {
+      slots: {
+        // §9.5: the label is `body-large` on `on-surface-variant`. The
+        // library defaults to its own 14px, one step below the input text
+        // it labels. `text-base` rather than `text-body-large` for the same
+        // tailwind-merge reason documented on `authForm.description` below.
+        label: 'text-base text-muted',
+      },
       variants: {
         required: {
           true: {
             label: 'after:content-none',
           },
         },
+      },
+    },
+
+    // M3 outlined text field (§9.5). Nuxt UI's defaults render a 32px-tall
+    // field with 14px text and a 12px radius; M3 specifies a 56dp field,
+    // `body-large` text and `corner-extra-small`. The 16px is the one that
+    // is not a preference: below 16px, iOS Safari zooms the viewport on
+    // focus, which §9.5 records as non-negotiable and which no amount of
+    // desktop review would surface.
+    input: {
+      slots: {
+        base: 'h-14 rounded-xs',
+      },
+      // The size variant sets the font size and is applied after the slot
+      // override, so `text-base` on `base` loses to it. `xl` is the size
+      // whose text is 16px; the height comes from the slot above, because
+      // no library size is M3's 56dp.
+      defaultVariants: {
+        size: 'xl',
       },
     },
 

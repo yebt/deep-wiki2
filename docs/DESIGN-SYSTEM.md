@@ -1334,6 +1334,20 @@ All: `corner-medium` (12px). `UCard`'s stock `rounded-lg` with `--ui-radius: 0.5
 
 16px input text is not negotiable: below 16px, iOS Safari zooms the viewport on focus.
 
+**None of this comes for free.** Nuxt UI's defaults render a 32px-tall field with 14px text and a 12px radius — three of the four rows above wrong, including the non-negotiable one. Set them centrally in `app.config.ts`:
+
+```ts
+input: {
+  slots: { base: 'h-14 rounded-xs' },   // no library size is M3's 56dp
+  defaultVariants: { size: 'xl' },      // the size whose text is 16px
+},
+formField: {
+  slots: { label: 'text-base text-muted' },  // library default is 14px
+},
+```
+
+The size variant is applied **after** the slot override, so `text-base` written on `base` loses to the variant's own font size. The size must be chosen, not overridden — this is the trap that shipped 14px text past a design review.
+
 Every input has a programmatically associated label; placeholder is not a label (checklist §5). `UFormField` provides the association — use it.
 
 ### 9.6 Menus, dialogs, snackbars, tooltips

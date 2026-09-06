@@ -408,6 +408,32 @@ makes conventions portable across projects.
 
 Discoveries and constraints. Newest first.
 
+### 2026-09-06 — The auth inputs violated three rows of the project's own text-field table
+
+The owner said the inputs looked wrong. Measured against `docs/DESIGN-SYSTEM.md` §9.5, which this
+project wrote and the screens were reviewed under:
+
+| §9.5 requires | Shipped |
+| --- | --- |
+| `body-large` — 16px, **non-negotiable** | 14px |
+| `corner-extra-small` — 4px | 12px |
+| M3 text field height — 56dp | 32px |
+| label `body-large` | 14px |
+
+Nobody applied the table; Nuxt UI's defaults were left in place. The 16px row is the one that
+matters beyond taste: **below 16px, iOS Safari zooms the viewport when a field takes focus**, and
+§9.5 records that explicitly. A desktop review cannot see it, which is exactly why the rule was
+written down rather than left to judgement.
+
+A second trap sat underneath: Nuxt UI applies its **size variant after** an `app.config.ts` slot
+override, so `text-base` written on the `base` slot silently loses. The size has to be *chosen*
+(`defaultVariants: { size: 'xl' }`), not overridden. The first fix attempt corrected radius,
+height and label but left the font at 14px, and only measuring caught it.
+
+**Impact:** fixed centrally so every future form inherits it, and `docs/DESIGN-SYSTEM.md` §9.5 now
+carries the concrete `app.config.ts` block plus the variant-ordering warning. The wider lesson:
+a design system that states a rule but not how to express it in the stack gets read as advice.
+
 ### 2026-09-06 — `/health` bypassed CORS because Hono applies middleware only to later routes
 
 `/health` was registered at module scope, while the CORS middleware was installed further down
