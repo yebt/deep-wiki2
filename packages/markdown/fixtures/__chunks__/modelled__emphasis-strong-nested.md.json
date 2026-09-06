@@ -1,0 +1,9 @@
+[
+  {
+    "blockIds": [
+      "d:96a962b96500#0"
+    ],
+    "text": "This is __strong with _nested emphasis_ inside__.",
+    "ordinal": 0
+  }
+]

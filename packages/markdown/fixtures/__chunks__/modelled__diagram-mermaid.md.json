@@ -1,0 +1,9 @@
+[
+  {
+    "blockIds": [
+      "d:3abb7d524f7c#0"
+    ],
+    "text": "```mermaid\ngraph TD;\n  A-->B;\n```",
+    "ordinal": 0
+  }
+]
