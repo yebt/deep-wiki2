@@ -61,7 +61,7 @@ further decision gate blocks `sdd-apply`.
 ## Phase 0: Sequencing Gate (blocking, not code)
 
 - [x] 0.1 Confirm `openspec/changes/tenancy-and-permissions/` has archived (moved out of `openspec/changes/`) before starting any task that touches `plans`. If not yet archived, stop and re-check before Phase 11. — **Met**: archived at `openspec/changes/archive/2026-09-06-tenancy-and-permissions`.
-- [ ] 0.2 Read `packages/db/drizzle/meta/_journal.json` (read-only) immediately before writing any migration in Phases 8, 11, 14, 15, 16; use `next idx + 1` as the migration number, never a number copied from `design.md`. `content-and-editor` may have already claimed `0008`–`0010`; whichever change applies second renumbers from the journal, per the existing `docs/TODO.md` Finding (2026-09-06).
+- [ ] 0.2 Read `packages/db/drizzle/meta/_journal.json` (read-only) immediately before writing any migration in Phases 8, 11, 14, 15, 16; use `next idx + 1` as the migration number, never a number copied from `design.md`. `content-and-editor` may have already claimed `0008`–`0010`; whichever change applies second renumbers from the journal, per the existing `docs/TODO.md` Finding (2026-09-06). — Done for Phase 8 (journal `idx` 7 → used `0008`); still applies to Phases 11/14/15/16, out of this batch's scope.
 
 ## Phase 1: Core Purity — Close the Type-Only Import Hole
 
@@ -119,13 +119,13 @@ further decision gate blocks `sdd-apply`.
 
 ## Phase 8: Schema — Settings and Credentials
 
-- [ ] 8.1 Derive migration number per Phase 0.2; write `packages/db/drizzle/NNNN_ai_settings_and_credentials.sql` creating `workspace_ai_settings` and `workspace_ai_credentials` per `design.md`'s Schema table (composite FK `(id, workspace_id)`, `UNIQUE (workspace_id, provider)`, no plaintext column).
-- [ ] 8.2 RED: `packages/db/src/schema.test.ts` / `migration.test.ts` — both tables exist after `migrate()`; insert with `workspace_id = NULL` is rejected; insert under a nonexistent workspace is rejected.
-- [ ] 8.3 GREEN: add Drizzle `pgTable` definitions for both tables to `packages/db/src/schema.ts`.
-- [ ] 8.4 RED: composite-FK test — a credential row moved to another workspace's `(id, workspace_id)` pair is rejected at the database.
-- [ ] 8.5 GREEN: verify the FK definition in 8.1 covers 8.4 (adjust SQL if not).
-- [ ] 8.6 RED: `down` migration test — reversing `NNNN_ai_settings_and_credentials` drops both tables including ciphertext rows.
-- [ ] 8.7 GREEN: write the tested `down` block.
+- [x] 8.1 Derive migration number per Phase 0.2; write `packages/db/drizzle/NNNN_ai_settings_and_credentials.sql` creating `workspace_ai_settings` and `workspace_ai_credentials` per `design.md`'s Schema table (composite FK `(id, workspace_id)`, `UNIQUE (workspace_id, provider)`, no plaintext column). — journal `idx` was 7; used `0008_ai_settings_and_credentials`.
+- [x] 8.2 RED: `packages/db/src/schema.test.ts` / `migration.test.ts` — both tables exist after `migrate()`; insert with `workspace_id = NULL` is rejected; insert under a nonexistent workspace is rejected. — in `packages/db/src/ai/settings-and-credentials.test.ts`.
+- [x] 8.3 GREEN: add Drizzle `pgTable` definitions for both tables to `packages/db/src/schema.ts`.
+- [x] 8.4 RED: composite-FK test — a credential row moved to another workspace's `(id, workspace_id)` pair is rejected at the database. — via a throwaway companion table FK'd to `(id, workspace_id)`, proving the constraint is consumable exactly as a future referencing table would.
+- [x] 8.5 GREEN: verify the FK definition in 8.1 covers 8.4 (adjust SQL if not). — covered on first run; no adjustment needed.
+- [x] 8.6 RED: `down` migration test — reversing `NNNN_ai_settings_and_credentials` drops both tables including ciphertext rows.
+- [x] 8.7 GREEN: write the tested `down` block.
 
 ## Phase 9: Structural Checks — Denylist, SDK Import, Decryption Boundary
 

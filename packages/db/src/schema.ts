@@ -14,8 +14,19 @@
  * the hand-written objects exist after `migrate()` runs, so a future drift
  * between this file and the migrations fails the suite, not the tenant.
  */
-import { boolean, integer, jsonb, pgEnum, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
+import { boolean, customType, integer, jsonb, pgEnum, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
 import type { Action, Effect } from '@deep-wiki/core';
+
+/**
+ * `drizzle-orm/pg-core` has no built-in `bytea` column — this is the
+ * documented `customType` escape hatch, mapped to `Uint8Array` to match
+ * `SealedCredential`'s field types (`@deep-wiki/core`'s `ai/ports.ts`).
+ */
+const bytea = customType<{ data: Uint8Array }>({
+  dataType() {
+    return 'bytea';
+  },
+});
 
 export const nodeType = pgEnum('node_type', ['workspace', 'shelf', 'book', 'chapter', 'page']);
 
@@ -31,6 +42,18 @@ export const subjectKind = pgEnum('subject_kind', ['user', 'cell', 'role', 'agen
 export const permAction = pgEnum('perm_action', ['read', 'comment', 'write', 'manage']);
 export const permEffect = pgEnum('perm_effect', ['allow', 'deny']);
 export const registrationMode = pgEnum('registration_mode', ['closed', 'invitation_only', 'open']);
+
+/** Mirrors `@deep-wiki/core`'s closed `ProviderId` union (ai-provider-registry spec). */
+export const aiProvider = pgEnum('ai_provider', ['anthropic', 'openai', 'google', 'deepseek', 'openrouter', 'local']);
+/** Mirrors `@deep-wiki/core`'s closed `StructuredOutputLevel` union. */
+export const aiStructuredOutputLevel = pgEnum('ai_structured_output_level', ['schema', 'tool-call', 'prompted', 'none']);
+/** A provider SDK error mapped to a closed code set before it ever reaches a logger. */
+export const aiCredentialValidationErrorCode = pgEnum('ai_credential_validation_error_code', [
+  'invalid_key',
+  'insufficient_quota',
+  'network',
+  'unknown',
+]);
 
 export const plans = pgTable('plans', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -197,4 +220,50 @@ export const invitations = pgTable('invitations', {
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
   acceptedAt: timestamp('accepted_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * Chat configuration only — the embedding pair lives in its own table
+ * (Phase 15) because it is FK-referenced by `chunks` (design.md —
+ * "Schema"; "Why the embedding pair is a table and not two columns on
+ * settings").
+ */
+export const workspaceAiSettings = pgTable('workspace_ai_settings', {
+  workspaceId: uuid('workspace_id')
+    .primaryKey()
+    .references(() => workspaces.id, { onDelete: 'cascade' }),
+  chatProvider: aiProvider('chat_provider'),
+  chatModel: text('chat_model'),
+  structuredOutputFloor: aiStructuredOutputLevel('structured_output_floor'),
+  updatedBy: uuid('updated_by').references(() => users.id, { onDelete: 'set null' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * Envelope-encrypted BYOK provider credentials (workspace-ai-credentials
+ * spec). No plaintext column exists. The composite `(id, workspace_id)`
+ * unique constraint is declared only in the migration SQL (see the
+ * module doc comment above) — it exists so a future referencing table
+ * can pin a row to its own workspace, in the same idiom as
+ * `nodes_id_workspace_id_unique`.
+ */
+export const workspaceAiCredentials = pgTable('workspace_ai_credentials', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  workspaceId: uuid('workspace_id')
+    .notNull()
+    .references(() => workspaces.id, { onDelete: 'cascade' }),
+  provider: aiProvider('provider').notNull(),
+  ciphertext: bytea('ciphertext').notNull(),
+  iv: bytea('iv').notNull(),
+  authTag: bytea('auth_tag').notNull(),
+  wrappedDek: bytea('wrapped_dek').notNull(),
+  keyId: text('key_id').notNull(),
+  alg: text('alg').notNull().default('aes-256-gcm'),
+  lastFour: text('last_four').notNull(),
+  validatedAt: timestamp('validated_at', { withTimezone: true }),
+  validationErrorCode: aiCredentialValidationErrorCode('validation_error_code'),
+  compromisedAt: timestamp('compromised_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
