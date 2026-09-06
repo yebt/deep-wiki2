@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@deep-wiki/core": "workspace:*",
+    "@deep-wiki/markdown": "workspace:*",
     "drizzle-orm": "^0.38.3",
     "postgres": "^3.4.5"
   },

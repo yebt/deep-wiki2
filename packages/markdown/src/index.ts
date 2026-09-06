@@ -21,6 +21,13 @@ export type { WikiLinkNode, WikiLinkResolver, WikiLinkTarget } from './extension
 export type { TagNode } from './extensions/tag';
 export type { BlockAnchorNode } from './extensions/block-anchor';
 export type { VerbatimInlineNode, VerbatimNode } from './extensions/verbatim';
+export { buildBlockIndex } from './block-index';
+export type { BlockIndex, BlockIndexEntry } from './block-index';
+export { chunk } from './chunk';
+export type { Chunk, ChunkOptions } from './chunk';
+export { deriveBlockId, matchBlocks, mintBlockId, MATCH_THRESHOLD } from './match-blocks';
+export type { BlockAssignment, BlockAssignmentStatus, MatchBlocksResult, PersistedBlockRecord } from './match-blocks';
+export { render } from './render';
 
 /**
  * The single shared unified/remark pipeline (docs/SPECS.md §13, §14):
