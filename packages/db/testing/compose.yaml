@@ -3,14 +3,30 @@
 # Deliberately separate from the repository root's compose.yaml and its
 # dev-stack ports: this machine already runs unrelated services on 5432,
 # 1025, 8025 and 9000, so test provisioning must not assume those ports are
-# free. A distinct host port (55432) and distinct test-only credentials mean
+# free. A distinct host port and distinct test-only credentials mean
 # `bun run test` never contends with a developer's own dev stack, or with
 # any other project's containers on the same host.
+#
+# Both the project name and the published port are per-worktree, so two git
+# worktrees of this repository can run their suites at the same time.
+# `packages/db/testing/worktree.ts` derives them from the worktree's own
+# absolute path and passes them in the compose process's environment; the
+# defaults below are the main checkout's values, so a plain `podman compose
+# up` here from the main checkout behaves exactly as it always has.
+#
+# The project name matters more than the port. Compose keys a stack by its
+# project name alone: with a fixed `name:`, `up` from a second worktree
+# *replaces* the first worktree's container instead of colliding on the
+# port (verified on podman-compose 1.6.0), and the first worktree's
+# database disappears mid-run.
+#
+# From a linked worktree, drive this file by hand with the matching
+# environment:  eval "$(bun run packages/db/testing/worktree.ts)"
 #
 # `podman compose` (or `docker compose`) resolves this file automatically
 # because packages/db/testing/provision.ts spawns the compose command with
 # this directory as its cwd — the argument vector itself never names a file.
-name: deep-wiki-test
+name: ${COMPOSE_PROJECT_NAME:-deep-wiki-test}
 
 services:
   postgres:
@@ -18,9 +34,13 @@ services:
     environment:
       POSTGRES_USER: dw_test
       POSTGRES_PASSWORD: dw_test
-      POSTGRES_DB: postgres
+      # Not a database anything connects to: it is this container's owner
+      # stamp. provision.ts reads pg_database and refuses to run against a
+      # server stamped by a *different* worktree, so a slot collision says
+      # so instead of quietly serving one worktree the other's schema.
+      POSTGRES_DB: ${DEEPWIKI_TEST_OWNER_DB:-dw_owner_main}
     ports:
-      - "55432:5432"
+      - "${DEEPWIKI_TEST_PG_PORT:-55432}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U dw_test"]
       interval: 2s

@@ -21,7 +21,7 @@ import { writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { API_PORT, API_URL, WEB_URL } from './ports';
+import { API_PORT, API_URL, MAILPIT_SMTP_PORT, WEB_URL } from './ports';
 
 const REPO_ROOT = join(import.meta.dirname, '..');
 const FIXTURES_PATH = join(import.meta.dirname, '.auth-fixtures.json');
@@ -73,7 +73,7 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
       PASSWORD_RESET_TTL_MINUTES: '30',
       INVITATION_TTL_DAYS: '7',
       SMTP_HOST: 'localhost',
-      SMTP_PORT: '11025',
+      SMTP_PORT: String(MAILPIT_SMTP_PORT),
       SMTP_SECURE: 'false',
       MAIL_FROM: 'noreply@deep-wiki.local',
       BLOB_STORE_DRIVER: 'filesystem',

@@ -8,19 +8,34 @@
  */
 import { createHash, createHmac } from 'node:crypto';
 import { connect } from 'node:net';
+import {
+  apiComposeEnv,
+  composeEnvPrefix,
+  findForeignPortOwner,
+  harnessIdentity,
+  listPortOwners,
+} from '@deep-wiki/db/testing/worktree';
 
 export const COMPOSE_DIR = import.meta.dir;
 const COMPOSE_TIMEOUT_MS = 90_000;
 
-export const MAILPIT_SMTP_HOST = 'localhost';
-export const MAILPIT_SMTP_PORT = 11025;
-export const MAILPIT_HTTP_BASE_URL = 'http://localhost:18025';
+// Ports, the compose project name and the bucket are per-worktree so two
+// git worktrees can run their suites at the same time; the main checkout
+// keeps 11025/18025/19000/19001 and the bucket `deep-wiki-test`. See
+// packages/db/testing/worktree.ts.
+const HARNESS = harnessIdentity();
 
-export const MINIO_ENDPOINT = 'http://localhost:19000';
+export const MAILPIT_SMTP_HOST = 'localhost';
+export const MAILPIT_SMTP_PORT = HARNESS.ports.mailpitSmtp;
+export const MAILPIT_HTTP_BASE_URL = `http://localhost:${HARNESS.ports.mailpitHttp}`;
+
+export const MINIO_ENDPOINT = `http://localhost:${HARNESS.ports.minioApi}`;
 export const MINIO_REGION = 'us-east-1';
 export const MINIO_ACCESS_KEY_ID = 'dw_test';
 export const MINIO_SECRET_ACCESS_KEY = 'dw_test_password';
-export const MINIO_TEST_BUCKET = 'deep-wiki-test';
+// Per-worktree too, so even a slot collision cannot make two worktrees
+// read and delete each other's objects.
+export const MINIO_TEST_BUCKET = HARNESS.minioBucket;
 
 export type ContainerRuntime = 'podman' | 'docker';
 
@@ -66,6 +81,33 @@ async function servicesReachable(): Promise<boolean> {
  * Never skips — throws with the exact manual command on total failure,
  * same idiom as packages/db/testing/provision.ts (design.md D15).
  */
+/**
+ * Turns "compose timed out" into a sentence that names the container in
+ * the way, so a slot collision between two worktrees does not masquerade
+ * as a broken Mailpit.
+ */
+function foreignOwnerMessage(binary: ContainerRuntime): string | undefined {
+  const foreign = findForeignPortOwner(
+    listPortOwners(binary),
+    [HARNESS.ports.mailpitSmtp, HARNESS.ports.mailpitHttp, HARNESS.ports.minioApi, HARNESS.ports.minioConsole],
+    HARNESS.apiProjectName,
+  );
+  if (!foreign) return undefined;
+
+  return (
+    `host port ${foreign.port} is already published by container "${foreign.container}"` +
+    (foreign.project ? ` of a different compose project ("${foreign.project}")` : ' outside any compose project') +
+    `, but this worktree (${HARNESS.root}, slot ${HARNESS.slot}, project "${HARNESS.apiProjectName}") needs it. ` +
+    'This is a port collision between two checkouts, not a broken service: move this worktree with ' +
+    `DEEPWIKI_TEST_SLOT=<1..248>, or stop "${foreign.container}".`
+  );
+}
+
+/** The manual command, carrying the environment that makes it mean the same thing. */
+function manualCommand(binary: ContainerRuntime): string {
+  return `(cd apps/api/testing && ${composeEnvPrefix(apiComposeEnv(HARNESS))} ${binary} compose up -d --wait)`;
+}
+
 export async function ensureTestServices(): Promise<void> {
   if (await servicesReachable()) {
     return;
@@ -75,12 +117,17 @@ export async function ensureTestServices(): Promise<void> {
   if (!binary) {
     throw new Error(
       'apps/api/testing: no container runtime found on PATH (podman or docker). ' +
-        'Run (cd apps/api/testing && podman compose up -d --wait) manually.',
+        `Run ${manualCommand('podman')} manually.`,
     );
   }
 
   const proc = Bun.spawn([binary, 'compose', 'up', '-d', '--wait'], {
     cwd: COMPOSE_DIR,
+    // The compose project name travels in COMPOSE_PROJECT_NAME, not a -p
+    // flag: verified honoured at `up` time by this host's provider
+    // (podman-compose 1.6.0). The compose file interpolates the same
+    // variable into its own `name:` so the two can never disagree.
+    env: { ...process.env, ...apiComposeEnv(HARNESS) },
     stdout: 'ignore',
     stderr: 'ignore',
   });
@@ -98,10 +145,12 @@ export async function ensureTestServices(): Promise<void> {
   clearTimeout(timer);
 
   if (timedOut || !(await servicesReachable())) {
+    const collision = foreignOwnerMessage(binary);
     throw new Error(
-      `apps/api/testing: ${binary} compose did not bring up a reachable Mailpit/MinIO within ` +
-        `${COMPOSE_TIMEOUT_MS}ms. Run (cd apps/api/testing && ${binary} compose up -d --wait) manually ` +
-        'to see the underlying error.',
+      collision
+        ? `apps/api/testing: ${collision}`
+        : `apps/api/testing: ${binary} compose did not bring up a reachable Mailpit/MinIO within ` +
+          `${COMPOSE_TIMEOUT_MS}ms. Run ${manualCommand(binary)} manually to see the underlying error.`,
     );
   }
 }

@@ -4,12 +4,18 @@ import {
   buildComposeUpArgs,
   detectContainerRuntime,
   dropTestDatabase,
+  localTestUrl,
+  ProvisioningError,
   resolveAdminUrl,
   TEST_DB_PREFIX,
   UnsafeDatabaseNameError,
   type ResolveAdminUrlDeps,
   type SpawnResult,
 } from './provision';
+import { deriveHarnessIdentity, PORT_OWNER_PS_FORMAT } from './worktree';
+
+const MAIN_ID = deriveHarnessIdentity({ root: '/home/dev/deep-wiki', isMainWorktree: true });
+const WORKTREE_ID = deriveHarnessIdentity({ root: '/home/dev/wt/probe', isMainWorktree: false });
 
 describe('assertTestDatabaseName', () => {
   test('refuses a database name that does not start with the test prefix', () => {
@@ -108,6 +114,9 @@ function makeDeps(overrides: Partial<ResolveAdminUrlDeps> = {}): ResolveAdminUrl
     probe: async () => false,
     detectRuntime: () => undefined,
     runCompose: async () => ({ code: 0, timedOut: false }) as SpawnResult,
+    identity: MAIN_ID,
+    portOwners: () => '',
+    serverOwners: async () => [],
     ...overrides,
   };
 }
@@ -150,6 +159,18 @@ describe('resolveAdminUrl', () => {
     expect(composeCalled).toBe(false);
   });
 
+  test('connects to the port this worktree derived, not to a fixed one', async () => {
+    const deps = makeDeps({ identity: WORKTREE_ID, probe: async () => true });
+
+    expect(await resolveAdminUrl(deps)).toBe(`postgres://dw_test:dw_test@localhost:${WORKTREE_ID.ports.postgres}/postgres`);
+  });
+
+  test('the main checkout still resolves to the port the harness has always used', async () => {
+    const deps = makeDeps({ probe: async () => true });
+
+    expect(await resolveAdminUrl(deps)).toBe('postgres://dw_test:dw_test@localhost:55432/postgres');
+  });
+
   test('a clean, actionable timeout message at the configured bound when the compose wait never completes', async () => {
     const deps = makeDeps({
       detectRuntime: () => 'podman',
@@ -161,5 +182,115 @@ describe('resolveAdminUrl', () => {
     });
 
     await expect(resolveAdminUrl(deps, 20)).rejects.toThrow(/20ms|timed out|timeout/i);
+  });
+});
+
+describe('resolveAdminUrl — a worktree collision names itself', () => {
+  test('refuses to quietly borrow another worktree’s Postgres when both derived the same port', async () => {
+    const deps = makeDeps({
+      identity: WORKTREE_ID,
+      probe: async () => true,
+      serverOwners: async () => ['dw_owner_99887766'],
+    });
+
+    await expect(resolveAdminUrl(deps)).rejects.toThrow(ProvisioningError);
+    await expect(resolveAdminUrl(deps)).rejects.toThrow(/dw_owner_99887766/);
+  });
+
+  test('the collision error explains it is a collision, and how to step out of the way', async () => {
+    const deps = makeDeps({
+      identity: WORKTREE_ID,
+      probe: async () => true,
+      serverOwners: async () => ['dw_owner_99887766'],
+    });
+
+    await expect(resolveAdminUrl(deps)).rejects.toThrow(/another deep-wiki worktree|different worktree/i);
+    await expect(resolveAdminUrl(deps)).rejects.toThrow(/DEEPWIKI_TEST_SLOT/);
+  });
+
+  test('never fails when the server carries this worktree’s own stamp', async () => {
+    const deps = makeDeps({
+      identity: WORKTREE_ID,
+      probe: async () => true,
+      serverOwners: async () => [WORKTREE_ID.ownerDatabase],
+    });
+
+    expect(await resolveAdminUrl(deps)).toBe(localTestUrl(WORKTREE_ID));
+  });
+
+  test('accepts an unstamped server rather than inventing a conflict (a container older than this check)', async () => {
+    const deps = makeDeps({ identity: WORKTREE_ID, probe: async () => true, serverOwners: async () => [] });
+
+    expect(await resolveAdminUrl(deps)).toBe(localTestUrl(WORKTREE_ID));
+  });
+
+  test('never asks the container runtime on the happy path: `podman ps` costs 15-80s on a real host', async () => {
+    let asked = false;
+    const deps = makeDeps({
+      identity: WORKTREE_ID,
+      probe: async () => true,
+      serverOwners: async () => [WORKTREE_ID.ownerDatabase],
+      portOwners: () => {
+        asked = true;
+        return '';
+      },
+    });
+
+    await resolveAdminUrl(deps);
+    expect(asked).toBe(false);
+  });
+
+  test('TEST_DATABASE_URL short-circuits before any ownership check', async () => {
+    let asked = false;
+    const deps = makeDeps({
+      env: { TEST_DATABASE_URL: 'postgres://ci:ci@ci-host:5432/deepwiki_ci' },
+      serverOwners: async () => {
+        asked = true;
+        return [];
+      },
+    });
+
+    await resolveAdminUrl(deps);
+    expect(asked).toBe(false);
+  });
+
+  test('when compose cannot bring the stack up, the error names the container holding the port', async () => {
+    const deps = makeDeps({
+      identity: WORKTREE_ID,
+      detectRuntime: () => 'podman',
+      runCompose: async () => ({ code: 1, timedOut: false }),
+      portOwners: () =>
+        `someone-elses-postgres\tunrelated-project\t0.0.0.0:${WORKTREE_ID.ports.postgres}->5432/tcp`,
+    });
+
+    await expect(resolveAdminUrl(deps)).rejects.toThrow(/someone-elses-postgres/);
+    await expect(resolveAdminUrl(deps)).rejects.toThrow(/unrelated-project/);
+  });
+});
+
+describe('the manual commands the failure messages print', () => {
+  test('carry the environment a linked worktree needs, so pasting them cannot start the wrong stack', async () => {
+    const deps = makeDeps({ identity: WORKTREE_ID, detectRuntime: () => undefined });
+
+    await expect(resolveAdminUrl(deps)).rejects.toThrow(
+      new RegExp(`COMPOSE_PROJECT_NAME=${WORKTREE_ID.dbProjectName}`),
+    );
+    await expect(resolveAdminUrl(deps)).rejects.toThrow(
+      new RegExp(`DEEPWIKI_TEST_PG_PORT=${WORKTREE_ID.ports.postgres}`),
+    );
+  });
+
+  test('the main checkout prints exactly the command it always printed, plus its own (unchanged) values', async () => {
+    const deps = makeDeps({ detectRuntime: () => undefined });
+
+    await expect(resolveAdminUrl(deps)).rejects.toThrow(/podman compose up -d --wait postgres/);
+    await expect(resolveAdminUrl(deps)).rejects.toThrow(/DEEPWIKI_TEST_PG_PORT=55432/);
+  });
+});
+
+describe('the port-ownership query', () => {
+  test('asks the runtime for the one format parsePortOwners can read', () => {
+    expect(PORT_OWNER_PS_FORMAT).toContain('{{.Ports}}');
+    expect(PORT_OWNER_PS_FORMAT).toContain('com.docker.compose.project');
   });
 });

@@ -104,6 +104,38 @@ message instead — useful when you want to manage the test container yourself. 
 never silently skips a database-backed test: a total provisioning failure throws with the
 exact command to run. `bun run check` and the pre-commit hook stay database-free.
 
+### Running two worktrees at once
+
+Nothing to configure. Every value the test harness needs to keep to itself — both compose
+project names, the five container host ports, the two e2e server ports and the MinIO test
+bucket — is derived from the worktree's own absolute path by
+`packages/db/testing/worktree.ts`. The main checkout keeps the values it always had (Postgres
+`55432`, Mailpit `11025`/`18025`, MinIO `19000`/`19001`, e2e `4000`/`4173`); every linked
+worktree gets its own block of eight consecutive ports in **13008–14990**, a range chosen to sit
+clear of the dev stack, of the main checkout's test stack, and of this kernel's ephemeral range.
+The derivation is a pure function of the path, so a worktree gets the same values on every run
+and reuses its own containers rather than orphaning them.
+
+The compose **project name** matters more than the port. Compose keys a stack by project name
+alone: with a fixed `name:`, `up` from a second worktree does not collide on the port — it
+*replaces* the first worktree's container, and that worktree's database disappears mid-run.
+
+To see what this worktree derives:
+
+```bash
+bun run packages/db/testing/worktree.ts
+```
+
+That prints the environment as `export` lines; `eval "$(...)"` it before driving either
+`compose.yaml` under `packages/db/testing/` or `apps/api/testing/` by hand, or the defaults in
+those files will start the *main checkout's* stack. Every derived value can be overridden
+explicitly — `DEEPWIKI_TEST_SLOT` moves a whole block, `DEEPWIKI_TEST_PG_PORT` and friends move
+one port each.
+
+The test Postgres stamps itself with a `dw_owner_<tag>` database naming the worktree that
+started it. If two worktrees ever land on the same slot, provisioning stops and says so, rather
+than quietly running one worktree's suites against the other's schema.
+
 ### The container stack
 
 ```bash

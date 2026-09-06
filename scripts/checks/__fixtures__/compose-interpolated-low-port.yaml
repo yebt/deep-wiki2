@@ -1,0 +1,6 @@
+name: fixture-interpolated-low-port
+services:
+  api:
+    image: example/api
+    ports:
+      - "${FIXTURE_API_PORT:-80}:8080"

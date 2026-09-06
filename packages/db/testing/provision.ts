@@ -15,24 +15,44 @@
  * total failure throws with the exact command to run instead.
  *
  * Deviation from design.md's literal wording: the local fallback probes a
- * dedicated test-only port (55432) rather than the dev stack's 5432. This
- * machine (like any self-hoster's) may already run unrelated services on
- * 5432/1025/8025/9000 (verified during this change), so provisioning must
- * not assume dev-stack ports are free. The compose file in this directory
- * is entirely separate from the repository root's `compose.yaml`.
+ * dedicated test-only port (55432 on the main checkout) rather than the
+ * dev stack's 5432. This machine (like any self-hoster's) may already run
+ * unrelated services on 5432/1025/8025/9000 (verified during this change),
+ * so provisioning must not assume dev-stack ports are free. The compose
+ * file in this directory is entirely separate from the repository root's
+ * `compose.yaml`.
+ *
+ * Both that port and the compose project name are per-worktree — see
+ * ./worktree.ts, which derives them from this worktree's absolute path so
+ * two git worktrees can run their suites at the same time. The main
+ * checkout keeps 55432 and the project name `deep-wiki-test`.
  */
 import { randomBytes } from 'node:crypto';
 import { join } from 'node:path';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
+import {
+  composeEnvPrefix,
+  dbComposeEnv,
+  findForeignPortOwner,
+  harnessIdentity,
+  listPortOwners,
+  OWNER_DB_PREFIX,
+  type ForeignPortOwner,
+  type HarnessIdentity,
+} from './worktree';
 
 export const TEST_DB_PREFIX = 'dw_test_';
 const TEMPLATE_DB_NAME = 'deepwiki_test_template';
 const COMPOSE_DIR = import.meta.dir;
 const DEFAULT_MIGRATIONS_FOLDER = join(import.meta.dir, '..', 'drizzle');
-const LOCAL_TEST_URL = 'postgres://dw_test:dw_test@localhost:55432/postgres';
 export const COMPOSE_TIMEOUT_MS = 90_000;
+
+/** The admin URL for this worktree's own test Postgres. */
+export function localTestUrl(id: HarnessIdentity): string {
+  return `postgres://dw_test:dw_test@localhost:${id.ports.postgres}/postgres`;
+}
 
 export class UnsafeDatabaseNameError extends Error {
   constructor(name: string) {
@@ -80,9 +100,19 @@ export function detectContainerRuntime(which: (bin: string) => string | null = (
   return undefined;
 }
 
+/**
+ * The compose project name travels in `COMPOSE_PROJECT_NAME` rather than a
+ * `-p` flag, so `buildComposeUpArgs` stays the fixed, token-free vector it
+ * has always been. Verified against this host's provider (podman-compose
+ * 1.6.0): `COMPOSE_PROJECT_NAME` is honoured at `up` time — note that
+ * `podman compose config` does *not* reflect it, which is why the compose
+ * files interpolate the same variable into their own `name:` as well, so
+ * `config` and `up` agree.
+ */
 async function defaultRunCompose(binary: ContainerRuntime, timeoutMs: number): Promise<SpawnResult> {
   const proc = Bun.spawn(buildComposeUpArgs(binary) as string[], {
     cwd: COMPOSE_DIR,
+    env: { ...process.env, ...dbComposeEnv(harnessIdentity()) },
     stdout: 'ignore',
     stderr: 'ignore',
   });
@@ -115,6 +145,42 @@ export interface ResolveAdminUrlDeps {
   probe(url: string): Promise<boolean>;
   detectRuntime(): ContainerRuntime | undefined;
   runCompose(binary: ContainerRuntime, timeoutMs: number): Promise<SpawnResult>;
+  /** This worktree's derived identity. Defaults to the running worktree's. */
+  readonly identity?: HarnessIdentity;
+  /** The `dw_owner_*` databases stamped on the server answering `url`. */
+  serverOwners?(url: string): Promise<string[]>;
+  /** `podman|docker ps` output, used only to name a port's real owner. */
+  portOwners?(): string;
+}
+
+/**
+ * Reads the owner stamps off a running test Postgres. One cheap query on
+ * a connection we were opening anyway; the alternative — asking the
+ * container runtime which project publishes the port — measured 15-80
+ * seconds of `podman ps` on the development host and cannot live on the
+ * path every suite takes.
+ */
+async function defaultServerOwners(url: string): Promise<string[]> {
+  const sql = postgres(withDatabase(url, 'postgres'), { max: 1, connect_timeout: 2, onnotice: () => {} });
+  try {
+    const rows = await sql<{ datname: string }[]>`
+      select datname from pg_database where datname like ${`${OWNER_DB_PREFIX}%`}
+    `;
+    return rows.map((row) => row.datname);
+  } catch {
+    return [];
+  } finally {
+    await sql.end({ timeout: 1 }).catch(() => {});
+  }
+}
+
+let cachedPortOwners: string | undefined;
+
+function defaultPortOwners(): string {
+  // One bounded `ps` per process, and only ever on a path that is already
+  // failing — never on the path a green run takes.
+  cachedPortOwners ??= listPortOwners(detectContainerRuntime() ?? 'podman');
+  return cachedPortOwners;
 }
 
 export const defaultProvisionDeps: ResolveAdminUrlDeps = {
@@ -122,33 +188,74 @@ export const defaultProvisionDeps: ResolveAdminUrlDeps = {
   probe: defaultProbe,
   detectRuntime: () => detectContainerRuntime(),
   runCompose: defaultRunCompose,
+  serverOwners: defaultServerOwners,
+  portOwners: defaultPortOwners,
 };
 
-function noRuntimeMessage(): string {
+/**
+ * The manual command, carrying the environment that makes it mean the
+ * same thing this process meant. Pasting it from a linked worktree
+ * without the prefix would start the *main checkout's* stack.
+ */
+function manualCommand(id: HarnessIdentity, binary: ContainerRuntime = 'podman'): string {
+  return `(cd packages/db/testing && ${composeEnvPrefix(dbComposeEnv(id))} ${buildComposeUpArgs(binary).join(' ')})`;
+}
+
+function noRuntimeMessage(id: HarnessIdentity): string {
   return (
     'no container runtime found on PATH: install podman or docker, or set TEST_DATABASE_URL ' +
-    'to an already-reachable Postgres. Manual fallback: (cd packages/db/testing && podman compose up -d --wait postgres)'
+    `to an already-reachable Postgres. Manual fallback: ${manualCommand(id)}`
   );
 }
 
-function noAutostartMessage(): string {
+function noAutostartMessage(id: HarnessIdentity): string {
   return (
     'DEEPWIKI_TEST_NO_AUTOSTART=1 is set and no reachable test Postgres was found: run ' +
-    '(cd packages/db/testing && podman compose up -d --wait postgres) manually, or unset the variable.'
+    `${manualCommand(id)} manually, or unset the variable.`
   );
 }
 
-function timeoutMessage(binary: ContainerRuntime, timeoutMs: number): string {
+function timeoutMessage(binary: ContainerRuntime, timeoutMs: number, id: HarnessIdentity): string {
   return (
     `${binary} compose did not report postgres healthy within ${timeoutMs}ms (timed out). ` +
-    `Run (cd packages/db/testing && ${buildComposeUpArgs(binary).join(' ')}) manually to see the underlying error.`
+    `Run ${manualCommand(id, binary)} manually to see the underlying error.`
   );
 }
 
-function composeFailedMessage(binary: ContainerRuntime, code: number | null): string {
+function composeFailedMessage(binary: ContainerRuntime, code: number | null, id: HarnessIdentity): string {
   return (
     `${binary} compose exited with code ${code}. ` +
-    `Run (cd packages/db/testing && ${buildComposeUpArgs(binary).join(' ')}) manually to see the underlying error.`
+    `Run ${manualCommand(id, binary)} manually to see the underlying error.`
+  );
+}
+
+/**
+ * The honest version of "the database timed out". Two worktrees derive
+ * the same port only if their path digests land on the same slot; when
+ * that happens the harness must say so, because silently reusing the
+ * other worktree's Postgres would mean running this worktree's suites
+ * against the other one's migrations — flaky application behaviour with
+ * no application cause, which is exactly the failure this harness exists
+ * to prevent.
+ */
+export function ownerConflictMessage(owners: readonly string[], id: HarnessIdentity): string {
+  return (
+    `the Postgres answering on port ${id.ports.postgres} belongs to a different worktree: it is stamped ` +
+    `${owners.map((owner) => `"${owner}"`).join(', ')}, but this worktree (${id.root}, slot ${id.slot}) is ` +
+    `"${id.ownerDatabase}". Two worktrees derived the same harness slot. Running against it would migrate and query ` +
+    'the other worktree’s database, so provisioning stops here instead. Move this worktree out of the way with ' +
+    'DEEPWIKI_TEST_SLOT=<1..248> (or DEEPWIKI_TEST_PG_PORT=<port>), or stop the other worktree’s stack.'
+  );
+}
+
+/** The same answer, when the obstacle is a container rather than another worktree's Postgres. */
+export function portConflictMessage(owner: ForeignPortOwner, id: HarnessIdentity): string {
+  return (
+    `host port ${owner.port} is already published by container "${owner.container}"` +
+    (owner.project ? ` of a different compose project ("${owner.project}")` : ' outside any compose project') +
+    `, but this worktree (${id.root}, slot ${id.slot}, project "${id.dbProjectName}") needs it for its own test Postgres. ` +
+    'This is a port collision, not a broken database. Move this worktree out of the way with ' +
+    `DEEPWIKI_TEST_SLOT=<1..248> (or DEEPWIKI_TEST_PG_PORT=<port>), or stop "${owner.container}".`
   );
 }
 
@@ -163,32 +270,60 @@ export async function resolveAdminUrl(deps: ResolveAdminUrlDeps, timeoutMs: numb
     return envUrl;
   }
 
-  if (await deps.probe(LOCAL_TEST_URL)) {
-    return LOCAL_TEST_URL;
+  const id = deps.identity ?? harnessIdentity();
+  const url = localTestUrl(id);
+
+  // Only ever on a path that is already failing: `podman ps` is slow
+  // enough (15-80s measured) that it must never touch a green run.
+  const assertPortIsOurs = (): void => {
+    const foreign = findForeignPortOwner(deps.portOwners?.() ?? '', [id.ports.postgres], id.dbProjectName);
+    if (foreign) {
+      throw new ProvisioningError(portConflictMessage(foreign, id));
+    }
+  };
+
+  const assertServerIsOurs = async (): Promise<void> => {
+    const owners = (await deps.serverOwners?.(url)) ?? [];
+    // No stamp at all: a container older than this check. Nothing to
+    // conclude, and inventing a conflict would be worse than missing one.
+    if (owners.length === 0 || owners.includes(id.ownerDatabase)) return;
+    throw new ProvisioningError(ownerConflictMessage(owners, id));
+  };
+
+  if (await deps.probe(url)) {
+    // Something answers on our port. Before trusting it, make sure it is
+    // ours: another worktree's Postgres would happily accept the
+    // connection and then serve this suite the wrong schema.
+    await assertServerIsOurs();
+    return url;
   }
 
   if (deps.env.DEEPWIKI_TEST_NO_AUTOSTART === '1') {
-    throw new ProvisioningError(noAutostartMessage());
+    throw new ProvisioningError(noAutostartMessage(id));
   }
 
   const binary = deps.detectRuntime();
   if (!binary) {
-    throw new ProvisioningError(noRuntimeMessage());
+    throw new ProvisioningError(noRuntimeMessage(id));
   }
 
   const result = await deps.runCompose(binary, timeoutMs);
   if (result.timedOut) {
-    throw new ProvisioningError(timeoutMessage(binary, timeoutMs));
+    assertPortIsOurs();
+    throw new ProvisioningError(timeoutMessage(binary, timeoutMs, id));
   }
   if (result.code !== 0) {
-    throw new ProvisioningError(composeFailedMessage(binary, result.code));
+    assertPortIsOurs();
+    throw new ProvisioningError(composeFailedMessage(binary, result.code, id));
   }
 
-  if (!(await deps.probe(LOCAL_TEST_URL))) {
-    throw new ProvisioningError(composeFailedMessage(binary, result.code));
+  if (!(await deps.probe(url))) {
+    assertPortIsOurs();
+    throw new ProvisioningError(composeFailedMessage(binary, result.code, id));
   }
 
-  return LOCAL_TEST_URL;
+  await assertServerIsOurs();
+  return url;
 }
 
 function withDatabase(url: string, databaseName: string): string {

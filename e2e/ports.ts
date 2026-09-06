@@ -10,9 +10,26 @@
  *
  * The same fact must not be written twice. See docs/TODO.md, which records
  * three earlier instances of this exact shape.
+ *
+ * The values themselves are per-worktree, from the same derivation the
+ * container stacks use (packages/db/testing/worktree.ts): the main
+ * checkout keeps 4000 and 4173, every linked worktree gets its own pair,
+ * so two worktrees can run `bun run e2e` at the same time. That module is
+ * deliberately free of Bun-only APIs — this file is loaded by Playwright's
+ * Node process — and is imported by relative path for the same reason.
  */
-export const API_PORT = 4000;
-export const WEB_PORT = 4173;
+import { harnessIdentity } from '../packages/db/testing/worktree';
+
+const harness = harnessIdentity();
+
+export const API_PORT = harness.ports.api;
+export const WEB_PORT = harness.ports.web;
+
+/**
+ * The API under test sends mail through the test Mailpit that
+ * `apps/api/testing/compose.yaml` publishes — same worktree, same port.
+ */
+export const MAILPIT_SMTP_PORT = harness.ports.mailpitSmtp;
 
 export const API_URL = `http://localhost:${API_PORT}`;
 export const WEB_URL = `http://localhost:${WEB_PORT}`;

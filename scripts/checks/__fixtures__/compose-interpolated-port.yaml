@@ -1,0 +1,7 @@
+name: fixture-interpolated-port
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    ports:
+      - "${FIXTURE_PG_PORT:-13456}:5432"
+      - "${FIXTURE_ALT_PORT-13457}:5433"

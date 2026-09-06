@@ -5,7 +5,8 @@
   "version": "0.0.0",
   "exports": {
     ".": "./src/index.ts",
-    "./testing/provision": "./testing/provision.ts"
+    "./testing/provision": "./testing/provision.ts",
+    "./testing/worktree": "./testing/worktree.ts"
   },
   "scripts": {
     "test": "bun test",
