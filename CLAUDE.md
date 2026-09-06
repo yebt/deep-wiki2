@@ -45,7 +45,9 @@ Run from the repository root.
 | `bun run typecheck` | Type-checks every workspace member and the root scripts |
 | `bun run lint` | ESLint across the repository |
 | `bun run test` | Test suite for every package and app, plus the check scripts' own tests. `packages/db`'s suites auto-provision a disposable test Postgres (`packages/db/testing/provision.ts`); set `DEEPWIKI_TEST_NO_AUTOSTART=1` to opt out and fail fast instead |
-| `bun run check` | The structural guard rail |
+| `bun run check` | The structural guard rail. This is what the `.githooks/pre-commit` hook runs |
+| `bun run verify` | Every gate — `check`, the local `.env` port consistency, `lint`, `typecheck`, `test`. Run it before tagging a milestone; it is not in the commit hook |
+| `bun run env:check` | Compares your local `.env`'s ports against what `compose.yaml` publishes. Deliberately outside the commit hook: `.env` is your machine's state, not the repository's |
 
 `bun run check` fails when:
 
