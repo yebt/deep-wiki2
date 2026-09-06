@@ -408,6 +408,25 @@ makes conventions portable across projects.
 
 Discoveries and constraints. Newest first.
 
+### 2026-09-06 — apps/web looked for the API on a port nothing listens on
+
+`apps/web/nuxt.config.ts` hardcoded `apiBaseUrl: 'http://localhost:4000'` with a comment claiming
+it tracked "apps/api's default PORT". `env.example` documents `PORT=3000`. The comment and the
+value had drifted apart, and neither was reachable on a machine where 3000 already belongs to
+another project — so the browser called a port with nothing behind it and the sign-in screen
+reported the API as unreachable.
+
+This is the third instance of one pattern in two days: **the same fact written in two places with
+nothing comparing them.** First `POSTGRES_HOST_PORT` against `DATABASE_URL`, then
+`MAILPIT_SMTP_HOST_PORT` against `SMTP_PORT`, now `PORT` against both `APP_URL` and the base URL
+the browser is handed.
+
+**Impact:** the default now tracks `env.example`'s `PORT`, `NUXT_PUBLIC_API_BASE_URL` is documented
+as the override (Nuxt maps `NUXT_PUBLIC_*` onto `runtimeConfig.public` automatically), and
+`env-consistency.ts` compares both new pairs. The pattern is worth naming for future phases: any
+value that must agree with another value belongs in one place, and where duplication is
+unavoidable, a check must compare them — a comment asserting they agree is not a mechanism.
+
 ### 2026-09-06 — A malformed DATABASE_URL failed with a parser stack instead of a cause
 
 `createDb` passed the value straight to `postgres.js`, which threw `ERR_INVALID_URL` with a stack

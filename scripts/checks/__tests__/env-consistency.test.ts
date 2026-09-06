@@ -40,11 +40,26 @@ describe('checkEnvConsistency', () => {
     expect(result.errors).toHaveLength(1);
   });
 
+  test('PORT disagreeing with the api base url the browser is given fails', () => {
+    const result = checkEnvConsistency(
+      parseEnv('PORT=4400\nNUXT_PUBLIC_API_BASE_URL=http://localhost:4000\n'),
+    );
+    expect(result.ok).toBe(false);
+    expect(result.errors[0]).toContain('4400');
+    expect(result.errors[0]).toContain('4000');
+  });
+
+  test('PORT disagreeing with APP_URL fails', () => {
+    const result = checkEnvConsistency(parseEnv('PORT=4400\nAPP_URL=http://localhost:3000\n'));
+    expect(result.ok).toBe(false);
+  });
+
   test('agreeing ports pass', () => {
     const result = checkEnvConsistency(
       parseEnv(
         'POSTGRES_HOST_PORT=25432\nDATABASE_URL=postgres://u:p@localhost:25432/db\n' +
-          'MAILPIT_SMTP_HOST_PORT=21025\nSMTP_PORT=21025\n',
+          'MAILPIT_SMTP_HOST_PORT=21025\nSMTP_PORT=21025\n' +
+          'PORT=4400\nAPP_URL=http://localhost:4400\nNUXT_PUBLIC_API_BASE_URL=http://localhost:4400\n',
       ),
     );
     expect(result.ok).toBe(true);

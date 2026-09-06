@@ -9,7 +9,9 @@
  * and the resulting error came from that other server, so it named a
  * database and a role the developer had never heard of.
  *
- * The same trap exists between `MAILPIT_SMTP_HOST_PORT` and `SMTP_PORT`.
+ * The same trap exists between `MAILPIT_SMTP_HOST_PORT` and `SMTP_PORT`, and
+ * between `PORT` — where apps/api listens — and both `APP_URL` and
+ * `NUXT_PUBLIC_API_BASE_URL`, where the browser is told to find it.
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -46,6 +48,8 @@ export function portOfUrl(url: string): string | undefined {
 const PAIRS: readonly { publish: string; consume: string; kind: 'url' | 'port'; hint: string }[] = [
   { publish: 'POSTGRES_HOST_PORT', consume: 'DATABASE_URL', kind: 'url', hint: 'the port inside DATABASE_URL' },
   { publish: 'MAILPIT_SMTP_HOST_PORT', consume: 'SMTP_PORT', kind: 'port', hint: 'SMTP_PORT' },
+  { publish: 'PORT', consume: 'NUXT_PUBLIC_API_BASE_URL', kind: 'url', hint: "the port inside NUXT_PUBLIC_API_BASE_URL" },
+  { publish: 'PORT', consume: 'APP_URL', kind: 'url', hint: 'the port inside APP_URL' },
 ];
 
 export function checkEnvConsistency(env: Map<string, string>): EnvConsistencyResult {
@@ -62,8 +66,9 @@ export function checkEnvConsistency(env: Map<string, string>): EnvConsistencyRes
     if (actual !== published) {
       errors.push(
         `${pair.publish}=${published} but ${pair.hint} is ${actual}. ` +
-          `Compose publishes the service on ${published}; the app would connect to ${actual}, ` +
-          `which on a busy machine is another project's service. Set them to the same value.`,
+          `One says ${published}, the other says ${actual}. They are the same fact written twice — ` +
+          `one says where the service listens or is published, the other says where to reach it. ` +
+          `On a busy machine the mismatched one lands on another project's service. Set them equal.`,
       );
     }
   }

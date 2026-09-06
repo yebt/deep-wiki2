@@ -29,8 +29,12 @@ export default defineNuxtConfig({
       // apps/web reads zero required environment variables in Phase 0
       // (see src/config.ts). This is an optional, defaulted override —
       // not a fail-fast requirement — so it is not part of that schema.
-      // Points at apps/api's default PORT from packages/contracts/src/env.ts.
-      apiBaseUrl: 'http://localhost:4000',
+      //
+      // Override with NUXT_PUBLIC_API_BASE_URL, which Nuxt maps onto this key
+      // automatically. The default must track `PORT` in env.example: this is
+      // the same fact written in two places, and `bun run env:check` compares
+      // them because they silently drifted once already.
+      apiBaseUrl: 'http://localhost:3000',
     },
   },
 
