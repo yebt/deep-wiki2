@@ -43,18 +43,44 @@ function findSourceFiles(dir: string): string[] {
   return found;
 }
 
+export interface CoreManifest {
+  dependencies?: Record<string, string>;
+  devDependencies?: Record<string, string>;
+  peerDependencies?: Record<string, string>;
+}
+
+/**
+ * `dependencies` alone is not enough. `scanImports()` elides type-only imports
+ * (measured), so a framework reached for as `import type` is invisible to the
+ * AST scan — and if that framework were declared only under `devDependencies`,
+ * nothing here would have seen it either. Both holes had to be open at once for
+ * a framework to reach packages/core unnoticed, and both were.
+ *
+ * Pure so it can be tested without a filesystem.
+ */
+export function checkManifest(pkg: CoreManifest): CorePurityResult {
+  const deps = [
+    ...Object.keys(pkg.dependencies ?? {}),
+    ...Object.keys(pkg.devDependencies ?? {}),
+    ...Object.keys(pkg.peerDependencies ?? {}),
+  ];
+
+  return deps.length === 0
+    ? { ok: true, errors: [] }
+    : {
+        ok: false,
+        errors: [
+          `package.json declares dependencies (${deps.join(', ')}); packages/core must depend on ` +
+            `nothing, including under devDependencies or peerDependencies`,
+        ],
+      };
+}
+
 export function checkCorePurity(coreDir: string): CorePurityResult {
   const errors: string[] = [];
 
-  const pkg = JSON.parse(readFileSync(join(coreDir, 'package.json'), 'utf8')) as {
-    dependencies?: Record<string, string>;
-  };
-  const deps = Object.keys(pkg.dependencies ?? {});
-  if (deps.length > 0) {
-    errors.push(
-      `package.json declares non-empty "dependencies" (${deps.join(', ')}); packages/core must depend on nothing`,
-    );
-  }
+  const pkg = JSON.parse(readFileSync(join(coreDir, 'package.json'), 'utf8')) as CoreManifest;
+  errors.push(...checkManifest(pkg).errors);
 
   const srcDir = join(coreDir, 'src');
   for (const file of findSourceFiles(srcDir)) {

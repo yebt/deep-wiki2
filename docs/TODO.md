@@ -408,6 +408,28 @@ makes conventions portable across projects.
 
 Discoveries and constraints. Newest first.
 
+### 2026-09-06 — Two structural checks had holes that only lined up together
+
+Phase 2's task breakdown found both, and both are now closed.
+
+`core-purity.ts` inspected only `dependencies`. Separately, `Bun.Transpiler().scanImports()` was
+measured to **elide type-only imports**. Either hole alone is survivable; together they compose: a
+framework reached for as `import type` is invisible to the AST scan, and if it were declared under
+`devDependencies` the manifest rule never saw it either. `packages/core`'s framework-free
+guarantee — the invariant `CLAUDE.md` calls machine-enforced — had a path straight through it.
+The check now counts `dependencies`, `devDependencies` and `peerDependencies`, and the manifest
+rule is a pure function so it can be tested without a filesystem.
+
+`single-parser.ts`, written an hour earlier in this same session, did not list `milkdown` — the
+very ProseMirror editor Phase 2 is about to build on. It is legitimate inside `packages/editor`
+and nowhere else, since it carries its own markdown serialiser. A stray import would have passed
+the check written specifically to prevent exactly that.
+
+**Impact:** the lesson is not either bug. It is that **a check is only as good as its list, and a
+list written from memory is a guess.** Both were closed by another agent reading the checks
+against the work about to be done, not by the checks failing. Structural checks need the same
+adversarial reading as the code they guard.
+
 ### 2026-09-06 — Fourth instance: the e2e harness told the browser the wrong API port
 
 Changing `apps/web`'s compiled `apiBaseUrl` default from 4000 to 3000 broke the e2e suite, because

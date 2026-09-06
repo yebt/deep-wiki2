@@ -25,6 +25,16 @@ describe('checkFile', () => {
     expect(checkFile('packages/editor/src/schema.ts', "import { x } from 'prosemirror-markdown';")).toEqual([]);
   });
 
+  test('a stray Milkdown import outside packages/editor fails', () => {
+    const errors = checkFile('apps/web/app/pages/edit.vue', "import { Editor } from '@milkdown/core';");
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain('@milkdown/');
+  });
+
+  test('packages/editor may import Milkdown — it owns the ProseMirror side', () => {
+    expect(checkFile('packages/editor/src/editor.ts', "import { Editor } from '@milkdown/core';")).toEqual([]);
+  });
+
   test('ordinary code with no parser import passes', () => {
     expect(checkFile('apps/api/src/routes/auth.ts', "import { Hono } from 'hono';")).toEqual([]);
   });

@@ -30,6 +30,12 @@ const FORBIDDEN_SPECIFIERS: readonly string[] = [
   'micromark', // only via packages/markdown's own pipeline
   'remark-parse',
   'remark-stringify',
+  // Milkdown is the ProseMirror editor this project will build on. It is
+  // legitimate inside packages/editor and nowhere else: it carries its own
+  // markdown serialiser, so a stray import elsewhere is a second parser by
+  // another name.
+  '@milkdown/',
+  'milkdown',
 ];
 
 /** Component and composable names from @nuxt/ui's own editor surface. */
