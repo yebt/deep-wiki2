@@ -34,3 +34,5 @@ export type {
   VoidReason,
 } from './ai/budget';
 export { outstandingMicroUsd, reserve, settle, voidReservation } from './ai/budget';
+export type { StablePrefix, StablePrefixInput } from './ai/prefix';
+export { buildPrefix } from './ai/prefix';

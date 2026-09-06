@@ -1,0 +1,4 @@
+Team rule pack: Engineering Handbook.
+- Prefer explicit error handling over exceptions crossing module boundaries.
+- Every public function needs a docstring naming its failure modes.
+- No PR merges without a passing test suite.

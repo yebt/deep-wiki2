@@ -1,0 +1,4 @@
+Team rule pack: Writing Style.
+- Use active voice.
+- Avoid marketing adjectives ("revolutionary", "seamless").
+- One idea per paragraph.

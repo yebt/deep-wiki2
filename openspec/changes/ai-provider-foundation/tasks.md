@@ -90,10 +90,10 @@ further decision gate blocks `sdd-apply`.
 
 ## Phase 4: Core — Stable Prompt Prefix
 
-- [ ] 4.1 RED: `packages/core/src/ai/prefix.test.ts` — determinism (assemble twice ⇒ deep-equal); shuffle-invariance (shuffled tool input array ⇒ identical serialized bytes); fixed ordering tools → system → team rule packs → document → question (prompt-assembly spec).
-- [ ] 4.2 GREEN: `packages/core/src/ai/prefix.ts` — `buildPrefix(input): { text, hash, cacheBoundary }`; canonical JSON writer with sorted keys; `StablePrefixInput` typed as `string`/`readonly string[]` only (no `Date`, no uuid).
-- [ ] 4.3 RED: golden-file test per rule-pack fixture asserting a prefix change is a visible diff, not a silent cache miss.
-- [ ] 4.4 GREEN: commit the golden fixtures alongside 4.2.
+- [x] 4.1 RED: `packages/core/src/ai/prefix.test.ts` — determinism (assemble twice ⇒ deep-equal); shuffle-invariance (shuffled tool input array ⇒ identical serialized bytes); fixed ordering tools → system → team rule packs → document → question (prompt-assembly spec).
+- [x] 4.2 GREEN: `packages/core/src/ai/prefix.ts` — `buildPrefix(input): { text, hash, cacheBoundary }`; canonical JSON writer with sorted keys; `StablePrefixInput` typed as `string`/`readonly string[]` only (no `Date`, no uuid).
+- [x] 4.3 RED: golden-file test per rule-pack fixture asserting a prefix change is a visible diff, not a silent cache miss.
+- [x] 4.4 GREEN: commit the golden fixtures alongside 4.2.
 
 ## Phase 5: Core — Ports
 
