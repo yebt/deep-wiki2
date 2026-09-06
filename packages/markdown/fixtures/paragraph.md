@@ -1,1 +1,1 @@
-A simple paragraph with **bold** and _italic_ text.
+A simple paragraph with __bold__ and _italic_ text.
