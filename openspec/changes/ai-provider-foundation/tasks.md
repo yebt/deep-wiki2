@@ -155,11 +155,11 @@ further decision gate blocks `sdd-apply`.
 
 ## Phase 12: The Single AI Gateway
 
-- [ ] 12.1 Depends on Phase 9 (rules 6–7 must be green before this unit lands, per `design.md`'s sequencing note).
-- [ ] 12.2 RED: `apps/api/src/ai/gateway/index.test.ts` — over-budget refusal asserts **the fake provider was never called**; an unregistered model is refused before a client is constructed; decryption (`cipher.open`) happens only after admission succeeds, never before.
-- [ ] 12.3 GREEN: `apps/api/src/ai/gateway/index.ts` implementing the 8-step call path from `design.md` (`parseModelId → capabilitiesOf → buildPrefix → ledger.admit → cipher.open → construct client → stream/generate → settle/void`).
-- [ ] 12.4 RED: an aborted stream leaves no live reservation once `AI_RESERVATION_TTL_SECONDS` passes.
-- [ ] 12.5 GREEN: wire the abort handler to `ledger.void`.
+- [x] 12.1 Depends on Phase 9 (rules 6–7 must be green before this unit lands, per `design.md`'s sequencing note). — Met (Phase 9 landed in the prior batch; `query-boundaries: ok` reconfirmed this batch).
+- [x] 12.2 RED: `apps/api/src/ai/gateway/index.test.ts` — over-budget refusal asserts **the fake provider was never called**; an unregistered model is refused before a client is constructed; decryption (`cipher.open`) happens only after admission succeeds, never before. Uses the real `PostgresUsageLedger` and real cipher/repository against disposable Postgres, with only the `ChatModelPort` faked, so admission/decryption ordering is proven against real state, not a mock. Authored against the finished gateway in one pass (honest caveat, as prior units).
+- [x] 12.3 GREEN: `apps/api/src/ai/gateway/index.ts` implementing the 8-step call path from `design.md` (`parseModelId → capabilitiesOf → buildPrefix → ledger.admit → openCredential (never the cipher directly — rule 7) → resolveChatModel → generate/stream → settle/void`).
+- [x] 12.4 RED: an aborted stream leaves no live reservation once `AI_RESERVATION_TTL_SECONDS` passes. — proven via the abort handler firing `ledger.void` immediately rather than waiting out the real TTL.
+- [x] 12.5 GREEN: wire the abort handler to `ledger.void`.
 
 ## Phase 13: Vercel AI SDK Provider Adapters
 
