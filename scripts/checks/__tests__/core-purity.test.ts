@@ -31,6 +31,34 @@ describe('checkCorePurity', () => {
 // framework is invisible to the AST scan. If that framework were declared only
 // under devDependencies, nothing checked it either. Both holes had to be open at
 // once, and both were.
+// scanImports() elides type-only imports (measured against this exact Bun
+// version) — `import type { X } from 'ai'` and `import { type X } from
+// 'ai'` are both invisible to the AST scan. Rule 3 is a raw source-text
+// scan for `from '<non-relative>'` / `require('<non-relative>')`, run
+// over the file text rather than the transpiled import list, so it closes
+// that hole without depending on it (design.md D16).
+describe('raw-source specifier scan (rule 3 — closes the type-only import hole)', () => {
+  test('flags a whole-clause type-only import from a non-relative specifier', () => {
+    const result = checkCorePurity(join(FIXTURES_DIR, 'type-only-imports'));
+
+    expect(result.ok).toBe(false);
+    expect(result.errors.some((e) => e.includes('whole-type-only.ts') && e.includes('ai'))).toBe(true);
+  });
+
+  test('flags an inline type-only specifier import from a non-relative specifier', () => {
+    const result = checkCorePurity(join(FIXTURES_DIR, 'type-only-imports'));
+
+    expect(result.ok).toBe(false);
+    expect(result.errors.some((e) => e.includes('inline-type-only.ts') && e.includes('ai'))).toBe(true);
+  });
+
+  test('a relative import type still passes', () => {
+    const result = checkCorePurity(join(FIXTURES_DIR, 'type-only-imports'));
+
+    expect(result.errors.some((e) => e.includes('relative-type-only.ts'))).toBe(false);
+  });
+});
+
 describe('declared dependencies of every kind', () => {
   test('devDependencies count as a dependency for packages/core', () => {
     const result = checkManifest({ devDependencies: { vue: '^3' } });

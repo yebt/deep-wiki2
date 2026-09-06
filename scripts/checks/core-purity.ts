@@ -23,6 +23,35 @@ function isRelativeSpecifier(path: string): boolean {
   return path.startsWith('.') || path.startsWith('/');
 }
 
+/**
+ * Rule 3 (design.md D16): a raw source-text scan for `from '<non-relative>'`
+ * and `require('<non-relative>')`, evaluated against the file's own text
+ * rather than the transpiled import list. `scanImports()` was measured to
+ * elide type-only specifiers — `import type { X } from 'ai'` and
+ * `import { type X } from 'ai'` both vanish before the AST scan ever sees
+ * them. This pass does not depend on that hole staying closed anywhere
+ * else; it reads the bytes on disk. It runs alongside `scanImports()`, not
+ * instead of it — the AST pass keeps its precision on dynamic `import()`
+ * forms this text pass does not attempt to parse.
+ */
+const FROM_CLAUSE_PATTERN = /\bfrom\s+(['"])([^'"]+)\1/g;
+const REQUIRE_CALL_PATTERN = /\brequire\(\s*(['"])([^'"]+)\1\s*\)/g;
+
+function scanRawSpecifiers(code: string): string[] {
+  const specifiers: string[] = [];
+
+  for (const match of code.matchAll(FROM_CLAUSE_PATTERN)) {
+    const specifier = match[2];
+    if (specifier) specifiers.push(specifier);
+  }
+  for (const match of code.matchAll(REQUIRE_CALL_PATTERN)) {
+    const specifier = match[2];
+    if (specifier) specifiers.push(specifier);
+  }
+
+  return specifiers;
+}
+
 function findSourceFiles(dir: string): string[] {
   const found: string[] = [];
 
@@ -93,6 +122,16 @@ export function checkCorePurity(coreDir: string): CorePurityResult {
       if (!isRelativeSpecifier(imp.path)) {
         errors.push(
           `${relative(coreDir, file)}: disallowed non-relative import "${imp.path}" (packages/core must import nothing but its own relative modules)`,
+        );
+      }
+    }
+
+    for (const specifier of scanRawSpecifiers(code)) {
+      if (!isRelativeSpecifier(specifier)) {
+        errors.push(
+          `${relative(coreDir, file)}: disallowed non-relative specifier "${specifier}" found by the raw-source scan ` +
+            `(packages/core must import nothing but its own relative modules — this catches a type-only import ` +
+            `scanImports() elides)`,
         );
       }
     }

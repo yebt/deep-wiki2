@@ -60,13 +60,13 @@ further decision gate blocks `sdd-apply`.
 
 ## Phase 0: Sequencing Gate (blocking, not code)
 
-- [ ] 0.1 Confirm `openspec/changes/tenancy-and-permissions/` has archived (moved out of `openspec/changes/`) before starting any task that touches `plans`. If not yet archived, stop and re-check before Phase 11.
+- [x] 0.1 Confirm `openspec/changes/tenancy-and-permissions/` has archived (moved out of `openspec/changes/`) before starting any task that touches `plans`. If not yet archived, stop and re-check before Phase 11. — **Met**: archived at `openspec/changes/archive/2026-09-06-tenancy-and-permissions`.
 - [ ] 0.2 Read `packages/db/drizzle/meta/_journal.json` (read-only) immediately before writing any migration in Phases 8, 11, 14, 15, 16; use `next idx + 1` as the migration number, never a number copied from `design.md`. `content-and-editor` may have already claimed `0008`–`0010`; whichever change applies second renumbers from the journal, per the existing `docs/TODO.md` Finding (2026-09-06).
 
 ## Phase 1: Core Purity — Close the Type-Only Import Hole
 
-- [ ] 1.1 RED: `scripts/checks/core-purity.test.ts` — add fixtures for `import type { X } from 'ai'`, `import { type X } from 'ai'`, and a relative `import type` that must still pass; assert the new rule flags the first two and passes the third.
-- [ ] 1.2 GREEN: add a raw-source specifier scan (`from '<non-relative>'` / `require('<non-relative>')` over file text, not the transpiled import list) as rule 3 in `scripts/checks/core-purity.ts`, run alongside `scanImports()`.
+- [x] 1.1 RED: `scripts/checks/core-purity.test.ts` — add fixtures for `import type { X } from 'ai'`, `import { type X } from 'ai'`, and a relative `import type` that must still pass; assert the new rule flags the first two and passes the third.
+- [x] 1.2 GREEN: add a raw-source specifier scan (`from '<non-relative>'` / `require('<non-relative>')` over file text, not the transpiled import list) as rule 3 in `scripts/checks/core-purity.ts`, run alongside `scanImports()`.
 
 ## Phase 2: Core — Provider Identity, Capability Registry, Degradation Ladder
 
