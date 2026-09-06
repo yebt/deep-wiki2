@@ -5,6 +5,7 @@ export type { MailSendError, MailSender, SendMailInput } from './ports/mail-send
 export { impliedAllowActions, impliedDenyActions } from './permissions/actions';
 export { can } from './permissions/can';
 export { decide } from './permissions/decide';
+export { decideMany } from './permissions/decide-many';
 export type { Action, Effect, GrantLookup, GrantQuery, ResolvedGrant, SubjectKind } from './permissions/types';
 export { normalizeEmail } from './email';
 export { Secret } from './secret';

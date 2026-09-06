@@ -38,6 +38,10 @@ export type { CreatedWorkspace, CreateWorkspaceInput } from './workspaces/create
 export { can, createGrantLookup } from './permissions/queries';
 export { insertGrants } from './permissions/grants';
 export type { GrantInput } from './permissions/grants';
+export { canManyResources, canManySubjects } from './permissions/can-many';
+export type { CanManyResourcesInput, CanManySubjectsInput } from './permissions/can-many';
+export { readableResourceIds, readableSubjectIds } from './permissions/readable';
+export type { ReadableResourceIdsInput, ReadableSubjectIdsInput } from './permissions/readable';
 export { NotCanonicalError, savePage, StaleContentError } from './content/save-page';
 export type { SavePageInput as SavePageDbInput, SavePageResult } from './content/save-page';
 export { readPageHtml, readPageMarkdown } from './content/read-page';

@@ -288,15 +288,15 @@ dependency graph, not only by intent.
 
 ## Phase 11 (WU-11) — `feat(core,db): set-shaped permission folds for list endpoints`
 
-- [ ] 11.1 RED — `decide-many.test.ts`, differential against Phase 1's `decide()`:
+- [x] 11.1 RED — `decide-many.test.ts`, differential against Phase 1's `decide()`:
       `decideMany()` folds each group exactly as `decide()` folds one, for
       identical inputs.
-- [ ] 11.2 GREEN — `packages/core/src/permissions/decide-many.ts`.
-- [ ] 11.3 RED — `can-many.test.ts`: `canManyResources` returns ≤10
+- [x] 11.2 GREEN — `packages/core/src/permissions/decide-many.ts`.
+- [x] 11.3 RED — `can-many.test.ts`: `canManyResources` returns ≤10
       `(origin_id, effect, depth)` rows per candidate from one recursive CTE seeded
       from `unnest($resourceIds)`; `canManySubjects` inverts it (≤5 rows per
       resource's ancestor chain); exactly one SQL statement is issued (no N+1).
-- [ ] 11.4 GREEN — `packages/db/src/permissions/{can-many,readable}.ts`.
+- [x] 11.4 GREEN — `packages/db/src/permissions/{can-many,readable}.ts`.
 
 ## Phase 12 (WU-12) — `feat(api): page read and save with optimistic concurrency behind can()`
 
