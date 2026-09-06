@@ -36,3 +36,25 @@ export type {
 export { outstandingMicroUsd, reserve, settle, voidReservation } from './ai/budget';
 export type { StablePrefix, StablePrefixInput } from './ai/prefix';
 export { buildPrefix } from './ai/prefix';
+export type { CredentialAad } from './ai/aad';
+export { buildAad } from './ai/aad';
+export type {
+  ChatFinishReason,
+  ChatModelPort,
+  ChatRequest,
+  ChatResult,
+  ChatStream,
+  CipherError,
+  CredentialCipher,
+  EmbedRequest,
+  EmbedResult,
+  EmbeddingModelPort,
+  KeyError,
+  KeyProvider,
+  LedgerError,
+  ProviderError,
+  ProviderErrorCode,
+  PromptPart,
+  SealedCredential,
+  UsageLedger,
+} from './ai/ports';

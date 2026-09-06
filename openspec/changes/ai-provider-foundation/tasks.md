@@ -97,10 +97,10 @@ further decision gate blocks `sdd-apply`.
 
 ## Phase 5: Core — Ports
 
-- [ ] 5.1 RED: `packages/core/src/ai/ports.test.ts` — type-level test asserting `ChatModelPort`, `EmbeddingModelPort`, `KeyProvider`, `CredentialCipher`, `UsageLedger` compose only of `Result`/`Secret`/primitive types (no leaked SDK type, enforced by 1.2's rule 3 as a regression guard).
-- [ ] 5.2 GREEN: `packages/core/src/ai/ports.ts` — the five port interfaces from `design.md`.
-- [ ] 5.3 RED: `packages/core/src/ai/aad.test.ts` — AAD construction (`workspace_id ‖ credential_id ‖ provider`) is deterministic and order-sensitive.
-- [ ] 5.4 GREEN: `packages/core/src/ai/aad.ts`.
+- [x] 5.1 RED: `packages/core/src/ai/ports.test.ts` — type-level test asserting `ChatModelPort`, `EmbeddingModelPort`, `KeyProvider`, `CredentialCipher`, `UsageLedger` compose only of `Result`/`Secret`/primitive types (no leaked SDK type, enforced by 1.2's rule 3 as a regression guard).
+- [x] 5.2 GREEN: `packages/core/src/ai/ports.ts` — the five port interfaces from `design.md`.
+- [x] 5.3 RED: `packages/core/src/ai/aad.test.ts` — AAD construction (`workspace_id ‖ credential_id ‖ provider`) is deterministic and order-sensitive.
+- [x] 5.4 GREEN: `packages/core/src/ai/aad.ts`.
 
 ## Phase 6: Contracts — Key-Provider Env Schema
 
