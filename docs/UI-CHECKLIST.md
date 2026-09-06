@@ -82,6 +82,8 @@ Derived from this project's actual stack and domain.
 - [ ] No arbitrary Tailwind values (`w-[437px]`, `text-[13.5px]`, `bg-[#1a1a1a]`) fighting the library's scale. If the scale is genuinely wrong for this product, the scale gets changed once, centrally.
 - [ ] Reka UI primitives are used for anything with interaction semantics (menus, dialogs, comboboxes). Hand-rolled versions lose focus trapping, `aria-*` wiring, and keyboard handling that this checklist requires elsewhere.
 - [ ] No wrapper component that exists only to rename a Nuxt UI prop.
+- [ ] **Anything that appears on more than one screen is one component, not one copy per screen.** The header, the footer, the page heading block, the card that holds a form. A second copy is a defect even while the two copies are identical, because they will not stay identical — this is how the app bar came to say two different things and only one of two screens got a layout fix.
+- [ ] **Before building a screen, open the screen nearest to it and match its measured values** — container radius and tone, control height, heading size, the gaps between blocks. A screen may pass every box below in isolation and still make the product look unsystematic; this checklist audits one screen, so the comparison to the others has to be made deliberately.
 
 ### 4.2 Theming — user-selectable themes via CSS variables
 
@@ -108,6 +110,8 @@ Derived from this project's actual stack and domain.
 - [ ] Reading comfort beats visual flourish. No gradient text, no animated headers, no decorative motion in the document body.
 - [ ] Code blocks and tables scroll inside their own container and never widen the page (see section 6).
 - [ ] Chrome (nav, toolbars, panels) is visually quieter than content. If the sidebar competes with the document for attention, the sidebar loses.
+- [ ] **An eyebrow above a heading must add context the heading does not.** Repeating a word of the `h1` spends a hierarchy level for nothing. Added after the 2026-09-04 review removed the eyebrow from all four auth screens; recorded then in the Review Log but not here, which is why `/` kept "Phase 0 · Bootstrap" above "Bootstrap smoke page" for two more reviews.
+- [ ] **A page description is chrome, not document prose.** It takes `body-large` (16px on 24px leading), not `doc-body` (16px on 26px) — `docs/DESIGN-SYSTEM.md` §2.3 reserves the longer leading for the reading surface. The same sentence must not be set solid two ways on two screens.
 
 ### 4.5 Read mode vs. edit mode
 
@@ -196,6 +200,7 @@ The app shell is a three-pane wiki: navigation tree · document · contextual pa
 - [ ] **Medium (768–1279px):** the contextual panel becomes an overlay or is collapsible. The document stays readable.
 - [ ] **Narrow (<768px):** single pane. The navigation tree becomes a drawer that traps focus and closes on selection and on Escape.
 - [ ] **The page body never scrolls horizontally.** At any breakpoint. Verify at 320px width.
+- [ ] **The page body never scrolls vertically on content that fits, and this is verified by measuring the rendered box** — `document.documentElement.scrollHeight === window.innerHeight` at 1280×900 and 320×900 — not by looking at a screenshot, which hides vertical overflow below the fold. Any page pairing `UMain` with `UFooter` is the specific trap: `UMain`'s base height is the viewport minus the *header* only, so the page overflows by exactly the footer's height. Recorded in the Review Log on 2026-09-04 and fixed there inside `AuthShell`; `/` was the one screen not using that shell and still carried 49px of scroll on 2026-09-06. The height now comes from `AppShell` plus the central `main` override in `app.config.ts`, so it cannot be had per screen — but the measurement is still the check.
 - [ ] **Tables scroll inside their own `overflow-x: auto` container** with a visible affordance that more content exists.
 - [ ] **Code blocks scroll inside their own container** and do not wrap by default.
 - [ ] **Diagrams scroll or scale inside their own container** and never overflow the document column.
@@ -365,6 +370,119 @@ Append a new entry after every owner review. **Never delete an entry** — if a 
 - The two-icon-pack requirement (§4.3) remains untested — only `lucide` is installed.
 - Contrast was measured on the specific pairs named above, not audited exhaustively across every
   component.
+
+---
+
+### 2026-09-06 — Cross-screen consistency audit (`/`, `/login`, `/forgot-password`, `/reset-password`, `/invite/accept`)
+
+**Reviewer:** Eduardo
+**Verdict:** Pass with follow-ups
+
+This audit compared the screens **to each other** rather than each one to this
+checklist. Computed styles were extracted from the running app at 1280×900 in
+both themes and tabulated per component class. Findings are the values that
+differed between screens; a value that differs is a finding even where both
+sides are defensible in isolation. The four auth screens measured identical to
+each other on every value taken. Every divergence found was on `/`, which was
+styled before both the shape ruling (§3.4) and the rhythm ruling (§7.4) landed.
+
+**Findings** (max 3, ordered by user impact)
+
+1. **`/` carried 49px of permanent vertical scroll; the auth screens fit exactly.**
+   - *Observable evidence:* at 1280×900 in both themes, `/` measured
+     `scrollHeight` 949 against `innerHeight` 900 — the overflow is exactly the
+     49px footer, on a page whose content ends 150px above the fold. All four
+     auth screens measured 900 against 900.
+   - *Root cause:* this is the identical defect found on 2026-09-04 (finding 1,
+     above). It was fixed *inside `AuthShell`*, so it was fixed for the four
+     screens that use the shell and for no others. `/` renders its own header,
+     `UMain` and footer, and `UMain`'s base is
+     `min-h-[calc(100vh-var(--ui-header-height))]` — viewport minus the header,
+     with no allowance for a footer. The rule the last review recorded ("verify
+     by measuring the rendered box") went into the Review Log and never into §6,
+     so nothing carried it forward. `e2e/auth-layout.spec.ts` asserts exactly
+     this and enumerates only the four auth paths.
+   - *Correction applied:* the fix moved out of the shell. `AppShell.vue` owns
+     the `min-h-svh` column, the header and the footer, and every route renders
+     inside it; `app.config.ts` replaces `main.base` with `flex min-h-0 flex-1
+     flex-col` centrally, so no screen can reintroduce the calculation.
+     Re-measured: `/` is now 900/900 in both themes.
+   - *Rule added:* §6 — the vertical-overflow measurement, with the `UMain` +
+     `UFooter` trap named. §4.1 — anything appearing on more than one screen is
+     one component, not one copy per screen.
+
+2. **The two screens disagreed about what a container is: `/`'s panels sat on the same tonal rung as the header and footer.**
+   - *Observable evidence:* `/`'s two panels were hand-rolled
+     `div.rounded-lg.bg-elevated.ring.ring-default.p-4.sm:p-6` and measured
+     `oklch(0.94828…)` light / `oklch(0.28448…)` dark — byte-identical to the
+     measured header and footer background on the same screen. The auth card is
+     `UCard variant="soft"` and measured `oklch(0.91379…)` / `oklch(0.34483…)`.
+     Same radius (16px) and same padding (24px), one rung apart in tone, and
+     one of the two carried a ring the other did not.
+   - *Root cause:* `/` predates §9.4's ruling and built its container by hand
+     instead of reaching for `UCard`, so the tone was chosen rather than read.
+     `bg-elevated` is the *chrome* rung (§1.4 gives it to the nav pane, the
+     contextual panel and the top app bar) — which is why the panels read as
+     chrome rather than as content, most visibly in dark.
+   - *Correction applied:* both panels are now `UCard variant="soft" as="section"`,
+     the same component and tone as the auth card. The status block inside was
+     `bg-emphasized` — identical to the card it would now sit on, and already
+     identical to the idle status chip inside it — and moved down to `bg-default`,
+     the recessed rung the auth screens' input fields already use inside that
+     same card tone.
+   - *Rule added:* §4.1 — compare against the nearest existing screen before
+     building. `docs/DESIGN-SYSTEM.md` §9.4 now states which card a container
+     sitting directly on the app ground gets, which is the question `/` answered
+     differently.
+
+3. **The page heading block was set three ways at once on `/`, none of them the auth screens'.**
+   - *Observable evidence:* heading block → container below measured **40px** on
+     `/` against **32px** on all four auth screens (§7.4 rules 32px); the
+     supporting sentence was `doc-body` 16px/**26px** with a **16px** gap under
+     the `h1` against `body-large` 16px/**24px** and **12px**; and `/` carried
+     an eyebrow, "Phase 0 · Bootstrap", above an `h1` reading "Bootstrap smoke
+     page". The `h1` itself measured 28px/400 on every screen — that one had not
+     drifted.
+   - *Root cause:* the heading block existed twice in markup, so §7.4's 32px
+     landed on the copy inside `AuthShell` and not on the copy inside `/`. The
+     eyebrow rule from the 2026-09-04 review was recorded in the Review Log and
+     never added to §4.4, so it bound nothing.
+   - *Correction applied:* `PageHeading.vue` now owns the eyebrow, the `h1`, the
+     supporting sentence and all three distances; both `AuthShell` and `/` use
+     it. `/`'s eyebrow is "Phase 0" — the part that was not already in the
+     heading. Re-measured: 8 / 12 / 32px on every screen, in both themes.
+   - *Rule added:* §4.4 — the eyebrow rule, and a page description is `body-large`
+     chrome, not `doc-body` prose.
+
+**Checked and found already consistent — no action**
+
+- Primary action geometry: 40px tall, 12px radius, 14px label, `px-2.5 py-1.5`,
+  identical on all five screens in both themes.
+- Text fields: 56px tall, 12px radius, 16px text, 16px inset; label→field 8px,
+  field→field 24px, last field→submit 24px. Identical on all four auth screens.
+- Focus ring: 3px solid `secondary` at 2px offset on every control on every
+  screen in both themes. An earlier reading that showed inputs at
+  `primary/25` was a sampling artefact — the input's `transition-colors`
+  animates `outline-color`, and the sample was taken mid-transition. Measured
+  again after the transition settles, it is uniform.
+- `h1`: 28px/36px/400 everywhere.
+- Horizontal overflow at 320px: none on any screen.
+
+**Follow-ups carried forward, not fixed**
+
+- `e2e/auth-layout.spec.ts` still enumerates only the four auth paths. Its
+  measurement is what would have caught finding 1 on `/`; `/` should be added to
+  its `AUTH_PAGES` list (or the file renamed to cover the app chrome). Not done
+  here — `e2e/**` is outside this audit's owned paths.
+- `/`'s heading column keeps `max-w-measure` while the auth screens use
+  `max-w-md`. Deliberate: one is a reading column, the other a form column.
+- `/` top-aligns its content while the auth screens centre theirs with
+  `my-auto`. Deliberate: a form is centred in the space it has; a content page
+  starts at the top.
+- Three `apps/web` composable suites (`useApiHealth`, `useAcceptInvitation`,
+  `usePasswordResetRequest`) fail on this host with `setupNuxt` exceeding the
+  60s hook timeout under concurrent load. Environmental, unrelated to these
+  files; the five page suites (27 tests) pass.
 
 ---
 

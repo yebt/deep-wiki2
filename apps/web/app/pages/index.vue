@@ -4,10 +4,20 @@
 // docs/UI-CHECKLIST.md's scope note and design.md's Package Skeletons
 // table ("web: one smoke page, one composable").
 //
+// Chrome, the heading block and the container idiom all come from the
+// same components the authentication screens use — `AppShell`,
+// `PageHeading` and `UCard variant="soft"`. This page was written before
+// the shape (§3.4) and rhythm (§7.4) rulings and had drifted from them:
+// it carried its own copy of the header and footer, a 40px heading gap
+// against the auth screens' 32px, a document type role on a page
+// description, and hand-rolled panels one tonal rung below the auth card
+// — the same rung as the header and footer, so the panels read as chrome
+// rather than as content.
+//
 // Every visual value here resolves to a token from
 // apps/web/app/assets/css/main.css: the M3 type roles (`text-headline-*`,
 // `text-title-*`, `text-body-*`, `text-label-*`), the surface-container
-// ladder (`bg-muted` → `bg-default` / `bg-elevated`), the 4dp spacing
+// ladder (`bg-muted` → `bg-emphasized` → `bg-default`), the 4dp spacing
 // grid and the shape scale. Hierarchy is carried by container tone, never
 // by a shadow (docs/DESIGN-SYSTEM.md §1.3, §4.3).
 const { status, message, detail, checkedAt, check } = useApiHealth();
@@ -46,7 +56,7 @@ const healthTone = computed(() => {
     case 'loading':
       return 'bg-secondary-container text-on-secondary-container';
     default:
-      return 'bg-emphasized text-muted';
+      return 'bg-elevated text-muted';
   }
 });
 
@@ -84,169 +94,138 @@ const proofs = [
 </script>
 
 <template>
-  <div>
-    <!-- `:toggle="false"`: UHeader renders a hamburger that opens a mobile
-         menu built from its `#body` slot. This page has no navigation, so
-         the default toggle would be a control that looks clickable and
-         does nothing (docs/UI-CHECKLIST.md §6, observable breakage). -->
-    <UHeader :toggle="false">
-      <template #left>
-        <span class="flex items-center gap-2">
-          <UIcon name="i-lucide-library-big" class="size-5 text-primary" aria-hidden="true" />
-          <span class="text-title-large text-highlighted">deep-wiki</span>
-        </span>
-      </template>
-      <template #right>
-        <!-- The only icon-only control on the page. docs/UI-CHECKLIST.md §4.3
-             requires both an accessible name and a tooltip, because the same
-             glyph is ambiguous across icon packs. -->
-        <UTooltip text="Toggle color theme">
-          <UColorModeButton aria-label="Toggle color theme" />
-        </UTooltip>
-      </template>
-    </UHeader>
+  <AppShell>
+    <UContainer class="py-10 sm:py-16">
+      <PageHeading
+        class="max-w-measure"
+        eyebrow="Phase 0"
+        heading="Bootstrap smoke page"
+        description="This screen exists to prove the web application shell boots, is themed, and is reachable — it is not a product feature. Nothing here reads or writes a wiki; there is no navigation tree, no editor and no sign-in."
+      />
 
-    <UMain>
-      <UContainer class="py-10 sm:py-16">
-        <div class="max-w-measure">
-          <p class="text-label-large text-muted">Phase 0 · Bootstrap</p>
-          <h1 class="text-headline-medium text-highlighted mt-2">
-            Bootstrap smoke page
-          </h1>
-          <p class="text-doc-body text-muted mt-4">
-            This screen exists to prove the web application shell boots, is
-            themed, and is reachable — it is not a product feature. Nothing
-            here reads or writes a wiki; there is no navigation tree, no
-            editor and no sign-in.
+      <div class="grid gap-6 md:grid-cols-2 xl:grid-cols-3 items-start">
+        <!-- The same container as the auth card: M3's Filled card at
+             `surface-container-highest` (§9.4), retargeted to the opaque
+             container token in app.config.ts. These panels sit directly
+             on the app ground, which is the case that ruling was made
+             for. -->
+        <UCard
+          as="section"
+          variant="soft"
+          aria-labelledby="api-connection-heading"
+          class="xl:col-span-2 min-w-0"
+        >
+          <h2 id="api-connection-heading" class="text-title-large text-highlighted">
+            API connection
+          </h2>
+          <p class="text-body-medium text-muted mt-2">
+            Checked from the browser on load, and again whenever you ask.
           </p>
-        </div>
 
-        <div class="mt-10 grid gap-6 md:grid-cols-2 xl:grid-cols-3 items-start">
-          <section
-            aria-labelledby="api-connection-heading"
-            class="xl:col-span-2 min-w-0 rounded-lg bg-elevated ring ring-default p-4 sm:p-6"
+          <!-- Recessed inside the filled card: `bg-default` is the
+               *lowest* rung of the ladder (tone 100 light / 4 dark), the
+               same rung the auth screens' input fields sit on inside the
+               same card tone. There is no rung above `bg-emphasized` to
+               promote it to — §1.4 forbids a sixth surface level. -->
+          <div
+            class="mt-6 flex items-start gap-3 rounded-md bg-default p-4"
+            role="status"
+            aria-live="polite"
           >
-            <h2
-              id="api-connection-heading"
-              class="text-title-large text-highlighted"
+            <span
+              class="flex size-10 shrink-0 items-center justify-center rounded-full"
+              :class="healthTone"
             >
-              API connection
-            </h2>
-            <p class="text-body-medium text-muted mt-2">
-              Checked from the browser on load, and again whenever you ask.
-            </p>
+              <UIcon
+                :name="healthIcon"
+                class="size-5"
+                :class="status === 'loading' && 'animate-spin'"
+                aria-hidden="true"
+              />
+            </span>
+            <div class="min-w-0 flex-1">
+              <p class="text-body-large-emphasized text-highlighted">
+                {{ message }}
+              </p>
+              <p
+                v-if="detail"
+                class="text-body-small text-muted mt-1 break-all"
+              >
+                {{ detail }}
+              </p>
+              <p
+                v-if="checkedAtLabel"
+                class="text-label-medium text-muted mt-2"
+              >
+                Last checked at {{ checkedAtLabel }}
+              </p>
+            </div>
+          </div>
 
+          <dl class="mt-6 border-t border-default">
             <div
-              class="mt-6 flex items-start gap-3 rounded-md bg-emphasized p-4"
-              role="status"
-              aria-live="polite"
+              class="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 border-b border-default py-3"
+            >
+              <dt class="text-label-medium text-muted">Endpoint</dt>
+              <dd class="text-body-medium text-default font-mono break-all">
+                {{ healthEndpoint }}
+              </dd>
+            </div>
+            <div
+              class="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 border-b border-default py-3"
+            >
+              <dt class="text-label-medium text-muted">Transport</dt>
+              <dd class="text-body-medium text-default">
+                Browser fetch, no proxy
+              </dd>
+            </div>
+          </dl>
+
+          <!-- This screen's single primary action, so it is M3's Filled
+               button — the same treatment every auth screen's submit
+               carries. A filled-tonal here would have been the emphasis
+               M3 reserves for "a primary action in a context that already
+               has one elsewhere" (§9.1), and this page has no other. -->
+          <UButton
+            class="mt-6"
+            icon="i-lucide-refresh-cw"
+            variant="solid"
+            color="primary"
+            size="md"
+            :loading="status === 'loading'"
+            @click="check"
+          >
+            Re-check API connection
+          </UButton>
+        </UCard>
+
+        <UCard as="section" variant="soft" aria-labelledby="proofs-heading" class="min-w-0">
+          <h2 id="proofs-heading" class="text-title-large text-highlighted">
+            What this page proves
+          </h2>
+          <ul class="mt-6 space-y-6">
+            <li
+              v-for="proof in proofs"
+              :key="proof.title"
+              class="flex items-start gap-3"
             >
               <span
-                class="flex size-10 shrink-0 items-center justify-center rounded-full"
-                :class="healthTone"
+                class="flex size-8 shrink-0 items-center justify-center rounded-full bg-secondary-container text-on-secondary-container"
               >
-                <UIcon
-                  :name="healthIcon"
-                  class="size-5"
-                  :class="status === 'loading' && 'animate-spin'"
-                  aria-hidden="true"
-                />
+                <UIcon :name="proof.icon" class="size-4" aria-hidden="true" />
               </span>
-              <div class="min-w-0 flex-1">
-                <p class="text-body-large-emphasized text-highlighted">
-                  {{ message }}
+              <div class="min-w-0">
+                <p class="text-label-large-emphasized text-highlighted">
+                  {{ proof.title }}
                 </p>
-                <p
-                  v-if="detail"
-                  class="text-body-small text-muted mt-1 break-all"
-                >
-                  {{ detail }}
-                </p>
-                <p
-                  v-if="checkedAtLabel"
-                  class="text-label-medium text-muted mt-2"
-                >
-                  Last checked at {{ checkedAtLabel }}
+                <p class="text-body-medium text-muted mt-1">
+                  {{ proof.detail }}
                 </p>
               </div>
-            </div>
-
-            <dl class="mt-6 border-t border-default">
-              <div
-                class="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 border-b border-default py-3"
-              >
-                <dt class="text-label-medium text-muted">Endpoint</dt>
-                <dd class="text-body-medium text-default font-mono break-all">
-                  {{ healthEndpoint }}
-                </dd>
-              </div>
-              <div
-                class="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 border-b border-default py-3"
-              >
-                <dt class="text-label-medium text-muted">Transport</dt>
-                <dd class="text-body-medium text-default">
-                  Browser fetch, no proxy
-                </dd>
-              </div>
-            </dl>
-
-            <UButton
-              class="mt-6"
-              icon="i-lucide-refresh-cw"
-              variant="soft"
-              color="primary"
-              size="md"
-              :loading="status === 'loading'"
-              @click="check"
-            >
-              Re-check API connection
-            </UButton>
-          </section>
-
-          <section
-            aria-labelledby="proofs-heading"
-            class="min-w-0 rounded-lg bg-elevated ring ring-default p-4 sm:p-6"
-          >
-            <h2 id="proofs-heading" class="text-title-large text-highlighted">
-              What this page proves
-            </h2>
-            <ul class="mt-6 space-y-6">
-              <li
-                v-for="proof in proofs"
-                :key="proof.title"
-                class="flex items-start gap-3"
-              >
-                <span
-                  class="flex size-8 shrink-0 items-center justify-center rounded-full bg-secondary-container text-on-secondary-container"
-                >
-                  <UIcon :name="proof.icon" class="size-4" aria-hidden="true" />
-                </span>
-                <div class="min-w-0">
-                  <p class="text-label-large-emphasized text-highlighted">
-                    {{ proof.title }}
-                  </p>
-                  <p class="text-body-medium text-muted mt-1">
-                    {{ proof.detail }}
-                  </p>
-                </div>
-              </li>
-            </ul>
-          </section>
-        </div>
-      </UContainer>
-    </UMain>
-
-    <UFooter>
-      <template #left>
-        <p class="text-body-small text-muted">
-          deep-wiki bootstrap · Phase 0
-        </p>
-      </template>
-      <template #right>
-        <p class="text-body-small text-muted">
-          Material Design 3 · Nuxt UI v4
-        </p>
-      </template>
-    </UFooter>
-  </div>
+            </li>
+          </ul>
+        </UCard>
+      </div>
+    </UContainer>
+  </AppShell>
 </template>

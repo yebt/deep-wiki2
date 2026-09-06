@@ -357,6 +357,24 @@ export default defineAppConfig({
       },
     },
 
+    // `UMain`'s own base is `min-h-[calc(100vh-var(--ui-header-height))]`
+    // — the viewport minus the *header*, with no allowance for a footer.
+    // Any page pairing it with `UFooter` therefore overflows by exactly
+    // the footer's height: 49px at 1280x900, on content that fits several
+    // times over. That was found on the auth screens on 2026-09-04 and
+    // fixed inside `AuthShell`, which left `/` — the one screen that did
+    // not use the shell — still scrolling, and would have left the next
+    // screen scrolling too.
+    //
+    // Stated centrally instead: the remaining space, not a calculation
+    // that has to know either chrome's height. It is correct only inside
+    // `AppShell`'s `min-h-svh` column, which is why that column is
+    // likewise stated once and every route renders inside it
+    // (docs/UI-CHECKLIST.md §6).
+    main: {
+      base: 'flex min-h-0 flex-1 flex-col',
+    },
+
     footer: {
       slots: {
         root: 'bg-elevated border-t border-default',
