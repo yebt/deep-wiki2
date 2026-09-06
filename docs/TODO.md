@@ -408,6 +408,24 @@ makes conventions portable across projects.
 
 Discoveries and constraints. Newest first.
 
+### 2026-09-06 — A malformed DATABASE_URL failed with a parser stack instead of a cause
+
+`createDb` passed the value straight to `postgres.js`, which threw `ERR_INVALID_URL` with a stack
+rooted in its own `parseUrl`. Nothing in that output named the variable, the file it came from, or
+what was wrong with the text — the developer sees fifteen frames of library internals for what is
+a typo in a config line.
+
+The specific case that triggered it: a `.env` does **not** interpolate. Writing
+`DATABASE_URL=postgres://u:p@localhost:${POSTGRES_HOST_PORT}/deepwiki` passes `${POSTGRES_HOST_PORT}`
+through literally, and that is not a port. This is an easy mistake to make immediately after being
+told to move the port, because the variable is right there in the same file.
+
+**Impact:** `packages/db/src/database-url.ts` names the cause before `postgres.js` sees the value —
+unset, empty, quoted, missing scheme, unexpanded `${VAR}` or `$VAR`, non-numeric port, unparseable.
+It deliberately never echoes the URL back, because it carries a password; a test asserts that.
+The general rule this is an instance of: when a library's error names only its own internals, the
+adapter that owns the boundary should validate first and fail with the cause.
+
 ### 2026-09-04 — Two env vars held the same fact and nothing checked they agreed
 
 Making the compose host ports configurable fixed one problem and created another. `.env` now
