@@ -408,6 +408,32 @@ makes conventions portable across projects.
 
 Discoveries and constraints. Newest first.
 
+### 2026-09-06 — Fourth instance: the e2e harness told the browser the wrong API port
+
+Changing `apps/web`'s compiled `apiBaseUrl` default from 4000 to 3000 broke the e2e suite, because
+`e2e/global-setup.ts` starts `apps/api` on a hardcoded 4000 and nothing told the dev server about
+it. Seven auth tests failed with "Could not reach the server" while nothing about the application
+was wrong. The suite only passed for whoever set `NUXT_PUBLIC_API_BASE_URL` by hand.
+
+This is the **fourth** instance of one shape in two days — after `POSTGRES_HOST_PORT`/`DATABASE_URL`,
+`MAILPIT_SMTP_HOST_PORT`/`SMTP_PORT`, and `PORT`/`NUXT_PUBLIC_API_BASE_URL`. Each time the same
+fact lived in two places and nothing compared them; each time the failure pointed somewhere other
+than the cause.
+
+**Impact:** `e2e/ports.ts` holds `API_PORT` and `WEB_PORT` once, `global-setup.ts` and
+`playwright.config.ts` both import them, and the Playwright `webServer` passes
+`NUXT_PUBLIC_API_BASE_URL` through so the browser is told rather than left to guess. Verified: 22/22
+pass with no manual override. The pattern is now frequent enough to state as a rule for later
+phases — **when a value must agree with another value, import it; when it cannot be imported,
+check it; never write it twice and trust a comment.**
+
+### 2026-09-06 — Unreproducible: `podman compose --wait`
+
+A subagent reported that `podman-compose` 1.6.0 rejects `--wait`, causing `provision.ts` to exit
+125. Tested directly on this machine: `podman compose up -d --wait postgres` returned **exit 0**.
+Not reproduced, so not fixed. Recorded because it may be conditional on a cold start rather than a
+container already running — worth re-checking if provisioning fails on a clean machine.
+
 ### 2026-09-06 — Nuxt UI ships a second markdown parser, one import away
 
 `CLAUDE.md` calls the single-parser rule non-negotiable, and until now it lived only in prose.

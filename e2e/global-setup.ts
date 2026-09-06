@@ -21,9 +21,8 @@ import { writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const API_PORT = 4000;
-const API_URL = `http://localhost:${API_PORT}`;
-const WEB_URL = 'http://localhost:4173';
+import { API_PORT, API_URL, WEB_URL } from './ports';
+
 const REPO_ROOT = join(import.meta.dirname, '..');
 const FIXTURES_PATH = join(import.meta.dirname, '.auth-fixtures.json');
 

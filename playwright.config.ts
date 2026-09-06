@@ -1,7 +1,6 @@
 import { defineConfig, devices } from '@playwright/test';
 
-const PORT = 4173;
-const baseURL = `http://localhost:${PORT}`;
+import { API_URL, WEB_PORT as PORT, WEB_URL as baseURL } from './e2e/ports';
 
 /**
  * Root-level Playwright config (not nested under apps/web) — `e2e/` and
@@ -38,6 +37,11 @@ export default defineConfig({
   ],
   webServer: {
     command: `bun run -F @deep-wiki/web dev -- --port ${PORT}`,
+    // The browser must be told where global-setup started apps/api. Without
+    // this the dev server falls back to its compiled default, which is a
+    // different port, and every test that talks to the API fails while
+    // nothing is actually broken.
+    env: { NUXT_PUBLIC_API_BASE_URL: API_URL },
     url: baseURL,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
