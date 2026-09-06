@@ -129,12 +129,12 @@ further decision gate blocks `sdd-apply`.
 
 ## Phase 9: Structural Checks — Denylist, SDK Import, Decryption Boundary
 
-- [ ] 9.1 RED: `scripts/checks/query-boundaries.test.ts` — extend fixtures: a `*Response*` schema declaring `ciphertext`, `authTag`/`auth_tag`, `wrappedDek`/`wrapped_dek`, `keyId`/`key_id`, `dek`, `kek`, `keyMaterial`/`key_material`, or a `*ApiKey`/`*Secret`/`*Credential` suffix fails; a schema declaring `inputTokens`/`outputTokens`/`cachedInputTokens`/`reasoningTokens` **passes** (the named trap — constraint #5).
-- [ ] 9.2 GREEN: widen `DENYLISTED_FIELDS` with the exact/camelCase/suffix-anchored shapes from `design.md`; add `TOKEN_COUNT_ALLOWLIST` so the `Token` suffix rule never fires on the legitimate usage counters; widen the scan to `apps/api/src/routes`.
-- [ ] 9.3 RED: `scripts/checks/query-boundaries.test.ts` — a fixture file outside `apps/api/src/ai/gateway/` importing `ai`, `@ai-sdk/*`, or `@openrouter/*` fails; a fixture inside that directory passes.
-- [ ] 9.4 GREEN: rule 6 — the SDK import boundary, in the idiom of rule 1.
-- [ ] 9.5 RED: `scripts/checks/query-boundaries.test.ts` — a fixture file outside `apps/api/src/adapters/ai/credentials/` importing the cipher's `open` fails.
-- [ ] 9.6 GREEN: rule 7 — the decryption boundary.
+- [x] 9.1 RED: `scripts/checks/query-boundaries.test.ts` — extend fixtures: a `*Response*` schema declaring `ciphertext`, `authTag`/`auth_tag`, `wrappedDek`/`wrapped_dek`, `keyId`/`key_id`, `dek`, `kek`, `keyMaterial`/`key_material`, or a `*ApiKey`/`*Secret`/`*Credential` suffix fails; a schema declaring `inputTokens`/`outputTokens`/`cachedInputTokens`/`reasoningTokens` **passes** (the named trap — constraint #5).
+- [x] 9.2 GREEN: widen `DENYLISTED_FIELDS` with the exact/camelCase/suffix-anchored shapes from `design.md`; add `TOKEN_COUNT_ALLOWLIST` so the `Token` suffix rule never fires on the legitimate usage counters; widen the scan to `apps/api/src/routes`.
+- [x] 9.3 RED: `scripts/checks/query-boundaries.test.ts` — a fixture file outside `apps/api/src/ai/gateway/` importing `ai`, `@ai-sdk/*`, or `@openrouter/*` fails; a fixture inside that directory passes.
+- [x] 9.4 GREEN: rule 6 — the SDK import boundary, in the idiom of rule 1.
+- [x] 9.5 RED: `scripts/checks/query-boundaries.test.ts` — a fixture file outside `apps/api/src/adapters/ai/credentials/` importing the cipher's `open` fails.
+- [x] 9.6 GREEN: rule 7 — the decryption boundary.
 
 ## Phase 10: Credential Save Route
 

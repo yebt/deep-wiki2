@@ -1,9 +1,11 @@
 /**
- * Structural check: single decision path, path sargability, and
- * secret-field guards (design.md — "Preventing the non-sargable `text`
- * path"; "Credentials that must never be logged, serialised or rendered").
+ * Structural check: single decision path, path sargability, secret-field
+ * guards, and the AI provider boundaries (design.md — "Preventing the
+ * non-sargable `text` path"; "Credentials that must never be logged,
+ * serialised or rendered"; ai-provider-foundation design.md — "Extending
+ * `query-boundaries.ts` so the guard is not vacuous").
  *
- * Five rules, each independently testable against a fixture:
+ * Seven rules, each independently testable against a fixture:
  *   1. No file outside `packages/db/src/permissions/` may reference the
  *      `permissions` table via a SQL verb (FROM/JOIN/INTO/UPDATE) — `can()`
  *      is the single decision point; a second read path for machines is
@@ -20,14 +22,25 @@
  *      guarantees lowercase-only content, so this call could only ever be
  *      redundant or actively harmful.
  *   5. No zod schema exported under a `*Response*` name in
- *      `packages/contracts` may declare a denylisted secret-shaped field.
+ *      `packages/contracts/src` or `apps/api/src/routes` may declare a
+ *      denylisted secret-shaped field — exact AI-credential names, their
+ *      camelCase forms, and suffix-anchored generics (`*ApiKey`,
+ *      `*Secret`, `*Token`, `*Credential`). A `TOKEN_COUNT_ALLOWLIST`
+ *      keeps the `*Token` suffix from flagging the usage schema's own
+ *      legitimate `inputTokens`/`outputTokens`/`cachedInputTokens`/
+ *      `reasoningTokens` counters (ai-provider-foundation design.md D17).
+ *   6. No file outside `apps/api/src/ai/gateway/` may import `ai`,
+ *      `@ai-sdk/*` or `@openrouter/*` — the one directory allowed to
+ *      construct a provider client (D1).
+ *   7. No file outside `apps/api/src/adapters/ai/credentials/` may import
+ *      the cipher module — decryption happens in exactly one place.
  *
  * Rules 1 and 2 exclude `*.test.ts`/`*.spec.ts` files: verifying the
  * resolver's or the subtree query's real SQL behaviour (the truth table,
  * the EXPLAIN cost proof) legitimately embeds these exact patterns.
  */
 import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { join, relative, sep } from 'node:path';
+import { dirname, join, relative, resolve, sep } from 'node:path';
 
 export interface QueryBoundariesResult {
   ok: boolean;
@@ -52,7 +65,57 @@ const DENYLISTED_FIELDS = [
   'SMTP_PASSWORD',
   'BLOB_STORE_S3_SECRET_ACCESS_KEY',
   'DATABASE_URL',
+  // AI-credential exact snake_case columns (ai-provider-foundation
+  // design.md — "Extending query-boundaries.ts"; 0008_ai_settings_and_credentials.sql).
+  'ciphertext',
+  'auth_tag',
+  'wrapped_dek',
+  'key_id',
+  'dek',
+  'kek',
+  'key_material',
+  // camelCase equivalents.
+  'wrappedDek',
+  'authTag',
+  'keyMaterial',
+  'apiKey',
+  'apiKeyCiphertext',
+  'keyId',
+  // Envelope-encryption env variable names (environment-config delta).
+  'AI_KEK_KEYRING',
+  'AI_KEK_ACTIVE_ID',
+  'AI_KEK_KMS_KEY_ID',
 ];
+
+/**
+ * Suffix-anchored generics (design.md — "Extending query-boundaries.ts").
+ * Applied only to field names not already covered by `DENYLISTED_FIELDS`
+ * or `TOKEN_COUNT_ALLOWLIST`.
+ */
+const SUFFIX_DENYLIST_PATTERNS = [/(_api_key|ApiKey)$/, /(_secret|Secret)$/, /(_token|Token)$/, /(_credential|Credential)$/];
+
+/**
+ * The named trap (D17): a bare `*Token` suffix rule would flag the usage
+ * schema's own legitimate counters. Listed here, not silenced by
+ * softening the rule — a suppressed guard is worse than no guard.
+ */
+const TOKEN_COUNT_ALLOWLIST = new Set(['inputTokens', 'outputTokens', 'cachedInputTokens', 'reasoningTokens']);
+
+/** Matches `fieldName: z.…` — anchoring to a zod call keeps this from firing on an unrelated `cond ? a : b` ternary. */
+const ZOD_FIELD_PATTERN = /(['"`]?)([A-Za-z_][A-Za-z0-9_]*)\1\s*:\s*z\./g;
+
+function isDenylistedFieldName(name: string): boolean {
+  if (TOKEN_COUNT_ALLOWLIST.has(name)) return false;
+  if (DENYLISTED_FIELDS.includes(name)) return true;
+  return SUFFIX_DENYLIST_PATTERNS.some((pattern) => pattern.test(name));
+}
+
+/** `from '<specifier>'` / `export … from '<specifier>'`, used by rules 6 and 7. */
+const IMPORT_SPECIFIER_PATTERN = /\bfrom\s+(['"])([^'"]+)\1/g;
+
+function isDisallowedSdkSpecifier(specifier: string): boolean {
+  return specifier === 'ai' || specifier.startsWith('@ai-sdk/') || specifier.startsWith('@openrouter/');
+}
 
 /**
  * This check's own source and test necessarily contain the exact text
@@ -150,18 +213,75 @@ function checkLowerUpperPath(root: string, errors: string[]): void {
   }
 }
 
+/**
+ * Scanned directories widened to `apps/api/src/routes` (ai-provider-foundation
+ * design.md — "Extending query-boundaries.ts"): a hand-built JSON body in
+ * a route handler can leak a credential field without ever touching a
+ * schema in `packages/contracts`.
+ */
 function checkSecretFields(root: string, errors: string[]): void {
-  const contractsDir = join(root, 'packages', 'contracts', 'src');
-  const files = findFiles(contractsDir, SOURCE_FILE_PATTERN).filter((f) => !TEST_FILE_PATTERN.test(f));
+  const targetDirs = [join(root, 'packages', 'contracts', 'src'), join(root, 'apps', 'api', 'src', 'routes')];
+
+  for (const dir of targetDirs) {
+    const files = findFiles(dir, SOURCE_FILE_PATTERN).filter((f) => !TEST_FILE_PATTERN.test(f));
+
+    for (const file of files) {
+      const content = readFileSync(file, 'utf8');
+      if (!/Response/.test(content)) continue;
+
+      for (const match of content.matchAll(ZOD_FIELD_PATTERN)) {
+        const fieldName = match[2];
+        if (fieldName && isDenylistedFieldName(fieldName)) {
+          errors.push(`${relative(root, file)}: a response schema declares the denylisted field "${fieldName}"`);
+        }
+      }
+    }
+  }
+}
+
+/** Rule 6 (D1): no provider client can be constructed anywhere else. */
+function checkSdkImportBoundary(root: string, errors: string[]): void {
+  const gatewayDir = join(root, 'apps', 'api', 'src', 'ai', 'gateway');
+  const apiSrcDir = join(root, 'apps', 'api', 'src');
+  const files = findFiles(apiSrcDir, SOURCE_FILE_PATTERN).filter(
+    (f) => !TEST_FILE_PATTERN.test(f) && !isUnderPath(f, gatewayDir) && !isSelfFile(f),
+  );
 
   for (const file of files) {
     const content = readFileSync(file, 'utf8');
-    if (!/Response/.test(content)) continue;
+    for (const match of content.matchAll(IMPORT_SPECIFIER_PATTERN)) {
+      const specifier = match[2];
+      if (specifier && isDisallowedSdkSpecifier(specifier)) {
+        errors.push(
+          `${relative(root, file)}: imports "${specifier}" outside apps/api/src/ai/gateway/, the one directory ` +
+            `allowed to construct a provider client`,
+        );
+      }
+    }
+  }
+}
 
-    for (const field of DENYLISTED_FIELDS) {
-      const fieldPattern = new RegExp(`['"\`]?${field}['"\`]?\\s*:`);
-      if (fieldPattern.test(content)) {
-        errors.push(`${relative(root, file)}: a response schema declares the denylisted field "${field}"`);
+/** Rule 7: only the credentials adapter may reach the cipher's `open`. */
+function checkDecryptionBoundary(root: string, errors: string[]): void {
+  const credentialsDir = join(root, 'apps', 'api', 'src', 'adapters', 'ai', 'credentials');
+  const cipherDir = join(root, 'apps', 'api', 'src', 'adapters', 'ai', 'cipher');
+  const apiSrcDir = join(root, 'apps', 'api', 'src');
+  const files = findFiles(apiSrcDir, SOURCE_FILE_PATTERN).filter(
+    (f) => !TEST_FILE_PATTERN.test(f) && !isUnderPath(f, credentialsDir) && !isUnderPath(f, cipherDir) && !isSelfFile(f),
+  );
+
+  for (const file of files) {
+    const content = readFileSync(file, 'utf8');
+    for (const match of content.matchAll(IMPORT_SPECIFIER_PATTERN)) {
+      const specifier = match[2];
+      if (!specifier || !specifier.startsWith('.')) continue;
+
+      const resolved = resolve(dirname(file), specifier);
+      if (resolved === cipherDir || isUnderPath(resolved, cipherDir)) {
+        errors.push(
+          `${relative(root, file)}: imports from the cipher module (${specifier}) outside ` +
+            `apps/api/src/adapters/ai/credentials/, the one directory allowed to decrypt a credential`,
+        );
       }
     }
   }
@@ -175,6 +295,8 @@ export function checkQueryBoundaries(root: string): QueryBoundariesResult {
   checkLeadingWildcard(root, errors);
   checkLowerUpperPath(root, errors);
   checkSecretFields(root, errors);
+  checkSdkImportBoundary(root, errors);
+  checkDecryptionBoundary(root, errors);
 
   return { ok: errors.length === 0, errors };
 }
