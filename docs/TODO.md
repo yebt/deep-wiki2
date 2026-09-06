@@ -408,6 +408,25 @@ makes conventions portable across projects.
 
 Discoveries and constraints. Newest first.
 
+### 2026-09-06 — `APP_URL` is the web origin, and treating it as the API's broke CORS
+
+`APP_URL` feeds three things, and all three are the browser's view of **apps/web**: the single
+origin the API allows through CORS with credentials, and the host of the `/reset-password` and
+`/invite/accept` links mailed to users — both of which are Nuxt pages.
+
+`env.example` documented it beside `PORT` with the same value, which reads as though it were the
+API's own address. That is wrong in development, where the Nuxt dev server runs on a different
+port entirely, and it produced a CORS allowlist naming an origin no browser ever sends. A
+consistency check comparing `PORT` against `APP_URL` was briefly added and made the error
+mandatory before being removed.
+
+**Impact:** `APP_URL` now defaults to the Nuxt dev server and both `env.example` and the zod
+schema say what it means. `env-consistency.ts` compares `PORT` only against
+`NUXT_PUBLIC_API_BASE_URL`, and a test asserts that `APP_URL` is deliberately *not* tied to `PORT`,
+so the mistake cannot be reintroduced as a well-meaning fix. The wider lesson: a variable used by
+three call sites needs its meaning written where it is defined. "URL of the app" is ambiguous the
+moment an app is two deployables.
+
 ### 2026-09-06 — apps/web looked for the API on a port nothing listens on
 
 `apps/web/nuxt.config.ts` hardcoded `apiBaseUrl: 'http://localhost:4000'` with a comment claiming

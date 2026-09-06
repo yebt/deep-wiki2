@@ -10,8 +10,13 @@
  * database and a role the developer had never heard of.
  *
  * The same trap exists between `MAILPIT_SMTP_HOST_PORT` and `SMTP_PORT`, and
- * between `PORT` — where apps/api listens — and both `APP_URL` and
- * `NUXT_PUBLIC_API_BASE_URL`, where the browser is told to find it.
+ * between `PORT` — where apps/api listens — and `NUXT_PUBLIC_API_BASE_URL`,
+ * where the browser is told to find it.
+ *
+ * `APP_URL` is deliberately NOT compared against `PORT`. It is the browser's
+ * origin for apps/web — the CORS allowlist entry and the host of the
+ * `/reset-password` and `/invite/accept` links mailed to users. Tying it to
+ * the API's port is the mistake this comment exists to prevent.
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -49,7 +54,6 @@ const PAIRS: readonly { publish: string; consume: string; kind: 'url' | 'port'; 
   { publish: 'POSTGRES_HOST_PORT', consume: 'DATABASE_URL', kind: 'url', hint: 'the port inside DATABASE_URL' },
   { publish: 'MAILPIT_SMTP_HOST_PORT', consume: 'SMTP_PORT', kind: 'port', hint: 'SMTP_PORT' },
   { publish: 'PORT', consume: 'NUXT_PUBLIC_API_BASE_URL', kind: 'url', hint: "the port inside NUXT_PUBLIC_API_BASE_URL" },
-  { publish: 'PORT', consume: 'APP_URL', kind: 'url', hint: 'the port inside APP_URL' },
 ];
 
 export function checkEnvConsistency(env: Map<string, string>): EnvConsistencyResult {

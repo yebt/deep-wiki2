@@ -49,9 +49,15 @@ describe('checkEnvConsistency', () => {
     expect(result.errors[0]).toContain('4000');
   });
 
-  test('PORT disagreeing with APP_URL fails', () => {
-    const result = checkEnvConsistency(parseEnv('PORT=4400\nAPP_URL=http://localhost:3000\n'));
-    expect(result.ok).toBe(false);
+  // APP_URL is the browser-facing origin of apps/web — the CORS allowlist entry
+  // and the host of mailed reset/invite links. It is NOT the API's own address,
+  // and in development it is the Nuxt dev server on a different port entirely.
+  // Comparing it against PORT was a real mistake once; this test keeps it out.
+  test('APP_URL is deliberately not tied to PORT', () => {
+    const result = checkEnvConsistency(
+      parseEnv('PORT=4400\nAPP_URL=http://localhost:4173\nNUXT_PUBLIC_API_BASE_URL=http://localhost:4400\n'),
+    );
+    expect(result.ok).toBe(true);
   });
 
   test('agreeing ports pass', () => {
@@ -59,7 +65,7 @@ describe('checkEnvConsistency', () => {
       parseEnv(
         'POSTGRES_HOST_PORT=25432\nDATABASE_URL=postgres://u:p@localhost:25432/db\n' +
           'MAILPIT_SMTP_HOST_PORT=21025\nSMTP_PORT=21025\n' +
-          'PORT=4400\nAPP_URL=http://localhost:4400\nNUXT_PUBLIC_API_BASE_URL=http://localhost:4400\n',
+          'PORT=4400\nNUXT_PUBLIC_API_BASE_URL=http://localhost:4400\n',
       ),
     );
     expect(result.ok).toBe(true);

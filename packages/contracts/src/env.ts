@@ -22,7 +22,9 @@ export const envSchema = z.object({
 
   // Public base URL, used to build links embedded in email (invitations,
   // password reset). Defaulted so most tooling never has to set it.
-  APP_URL: z.string().url().default('http://localhost:3000'),
+  // The browser-facing origin of apps/web, not the API's own address: it is
+  // the CORS allowlist entry and the host of mailed reset/invite links.
+  APP_URL: z.string().url().default('http://localhost:4173'),
 
   // Session lifetime (design.md — "Authentication").
   SESSION_IDLE_TIMEOUT_MINUTES: z.coerce.number().int().positive().default(30),
