@@ -18,3 +18,16 @@ export {
   parsePath,
   PATH_DELIMITER,
 } from './paths';
+export type {
+  BlockId,
+  BlockIndexEntry,
+  BlockRegistry,
+  BlockRegistryError,
+  BlockStatus,
+  ContentStore,
+  ContentStoreError,
+  PageContent,
+  PageContentRef,
+  PersistedBlock,
+  SavePageInput,
+} from './content/types';
