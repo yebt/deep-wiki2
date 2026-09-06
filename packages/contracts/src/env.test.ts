@@ -1,10 +1,15 @@
 import { describe, expect, test } from 'bun:test';
 import { envSchema, parseEnv, refineEnv } from './env';
 
+// A 32-byte key, base64-encoded (Buffer.alloc(32, 7).toString('base64')),
+// reused across the base fixture below and the AI_KEK-specific tests.
+const DEFAULT_KEK = 'BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=';
+
 /**
  * Minimal environment that satisfies every unconditionally required
- * variable (Phase 1 base + Phase 1's auth/mail/blob additions), so each
- * test below only overrides the field it actually exercises.
+ * variable (Phase 1 base + Phase 1's auth/mail/blob additions, plus the
+ * default AI_KEK_DRIVER=env keyring), so each test below only overrides
+ * the field it actually exercises.
  */
 function validRawEnv(overrides: Record<string, string | undefined> = {}): Record<string, string | undefined> {
   return {
@@ -14,6 +19,8 @@ function validRawEnv(overrides: Record<string, string | undefined> = {}): Record
     SMTP_HOST: 'localhost',
     MAIL_FROM: 'noreply@deep-wiki.local',
     BLOB_STORE_FS_ROOT: './.data/blobs',
+    AI_KEK_KEYRING: `k1:${DEFAULT_KEK}`,
+    AI_KEK_ACTIVE_ID: 'k1',
     ...overrides,
   };
 }
@@ -136,5 +143,106 @@ describe('refineEnv', () => {
     expect(parsed.SMTP_USER).toBeUndefined();
     expect(parsed.SMTP_PASSWORD).toBeUndefined();
     expect(parsed.BLOB_STORE_S3_ENDPOINT).toBeUndefined();
+  });
+});
+
+const VALID_KEK = DEFAULT_KEK;
+// A 16-byte key, base64-encoded — the wrong length.
+const WRONG_LENGTH_KEK = 'AQEBAQEBAQEBAQEBAQEBAQ==';
+
+describe('refineEnv — AI_KEK envelope master key (environment-config delta)', () => {
+  test('accepts a well-formed keyring with the active id present in it', () => {
+    const parsed = envSchema.parse(
+      validRawEnv({ AI_KEK_DRIVER: 'env', AI_KEK_KEYRING: `k1:${VALID_KEK}`, AI_KEK_ACTIVE_ID: 'k1' }),
+    );
+    const result = refineEnv(parsed);
+
+    expect(result.ok).toBe(true);
+  });
+
+  test('accepts a keyring with multiple keys, naming any of them active', () => {
+    const parsed = envSchema.parse(
+      validRawEnv({
+        AI_KEK_DRIVER: 'env',
+        AI_KEK_KEYRING: `k1:${VALID_KEK},k2:${VALID_KEK}`,
+        AI_KEK_ACTIVE_ID: 'k2',
+      }),
+    );
+    const result = refineEnv(parsed);
+
+    expect(result.ok).toBe(true);
+  });
+
+  test('rejects a missing AI_KEK_KEYRING under the default env driver, naming the variable', () => {
+    const parsed = envSchema.parse(validRawEnv({ AI_KEK_KEYRING: undefined, AI_KEK_ACTIVE_ID: 'k1' }));
+    const result = refineEnv(parsed);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.some((issue) => issue.variable === 'AI_KEK_KEYRING')).toBe(true);
+    }
+  });
+
+  test('rejects a malformed AI_KEK_KEYRING entry (no id:base64key shape)', () => {
+    const parsed = envSchema.parse(
+      validRawEnv({ AI_KEK_KEYRING: 'not-a-valid-entry', AI_KEK_ACTIVE_ID: 'k1' }),
+    );
+    const result = refineEnv(parsed);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.some((issue) => issue.variable === 'AI_KEK_KEYRING')).toBe(true);
+    }
+  });
+
+  test('rejects a key that does not decode to exactly 32 bytes', () => {
+    const parsed = envSchema.parse(
+      validRawEnv({ AI_KEK_KEYRING: `k1:${WRONG_LENGTH_KEK}`, AI_KEK_ACTIVE_ID: 'k1' }),
+    );
+    const result = refineEnv(parsed);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.some((issue) => issue.variable === 'AI_KEK_KEYRING')).toBe(true);
+    }
+  });
+
+  test('rejects AI_KEK_ACTIVE_ID absent from the keyring', () => {
+    const parsed = envSchema.parse(
+      validRawEnv({ AI_KEK_KEYRING: `k1:${VALID_KEK}`, AI_KEK_ACTIVE_ID: 'k-does-not-exist' }),
+    );
+    const result = refineEnv(parsed);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.some((issue) => issue.variable === 'AI_KEK_ACTIVE_ID')).toBe(true);
+    }
+  });
+
+  test('rejects a missing AI_KEK_ACTIVE_ID even when the keyring parses', () => {
+    const parsed = envSchema.parse(validRawEnv({ AI_KEK_KEYRING: `k1:${VALID_KEK}`, AI_KEK_ACTIVE_ID: undefined }));
+    const result = refineEnv(parsed);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.some((issue) => issue.variable === 'AI_KEK_ACTIVE_ID')).toBe(true);
+    }
+  });
+
+  test('rejects a missing AI_KEK_KMS_KEY_ID when AI_KEK_DRIVER=kms', () => {
+    const parsed = envSchema.parse(validRawEnv({ AI_KEK_DRIVER: 'kms' }));
+    const result = refineEnv(parsed);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.some((issue) => issue.variable === 'AI_KEK_KMS_KEY_ID')).toBe(true);
+    }
+  });
+
+  test('accepts AI_KEK_DRIVER=kms with AI_KEK_KMS_KEY_ID present', () => {
+    const parsed = envSchema.parse(validRawEnv({ AI_KEK_DRIVER: 'kms', AI_KEK_KMS_KEY_ID: 'projects/x/keyRings/y/cryptoKeys/z' }));
+    const result = refineEnv(parsed);
+
+    expect(result.ok).toBe(true);
   });
 });

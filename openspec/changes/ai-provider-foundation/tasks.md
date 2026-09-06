@@ -104,9 +104,9 @@ further decision gate blocks `sdd-apply`.
 
 ## Phase 6: Contracts — Key-Provider Env Schema
 
-- [ ] 6.1 RED: `packages/contracts/src/env.test.ts` — `refineEnv` fails when `AI_KEK_KEYRING` is malformed, when any key is not exactly 32 bytes after base64 decode, or when `AI_KEK_ACTIVE_ID` is absent from the keyring; succeeds on a valid keyring (environment-config delta scenarios).
-- [ ] 6.2 GREEN: add `AI_KEK_DRIVER`, `AI_KEK_KEYRING`, `AI_KEK_ACTIVE_ID`, `AI_KEK_KMS_KEY_ID` (optional) to `envSchema`; extend `refineEnv()` with the keyring-parse/32-byte/active-id-present checks.
-- [ ] 6.3 Add the same four variables to `env.example` with non-secret placeholder values (no real key); `bun run -F @deep-wiki/root test scripts/checks/env-example` stays green.
+- [x] 6.1 RED: `packages/contracts/src/env.test.ts` — `refineEnv` fails when `AI_KEK_KEYRING` is malformed, when any key is not exactly 32 bytes after base64 decode, or when `AI_KEK_ACTIVE_ID` is absent from the keyring; succeeds on a valid keyring (environment-config delta scenarios).
+- [x] 6.2 GREEN: add `AI_KEK_DRIVER`, `AI_KEK_KEYRING`, `AI_KEK_ACTIVE_ID`, `AI_KEK_KMS_KEY_ID` (optional) to `envSchema`; extend `refineEnv()` with the keyring-parse/32-byte/active-id-present checks.
+- [x] 6.3 Add the same four variables to `env.example` with non-secret placeholder values (no real key); `bun run -F @deep-wiki/root test scripts/checks/env-example` stays green.
 
 ## Phase 7: Envelope Cipher and Key-Provider Adapters
 
