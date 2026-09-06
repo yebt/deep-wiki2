@@ -69,6 +69,20 @@ function phrasingChildrenOf(node: Node): Node[] | undefined {
 const ANCHORABLE_BLOCKS = new Set(['paragraph', 'heading', 'listItem']);
 
 /**
+ * Whether `node` is a kind of block a persisted anchor can live on, and if
+ * so, the `blockAnchor` node it currently carries (already applied by
+ * `applyBlockAnchors`), if any. Exported for `block-index.ts`, which needs
+ * the same notion of "the owning block" without duplicating it.
+ */
+export function findBlockAnchor(node: Node): BlockAnchorNode | undefined {
+  if (!ANCHORABLE_BLOCKS.has(node.type)) return undefined;
+  const children = phrasingChildrenOf(node);
+  if (!children || children.length === 0) return undefined;
+  const last = children[children.length - 1];
+  return last?.type === 'blockAnchor' ? (last as BlockAnchorNode) : undefined;
+}
+
+/**
  * Extracts a trailing ` ^id` from an anchorable block's own last text run
  * into a `blockAnchor` node appended after it, and restores every remaining
  * protected caret back to a literal `^` everywhere else in the tree.

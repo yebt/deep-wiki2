@@ -1049,6 +1049,29 @@ Fix: `packages/db/src/auth/instance-settings.ts` now reverts only when the curre
 is `open`; an explicit `closed` (or `invitation_only`) passes through unchanged.
 Impact: contained to `getInstanceSettings`.
 
+### 2026-09-06 — Block-match threshold τ = 0.5 is a judgement, not a measurement
+
+`packages/markdown/src/match-blocks.ts`'s `MATCH_THRESHOLD` decides whether a
+persisted block ID (design.md §"Block identity", docs/SPECS.md §3.3) follows a
+split or merged block, or is tombstoned instead. Below τ, an ID is never
+reassigned onto content the matcher is not confident is recognisably the same
+text.
+
+**The bias:** an orphaned anchor is preferred over a misattributed one. A
+comment or citation silently landing on the wrong block is worse than one that
+visibly breaks, because the orphan is detectable (its excerpt is retained,
+UI-CHECKLIST §4.7) and the misattribution is not.
+
+**The reversal criterion:** τ = 0.5 is deliberately conservative and has no
+measurement behind it yet. It should move only when a measured mis-assignment
+rate at this threshold, taken from real edit traffic once Phase 3's comments
+ship, shows it is costing more orphans than the misattributions it is
+preventing. Until then this is a one-constant change, not a mechanism change
+(design.md D8).
+
+Impact: `packages/markdown/src/match-blocks.ts` only; `packages/db`'s save
+transaction (a later phase) calls `matchBlocks` but does not itself decide τ.
+
 ---
 
 ## Open Questions
