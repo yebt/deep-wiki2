@@ -203,14 +203,27 @@ export default defineAppConfig({
     },
 
     // M3 outlined text field (§9.5). Nuxt UI's defaults render a 32px-tall
-    // field with 14px text and a 12px radius; M3 specifies a 56dp field,
-    // `body-large` text and `corner-extra-small`. The 16px is the one that
-    // is not a preference: below 16px, iOS Safari zooms the viewport on
-    // focus, which §9.5 records as non-negotiable and which no amount of
-    // desktop review would surface.
+    // field with 14px text; M3 specifies a 56dp field and `body-large`
+    // text. The 16px is the one that is not a preference: below 16px, iOS
+    // Safari zooms the viewport on focus, which §9.5 records as
+    // non-negotiable and which no amount of desktop review would surface.
+    //
+    // Shape is `rounded-md` — 12px, `corner-medium` — and NOT M3's literal
+    // `corner-extra-small` (4px). Recorded deviation, §9.5 and §14
+    // (2026-09-06). M3's 4px field is calibrated against an M3 button at
+    // `corner-full`: the two are meant to read as different kinds of
+    // object, and the enormous gap between them is the signal. This
+    // project already deviates the other way — §3.3 pulls buttons down to
+    // `corner-medium` for a dense keyboard-driven tool — and a 4px field
+    // beside a 12px button inside a 16px card is the residue of that
+    // earlier decision, not of M3. Completing it gives the screen two
+    // shape idioms instead of three: controls at `corner-medium`,
+    // containers at `corner-large`, still ordered so shape identifies the
+    // component. 12px is also below M3 Expressive's own square shape for a
+    // 56dp-tall control (16px), so this is the conservative direction.
     input: {
       slots: {
-        base: 'h-14 rounded-xs',
+        base: 'h-14 rounded-md',
       },
       // The size variant sets the font size and is applied after the slot
       // override, so `text-base` on `base` loses to it. `xl` is the size
@@ -220,6 +233,24 @@ export default defineAppConfig({
         size: 'xl',
       },
     },
+
+    // The rest of the text-field family. Nuxt UI already ships every one
+    // of these at `rounded-md`, so the shape ruling above needs no
+    // restating here — but none of them defaults to 16px text, and the
+    // iOS-zoom rule is a property of any text-entry control, not of
+    // `UInput` specifically. Setting the size default centrally is what
+    // stops the next form that reaches for a `USelect` from silently
+    // reintroducing the defect §9.5 already caught once.
+    //
+    // `h-14` goes only on the single-line controls. A textarea's height is
+    // its `rows`, and `UInputTags` grows as tags wrap; pinning either to
+    // 56px would clip its own content.
+    textarea: { defaultVariants: { size: 'xl' } },
+    inputTags: { defaultVariants: { size: 'xl' } },
+    select: { slots: { base: 'h-14' }, defaultVariants: { size: 'xl' } },
+    selectMenu: { slots: { base: 'h-14' }, defaultVariants: { size: 'xl' } },
+    inputMenu: { slots: { base: 'h-14' }, defaultVariants: { size: 'xl' } },
+    inputNumber: { slots: { base: 'h-14' }, defaultVariants: { size: 'xl' } },
 
     // The one-line form-level note that replaces the per-field
     // asterisks. `UAuthForm` centres its header and sets it at 16px; this

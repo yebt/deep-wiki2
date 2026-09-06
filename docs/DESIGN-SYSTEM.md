@@ -622,6 +622,8 @@ Nuxt UI's own components keep using `text-xs` / `text-sm` / `text-base` internal
 
 Directional variants exist and are used, not decorative: `corner-large-top` (16 16 0 0) for bottom sheets, `corner-large-end` (0 16 16 0) for the navigation drawer, `corner-extra-small-top` for filled text fields.
 
+That table is M3's specification, and it stays as M3's specification. Where this project departs from a row of it, the departure is stated in §3.4 and recorded in §14 — never by rewriting the row.
+
 ### 3.2 What M3 Expressive changed
 
 Expressive expanded shape from a fixed property into an **expressive axis**:
@@ -639,6 +641,23 @@ Expressive expanded shape from a fixed property into an **expressive axis**:
 | Extra large | 136dp | full | 28px | **16px** |
 
 The pressed corner is *smaller* than the rest corner. Pressing squares the button slightly. This is Expressive's principal press affordance, and it is why an M3 Expressive button feels physical while a flat Tailwind button does not.
+
+Note that Expressive's square shapes scale **with the component's height**: 32dp and 40dp controls take 12px, a 56dp control takes 16px, 96dp takes 28px. Corner size is proportional to the object, not fixed per component class. This is the one Expressive idea that bears directly on §9.5, because M3's text field is a 56dp control.
+
+#### What Expressive did *not* change: text fields
+
+Verified 2026-09-06, because §9.5 was rejected on review on exactly this point.
+
+| Source | State on `androidx-main`, today |
+| --- | --- |
+| `OutlinedTextFieldTokens.kt` | `// VERSION: v0_103` · `ContainerShape = ShapeKeyTokens.CornerExtraSmall` · `ContainerHeight = 56.0.dp` |
+| `FilledTextFieldTokens.kt` | `// VERSION: v0_210` · `ContainerShape = ShapeKeyTokens.CornerExtraSmallTop` · `ContainerColor = ColorSchemeKeyTokens.SurfaceContainerHighest` |
+| `Shapes.kt` KDoc on `extraSmall` | "By default autocomplete menu, select menu, snackbars, standard menu, **and text fields** use this shape." |
+| `tokens/` directory listing | Only `FilledTextFieldTokens.kt` and `OutlinedTextFieldTokens.kt` exist. There is no Expressive text-field token file. |
+
+Two of those are decisive. `FilledTextFieldTokens.kt` sits at token version **v0_210** — regenerated well after the v0.192 baseline this document was written against — and still emits `CornerExtraSmallTop`. And `Shapes.kt` is the very file that *carries* the Expressive additions (`largeIncreased`, `extraLargeIncreased`, `extraExtraLarge`), yet its `extraSmall` KDoc still names text fields.
+
+**Conclusion: M3 Expressive did not move text fields off `corner-extra-small`.** The shape scale grew at the top end (20 / 32 / 48) and `corner-full` was redefined; the bottom end, where text fields live, was untouched. Any claim that "current M3 says text fields are rounder" is false at the token level. If this project rounds its fields, it does so as a recorded deviation and for its own reasons — see §3.4 and §9.5.
 
 ### 3.3 In this stack
 
@@ -702,6 +721,29 @@ Only these radii exist. `rounded-[10px]` is a checklist §4.1 failure.
 **Don't**
 - Don't mix radii within one component. A card with `rounded-lg` does not contain a `rounded-xl` image.
 - Don't use `rounded-xl` (24px) for anything that has a real M3 token; it is the one rung with no exact M3 equivalent.
+
+### 3.4 Shape coherence — how much does M3 actually ask for?
+
+Less than one might hope, and in the opposite direction to the intuition.
+
+M3's own statement of what shape is for, quoted verbatim from the file-level KDoc of `androidx.compose.material3.Shapes` (which reproduces the shape overview page, the page `m3.material.io` renders only in JavaScript):
+
+> "Material surfaces can be displayed in different shapes. Shapes direct attention, **identify components**, communicate state, and express brand."
+
+*Identify components.* Shape in M3 is a **differentiating** signal, not a uniforming one. The scale deliberately assigns different rungs to different classes of object — 4px fields and menus, 8px chips, 12px cards, 16px drawers, 28px dialogs, `corner-full` buttons — and a screen carrying three different radii is M3 working as specified, not M3 being violated. There is no M3 rule that says "pick one radius for your product".
+
+What Expressive adds is permission, not prescription: shape became an adjustable axis, so a product may choose a softer or sharper direction than the defaults, and shape and radius may be combined "to generate visual tension or cohesion". That is the licence under which this document deviates. It is not an instruction that everything must match.
+
+**Ruling: this product commits to a two-rung shape direction, and every deviation below is an application of it.**
+
+| Class of object | Rung | Utility | Members |
+| --- | --- | --- | --- |
+| **Controls** — things you operate | `corner-medium` 12px | `rounded-md` | Buttons, text fields and the whole text-field family, dropdown triggers, menus |
+| **Containers** — things that hold controls | `corner-large` 16px | `rounded-lg` | Cards, panels, the auth card |
+
+Full-bleed chrome stays `rounded-none`; the closed `rounded-full` set from §3.3 (focus rings, avatars, badges, active indicators) is unaffected; dialogs keep `corner-extra-large`. The two rungs are **adjacent on the M3 scale and correctly ordered** — a control is never rounder than the container it sits in — so M3's "shape identifies components" survives at the level that matters on a real screen, while the screen still reads as one system rather than three.
+
+The rung a deviation moves *to* must be a real M3 token. `corner-medium` and `corner-large` are. `rounded-[10px]` is still a §12.3 failure.
 
 ---
 
@@ -1319,34 +1361,91 @@ All: `corner-medium` (12px). `UCard`'s stock `rounded-lg` with `--ui-radius: 0.5
 
 ### 9.5 Text fields
 
-| Property | M3 (outlined) | Nuxt UI |
-| --- | --- | --- |
-| Shape | `corner-extra-small` (4px) | `rounded-xs` with `--ui-radius: 0.5rem` |
-| Outline | 1px `outline` | `ring ring-inset ring-accented` |
-| Focus outline | **2px** `primary` | `focus-visible:ring-primary` + `focus-visible:outline-3` |
-| Input text | `body-large` (16px) | `text-body-large` |
-| Label | `body-large`, `on-surface-variant` | `text-muted` |
-| Supporting text | `body-small`, `on-surface-variant` | `text-body-small text-muted` |
+| Property | M3 (outlined) | deep-wiki | Nuxt UI |
+| --- | --- | --- | --- |
+| Shape | `corner-extra-small` (4px) | **`corner-medium` (12px)** — deviation, §3.4 | `rounded-md` with `--ui-radius: 0.5rem` |
+| Height | 56dp | 56px | `h-14` on the `base` slot |
+| Outline | 1px `outline` | unchanged | `ring ring-inset ring-accented` |
+| Focus outline | **2px** `primary` | unchanged | `focus-visible:ring-primary` + `focus-visible:outline-3` |
+| Input text | `body-large` (16px) | unchanged — **non-negotiable** | `size="xl"` |
+| Label | `body-large`, `on-surface-variant` | unchanged | `text-base text-muted` |
+| Supporting text | `body-small`, `on-surface-variant` | unchanged | `text-body-small text-muted` |
+
+#### The shape ruling, and why it is a deviation rather than a correction
+
+**Ruling: text fields take `corner-medium` (12px), not M3's `corner-extra-small` (4px).**
+
+Say plainly what this is. §3.2 establishes, from the token files, that current M3 — Expressive included — still specifies 4px for the outlined field container and `corner-extra-small-top` for the filled one, and that the `Shapes.kt` KDoc which carries the Expressive additions still names text fields under `extraSmall`. **M3 did not change. This project is changing.** Anyone citing "M3 Expressive rounded the text field" is citing something that does not exist.
+
+The reason to deviate anyway is that this project already deviated once, in the opposite direction, and left the result half-applied:
+
+| Object | M3 | deep-wiki before | Gap |
+| --- | --- | --- | --- |
+| Auth card | `corner-medium` 12px | `rounded-lg` 16px (§9.4, accepted) | — |
+| Primary button | `corner-full` | `rounded-md` 12px (§3.3, deliberate) | −∞ → 12 |
+| Text field | `corner-extra-small` 4px | `rounded-xs` 4px (M3 literal) | unchanged |
+
+M3's 4px field is calibrated against an M3 button at `corner-full`. The two are meant to read as *different kinds of object*, and the huge distance between them is the signal. §3.3 pulled the button down to 12px for a dense keyboard-driven tool — a defensible call — and by doing so collapsed the distance the 4px field was contrasting against. What was left is 4 / 12 / 16 on one small form: three rungs, no relationship between them, and a field whose corner is a quarter of its container's. That is the residue of the button decision, not of M3.
+
+§3.4's two-rung direction resolves it: **controls at `corner-medium`, containers at `corner-large`.** The field joins the button. The card stays one rung up. Two idioms, adjacent on the scale, ordered so a control is never rounder than what holds it.
+
+Three things make this the conservative move rather than an indulgence:
+
+1. **12px is a real M3 token** (`corner-medium`), reached through `rounded-md` on the existing ladder. No arbitrary value, no §12.3 failure.
+2. **It is below Expressive's own proportional shape for a control of this height.** §3.2's button table scales the square corner with height: 40dp → 12px, 56dp → 16px. The M3 field is a 56dp control. 12px is the smaller of the two candidates.
+3. **It is what Nuxt UI already ships.** `UInput`'s stock `base` is `rounded-md`; the previous 4px was an override this project added. So is every other member of the family. The fix is the removal of a special case, not the addition of one.
+
+What this ruling does *not* license: rounding a container to match its contents, or flattening every radius on a screen to a single number. Shape still identifies the component (§3.4).
+
+#### The filled-vs-outlined ruling — re-examined, and it holds
 
 `UInput` variants are `outline | soft | subtle | ghost | none` (default `outline`) — note there is **no `solid`**. M3's outlined text field is `variant="outline"`; M3's filled text field is `variant="subtle"`.
 
-**Ruling: outlined everywhere.** M3 says pick one style and use it consistently. Outlined reads better in a dense form and does not compete with the surface ladder.
+**Ruling: outlined everywhere. Reaffirmed 2026-09-06, now for a measured reason rather than a stylistic one.**
 
-16px input text is not negotiable: below 16px, iOS Safari zooms the viewport on focus.
+M3's filled text field container is `surface-container-highest` (`FilledTextFieldTokens.kt`, `ContainerColor = ColorSchemeKeyTokens.SurfaceContainerHighest`). On this project's ladder that is `bg-emphasized` — tone 90 light, tone 22 dark. Now look at what the field would sit on:
 
-**None of this comes for free.** Nuxt UI's defaults render a 32px-tall field with 14px text and a 12px radius — three of the four rows above wrong, including the non-negotiable one. Set them centrally in `app.config.ts`:
+| Ground | Tone (light / dark) | Filled field at tone 90 / 22 | Separation |
+| --- | --- | --- | --- |
+| Auth card — `UCard variant="soft"` → `bg-emphasized` | 90 / 22 | 90 / 22 | **zero — identical tone** |
+| Contextual panel, nav pane — `bg-elevated` | 94 / 12 | 90 / 22 | 4 tones / 10 tones |
+| Dialog, menu, palette — `bg-accented` | 92 / 17 | 90 / 22 | 2 tones / 5 tones |
+| Document canvas — `bg-default` | 100 / 4 | 90 / 22 | 10 / 18 tones |
+
+The auth card is the case the review was about, and it is the worst one: §9.4 puts the auth card on M3's *Filled* card, which is `surface-container-highest` — **the same role M3 gives the filled text field**. A filled field on this card is invisible by construction. And there is no rung above `bg-emphasized` to promote it to; §1.4 forbids a sixth surface level.
+
+That is not a fixable detail. M3's filled field assumes the field is the topmost toned thing on the screen. In a three-pane tool, forms live inside panes and dialogs that have already spent the ladder. Outlined uses the `outline` role — a 3:1 boundary that is independent of the ground it is drawn on — and therefore works identically on all five rungs.
+
+A secondary point, for anyone arriving with a reference screenshot: M3's filled field is `corner-extra-small-**top**` — 4px on the top corners, **square on the bottom**. A filled field is the *least* rounded thing in the M3 catalogue, not the most. A reference showing generously rounded filled fields is a themed product, not stock M3, and it is evidence for the shape ruling above rather than for the fill.
+
+#### The 16px rule, and the ordering trap
+
+16px input text is not negotiable: below 16px, iOS Safari zooms the viewport on focus. This is a property of any text-entry control, not of `UInput`.
+
+**None of this comes for free.** Nuxt UI's defaults render a 32px-tall field with 14px text. Set it centrally in `app.config.ts`:
 
 ```ts
 input: {
-  slots: { base: 'h-14 rounded-xs' },   // no library size is M3's 56dp
+  slots: { base: 'h-14 rounded-md' },   // 56dp (§7) · corner-medium (§3.4)
   defaultVariants: { size: 'xl' },      // the size whose text is 16px
 },
 formField: {
   slots: { label: 'text-base text-muted' },  // library default is 14px
 },
+
+// The rest of the family. Shape needs no restating — Nuxt UI already ships
+// every one of these at `rounded-md` — but none of them defaults to 16px.
+// `h-14` only on the single-line controls: a textarea's height is its rows,
+// and `UInputTags` grows as tags wrap.
+textarea:    { defaultVariants: { size: 'xl' } },
+inputTags:   { defaultVariants: { size: 'xl' } },
+select:      { slots: { base: 'h-14' }, defaultVariants: { size: 'xl' } },
+selectMenu:  { slots: { base: 'h-14' }, defaultVariants: { size: 'xl' } },
+inputMenu:   { slots: { base: 'h-14' }, defaultVariants: { size: 'xl' } },
+inputNumber: { slots: { base: 'h-14' }, defaultVariants: { size: 'xl' } },
 ```
 
-The size variant is applied **after** the slot override, so `text-base` written on `base` loses to the variant's own font size. The size must be chosen, not overridden — this is the trap that shipped 14px text past a design review.
+The size variant is applied **after** the slot override, so `text-base` written on `base` loses to the variant's own font size. The size must be **chosen**, not overridden — this is the trap that shipped 14px text past a design review. It is also why the family entries above set `size`, not a font class.
 
 Every input has a programmatically associated label; placeholder is not a label (checklist §5). `UFormField` provides the association — use it.
 
@@ -1767,7 +1866,8 @@ Token values in this document are taken from the following, not from memory:
 - `material-components/material-web` — `tokens/versions/v0_192/` (`md-sys-color`, `md-sys-typescale`, `md-sys-shape`, `md-sys-state`, `md-sys-motion`, `md-sys-elevation`, `md-ref-palette`, `md-ref-typeface`, and the `md-comp-*` component token files)
 - `material-foundation/material-color-utilities` — `typescript/dynamiccolor/color_spec_2021.ts` (role → tone mapping), `variant.ts`
 - `androidx/androidx` — `compose/material3/.../tokens/` (`ShapeTokens`, `TypeScaleTokens`, `StandardMotionTokens`, `ExpressiveMotionTokens`, `Button{XSmall,Small,Medium,Large,XLarge}Tokens`) for the M3 Expressive additions
-- `m3.material.io` — breakpoints, grids and spacing, tone-based surface colour
+- `androidx/androidx` — `compose/material3/material3/src/commonMain/kotlin/androidx/compose/material3/tokens/{OutlinedTextFieldTokens,FilledTextFieldTokens,ShapeTokens}.kt` and `.../material3/Shapes.kt`, read on `androidx-main` on **2026-09-06** for §3.2's text-field verification. `Shapes.kt`'s KDoc is the only machine-readable copy of M3's shape overview prose; `m3.material.io` renders that page in JavaScript and cannot be fetched.
+- `m3.material.io` — breakpoints, grids and spacing, tone-based surface colour. **Not fetchable**: it is a client-rendered SPA and returns an empty shell. Verify token claims against the platform token files above, never against a summary of this site.
 - `tailwindcss.com/docs/theme` — `@theme` namespaces and options
 - The installed `@nuxt/ui@4.11.0` package: `dist/runtime/index.css`, `dist/runtime/plugins/colors.js`, and the resolved component theme in `apps/web/.nuxt/ui/`
 
@@ -1784,6 +1884,11 @@ Amend this file in place when a rule turns out to be wrong, and record why here.
 | 2026-09-04 | Dark neutral container rungs moved up one M3 tone each (12→17, 17→22, 22→24). | Tones 10 and 12 measured **1.04:1** between the app ground and the header butting against it — the collapsed rung §1.4 exists to prevent. All replacement tones come from §1.1's list. |
 | 2026-09-04 | Dark `--ui-primary` moves from tone 80 to tone 70. | M3 specifies tone 80 for dark primary, but at oklch L 0.84 / hue 262 the maximum sRGB chroma is 0.0793 and the palette already sat at 0.078 — the gamut ceiling, so the button could not be made less washed out at that tone. Tone 70 raises chroma to 0.120 (+54%) and still measures 6.35:1 against its label, above the §5 floor of 4.5:1. Deviates from M3 deliberately; the checklist wins on how a control reads. |
 | 2026-09-03 | §5.2: `solid` pressed/hover states now use a `currentColor` compositing overlay instead of stepping the shade. | Measured against this project's tone tables, the shade step put a white label on tone 60 at 3.15:1, below the checklist's 4.5:1 floor. The checklist wins on accessibility per §0. One shade slot spans ten M3 tones, about 2.5x an 0.12 state layer, so the step overshoots. |
+| 2026-09-06 | **New §3.4 — a two-rung shape direction for the product: controls at `corner-medium` (12px), containers at `corner-large` (16px).** | Owner rejected the auth form on review: the screen carried a 16px card, a 12px button and a 4px input — three shape idioms with no relationship. Investigated whether M3 sanctioned rounder fields; it does not (see the row below). It sanctions *choosing a direction*: M3's own shape prose is "shape… identifies components", and Expressive makes shape an adjustable axis, combinable "to generate visual tension or cohesion". The gap was self-inflicted — §3.3 had already moved buttons from `corner-full` to 12px, collapsing the contrast M3's 4px field exists to play against. Two adjacent, correctly-ordered rungs replace three unrelated ones. |
+| 2026-09-06 | **§9.5: text field shape moves from `corner-extra-small` (4px) to `corner-medium` (12px). Recorded deviation from M3.** | An application of §3.4, not a correction to M3 — M3 still says 4px and this project no longer does. Mitigations: 12px is a real M3 token; it is *below* M3 Expressive's own square shape for a 56dp-tall control (16px), so it is the conservative candidate; and it is Nuxt UI's stock `UInput` radius, so the change removes a project override rather than adding one. Measured on `/login`: input, button and card now read 12 / 12 / 16px in both themes. |
+| 2026-09-06 | §3.2: added the verification that **M3 Expressive did not change text-field shape**, with the token evidence. | The rejection rested on a belief that current M3 rounds its fields. It does not. `FilledTextFieldTokens.kt` is at token version **v0_210** — regenerated after this document's v0.192 baseline — and still emits `CornerExtraSmallTop`; `OutlinedTextFieldTokens.kt` still emits `CornerExtraSmall` at 56dp; `Shapes.kt`, the file that *carries* the Expressive additions, still names text fields under `extraSmall`; and no Expressive text-field token file exists. Recorded so the claim is not re-litigated from memory. |
+| 2026-09-06 | §9.5: "outlined everywhere" **reaffirmed**, with a measured reason replacing the stylistic one. | The owner's reference showed *filled* fields. M3's filled field container is `surface-container-highest`, which on this ladder is `bg-emphasized` — and §9.4 already puts the auth card on that exact role. A filled field on the auth card would be **the same tone as the card**, with no rung above it to escape to (§1.4 forbids a sixth surface level). On `bg-elevated` it is 4 tones away, on `bg-accented` 2. The outlined field's `outline` role is ground-independent and holds 3:1 on all five rungs. Also noted: M3's filled field is `corner-extra-small-**top**` — square-bottomed, the least rounded thing in the catalogue — so a rounded filled field is evidence for the shape ruling, not for the fill. |
+| 2026-09-06 | §9.5: `size: 'xl'` extended to `textarea`, `select`, `selectMenu`, `inputMenu`, `inputNumber`, `inputTags`. | The 16px floor is a property of text entry, not of `UInput`. Only `UInput` had it, so the first form to reach for a `USelect` would have silently reintroduced the iOS-zoom defect §9.5 already caught once. `h-14` deliberately not applied to `textarea` or `inputTags`, whose height is their content. |
 | 2026-09-03 | Dark `outline-variant` moved from tone 20 to tone 30; `text-muted` moved to `on-surface-variant` tone 30/80. | At tone 20 the border was invisible on a tone-12 panel. Nuxt UI's default muted text measured 3.9:1 on `bg-muted`, failing the §5 body-text floor. |
 </content>
 </invoke>

@@ -408,6 +408,37 @@ makes conventions portable across projects.
 
 Discoveries and constraints. Newest first.
 
+### 2026-09-06 — Nuxt UI ships a second markdown parser, one import away
+
+`CLAUDE.md` calls the single-parser rule non-negotiable, and until now it lived only in prose.
+Verified: `@nuxt/ui` 4.11.0 ships a TipTap-based editor surface — `UEditor`, `useEditorMenu`,
+`runtime/utils/editor` — and TipTap is in its own dependencies. It is already in this
+repository's tree. **A one-line `<UEditor />` in any component would have introduced a second
+markdown serialiser**, and nothing would have failed: not typecheck, not lint, not the tests.
+The divergence would appear later, on exactly the edge cases GATE-2 exists to pin down.
+
+**Impact:** `scripts/checks/single-parser.ts` fails the build on any import of a competing
+markdown library, and on any use of the Nuxt UI editor surface, outside `packages/markdown` and
+`packages/editor` which own the pipeline. It excludes its own source and tests, following the
+precedent `query-boundaries.ts` set when it flagged itself for the same reason — a check that
+describes forbidden patterns necessarily contains them.
+
+The general point, and the third time this session it has come up: **a rule with no mechanism is
+advice.** It was written in the most emphatic prose available to this repository and was still
+one import away from being broken silently.
+
+### 2026-09-06 — `scanImports()` elides type-only imports
+
+Measured directly: `Bun.Transpiler().scanImports()` returns nothing for
+`import type { Root } from 'mdast'` while reporting a value import in the same file. This settles
+an open question the Phase 2 design left unresolved.
+
+**Impact:** `core-purity.ts` is built on `scanImports()`, so it has a blind spot for type-only
+imports into `packages/core`. That is defensible — a type-only import creates no runtime
+dependency — and the check's separate manifest rule still rejects a declared dependency. But the
+blind spot should be known rather than discovered: a type-only import from a framework would
+pass the purity check today.
+
 ### 2026-09-06 — The auth inputs violated three rows of the project's own text-field table
 
 The owner said the inputs looked wrong. Measured against `docs/DESIGN-SYSTEM.md` §9.5, which this
