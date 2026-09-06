@@ -95,7 +95,18 @@ describe('port interfaces compose only of Result/Secret/primitive types', () => 
       void: async () => ok(undefined),
     };
 
-    const admission = await fake.admit({ reserveMicroUsd: 100, nowIso: '2026-01-01T00:00:00.000Z', expiresAtIso: '2026-01-01T00:15:00.000Z' });
+    const admission = await fake.admit({
+      workspaceId: 'ws1',
+      periodStart: '2026-01-01',
+      subjectType: 'user',
+      subjectId: 'user1',
+      provider: 'anthropic',
+      model: 'claude-3-5-sonnet-20241022',
+      operation: 'chat',
+      reserveMicroUsd: 100,
+      nowIso: '2026-01-01T00:00:00.000Z',
+      expiresAtIso: '2026-01-01T00:15:00.000Z',
+    });
     expect(admission.ok).toBe(true);
     const settled = await fake.settle('r1', { inputTokens: 1, cachedInputTokens: 0, outputTokens: 1 });
     expect(settled.ok).toBe(true);

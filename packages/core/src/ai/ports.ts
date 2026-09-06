@@ -14,10 +14,11 @@
  */
 import { type Result } from '../result';
 import type { Secret } from '../secret';
+import type { SubjectKind } from '../permissions/types';
 import type { ChatUsage } from './pricing';
 import type { CredentialAad } from './aad';
 import type { AdmissionInput, BudgetRefusal, Reservation, VoidReason } from './budget';
-import type { ModelRef } from './ids';
+import type { ModelRef, ProviderId } from './ids';
 import type { StablePrefix } from './prefix';
 import type { StructuredOutputLevel } from './registry';
 
@@ -113,8 +114,29 @@ export interface CredentialCipher {
   open(sealed: SealedCredential, aad: CredentialAad): Promise<Result<Secret<string>, CipherError>>;
 }
 
+export type LedgerOperation = 'chat' | 'embed';
+
+/**
+ * `AdmissionInput` (`budget.ts`) is `reserve()`'s minimal pure-function
+ * input; a real admission additionally names who and what the eventual
+ * `ai_usage_events` row attributes the reservation to (design.md —
+ * "Schema", `ai_usage_events`). `degradationLevel` is deliberately absent
+ * here — it is only known once a call actually degrades a rung (Phase
+ * 14), never at admission time.
+ */
+export interface LedgerAdmissionInput extends AdmissionInput {
+  readonly workspaceId: string;
+  readonly periodStart: string;
+  readonly subjectType: SubjectKind;
+  readonly subjectId: string;
+  readonly provider: ProviderId;
+  readonly model: string;
+  readonly operation: LedgerOperation;
+  readonly prefixHash?: string;
+}
+
 export interface UsageLedger {
-  admit(input: AdmissionInput): Promise<Result<Reservation, BudgetRefusal>>;
+  admit(input: LedgerAdmissionInput): Promise<Result<Reservation, BudgetRefusal>>;
   settle(id: string, usage: ChatUsage): Promise<Result<void, LedgerError>>;
   void(id: string, reason: VoidReason): Promise<Result<void, LedgerError>>;
 }

@@ -14,7 +14,7 @@
  * the hand-written objects exist after `migrate()` runs, so a future drift
  * between this file and the migrations fails the suite, not the tenant.
  */
-import { boolean, customType, integer, jsonb, pgEnum, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
+import { bigint, boolean, customType, date, integer, jsonb, pgEnum, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
 import type { Action, Effect } from '@deep-wiki/core';
 
 /**
@@ -54,6 +54,10 @@ export const aiCredentialValidationErrorCode = pgEnum('ai_credential_validation_
   'network',
   'unknown',
 ]);
+/** Mirrors `@deep-wiki/core`'s `LedgerOperation` (ai-usage-accounting spec). */
+export const aiUsageOperation = pgEnum('ai_usage_operation', ['chat', 'embed']);
+/** Mirrors `@deep-wiki/core`'s `ReservationState` (`ai/budget.ts`). */
+export const aiReservationState = pgEnum('ai_reservation_state', ['reserved', 'settled', 'voided']);
 
 export const plans = pgTable('plans', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -62,6 +66,8 @@ export const plans = pgTable('plans', {
   maxSeats: integer('max_seats').notNull(),
   maxStorageBytes: text('max_storage_bytes').notNull(),
   maxAiTokensMonthly: text('max_ai_tokens_monthly').notNull(),
+  /** `ai_usage_ledger` migration (Phase 11) — enforced by the same admission statement as `maxAiTokensMonthly`. */
+  maxAiCostMicroUsdMonthly: text('max_ai_cost_micro_usd_monthly').notNull().default('0'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
@@ -266,4 +272,53 @@ export const workspaceAiCredentials = pgTable('workspace_ai_credentials', {
   compromisedAt: timestamp('compromised_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * Per-call usage events (ai-usage-accounting spec; design.md — "Cost
+ * enforcement, in the same path that builds the call"). The partial
+ * index over live reservations and the `CHECK (state <> 'settled' OR
+ * actual_micro_usd IS NOT NULL)` constraint are declared only in the
+ * migration SQL (see the module doc comment above).
+ */
+export const aiUsageEvents = pgTable('ai_usage_events', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  workspaceId: uuid('workspace_id')
+    .notNull()
+    .references(() => workspaces.id, { onDelete: 'cascade' }),
+  periodStart: date('period_start').notNull(),
+  subjectType: subjectKind('subject_type').notNull(),
+  subjectId: uuid('subject_id').notNull(),
+  provider: aiProvider('provider').notNull(),
+  model: text('model').notNull(),
+  operation: aiUsageOperation('operation').notNull(),
+  state: aiReservationState('state').notNull().default('reserved'),
+  inputTokens: integer('input_tokens'),
+  outputTokens: integer('output_tokens'),
+  cachedInputTokens: integer('cached_input_tokens'),
+  reservedMicroUsd: bigint('reserved_micro_usd', { mode: 'number' }).notNull(),
+  actualMicroUsd: bigint('actual_micro_usd', { mode: 'number' }),
+  prefixHash: text('prefix_hash'),
+  degradationLevel: aiStructuredOutputLevel('degradation_level'),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  settledAt: timestamp('settled_at', { withTimezone: true }),
+});
+
+/**
+ * Per-(workspace, month) budget aggregate (ai-usage-accounting spec).
+ * This table is a report surface, not the enforcement mechanism itself —
+ * see the migration SQL's module doc comment for why admission
+ * recomputes its live outstanding total straight from `ai_usage_events`.
+ */
+export const workspaceAiBudgetPeriods = pgTable('workspace_ai_budget_periods', {
+  workspaceId: uuid('workspace_id')
+    .notNull()
+    .references(() => workspaces.id, { onDelete: 'cascade' }),
+  periodStart: date('period_start').notNull(),
+  reservedMicroUsd: bigint('reserved_micro_usd', { mode: 'number' }).notNull().default(0),
+  settledMicroUsd: bigint('settled_micro_usd', { mode: 'number' }).notNull().default(0),
+  settledTokens: bigint('settled_tokens', { mode: 'number' }).notNull().default(0),
+  limitMicroUsd: bigint('limit_micro_usd', { mode: 'number' }).notNull(),
+  tokenLimit: bigint('token_limit', { mode: 'number' }),
 });

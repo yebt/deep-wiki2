@@ -38,3 +38,4 @@ export type { CreatedWorkspace, CreateWorkspaceInput } from './workspaces/create
 export { can, createGrantLookup } from './permissions/queries';
 export { insertGrants } from './permissions/grants';
 export type { GrantInput } from './permissions/grants';
+export { createPostgresUsageLedger } from './ai/ledger';

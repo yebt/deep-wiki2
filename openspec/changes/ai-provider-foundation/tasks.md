@@ -138,20 +138,20 @@ further decision gate blocks `sdd-apply`.
 
 ## Phase 10: Credential Save Route
 
-- [ ] 10.1 RED: `apps/api/src/routes/ai-credentials.test.ts` — a syntactically valid, provider-accepted key is persisted; a provider-rejected key returns a validation error and persists no row; `can()` denies the write for a user with no `manage` grant, before any encryption; the response body never contains the submitted key (`expectNoCredential`); a request-supplied `workspace_id` is ignored in favor of the authenticated subject's workspace.
-- [ ] 10.2 GREEN: `apps/api/src/routes/ai-credentials.ts` — resolves authorization through `can()`, runs the cheapest provider probe, maps probe errors to `invalid_key｜insufficient_quota｜network｜unknown` before they reach a logger, seals via `CredentialCipher`, persists.
-- [ ] 10.3 RED: `apps/api/src/routes/ai-credentials.test.ts` — settings-read scenario: fetching a workspace's AI settings never returns plaintext or ciphertext.
-- [ ] 10.4 GREEN: the settings-read handler serializes only `last_four`, `provider`, `validated_at`.
+- [x] 10.1 RED: `apps/api/src/routes/ai-credentials.test.ts` — a syntactically valid, provider-accepted key is persisted; a provider-rejected key returns a validation error and persists no row; `can()` denies the write for a user with no `manage` grant, before any encryption; the response body never contains the submitted key (`expectNoCredential`); a request-supplied `workspace_id` is ignored in favor of the authenticated subject's workspace. — authored against the finished route in one pass (honestly noted, not a fabricated RED — same caveat as Phase 8.1); the workspace is resolved from the URL path, so a body-supplied `workspaceId` is structurally unread rather than checked and discarded.
+- [x] 10.2 GREEN: `apps/api/src/routes/ai-credentials.ts` — resolves authorization through `can()`, runs the cheapest provider probe (`CredentialValidationProbe`, injected — the real Vercel AI SDK-backed implementation lands with Phase 13), maps probe errors to `invalid_key｜insufficient_quota｜network｜unknown` before they reach a logger, seals via `CredentialCipher`, persists through `apps/api/src/adapters/ai/credentials/repository.ts`.
+- [x] 10.3 RED: `apps/api/src/routes/ai-credentials.test.ts` — settings-read scenario: fetching a workspace's AI settings never returns plaintext or ciphertext.
+- [x] 10.4 GREEN: the settings-read handler serializes only `last_four`, `provider`, `validated_at`.
 
 ## Phase 11: Usage Ledger and Plan Quota
 
-- [ ] 11.1 Re-confirm Phase 0.1 (tenancy-and-permissions archived) before writing this migration — it `ALTER`s `plans`.
-- [ ] 11.2 Derive migration number per Phase 0.2; write `NNNN_ai_usage_ledger.sql` creating `ai_usage_events`, `workspace_ai_budget_periods`, and `ALTER TABLE plans ADD COLUMN max_ai_cost_micro_usd_monthly`.
-- [ ] 11.3 RED: `packages/db/src/ai/ledger.test.ts` — the admission `UPDATE` under two concurrent transactions: exactly one succeeds when the second would exceed the limit; an expired reservation (`expires_at < now()`) is excluded from the outstanding sum; `settle` and `void` are idempotent under `WHERE state = 'reserved'`.
-- [ ] 11.4 GREEN: `packages/db/src/ai/ledger.ts` implementing `UsageLedger` with the single conditional `UPDATE` from `design.md`.
-- [ ] 11.5 RED: a workspace with no budget-period row gets one seeded from its plan on first admission.
-- [ ] 11.6 GREEN: implement period-row seeding in `ledger.ts`.
-- [ ] 11.7 Write the tested `down` migration (drop both tables, drop the `plans` column).
+- [x] 11.1 Re-confirm Phase 0.1 (tenancy-and-permissions archived) before writing this migration — it `ALTER`s `plans`. — still archived at `openspec/changes/archive/2026-09-06-tenancy-and-permissions`.
+- [x] 11.2 Derive migration number per Phase 0.2; write `NNNN_ai_usage_ledger.sql` creating `ai_usage_events`, `workspace_ai_budget_periods`, and `ALTER TABLE plans ADD COLUMN max_ai_cost_micro_usd_monthly`. — journal `idx` was 8; used `0009_ai_usage_ledger`.
+- [x] 11.3 RED: `packages/db/src/ai/ledger.test.ts` — the admission `UPDATE` under two concurrent transactions: exactly one succeeds when the second would exceed the limit; an expired reservation (`expires_at < now()`) is excluded from the outstanding sum; `settle` and `void` are idempotent under `WHERE state = 'reserved'`.
+- [x] 11.4 GREEN: `packages/db/src/ai/ledger.ts` implementing `UsageLedger` with the single conditional `UPDATE` from `design.md`. Required extending `UsageLedger.admit`'s parameter (`packages/core/src/ai/ports.ts`'s new `LedgerAdmissionInput`, extending `AdmissionInput` with the attribution `ai_usage_events` needs — workspace/subject/provider/model/operation) — a deviation from Phase 5's original signature, noted below.
+- [x] 11.5 RED: a workspace with no budget-period row gets one seeded from its plan on first admission.
+- [x] 11.6 GREEN: implement period-row seeding in `ledger.ts`.
+- [x] 11.7 Write the tested `down` migration (drop both tables, drop the `plans` column). — also required updating Phase 8's own down-migration test to reverse `0009` before `0008`, since `ai_usage_events.degradation_level` depends on `0008`'s `ai_structured_output_level` type.
 
 ## Phase 12: The Single AI Gateway
 

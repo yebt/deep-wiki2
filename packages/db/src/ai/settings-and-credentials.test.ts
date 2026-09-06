@@ -173,12 +173,19 @@ describe('composite (id, workspace_id) pins a credential to its own workspace', 
 });
 
 const DOWN_MIGRATION_PATH = join(import.meta.dir, '..', '..', 'drizzle', 'down', '0008_ai_settings_and_credentials.down.sql');
+// `ai_usage_events.degradation_level` (0009) references
+// `ai_structured_output_level`, a type 0008 owns — reversing 0008 alone
+// while 0009 is still applied is not a real rollback order, exactly as
+// applying 0009 before 0008 would not be. This down-migration proof
+// reverses in the correct order: the later migration first.
+const LEDGER_DOWN_MIGRATION_PATH = join(import.meta.dir, '..', '..', 'drizzle', 'down', '0009_ai_usage_ledger.down.sql');
 
 describe('down migration', () => {
   test('reversing 0008_ai_settings_and_credentials drops both tables, including ciphertext rows', async () => {
     const { workspaceId } = await seedWorkspace();
     await insertCredential(workspaceId, 'openai');
 
+    await sql.file(LEDGER_DOWN_MIGRATION_PATH);
     await sql.file(DOWN_MIGRATION_PATH);
 
     const rows = await sql<{ table_name: string }[]>`
