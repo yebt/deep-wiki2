@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { deriveBlockId, matchBlocks, mintBlockId } from './match-blocks';
+import { deriveBlockId, MATCH_THRESHOLD, matchBlocks, mintBlockId } from './match-blocks';
 
 // markdown-pipeline: Block Split Assigns The Original ID / Block Merge Keeps
 // One ID And Supersedes / Block Delete Tombstones The ID. design.md "Block
@@ -61,6 +61,57 @@ describe('matchBlocks: split', () => {
 
 describe('matchBlocks: merge', () => {
   test('merging two blocks keeps the higher-scoring id and supersedes the other', () => {
+    // Two distinct previous blocks, each still sharing enough vocabulary
+    // with the single merged next block to individually clear
+    // MATCH_THRESHOLD (0.58 and 0.64) — this is what actually drives both
+    // into the same claimed slot and into the merge branch (`claimantsBySlot`
+    // in match-blocks.ts), unlike a fixture where one side scores 0 and
+    // never reaches that branch at all.
+    const previous = [
+      { id: 'id-0', text: 'Apples and oranges are tasty fruits, sweet and juicy.' },
+      { id: 'id-1', text: 'Bananas are also delicious and pair nicely with warm spices.' },
+    ];
+    const next = [
+      'Apples and oranges are tasty fruits, sweet and juicy, Bananas are also delicious and pair nicely with warm spices.',
+    ];
+
+    const result = matchBlocks(previous, next);
+
+    // Sanity check this fixture genuinely lands both claimants on the same
+    // slot, above threshold — i.e. it actually reaches the merge branch,
+    // not just asserts the branch's expected shape.
+    const claimedSlots = new Set(result.assignments.filter((a) => a.slot !== undefined).map((a) => a.slot));
+    expect(claimedSlots.size).toBe(1);
+
+    // id-1 scores higher (0.64) against the merged slot than id-0 (0.58),
+    // so id-1 survives as the active id and id-0 is superseded by it.
+    const survivor = result.assignments.find((a) => a.id === 'id-1');
+    expect(survivor).toMatchObject({ status: 'active', slot: 0 });
+    expect(survivor!.score).toBeGreaterThan(MATCH_THRESHOLD);
+
+    const absorbed = result.assignments.find((a) => a.id === 'id-0');
+    expect(absorbed).toMatchObject({ status: 'superseded', supersededBy: 'id-1' });
+    expect(absorbed!.score).toBeGreaterThanOrEqual(MATCH_THRESHOLD);
+
+    // The mapping resolves rather than pointing at nothing: `supersededBy`
+    // names an id that is itself present, active, and occupying a real
+    // slot — not a dangling reference to a superseded or tombstoned id.
+    const resolved = result.assignments.find((a) => a.id === absorbed!.supersededBy);
+    expect(resolved).toBeDefined();
+    expect(resolved!.status).toBe('active');
+    expect(resolved!.slot).toBe(0);
+  });
+});
+
+describe('matchBlocks: tombstone despite a shared claimed slot', () => {
+  test('a claimant whose own best score never reaches the threshold is tombstoned, not superseded, even when it shares a slot with a matched block', () => {
+    // Distinct from `matchBlocks: delete` below (an ordinary orphan with no
+    // matching content anywhere): here id-1's best slot happens to coincide
+    // with id-0's, but id-1's own score against it never clears
+    // MATCH_THRESHOLD, so it never becomes a merge claimant at all — the
+    // threshold gate (`if (bestScore[i] < MATCH_THRESHOLD) return;`) routes
+    // it straight to tombstoned instead. This is the fixture the old,
+    // mislabeled "merge" test actually exercised.
     const previous = [
       { id: 'id-0', text: 'Apples and oranges are tasty fruits.' },
       { id: 'id-1', text: 'A completely different sentence about spacecraft engines.' },
@@ -72,8 +123,9 @@ describe('matchBlocks: merge', () => {
     const survivor = result.assignments.find((a) => a.id === 'id-0');
     expect(survivor).toMatchObject({ status: 'active', slot: 0 });
 
-    const absorbed = result.assignments.find((a) => a.id === 'id-1');
-    expect(absorbed?.status).toBe('tombstoned');
+    const orphan = result.assignments.find((a) => a.id === 'id-1');
+    expect(orphan?.status).toBe('tombstoned');
+    expect(orphan?.supersededBy).toBeUndefined();
   });
 });
 
