@@ -66,14 +66,18 @@ export type { UploadAvatarResponse } from './uploads';
 export {
   EditSessionRefusalSchema,
   EditSessionResponseSchema,
+  HeartbeatResponseSchema,
   ReadPageResponseSchema,
   SavePageRequestSchema,
   SavePageResponseSchema,
+  TakeOverResponseSchema,
 } from './pages';
 export type {
   EditSessionRefusal,
   EditSessionResponse,
+  HeartbeatResponse,
   ReadPageResponse,
   SavePageRequest,
   SavePageResponse,
+  TakeOverResponse,
 } from './pages';

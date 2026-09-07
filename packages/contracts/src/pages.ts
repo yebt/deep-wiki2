@@ -20,6 +20,7 @@ export type SavePageResponse = z.infer<typeof SavePageResponseSchema>;
 
 export const ReadPageResponseSchema = z.object({
   html: z.string(),
+  title: z.string(),
 });
 export type ReadPageResponse = z.infer<typeof ReadPageResponseSchema>;
 
@@ -37,6 +38,17 @@ export type EditSessionRefusal = z.infer<typeof EditSessionRefusalSchema>;
 
 export const EditSessionResponseSchema = z.object({
   markdown: z.string(),
+  title: z.string(),
   lock: z.object({ holderUserId: z.string(), acquiredAt: z.string(), heartbeatAt: z.string() }),
 });
 export type EditSessionResponse = z.infer<typeof EditSessionResponseSchema>;
+
+/** `PATCH /pages/:id/lock` (design.md "Heartbeat Keeps The Lock Alive"). */
+export const HeartbeatResponseSchema = z.object({
+  status: z.enum(['ok', 'lost']),
+});
+export type HeartbeatResponse = z.infer<typeof HeartbeatResponseSchema>;
+
+/** `POST /pages/:id/lock/take-over` — same shape as a successful edit-session, since take over always succeeds and hands back the doc to open. */
+export const TakeOverResponseSchema = EditSessionResponseSchema;
+export type TakeOverResponse = EditSessionResponse;

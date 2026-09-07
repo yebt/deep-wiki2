@@ -4,7 +4,17 @@
  * and save are both authorised through `can()`; save is guarded by
  * `content_hash` optimistic concurrency independently of any lock (D16).
  */
-import { acquireLock, can, NotCanonicalError, readPageHtml, readPageMarkdown, savePage, StaleContentError } from '@deep-wiki/db';
+import {
+  acquireLock,
+  can,
+  heartbeatLock,
+  NotCanonicalError,
+  readPageHtml,
+  readPageMarkdown,
+  savePage,
+  StaleContentError,
+  takeOverLock,
+} from '@deep-wiki/db';
 import { probe } from '@deep-wiki/editor';
 import { ErrorResponseSchema, SavePageRequestSchema } from '@deep-wiki/contracts';
 import { Hono } from 'hono';
@@ -27,6 +37,7 @@ async function readJsonBody(request: Request): Promise<Record<string, unknown>> 
 
 interface NodeRow {
   workspace_id: string;
+  title: string;
 }
 
 export function createPageRoutes(deps: PageRouteDeps): Hono<{ Variables: SessionVariables }> {
@@ -37,7 +48,7 @@ export function createPageRoutes(deps: PageRouteDeps): Hono<{ Variables: Session
     const nodeId = c.req.param('id');
     const session = c.get('session');
 
-    const [node] = await deps.sql<NodeRow[]>`SELECT workspace_id FROM nodes WHERE id = ${nodeId}`;
+    const [node] = await deps.sql<NodeRow[]>`SELECT workspace_id, title FROM nodes WHERE id = ${nodeId}`;
     if (!node) return c.json(ErrorResponseSchema.parse({ error: 'not found' }), 404);
 
     const authorized = await can(deps.sql, { subjectType: 'user', subjectId: session.userId, resourceId: nodeId, action: 'read' });
@@ -46,14 +57,14 @@ export function createPageRoutes(deps: PageRouteDeps): Hono<{ Variables: Session
     const content = await readPageHtml(deps.sql, { nodeId, workspaceId: node.workspace_id });
     if (!content) return c.json(ErrorResponseSchema.parse({ error: 'not found' }), 404);
 
-    return c.json({ html: content.renderedHtml });
+    return c.json({ html: content.renderedHtml, title: node.title });
   });
 
   app.put('/pages/:id', auth, async (c) => {
     const nodeId = c.req.param('id');
     const session = c.get('session');
 
-    const [node] = await deps.sql<NodeRow[]>`SELECT workspace_id FROM nodes WHERE id = ${nodeId}`;
+    const [node] = await deps.sql<NodeRow[]>`SELECT workspace_id, title FROM nodes WHERE id = ${nodeId}`;
     if (!node) return c.json(ErrorResponseSchema.parse({ error: 'not found' }), 404);
 
     const authorized = await can(deps.sql, { subjectType: 'user', subjectId: session.userId, resourceId: nodeId, action: 'write' });
@@ -87,7 +98,7 @@ export function createPageRoutes(deps: PageRouteDeps): Hono<{ Variables: Session
     const nodeId = c.req.param('id');
     const session = c.get('session');
 
-    const [node] = await deps.sql<NodeRow[]>`SELECT workspace_id FROM nodes WHERE id = ${nodeId}`;
+    const [node] = await deps.sql<NodeRow[]>`SELECT workspace_id, title FROM nodes WHERE id = ${nodeId}`;
     if (!node) return c.json(ErrorResponseSchema.parse({ error: 'not found' }), 404);
 
     const authorized = await can(deps.sql, { subjectType: 'user', subjectId: session.userId, resourceId: nodeId, action: 'write' });
@@ -131,6 +142,51 @@ export function createPageRoutes(deps: PageRouteDeps): Hono<{ Variables: Session
 
     return c.json({
       markdown: content.markdown,
+      title: node.title,
+      lock: { holderUserId: lock.holderUserId, acquiredAt: lock.acquiredAt.toISOString(), heartbeatAt: lock.heartbeatAt.toISOString() },
+    });
+  });
+
+  // document-modes: Heartbeat Keeps The Lock Alive. Requires `write`, same
+  // as acquiring the lock in the first place; a displaced holder's own
+  // heartbeat reports `lost` rather than silently reviving a lock that is
+  // no longer theirs (design.md "The displaced editor cannot overwrite").
+  app.patch('/pages/:id/lock', auth, async (c) => {
+    const nodeId = c.req.param('id');
+    const session = c.get('session');
+
+    const [node] = await deps.sql<NodeRow[]>`SELECT workspace_id, title FROM nodes WHERE id = ${nodeId}`;
+    if (!node) return c.json(ErrorResponseSchema.parse({ error: 'not found' }), 404);
+
+    const authorized = await can(deps.sql, { subjectType: 'user', subjectId: session.userId, resourceId: nodeId, action: 'write' });
+    if (!authorized) return c.json(ErrorResponseSchema.parse({ error: 'forbidden' }), 403);
+
+    const status = await heartbeatLock(deps.sql, { nodeId, workspaceId: node.workspace_id, userId: session.userId });
+    return c.json({ status });
+  });
+
+  // document-modes: "Take Over" Transfers The Lock. The caller must be
+  // explicit and confirmed client-side before this request is sent — the
+  // route itself always transfers unconditionally, exactly as
+  // `takeOverLock` is documented to.
+  app.post('/pages/:id/lock/take-over', auth, async (c) => {
+    const nodeId = c.req.param('id');
+    const session = c.get('session');
+
+    const [node] = await deps.sql<NodeRow[]>`SELECT workspace_id, title FROM nodes WHERE id = ${nodeId}`;
+    if (!node) return c.json(ErrorResponseSchema.parse({ error: 'not found' }), 404);
+
+    const authorized = await can(deps.sql, { subjectType: 'user', subjectId: session.userId, resourceId: nodeId, action: 'write' });
+    if (!authorized) return c.json(ErrorResponseSchema.parse({ error: 'forbidden' }), 403);
+
+    const content = await readPageMarkdown(deps.sql, { nodeId, workspaceId: node.workspace_id });
+    if (!content) return c.json(ErrorResponseSchema.parse({ error: 'not found' }), 404);
+
+    const lock = await takeOverLock(deps.sql, { nodeId, workspaceId: node.workspace_id, userId: session.userId });
+
+    return c.json({
+      markdown: content.markdown,
+      title: node.title,
       lock: { holderUserId: lock.holderUserId, acquiredAt: lock.acquiredAt.toISOString(), heartbeatAt: lock.heartbeatAt.toISOString() },
     });
   });

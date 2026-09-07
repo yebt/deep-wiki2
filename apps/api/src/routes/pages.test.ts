@@ -104,8 +104,9 @@ describe('GET /pages/:id', () => {
     const res = await app.request(`/pages/${fixture.pageId}`, { headers: { cookie: fixture.readerCookie } });
 
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { html: string };
+    const body = (await res.json()) as { html: string; title: string };
     expect(body.html).toContain('Hello');
+    expect(body.title).toBe('A Page');
   });
 });
 
@@ -219,5 +220,92 @@ describe('GET /pages/:id/edit-session', () => {
     const body = (await res.json()) as { reason: string; offeredExits: string[] };
     expect(body.reason).toBe('locked');
     expect(body.offeredExits).toEqual(expect.arrayContaining(['read_only', 'take_over']));
+  });
+});
+
+// document-modes: Heartbeat Keeps The Lock Alive; "Take Over" Transfers The Lock.
+describe('PATCH /pages/:id/lock', () => {
+  test('a heartbeat from the current holder extends the lock and returns ok', async () => {
+    const fixture = await buildFixture();
+    await savePage(sql, { nodeId: fixture.pageId, workspaceId: fixture.workspaceId, markdown: '# Hello\n', expectedContentHash: null });
+    const app = buildApp();
+    await app.request(`/pages/${fixture.pageId}/edit-session`, { headers: { cookie: fixture.writerCookie } });
+
+    const res = await app.request(`/pages/${fixture.pageId}/lock`, { method: 'PATCH', headers: { cookie: fixture.writerCookie } });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { status: string };
+    expect(body.status).toBe('ok');
+  });
+
+  test('a heartbeat from a displaced holder reports lost', async () => {
+    const fixture = await buildFixture();
+    await savePage(sql, { nodeId: fixture.pageId, workspaceId: fixture.workspaceId, markdown: '# Hello\n', expectedContentHash: null });
+    const app = buildApp();
+    await app.request(`/pages/${fixture.pageId}/edit-session`, { headers: { cookie: fixture.writerCookie } });
+
+    const [secondWriter] = await sql<{ id: string }[]>`
+      INSERT INTO users (email, password_hash, display_name) VALUES (${`writer3-${crypto.randomUUID()}@example.com`}, 'hash', 'Writer3') RETURNING id
+    `;
+    await sql`
+      INSERT INTO permissions (workspace_id, subject_type, subject_id, resource_id, action, effect)
+      VALUES (${fixture.workspaceId}, 'user', ${secondWriter!.id}, ${fixture.pageId}, 'write', 'allow')
+    `;
+    const secondCookie = await cookieFor(secondWriter!.id);
+    await app.request(`/pages/${fixture.pageId}/lock/take-over`, { method: 'POST', headers: { cookie: secondCookie } });
+
+    const res = await app.request(`/pages/${fixture.pageId}/lock`, { method: 'PATCH', headers: { cookie: fixture.writerCookie } });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { status: string };
+    expect(body.status).toBe('lost');
+  });
+
+  test('a subject with no write grant cannot heartbeat', async () => {
+    const fixture = await buildFixture();
+    await savePage(sql, { nodeId: fixture.pageId, workspaceId: fixture.workspaceId, markdown: '# Hello\n', expectedContentHash: null });
+    const app = buildApp();
+
+    const res = await app.request(`/pages/${fixture.pageId}/lock`, { method: 'PATCH', headers: { cookie: fixture.readerCookie } });
+
+    expect(res.status).toBe(403);
+  });
+});
+
+describe('POST /pages/:id/lock/take-over', () => {
+  test('transfers the lock to the caller and returns the markdown', async () => {
+    const fixture = await buildFixture();
+    await savePage(sql, { nodeId: fixture.pageId, workspaceId: fixture.workspaceId, markdown: '# Hello\n', expectedContentHash: null });
+    const app = buildApp();
+    await app.request(`/pages/${fixture.pageId}/edit-session`, { headers: { cookie: fixture.writerCookie } });
+
+    const [secondWriter] = await sql<{ id: string }[]>`
+      INSERT INTO users (email, password_hash, display_name) VALUES (${`writer4-${crypto.randomUUID()}@example.com`}, 'hash', 'Writer4') RETURNING id
+    `;
+    await sql`
+      INSERT INTO permissions (workspace_id, subject_type, subject_id, resource_id, action, effect)
+      VALUES (${fixture.workspaceId}, 'user', ${secondWriter!.id}, ${fixture.pageId}, 'write', 'allow')
+    `;
+    const secondCookie = await cookieFor(secondWriter!.id);
+
+    const res = await app.request(`/pages/${fixture.pageId}/lock/take-over`, { method: 'POST', headers: { cookie: secondCookie } });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { markdown: string; lock: { holderUserId: string } };
+    expect(body.markdown).toBe('# Hello\n');
+    expect(body.lock.holderUserId).toBe(secondWriter!.id);
+
+    const [lockRow] = await sql`SELECT holder_user_id FROM page_locks WHERE node_id = ${fixture.pageId}`;
+    expect(lockRow!.holder_user_id).toBe(secondWriter!.id);
+  });
+
+  test('a subject with no write grant cannot take over the lock', async () => {
+    const fixture = await buildFixture();
+    await savePage(sql, { nodeId: fixture.pageId, workspaceId: fixture.workspaceId, markdown: '# Hello\n', expectedContentHash: null });
+    const app = buildApp();
+
+    const res = await app.request(`/pages/${fixture.pageId}/lock/take-over`, { method: 'POST', headers: { cookie: fixture.readerCookie } });
+
+    expect(res.status).toBe(403);
   });
 });
