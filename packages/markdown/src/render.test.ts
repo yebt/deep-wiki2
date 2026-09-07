@@ -54,6 +54,66 @@ test('a data: image target is stripped by the URL-scheme allowlist', () => {
   expect(html).not.toContain('data:text/html');
 });
 
+// markdown-pipeline / page-content: render() must reuse the shared pipeline
+// (GFM, wiki-links, tags), not a bare remark-parse instance — otherwise
+// these constructs render as their raw source text rather than the
+// structure the rest of the system already models them as.
+
+test('a GFM table renders as a real HTML table, not raw pipe text', () => {
+  const markdown = '| Name | Age |\n| :--- | --: |\n| A    |   1 |\n| Bee  |  22 |\n';
+
+  const html = render(markdown);
+  expect(html).toContain('<table>');
+  expect(html).toContain('<td');
+  expect(html).toContain('Bee');
+  expect(html).not.toContain('| Name | Age |');
+});
+
+test('a footnote reference and definition render as a linked footnotes section', () => {
+  const markdown = 'A claim needing a citation.[^1]\n\n[^1]: The citation itself.\n';
+
+  const html = render(markdown);
+  // The reference becomes a linked back-reference, not literal "[^1]" text,
+  // and the definition moves into a dedicated, linked footnotes section —
+  // the reference/definition relationship a bare parser drops entirely.
+  expect(html).not.toContain('[^1]');
+  // The reference's own id and the definition's own href/id must pair up —
+  // proving the link, not just that both ids happen to exist somewhere.
+  expect(html).toContain('id="user-content-fnref-1"');
+  expect(html).toContain('href="#user-content-fn-1"');
+  expect(html).toContain('id="user-content-fn-1"');
+  expect(html).toContain('href="#user-content-fnref-1"');
+  expect(html).toContain('class="footnotes"');
+  expect(html).toContain('The citation itself.');
+});
+
+test('a wiki-link renders its own text as a distinct, non-clickable span, not literal brackets', () => {
+  const markdown = 'See [[Getting Started]] and [[Getting Started|the guide]].\n';
+
+  const html = render(markdown);
+  expect(html).not.toContain('[[');
+  expect(html).toContain('<span class="wiki-link">Getting Started</span>');
+  expect(html).toContain('<span class="wiki-link">the guide</span>');
+  // Not clickable yet — deliberately out of scope this batch (SPECS §14's
+  // per-viewer/per-page-cache tension stays unresolved).
+  expect(html).not.toContain('<a ');
+});
+
+test('a tag renders as a distinct span, not literal hash text folded into the paragraph', () => {
+  const markdown = 'This page is #important reading.\n';
+
+  const html = render(markdown);
+  expect(html).toContain('<span class="tag">#important</span>');
+});
+
+test('a persisted block anchor does not leak its raw id into the rendered text', () => {
+  const markdown = 'A paragraph with a persisted anchor. ^abc123\n';
+
+  const html = render(markdown);
+  expect(html).not.toContain('abc123');
+  expect(html).toContain('A paragraph with a persisted anchor.');
+});
+
 // knowledge-graph: Unresolved-Link Rendering Does Not Disclose Existence.
 // `render()` takes only a markdown string — it has no channel to receive a
 // wiki-link's resolution status (that lives in packages/db, resolved per
