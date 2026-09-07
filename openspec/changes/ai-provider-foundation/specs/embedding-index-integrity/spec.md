@@ -12,16 +12,21 @@ implicit side effect.
 
 ### Requirement: Active Pair Recorded on the Workspace
 
-`workspace_ai_settings` MUST record the workspace's active `(embedding_model,
-dimensions)` pair. This pair MUST be readable by any future write or read path without
-a separate lookup.
+The workspace's active `(embedding_model, dimensions)` pair MUST be recorded as a
+`workspace_embedding_indexes` generation row marked active for that workspace, not as
+columns on `workspace_ai_settings`. A generation row, not settings columns, is what the
+composite chunk foreign key can target: pinning the pair to `workspace_ai_settings`
+columns would force `ON UPDATE RESTRICT` on that settings row, making a model switch
+impossible while any chunk exists (design.md — "Why the embedding pair is a table and
+not two columns on settings"; D14). The active pair MUST be readable by any future
+write or read path from this row, without an additional settings lookup.
 
 #### Scenario: Active pair is set on first embedding configuration
 
 - GIVEN a workspace configuring `embedding_provider` for the first time
 - WHEN the model is selected
-- THEN `workspace_ai_settings` records that model and its dimension as the workspace's
-  active pair
+- THEN a `workspace_embedding_indexes` row is created for that model and its dimension,
+  and marked `active` as the workspace's active generation
 
 ### Requirement: Per-Row Model and Dimension Recording
 
