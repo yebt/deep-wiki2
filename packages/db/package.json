@@ -13,7 +13,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "migrate": "bun run migrate.ts",
     "seed": "bun run seed.ts",
-    "verify:paths": "bun run verify-paths.ts"
+    "verify:paths": "bun run verify-paths.ts",
+    "ai:reindex": "bun run ai-reindex.ts"
   },
   "dependencies": {
     "@deep-wiki/core": "workspace:*",

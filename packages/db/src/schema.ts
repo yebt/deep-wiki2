@@ -76,6 +76,8 @@ export const aiUsageOperation = pgEnum('ai_usage_operation', ['chat', 'embed']);
 export const aiReservationState = pgEnum('ai_reservation_state', ['reserved', 'settled', 'voided']);
 /** A generation's lifecycle (embedding-index-integrity spec — "Reindexing Is an Explicit Tracked Job"). */
 export const embeddingIndexState = pgEnum('embedding_index_state', ['building', 'active', 'retired']);
+/** A reindex job's own lifecycle (embedding-index-integrity spec — "Reindexing Is an Explicit Tracked Job"). */
+export const embeddingReindexJobState = pgEnum('embedding_reindex_job_state', ['queued', 'running', 'completed', 'failed']);
 
 export const plans = pgTable('plans', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -393,5 +395,27 @@ export const chunks = pgTable('chunks', {
   embedding: vector1536('embedding').notNull(),
   embeddingModel: text('embedding_model').notNull(),
   dimensions: integer('dimensions').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * A reindex is a second generation row to fill, never a destructive
+ * setting change (design.md — "Index generations are rows"). The
+ * partial `UNIQUE (workspace_id) WHERE state IN ('queued', 'running')`
+ * index is declared only in the migration SQL.
+ */
+export const embeddingReindexJobs = pgTable('embedding_reindex_jobs', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  workspaceId: uuid('workspace_id')
+    .notNull()
+    .references(() => workspaces.id, { onDelete: 'cascade' }),
+  fromModel: text('from_model'),
+  toModel: text('to_model').notNull(),
+  state: embeddingReindexJobState('state').notNull().default('queued'),
+  totalChunks: integer('total_chunks').notNull().default(0),
+  completedChunks: integer('completed_chunks').notNull().default(0),
+  startedAt: timestamp('started_at', { withTimezone: true }),
+  finishedAt: timestamp('finished_at', { withTimezone: true }),
+  errorCode: text('error_code'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
