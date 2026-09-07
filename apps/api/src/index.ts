@@ -13,6 +13,7 @@ import { createLinkRoutes } from './routes/links';
 import { createMentionRoutes } from './routes/mentions';
 import { createPageRoutes } from './routes/pages';
 import { createTagRoutes } from './routes/tags';
+import { createTreeRoutes } from './routes/tree';
 import { createUploadRoutes } from './routes/uploads';
 
 /**
@@ -150,6 +151,7 @@ if (import.meta.main) {
   app.route('/', createLinkRoutes({ sql, sessionIdleTimeoutMinutes: config.SESSION_IDLE_TIMEOUT_MINUTES }));
   app.route('/', createTagRoutes({ sql, sessionIdleTimeoutMinutes: config.SESSION_IDLE_TIMEOUT_MINUTES }));
   app.route('/', createMentionRoutes({ sql, sessionIdleTimeoutMinutes: config.SESSION_IDLE_TIMEOUT_MINUTES }));
+  app.route('/', createTreeRoutes({ sql, sessionIdleTimeoutMinutes: config.SESSION_IDLE_TIMEOUT_MINUTES }));
 
   console.log(`apps/api: listening on port ${config.PORT}`);
   Bun.serve({ port: config.PORT, fetch: app.fetch });

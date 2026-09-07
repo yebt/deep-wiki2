@@ -59,3 +59,7 @@ export type {
   TakeOverLockInput,
   TakeOverLockResult,
 } from './locks/page-lock';
+export { CrossWorkspaceMoveError, CyclicMoveError, IllegalParentTypeError, moveNode } from './nodes/move';
+export type { MoveNodeInput } from './nodes/move';
+export { reorderNode } from './nodes/reorder';
+export type { ReorderNodeInput } from './nodes/reorder';
