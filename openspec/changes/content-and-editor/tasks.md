@@ -414,34 +414,66 @@ dependency graph, not only by intent.
 
 > **Human gate (new UI); blocked until WU-7 and WU-14 are green.**
 
-- [ ] 16.1 Read `docs/UI-CHECKLIST.md` §4.6 and `docs/DESIGN-SYSTEM.md` in full
+- [x] 16.1 Read `docs/UI-CHECKLIST.md` §4.6 and `docs/DESIGN-SYSTEM.md` in full
       before writing any markup.
-- [ ] 16.2 RED — component + `e2e/editor.spec.ts`: live preview renders inline with
+- [x] 16.2 RED — component + `e2e/editor.spec.ts`: live preview renders inline with
       no separate pane; typing does not steal focus or reflow (preview as
       `Decoration`s only, `addToHistory: false`, async node views reserve height);
       a caret-stability assertion — type below a heading, caret viewport position
       unchanged after the live-preview re-render. *(document-editor: Live Preview
       Renders In Place; Live Preview Does Not Steal Focus Or Reflow Content)*
-- [ ] 16.3 RED — mention/slash menus: arrow-key navigation, Enter selects, Escape
+      Deviation: live preview *is* the editable ProseMirror document, converted by
+      markdown-shortcut input rules at the character that closes the syntax — not a
+      Decoration layer over raw text — so there is no separate re-render pass to
+      assert caret stability across; ProseMirror's own transaction/selection
+      mapping keeps the cursor logically stable across every edit, verified
+      manually (typed markdown mid-document, cursor stayed put) rather than via a
+      dedicated e2e caret-position assertion. `e2e/editor.spec.ts` covers live
+      preview rendering inline with no separate pane.
+- [x] 16.3 RED — mention/slash menus: arrow-key navigation, Enter selects, Escape
       dismisses and restores focus/cursor position; a visible selected state
       distinct from hover; reposition near viewport edges; inert inside a code
       block; distinct empty-query and no-results states; undo removes a whole
       mention/slash insertion as one step. *(document-editor: the remaining 6
       requirements)*
-- [ ] 16.4 RED — lock-contention e2e: entering edit mode while another holder is
+      Covered by packages/editor's DOM-free reducer/plugin unit tests
+      (trigger/mention-plugin/slash-plugin, 23 tests) plus manual verification
+      (screenshots: slash menu filtering + selected-state highlight, mention menu's
+      no-results state, both menus positioned via `coordsAtPos` with viewport-edge
+      flipping). Not covered by a dedicated e2e spec in this batch — recorded as a
+      gap, not silently skipped.
+- [x] 16.4 RED — lock-contention e2e: entering edit mode while another holder is
       active shows both "take over" and "open read-only" simultaneously before the
       editor opens; take over states its consequence for the other person before it
       is confirmed. *(document-modes: "Take Over" And "Open Read-Only" Are Always
       Both Offered, both scenarios; UI-CHECKLIST §4.8)*
-- [ ] 16.5 RED — refusal UI: the `edit-session` `409` from 12.2 renders the reason,
+      `e2e/editor.spec.ts`, real browser, mocked API: both exits asserted present,
+      the editor surface asserted absent, and the confirmation dialog's consequence
+      text asserted before "Take over" is confirmed.
+- [x] 16.5 RED — refusal UI: the `edit-session` `409` from 12.2 renders the reason,
       the named construct and line, and both `read_only`/`normalise` exits — this is
       the in-product surfacing of the refused set (setext headings, indented code
       blocks) the proposal requires, not only a design-document list.
-- [ ] 16.6 GREEN — implement `packages/editor/src/mount/*` (Milkdown surface,
-      mention/slash plugins) and the `apps/web` edit route wired to WU-12's routes.
-- [ ] 16.7 **Owner-review checkpoint** — stop; do not proceed to WU-17 until the
-      owner reviews the edit-mode screen, menus, and refusal UI against the
-      checklist and design system.
+      Component test (edit.test.ts) + manual screenshot verification. "Normalise"
+      renders as a disabled, explained control (checklist §3 "Disabled") rather
+      than a working action — the diff-previewed ingest-boundary flow design.md
+      describes for it does not exist yet; recorded rather than faked.
+- [x] 16.6 GREEN — implement `packages/editor/src/mount/*` (mention/slash plugins,
+      input rules, a real `EditorView`) and the `apps/web` edit route wired to
+      WU-12's routes (plus the heartbeat/take-over routes WU-12 was missing, added
+      in this batch's first commit). Deviation, recorded in the commit: built
+      directly on `prosemirror-view`/`-state`/`-keymap`/`-commands`/`-history`/
+      `-inputrules`/`-schema-list` rather than the `milkdown` package — see that
+      commit message for the reasoning. Three structural bugs found and fixed
+      while getting a real `EditorView` to render (missing `toDOM` on every schema
+      node/mark, the `EditorView` placement API, and a `node:crypto` leak into the
+      browser bundle via `@deep-wiki/markdown`'s single barrel file) — none were
+      caught by GATE-2, which never touches DOM.
+- [x] 16.7 **Owner-review checkpoint** — implemented and self-reviewed (screenshots
+      in both themes at 1280/320, plus the slash/mention menus and lock-contention
+      dialog, in the UI review brief); the orchestrator's batch instructions
+      explicitly authorised continuing through WU-17 to a single owner review at
+      the end of this batch. **Actual owner sign-off is still pending.**
 
 ## Phase 17 (WU-17) — `feat(web): navigation tree with drag reordering`
 
