@@ -79,6 +79,16 @@ jobs:
           bun run -F @deep-wiki/web build
           bun run -F @deep-wiki/api typecheck
 
+      # Layer 3 of "Read mode never reaches the ProseMirror bundle"
+      # (design.md; document-modes: "ProseMirror Bundle Isolation Is
+      # Verified By Build Output"). Must run AFTER the build step above —
+      # it reads that build's actual output — and is named separately so a
+      # failure here identifies exactly this gate, not a lint or test
+      # failure (design D10, same reasoning as the single-job/named-steps
+      # layout this workflow already uses).
+      - name: bundle isolation (build output)
+        run: bun run scripts/checks/bundle-isolation-build.ts apps/web
+
   e2e:
     name: e2e
     needs: verify

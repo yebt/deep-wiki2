@@ -357,6 +357,21 @@ export default defineAppConfig({
       },
     },
 
+    // `UMain`'s own base is `min-h-[calc(100vh-var(--ui-header-height))]`
+    // — viewport minus the header, with no allowance for a `UFooter`
+    // below it. Any screen pairing the two overflows by exactly the
+    // footer's height and carries permanent vertical scroll — this is the
+    // defect `AuthShell` first patched per-instance (docs/UI-CHECKLIST.md
+    // review log, 2026-09-04). Fixed here, centrally, so `AppShell` and
+    // every screen built on it never have to restate it: `flex-1` takes
+    // whatever space is actually left instead of a calculation that does
+    // not know the footer exists, and `min-h-0` lets that flex child
+    // shrink and scroll its own content instead of forcing the whole
+    // column taller than the viewport.
+    main: {
+      base: 'flex min-h-0 flex-1 flex-col',
+    },
+
     footer: {
       slots: {
         root: 'bg-elevated border-t border-default',

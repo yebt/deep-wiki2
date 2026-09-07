@@ -12,7 +12,7 @@
     "lint": "bun run --filter '*' lint && eslint .",
     "typecheck": "bun run --filter '*' typecheck && tsc --noEmit -p tsconfig.json",
     "check": "bun run scripts/checks/workspace-shape.ts && bun run scripts/checks/test-coverage.ts && bun run scripts/checks/core-purity.ts && bun run scripts/checks/env-example.ts && bun run scripts/checks/compose.ts && bun run scripts/checks/query-boundaries.ts && bun run scripts/checks/single-parser.ts && bun run scripts/checks/bundle-isolation.ts",
-    "check:bundle": "bun run scripts/checks/bundle-isolation.ts",
+    "check:bundle": "bun run scripts/checks/bundle-isolation.ts && bun run scripts/checks/bundle-isolation-build.ts apps/web",
     "db:migrate": "bun run --filter @deep-wiki/db migrate",
     "db:seed": "bun run --filter @deep-wiki/db seed",
     "compose:smoke": "bun run scripts/checks/compose-smoke.ts",
