@@ -108,97 +108,106 @@ useSeoMeta({ title: () => (session.value?.title ? `Editing ${session.value.title
       </UButton>
     </template>
 
+    <!-- `max-w-measure` on the column, not on the ready branch alone:
+         before this, the denied, missing, locked and refused states
+         rendered 1216px wide while the editor beside them rendered 659px,
+         so the screen changed column width with its state. -->
     <UContainer class="py-10 sm:py-16">
-      <div v-if="status === 'idle' || status === 'loading'" data-testid="edit-skeleton" class="max-w-measure" aria-hidden="true">
-        <USkeleton class="h-9 w-2/3" />
-        <USkeleton class="mt-6 h-48 w-full" />
-      </div>
-
-      <div v-else-if="status === 'forbidden'" role="status" class="flex items-start gap-3 rounded-lg bg-elevated p-6">
-        <UIcon name="i-lucide-lock" class="size-5 shrink-0 text-muted" aria-hidden="true" />
-        <div>
-          <h1 class="text-headline-small text-highlighted">You don't have access to edit this page</h1>
-          <p class="text-body-medium text-muted mt-2">Ask a workspace admin for write access, or open it read-only.</p>
-          <UButton class="mt-4" variant="outline" :to="`/pages/${nodeId}`">Open read-only</UButton>
+      <div class="max-w-measure">
+        <div v-if="status === 'idle' || status === 'loading'" data-testid="edit-skeleton" aria-hidden="true">
+          <USkeleton class="h-9 w-2/3" />
+          <USkeleton class="mt-6 h-48 w-full" />
         </div>
-      </div>
 
-      <div v-else-if="status === 'not-found'" role="status" class="flex items-start gap-3 rounded-lg bg-elevated p-6">
-        <UIcon name="i-lucide-file-question" class="size-5 shrink-0 text-muted" aria-hidden="true" />
-        <div>
-          <h1 class="text-headline-small text-highlighted">This page does not exist</h1>
-          <p class="text-body-medium text-muted mt-2">It may have been moved or deleted.</p>
-        </div>
-      </div>
+        <PageNotice v-else-if="status === 'forbidden'" icon="i-lucide-lock" heading="You don't have access to edit this page">
+          Ask a workspace admin for write access, or open it read-only.
+          <template #actions>
+            <UButton variant="outline" icon="i-lucide-eye" :to="`/pages/${nodeId}`">Open read-only</UButton>
+          </template>
+        </PageNotice>
 
-      <!-- document-modes: "Take Over" And "Open Read-Only" Are Always Both
-           Offered — both actions render simultaneously, never one at a
-           time, and never a single ambiguous lock icon. -->
-      <div v-else-if="status === 'locked'" role="alert" class="flex items-start gap-3 rounded-lg bg-elevated p-6">
-        <UIcon name="i-lucide-users" class="size-5 shrink-0 text-muted" aria-hidden="true" />
-        <div class="min-w-0">
-          <h1 class="text-headline-small text-highlighted">Someone else is editing this page</h1>
-          <p class="text-body-medium text-muted mt-2">
-            Locked since {{ refusal?.holder ? new Date(refusal.holder.acquiredAt).toLocaleTimeString() : 'a moment ago' }}. Taking over will
-            immediately end their editing session — their unsaved changes, if any, will be lost.
-          </p>
-          <div class="mt-4 flex flex-wrap gap-3">
+        <PageNotice v-else-if="status === 'not-found'" icon="i-lucide-file-question" heading="This page does not exist">
+          It may have been moved or deleted.
+        </PageNotice>
+
+        <!-- document-modes: "Take Over" And "Open Read-Only" Are Always Both
+             Offered — both actions render simultaneously, never one at a
+             time, and never a single ambiguous lock icon. -->
+        <PageNotice v-else-if="status === 'locked'" icon="i-lucide-users" heading="Someone else is editing this page" role="alert">
+          Locked since {{ refusal?.holder ? new Date(refusal.holder.acquiredAt).toLocaleTimeString() : 'a moment ago' }}. Taking over will
+          immediately end their editing session — their unsaved changes, if any, will be lost.
+          <template #actions>
             <UButton variant="outline" icon="i-lucide-eye" :to="`/pages/${nodeId}`">Open read-only</UButton>
             <UButton color="error" variant="solid" icon="i-lucide-log-in" @click="takeOverConfirmOpen = true">Take over editing</UButton>
-          </div>
-        </div>
-      </div>
+          </template>
+        </PageNotice>
 
-      <!-- document-modes / markdown-round-trip: the refused-document
-           surface — reason, construct, line, and both exits. -->
-      <div v-else-if="status === 'refused'" role="alert" class="flex items-start gap-3 rounded-lg bg-error-container p-6">
-        <UIcon name="i-lucide-circle-alert" class="size-5 shrink-0 text-on-error-container" aria-hidden="true" />
-        <div class="min-w-0">
-          <h1 class="text-headline-small text-on-error-container">This document can't be opened for editing yet</h1>
-          <p class="text-body-medium text-on-error-container mt-2">
-            <span v-if="refusal?.construct">Found <strong>{{ refusal.construct }}</strong></span>
-            <span v-if="refusal?.line"> on line {{ refusal.line }}</span>
-            <span v-if="refusal?.construct || refusal?.line">, which this editor does not support yet.</span>
-            <span v-else>This document is not in a form the editor can safely round-trip.</span>
-          </p>
-          <div class="mt-4 flex flex-wrap gap-3">
-            <UButton variant="outline" color="error" icon="i-lucide-eye" :to="`/pages/${nodeId}`">Open read-only</UButton>
-            <UTooltip text="Normalising rewrites the document to its canonical spelling with a diff preview before saving — that ingest flow is not built yet.">
-              <UButton disabled color="error" variant="subtle" icon="i-lucide-wand-2">Normalise this document</UButton>
-            </UTooltip>
-          </div>
-        </div>
-      </div>
-
-      <div v-else-if="status === 'network-error'" role="alert" class="flex items-start gap-3 rounded-lg bg-error-container p-6">
-        <UIcon name="i-lucide-circle-alert" class="size-5 shrink-0 text-on-error-container" aria-hidden="true" />
-        <div>
-          <h1 class="text-headline-small text-on-error-container">Couldn't open this page for editing</h1>
-          <p class="text-body-medium text-on-error-container mt-2">{{ message }}</p>
-          <UButton class="mt-4" variant="outline" color="error" icon="i-lucide-refresh-cw" @click="load">Retry</UButton>
-        </div>
-      </div>
-
-      <div v-else class="max-w-measure">
-        <PageHeading :heading="session?.title ?? ''" />
-        <p v-if="saveStatus === 'stale'" role="alert" class="mb-4 rounded-md bg-error-container px-3 py-2 text-body-small text-on-error-container">
-          {{ saveMessage }}
-        </p>
-        <p
-          v-else-if="saveStatus === 'success'"
-          role="status"
-          aria-live="polite"
-          class="mb-4 rounded-md bg-success-container px-3 py-2 text-body-small text-on-success-container"
+        <!-- document-modes / markdown-round-trip: the refused-document
+             surface — reason, construct, line, and both exits. -->
+        <PageNotice
+          v-else-if="status === 'refused'"
+          icon="i-lucide-circle-alert"
+          heading="This document can't be opened for editing yet"
+          tone="error"
+          role="alert"
         >
-          Saved.
-        </p>
-        <EditorSurface
-          v-if="session"
-          :markdown="session.markdown"
-          :workspace-id="session.workspaceId"
-          :page-id="nodeId"
-          @update="onEditorUpdate"
-        />
+          <span v-if="refusal?.construct">Found <strong>{{ refusal.construct }}</strong></span>
+          <span v-if="refusal?.line"> on line {{ refusal.line }}</span>
+          <span v-if="refusal?.construct || refusal?.line">, which this editor does not support yet.</span>
+          <span v-else>This document is not in a form the editor can safely round-trip.</span>
+          <template #actions>
+            <UButton variant="outline" color="error" icon="i-lucide-eye" :to="`/pages/${nodeId}`">Open read-only</UButton>
+            <!-- `aria-disabled`, not `disabled`. The attribute takes the
+                 control out of the tab order, which put the one sentence
+                 explaining why this exit is not available yet behind a
+                 hover a keyboard user cannot perform — measured on
+                 2026-09-07: the tooltip fired on mouse hover and the
+                 button could not be focused at all. §3 asks for the reason
+                 on hover *and* focus; §5 asks that every control be
+                 reachable by keyboard. It stays focusable, announces
+                 itself unavailable, and does nothing when activated. -->
+            <UTooltip text="Normalising rewrites the document to its canonical spelling with a diff preview before saving — that ingest flow is not built yet.">
+              <UButton aria-disabled="true" color="error" variant="subtle" icon="i-lucide-wand-2" @click.prevent>
+                Normalise this document
+              </UButton>
+            </UTooltip>
+          </template>
+        </PageNotice>
+
+        <PageNotice
+          v-else-if="status === 'network-error'"
+          icon="i-lucide-circle-alert"
+          heading="Couldn't open this page for editing"
+          tone="error"
+          role="alert"
+        >
+          {{ message }}
+          <template #actions>
+            <UButton variant="outline" color="error" icon="i-lucide-refresh-cw" @click="load">Retry</UButton>
+          </template>
+        </PageNotice>
+
+        <template v-else>
+          <PageHeading :heading="session?.title ?? ''" />
+          <p v-if="saveStatus === 'stale'" role="alert" class="mb-4 rounded-md bg-error-container px-3 py-2 text-body-small text-on-error-container">
+            {{ saveMessage }}
+          </p>
+          <p
+            v-else-if="saveStatus === 'success'"
+            role="status"
+            aria-live="polite"
+            class="mb-4 rounded-md bg-success-container px-3 py-2 text-body-small text-on-success-container"
+          >
+            Saved.
+          </p>
+          <EditorSurface
+            v-if="session"
+            :markdown="session.markdown"
+            :workspace-id="session.workspaceId"
+            :page-id="nodeId"
+            @update="onEditorUpdate"
+          />
+        </template>
       </div>
     </UContainer>
 

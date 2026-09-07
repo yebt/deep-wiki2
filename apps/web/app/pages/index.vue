@@ -46,7 +46,7 @@ const healthTone = computed(() => {
     case 'loading':
       return 'bg-secondary-container text-on-secondary-container';
     default:
-      return 'bg-emphasized text-muted';
+      return 'bg-elevated text-muted';
   }
 });
 
@@ -84,47 +84,34 @@ const proofs = [
 </script>
 
 <template>
-  <div>
-    <!-- `:toggle="false"`: UHeader renders a hamburger that opens a mobile
-         menu built from its `#body` slot. This page has no navigation, so
-         the default toggle would be a control that looks clickable and
-         does nothing (docs/UI-CHECKLIST.md §6, observable breakage). -->
-    <UHeader :toggle="false">
-      <template #left>
-        <span class="flex items-center gap-2">
-          <UIcon name="i-lucide-library-big" class="size-5 text-primary" aria-hidden="true" />
-          <span class="text-title-large text-highlighted">deep-wiki</span>
-        </span>
-      </template>
-      <template #right>
-        <!-- The only icon-only control on the page. docs/UI-CHECKLIST.md §4.3
-             requires both an accessible name and a tooltip, because the same
-             glyph is ambiguous across icon packs. -->
-        <UTooltip text="Toggle color theme">
-          <UColorModeButton aria-label="Toggle color theme" />
-        </UTooltip>
-      </template>
-    </UHeader>
+  <AppShell>
+    <!-- The chrome is `AppShell`'s. This page carried its own copy until
+         2026-09-07, and that copy was the one whose footer read "deep-wiki
+         bootstrap · Phase 0" while the other two said "deep-wiki"
+         (docs/UI-CHECKLIST.md §4.1). -->
+    <UContainer class="py-10 sm:py-16">
+      <div class="max-w-measure">
+        <!-- The eyebrow is "Phase 0" and not "Phase 0 · Bootstrap": an
+             eyebrow must add context the heading does not, and "Bootstrap"
+             is already the first word of the `h1` under it (§4.4). The
+             block, its 12px h1 → description gap and its 32px to the
+             content below are `PageHeading`'s, which is what stopped this
+             screen setting the same sentence solid differently from the
+             auth screens — `doc-body`'s 16/26 is the reading surface's
+             role, and a page description is chrome. -->
+        <PageHeading
+          eyebrow="Phase 0"
+          heading="Bootstrap smoke page"
+          description="This screen exists to prove the web application shell boots, is themed, and is reachable — it is not a product feature. Nothing here reads or writes a wiki; there is no navigation tree, no editor and no sign-in."
+        />
+      </div>
 
-    <UMain>
-      <UContainer class="py-10 sm:py-16">
-        <div class="max-w-measure">
-          <p class="text-label-large text-muted">Phase 0 · Bootstrap</p>
-          <h1 class="text-headline-medium text-highlighted mt-2">
-            Bootstrap smoke page
-          </h1>
-          <p class="text-doc-body text-muted mt-4">
-            This screen exists to prove the web application shell boots, is
-            themed, and is reachable — it is not a product feature. Nothing
-            here reads or writes a wiki; there is no navigation tree, no
-            editor and no sign-in.
-          </p>
-        </div>
-
-        <div class="mt-10 grid gap-6 md:grid-cols-2 xl:grid-cols-3 items-start">
-          <section
+      <div class="grid gap-6 md:grid-cols-2 xl:grid-cols-3 items-start">
+          <UCard
+            as="section"
+            variant="soft"
             aria-labelledby="api-connection-heading"
-            class="xl:col-span-2 min-w-0 rounded-lg bg-elevated ring ring-default p-4 sm:p-6"
+            class="xl:col-span-2 min-w-0"
           >
             <h2
               id="api-connection-heading"
@@ -137,7 +124,7 @@ const proofs = [
             </p>
 
             <div
-              class="mt-6 flex items-start gap-3 rounded-md bg-emphasized p-4"
+              class="mt-6 flex items-start gap-3 rounded-md bg-default p-4"
               role="status"
               aria-live="polite"
             >
@@ -201,12 +188,9 @@ const proofs = [
             >
               Re-check API connection
             </UButton>
-          </section>
+          </UCard>
 
-          <section
-            aria-labelledby="proofs-heading"
-            class="min-w-0 rounded-lg bg-elevated ring ring-default p-4 sm:p-6"
-          >
+          <UCard as="section" aria-labelledby="proofs-heading" variant="soft" class="min-w-0">
             <h2 id="proofs-heading" class="text-title-large text-highlighted">
               What this page proves
             </h2>
@@ -231,22 +215,8 @@ const proofs = [
                 </div>
               </li>
             </ul>
-          </section>
+          </UCard>
         </div>
       </UContainer>
-    </UMain>
-
-    <UFooter>
-      <template #left>
-        <p class="text-body-small text-muted">
-          deep-wiki bootstrap · Phase 0
-        </p>
-      </template>
-      <template #right>
-        <p class="text-body-small text-muted">
-          Material Design 3 · Nuxt UI v4
-        </p>
-      </template>
-    </UFooter>
-  </div>
+  </AppShell>
 </template>

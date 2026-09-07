@@ -76,7 +76,7 @@ describe('edit-mode page', () => {
     expect(component.text()).toMatch(/take over editing/i);
   });
 
-  test('renders the refused state naming the construct and line, with read-only and a disabled normalise exit', async () => {
+  test('renders the refused state naming the construct and line, with read-only and an unavailable normalise exit that stays reachable', async () => {
     mockDefaults();
     mockSession({
       status: 'refused',
@@ -88,8 +88,18 @@ describe('edit-mode page', () => {
     expect(component.text()).toMatch(/line 4/i);
     expect(component.text()).toMatch(/open read-only/i);
     expect(component.text()).toMatch(/normalise this document/i);
-    const normaliseButton = component.get('button[disabled]');
+    // `aria-disabled`, never the `disabled` attribute: the attribute takes
+    // the control out of the tab order, which is what put the one sentence
+    // explaining why this exit is not available yet behind a mouse hover a
+    // keyboard user cannot perform (docs/UI-CHECKLIST.md §3 wants the
+    // reason on hover *and* focus; §5 wants every control reachable by
+    // keyboard). Asserting the accessible state rather than the attribute
+    // is also what §7 asks for — the previous `button[disabled]` selector
+    // was an assertion on the implementation, which is why making this
+    // control more accessible read as a regression.
+    const normaliseButton = component.get('button[aria-disabled="true"]');
     expect(normaliseButton.text()).toMatch(/normalise/i);
+    expect(normaliseButton.attributes('disabled')).toBeUndefined();
   });
 
   test('renders the page title as the one h1 once ready, with the editor surface handed the right props', async () => {
