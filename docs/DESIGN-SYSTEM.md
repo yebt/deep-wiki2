@@ -503,6 +503,29 @@ The correct expression is a `ch`-relative container token, because `ch` is defin
 
 Do **not** use `--ui-container` (80rem / 1280px) for prose. That token is the app shell's max width, not the reading measure.
 
+#### A measure is a cap, not a position — and the column is the shell's
+
+Added 2026-09-07, because the paragraph above produced exactly the screen it exists to prevent, and this section is where an implementer reads it.
+
+`max-w-measure` sets a maximum width and nothing else. The element still begins wherever its parent's content box begins, so applied on its own it yields a 659px column pinned to the left gutter with the rest of the viewport empty beside it. Measured at 1280×900 in both themes on 2026-09-07: the read, edit and navigation-tree columns each rendered **658.9px wide at x=32**, leaving 589px of unused page — half a wide screen, on every product screen at once. §8.3's "Don't" list already said "`max-w-measure` (§2.4), then centre"; nobody who implemented the measure ever read as far as §8.
+
+**Ruling: `max-w-measure` is never written alone. It is `mx-auto w-full max-w-measure`.**
+
+**Ruling: the column is the app shell's, not the screen's.** Width and horizontal position belong beside the height, for the reason checklist §4.1 gives about anything that appears on more than one screen: a value spelled out on five screens is five chances to drift, and these five had already drifted — the auth screens centred at `max-w-md`, the three product screens capped and not centred, the smoke page capped for its heading and uncapped for the grid below it, and each with its own `UContainer` and its own vertical rhythm. A screen **names which column it stands in**; the shell owns what that means.
+
+| Column | Width | What stands in it |
+| --- | --- | --- |
+| `measure` | `--container-measure` (72ch) | Prose and anything sharing a screen with it: read mode, edit mode, the notices a screen shows instead of its content, the error screen. |
+| `narrow` | `max-w-md` (28rem) | One card holding a short form — the four auth screens. |
+| `wide` | `--ui-container` (80rem) | A screen whose content is a grid of panels rather than a document. |
+
+Two consequences worth stating, because both were decided by measurement rather than by taste:
+
+- **Edit mode takes the same column as read mode, and that is not a coincidence to be re-derived per screen.** Two screens that each state their own width are two chances for the text to move under the cursor when the user switches modes.
+- **The navigation tree takes the measure too.** A tree row is not prose, but it is a single line of `body-large` read left to right, and a label that starts at x=0 and ends at x=1216 is the scanning problem the 65–80 character band exists to solve — with the added cost that the eye must travel back across empty space to the next row's indent. The exemptions above are for content that *exceeds* the measure and scrolls inside its own box (tables, code, diagrams); a tree under-fills it, which is a different case.
+
+A screen on the `wide` column still gets its prose measured: `PageHeading` caps its own block at `max-w-measure`, because a heading's supporting sentence is prose wherever it stands, and 1216px of it is about 150 characters to the line.
+
 ### 2.5 In this stack
 
 Register the type scale as Tailwind v4 `--text-*` tokens. The `--text-<name>--line-height`, `--text-<name>--letter-spacing` and `--text-<name>--font-weight` modifiers let one utility class carry all four properties, which is what makes `text-title-large` a real replacement for four hand-written classes.
@@ -1975,6 +1998,7 @@ Amend this file in place when a rule turns out to be wrong, and record why here.
 | 2026-09-06 | **§9.4: new ruling — a container sitting directly on the app ground is the Filled card (`UCard variant="soft"` → `bg-emphasized`), never `bg-elevated` and never hand-rolled. Insets inside it step *down* to `bg-default`.** | Found by cross-screen audits on both tracks. Every content container on the three product screens — the permission-denied, not-found, locked, refused, failed and empty panels, and the navigation tree's own list — was hand-rolled at `bg-elevated` and measured `oklch(0.94828)` light / `oklch(0.28448)` dark, byte-identical to the header and footer on the same screen, while the auth card measured one rung up at `oklch(0.91379)` / `oklch(0.34483)`. Same object, same radius, two tones on two screens, and the one that was wrong read as chrome rather than as content. §9.4 had ruled only on cards *inside a pane*; every screen the product has today has no pane, so the case that actually occurs was the case with no rule. |
 | 2026-09-07 | **New §5.2 subsection — a state is a layer, never a step to another surface rung.** | `hover:bg-elevated` on a project-authored row is a no-op wherever the row already sits on that rung (measured: oklch(0.94828) over oklch(0.94828) light, oklch(0.28448) over oklch(0.28448) dark, on the tree rows) and reverses direction between themes wherever it is not (measured: a menu row on `bg-accented` going 0.93103 → 0.94828 in light and 0.32759 → 0.28448 in dark). §5.2 gave the mechanism and the opacities but never said in one line that a rung is not a state, so both defects passed a reading of the section that produced them. |
 | 2026-09-07 | §3.4: the Controls row's "menus" now explicitly binds project-authored menus. | The editor's mention and slash menus shipped at `rounded-lg` (16px) — the container rung — beside `UDropdownMenu` at `rounded-md`. §3.4 already listed menus under Controls; nothing said the row applies to a menu the project draws itself, and the two menus a user meets most often in edit mode were the only ones off the rung. |
+| 2026-09-07 | **New §2.4 subsection — a measure is a cap, not a position, and the content column belongs to the app shell.** `max-w-measure` is now always `mx-auto w-full max-w-measure`, and the three named columns (`measure` / `narrow` / `wide`) are stated once, on the shell. | §2.4 said which token caps the prose column and which token must not, and stopped. It never said that a cap sets no horizontal position, so every screen that followed it correctly rendered a 659px column against the left gutter: measured at 1280×900 in both themes, read, edit and the navigation tree were each **658.9px at x=32**, with 589px of empty page beside them — the right half of a wide screen unused on every product screen. §8.3's "Don't" list did say "then centre", four sections away from where the measure is chosen, and no one implementing §2.4 got there. Compounding it, `AppShell` owned the height and not the width, so all five screens wrote their own `UContainer`, their own column and their own vertical rhythm — the same shape as the drift §4.1 of the checklist exists to catch, in layout rather than in a component. |
 | 2026-09-03 | Dark `outline-variant` moved from tone 20 to tone 30; `text-muted` moved to `on-surface-variant` tone 30/80. | At tone 20 the border was invisible on a tone-12 panel. Nuxt UI's default muted text measured 3.9:1 on `bg-muted`, failing the §5 body-text floor. |
 </content>
 </invoke>

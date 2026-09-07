@@ -29,33 +29,28 @@ defineProps<{
        2026-09-07, and the copies drifted: this one rendered the brand as
        an inert `<span>` and the theme toggle at 40px, `AppShell` rendered
        a link and (after the review) 32px. What is left here is the only
-       thing that is genuinely the auth screens' own: a centred, narrow
-       column with a card in it (docs/UI-CHECKLIST.md §4.1 — anything on
-       more than one screen is one component, not one copy per screen). -->
-  <AppShell>
-    <!-- `my-auto` centres the block in the space that is left, and is the
-         one centring idiom that degrades correctly: auto margins only
-         absorb *positive* free space, so once the content is taller than
-         the region — a narrow viewport, 200% zoom, the three-field
-         invitation form with errors showing — they collapse to zero and
-         the block stays top-aligned and fully reachable instead of
-         overflowing symmetrically off both edges. -->
-    <UContainer class="my-auto py-10 sm:py-16">
-      <div class="mx-auto w-full max-w-md">
-        <PageHeading :heading="heading" :description="description" />
+       thing that is genuinely the auth screens' own: which of the shell's
+       columns they stand in, and a card in it (docs/UI-CHECKLIST.md §4.1 —
+       anything on more than one screen is one component, not one copy per
+       screen). -->
+  <!-- `column="narrow"` is `max-w-md`; `center` is the `my-auto` that
+       centres the block in the vertical space left over. Both were spelled
+       out here, along with the `UContainer` every other screen also spelled
+       out for itself, until the shell took the column on 2026-09-07 — the
+       same move, and the same reason, as the chrome above. -->
+  <AppShell column="narrow" center>
+    <PageHeading :heading="heading" :description="description" />
 
-        <!-- M3's Filled card (§9.4): `surface-container-highest`,
-             elevation 0. The Outlined card is `surface` plus a hairline,
-             which on these screens is a container sitting directly on the
-             app ground with nothing but an `outline-variant` rule to say
-             so — 1.14:1 against the ground in dark, where it read as a
-             hole rather than a card. `variant="soft"` is retargeted to the
-             opaque container token centrally, in app.config.ts. The 32px
-             to this card is `PageHeading`'s `mb-8` (§7.4). -->
-        <UCard variant="soft">
-          <slot />
-        </UCard>
-      </div>
-    </UContainer>
+    <!-- M3's Filled card (§9.4): `surface-container-highest`, elevation 0.
+         The Outlined card is `surface` plus a hairline, which on these
+         screens is a container sitting directly on the app ground with
+         nothing but an `outline-variant` rule to say so — 1.14:1 against
+         the ground in dark, where it read as a hole rather than a card.
+         `variant="soft"` is retargeted to the opaque container token
+         centrally, in app.config.ts. The 32px to this card is
+         `PageHeading`'s `mb-8` (§7.4). -->
+    <UCard variant="soft">
+      <slot />
+    </UCard>
   </AppShell>
 </template>

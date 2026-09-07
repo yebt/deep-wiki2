@@ -27,6 +27,15 @@
  * Handbook"), never a paraphrase of the heading beneath it. That was the
  * finding that removed the eyebrow from all four auth screens on
  * 2026-09-04.
+ *
+ * The block caps itself at `max-w-measure`. On `AppShell`'s `measure`
+ * column that is a no-op, because the column is already that width — but a
+ * heading block is prose, and on the shell's `wide` column the supporting
+ * sentence would otherwise set solid across 1216px, roughly 150 characters
+ * to the line against checklist §4.4's 65-80. docs/DESIGN-SYSTEM.md §2.4
+ * is explicit that `--ui-container` is the shell's max width and never the
+ * reading measure; capping here is what keeps that true on a screen that
+ * needs the wide column for what sits *below* its heading.
  */
 defineProps<{
   eyebrow?: string;
@@ -36,7 +45,7 @@ defineProps<{
 </script>
 
 <template>
-  <div class="mb-8">
+  <div class="mb-8 max-w-measure">
     <p v-if="eyebrow" class="text-label-large text-muted">{{ eyebrow }}</p>
     <h1 class="text-headline-medium text-highlighted" :class="eyebrow ? 'mt-2' : undefined">
       {{ heading }}

@@ -167,100 +167,104 @@ useSeoMeta({ title: 'Navigation tree — deep-wiki' });
 
 <template>
   <AppShell>
-    <!-- The heading and the tree share one column. The heading block was
-         rendering 1216px wide over a 659px tree, so the sentence that
-         introduces the tree did not line up with the tree it introduces. -->
-    <UContainer class="py-10 sm:py-16">
-      <div class="max-w-measure">
-        <PageHeading heading="Navigation tree" description="Every shelf, book, chapter and page you can read." />
+    <!-- `AppShell`'s `measure` column, the same one read and edit mode
+         stand in. A tree row is not prose, but it is a single line of
+         `body-large` read left to right, and a label that starts at x=0 and
+         ends at x=1216 is the scanning problem the 65-80 character measure
+         exists to solve — §2.4's exemptions are content that *exceeds* the
+         measure and scrolls inside its own box, which a tree does not. It
+         is also the width every other content screen has, and checklist
+         §4.1 asks a screen to match the nearest existing one rather than
+         choose its own. The heading and the tree therefore share it: the
+         heading block was rendering 1216px wide over a 659px tree, so the
+         sentence that introduces the tree did not line up with it. -->
+    <PageHeading heading="Navigation tree" description="Every shelf, book, chapter and page you can read." />
 
-        <div v-if="status === 'idle' || status === 'loading'" data-testid="tree-skeleton" class="space-y-2" aria-hidden="true">
-          <USkeleton class="h-10 w-full" />
-          <USkeleton class="h-10 w-5/6 ms-4" />
-          <USkeleton class="h-10 w-4/6 ms-8" />
-          <USkeleton class="h-10 w-5/6 ms-4" />
-        </div>
+    <div v-if="status === 'idle' || status === 'loading'" data-testid="tree-skeleton" class="space-y-2" aria-hidden="true">
+      <USkeleton class="h-10 w-full" />
+      <USkeleton class="h-10 w-5/6 ms-4" />
+      <USkeleton class="h-10 w-4/6 ms-8" />
+      <USkeleton class="h-10 w-5/6 ms-4" />
+    </div>
 
-        <PageNotice
-          v-else-if="status === 'forbidden'"
-          icon="i-lucide-lock"
-          heading="You don't have access to this workspace"
-          :level="2"
+    <PageNotice
+      v-else-if="status === 'forbidden'"
+      icon="i-lucide-lock"
+      heading="You don't have access to this workspace"
+      :level="2"
+    >
+      Ask a workspace admin to grant you access.
+    </PageNotice>
+
+    <PageNotice v-else-if="status === 'not-found'" icon="i-lucide-file-question" heading="This workspace does not exist" :level="2">
+      It may have been renamed, or the link may be wrong.
+    </PageNotice>
+
+    <PageNotice
+      v-else-if="status === 'network-error'"
+      icon="i-lucide-circle-alert"
+      heading="Couldn't load the tree"
+      :level="2"
+      tone="error"
+      role="alert"
+    >
+      {{ message }}
+      <template #actions>
+        <UButton variant="outline" color="error" icon="i-lucide-refresh-cw" @click="load">Retry</UButton>
+      </template>
+    </PageNotice>
+
+    <!-- First-run empty state, distinct from "nothing readable" — this
+         batch has no filter/search on this screen, so there is no
+         filtered-empty variant to distinguish it from. It names the
+         object in the product's own vocabulary (checklist §3). -->
+    <PageNotice v-else-if="nodes.length === 0" icon="i-lucide-library-big" heading="No shelves yet" :level="2">
+      Create a shelf to start organising books, chapters and pages.
+    </PageNotice>
+
+    <div v-else>
+      <p v-if="reorderError" role="alert" class="mb-4 rounded-md bg-error-container px-3 py-2 text-body-small text-on-error-container">
+        {{ reorderError }}
+      </p>
+      <!-- The keyboard contract is spelled out on the screen rather
+           than left to be discovered: the tree is one tab stop and the
+           arrows do the rest, which no visual affordance can say
+           (docs/UI-CHECKLIST.md §5). -->
+      <p id="tree-keyboard-help" class="text-body-small text-muted mb-2">
+        Arrow keys move through the tree, Enter opens a page, and Alt with the arrow keys moves an item among its siblings.
+      </p>
+      <!-- §1.4 gives `bg-elevated` to the navigation tree *as a pane*.
+           This screen has no panes: the tree is content in a column
+           sitting directly on the app ground, and drawn at
+           `bg-elevated` it measured oklch(0.94828) light /
+           oklch(0.28448) dark — byte-identical to the header above it.
+           A container on the app ground is the Filled card, the same
+           component and tone as the auth card (§9.4). The rows inside
+           it keep their own state layer and their `secondary-container`
+           drop target, both of which are ground-independent. -->
+      <UCard variant="soft" :ui="{ body: 'p-2' }">
+        <ul
+          ref="treeEl"
+          role="tree"
+          aria-label="Navigation tree"
+          aria-describedby="tree-keyboard-help"
         >
-          Ask a workspace admin to grant you access.
-        </PageNotice>
-
-        <PageNotice v-else-if="status === 'not-found'" icon="i-lucide-file-question" heading="This workspace does not exist" :level="2">
-          It may have been renamed, or the link may be wrong.
-        </PageNotice>
-
-        <PageNotice
-          v-else-if="status === 'network-error'"
-          icon="i-lucide-circle-alert"
-          heading="Couldn't load the tree"
-          :level="2"
-          tone="error"
-          role="alert"
-        >
-          {{ message }}
-          <template #actions>
-            <UButton variant="outline" color="error" icon="i-lucide-refresh-cw" @click="load">Retry</UButton>
-          </template>
-        </PageNotice>
-
-        <!-- First-run empty state, distinct from "nothing readable" — this
-             batch has no filter/search on this screen, so there is no
-             filtered-empty variant to distinguish it from. It names the
-             object in the product's own vocabulary (checklist §3). -->
-        <PageNotice v-else-if="nodes.length === 0" icon="i-lucide-library-big" heading="No shelves yet" :level="2">
-          Create a shelf to start organising books, chapters and pages.
-        </PageNotice>
-
-        <div v-else>
-          <p v-if="reorderError" role="alert" class="mb-4 rounded-md bg-error-container px-3 py-2 text-body-small text-on-error-container">
-            {{ reorderError }}
-          </p>
-          <!-- The keyboard contract is spelled out on the screen rather
-               than left to be discovered: the tree is one tab stop and the
-               arrows do the rest, which no visual affordance can say
-               (docs/UI-CHECKLIST.md §5). -->
-          <p id="tree-keyboard-help" class="text-body-small text-muted mb-2">
-            Arrow keys move through the tree, Enter opens a page, and Alt with the arrow keys moves an item among its siblings.
-          </p>
-          <!-- §1.4 gives `bg-elevated` to the navigation tree *as a pane*.
-               This screen has no panes: the tree is content in a column
-               sitting directly on the app ground, and drawn at
-               `bg-elevated` it measured oklch(0.94828) light /
-               oklch(0.28448) dark — byte-identical to the header above it.
-               A container on the app ground is the Filled card, the same
-               component and tone as the auth card (§9.4). The rows inside
-               it keep their own state layer and their `secondary-container`
-               drop target, both of which are ground-independent. -->
-          <UCard variant="soft" :ui="{ body: 'p-2' }">
-            <ul
-              ref="treeEl"
-              role="tree"
-              aria-label="Navigation tree"
-              aria-describedby="tree-keyboard-help"
-            >
-              <NavigationTreeNode
-                v-for="(node, index) in nodes"
-                :key="node.id"
-                :node="node"
-                :depth="0"
-                :parent-id="rootId ?? ''"
-                :index="index"
-                :set-size="nodes.length"
-                :active-id="activeId"
-                @reorder="onReorder"
-                @activate="onActivate"
-                @open="onOpen"
-                @keydown="onKeydown"
-              />
-            </ul>
-          </UCard>
-        </div>
-      </div>
-    </UContainer>
+          <NavigationTreeNode
+            v-for="(node, index) in nodes"
+            :key="node.id"
+            :node="node"
+            :depth="0"
+            :parent-id="rootId ?? ''"
+            :index="index"
+            :set-size="nodes.length"
+            :active-id="activeId"
+            @reorder="onReorder"
+            @activate="onActivate"
+            @open="onOpen"
+            @keydown="onKeydown"
+          />
+        </ul>
+      </UCard>
+    </div>
   </AppShell>
 </template>

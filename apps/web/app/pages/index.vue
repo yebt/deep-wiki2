@@ -84,139 +84,144 @@ const proofs = [
 </script>
 
 <template>
-  <AppShell>
+  <AppShell column="wide">
     <!-- The chrome is `AppShell`'s. This page carried its own copy until
          2026-09-07, and that copy was the one whose footer read "deep-wiki
          bootstrap · Phase 0" while the other two said "deep-wiki"
-         (docs/UI-CHECKLIST.md §4.1). -->
-    <UContainer class="py-10 sm:py-16">
-      <div class="max-w-measure">
-        <!-- The eyebrow is "Phase 0" and not "Phase 0 · Bootstrap": an
-             eyebrow must add context the heading does not, and "Bootstrap"
-             is already the first word of the `h1` under it (§4.4). The
-             block, its 12px h1 → description gap and its 32px to the
-             content below are `PageHeading`'s, which is what stopped this
-             screen setting the same sentence solid differently from the
-             auth screens — `doc-body`'s 16/26 is the reading surface's
-             role, and a page description is chrome. -->
-        <PageHeading
-          eyebrow="Phase 0"
-          heading="Bootstrap smoke page"
-          description="This screen exists to prove the web application shell boots, is themed, and is reachable — it is not a product feature. Nothing here reads or writes a wiki; there is no navigation tree, no editor and no sign-in."
-        />
-      </div>
+         (docs/UI-CHECKLIST.md §4.1). The column is the shell's too, as of
+         the same date.
 
-      <div class="grid gap-6 md:grid-cols-2 xl:grid-cols-3 items-start">
-          <UCard
-            as="section"
-            variant="soft"
-            aria-labelledby="api-connection-heading"
-            class="xl:col-span-2 min-w-0"
+         `column="wide"`: this screen's content is a grid of panels, not a
+         document, so it takes the shell's full `--ui-container` rather than
+         the reading measure the three product screens take. Its prose is
+         measured all the same — `PageHeading` caps its own block at
+         `max-w-measure`, because docs/DESIGN-SYSTEM.md §2.4 is explicit
+         that `--ui-container` is the shell's max width and never the
+         reading measure. -->
+    <!-- The eyebrow is "Phase 0" and not "Phase 0 · Bootstrap": an
+         eyebrow must add context the heading does not, and "Bootstrap"
+         is already the first word of the `h1` under it (§4.4). The
+         block, its 12px h1 → description gap and its 32px to the
+         content below are `PageHeading`'s, which is what stopped this
+         screen setting the same sentence solid differently from the
+         auth screens — `doc-body`'s 16/26 is the reading surface's
+         role, and a page description is chrome. -->
+    <PageHeading
+      eyebrow="Phase 0"
+      heading="Bootstrap smoke page"
+      description="This screen exists to prove the web application shell boots, is themed, and is reachable — it is not a product feature. Nothing here reads or writes a wiki; there is no navigation tree, no editor and no sign-in."
+    />
+
+    <div class="grid gap-6 md:grid-cols-2 xl:grid-cols-3 items-start">
+      <UCard
+        as="section"
+        variant="soft"
+        aria-labelledby="api-connection-heading"
+        class="xl:col-span-2 min-w-0"
+      >
+        <h2
+          id="api-connection-heading"
+          class="text-title-large text-highlighted"
+        >
+          API connection
+        </h2>
+        <p class="text-body-medium text-muted mt-2">
+          Checked from the browser on load, and again whenever you ask.
+        </p>
+
+        <div
+          class="mt-6 flex items-start gap-3 rounded-md bg-default p-4"
+          role="status"
+          aria-live="polite"
+        >
+          <span
+            class="flex size-10 shrink-0 items-center justify-center rounded-full"
+            :class="healthTone"
           >
-            <h2
-              id="api-connection-heading"
-              class="text-title-large text-highlighted"
-            >
-              API connection
-            </h2>
-            <p class="text-body-medium text-muted mt-2">
-              Checked from the browser on load, and again whenever you ask.
+            <UIcon
+              :name="healthIcon"
+              class="size-5"
+              :class="status === 'loading' && 'animate-spin'"
+              aria-hidden="true"
+            />
+          </span>
+          <div class="min-w-0 flex-1">
+            <p class="text-body-large-emphasized text-highlighted">
+              {{ message }}
             </p>
-
-            <div
-              class="mt-6 flex items-start gap-3 rounded-md bg-default p-4"
-              role="status"
-              aria-live="polite"
+            <p
+              v-if="detail"
+              class="text-body-small text-muted mt-1 break-all"
             >
-              <span
-                class="flex size-10 shrink-0 items-center justify-center rounded-full"
-                :class="healthTone"
-              >
-                <UIcon
-                  :name="healthIcon"
-                  class="size-5"
-                  :class="status === 'loading' && 'animate-spin'"
-                  aria-hidden="true"
-                />
-              </span>
-              <div class="min-w-0 flex-1">
-                <p class="text-body-large-emphasized text-highlighted">
-                  {{ message }}
-                </p>
-                <p
-                  v-if="detail"
-                  class="text-body-small text-muted mt-1 break-all"
-                >
-                  {{ detail }}
-                </p>
-                <p
-                  v-if="checkedAtLabel"
-                  class="text-label-medium text-muted mt-2"
-                >
-                  Last checked at {{ checkedAtLabel }}
-                </p>
-              </div>
-            </div>
-
-            <dl class="mt-6 border-t border-default">
-              <div
-                class="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 border-b border-default py-3"
-              >
-                <dt class="text-label-medium text-muted">Endpoint</dt>
-                <dd class="text-body-medium text-default font-mono break-all">
-                  {{ healthEndpoint }}
-                </dd>
-              </div>
-              <div
-                class="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 border-b border-default py-3"
-              >
-                <dt class="text-label-medium text-muted">Transport</dt>
-                <dd class="text-body-medium text-default">
-                  Browser fetch, no proxy
-                </dd>
-              </div>
-            </dl>
-
-            <UButton
-              class="mt-6"
-              icon="i-lucide-refresh-cw"
-              variant="soft"
-              color="primary"
-              size="md"
-              :loading="status === 'loading'"
-              @click="check"
+              {{ detail }}
+            </p>
+            <p
+              v-if="checkedAtLabel"
+              class="text-label-medium text-muted mt-2"
             >
-              Re-check API connection
-            </UButton>
-          </UCard>
-
-          <UCard as="section" aria-labelledby="proofs-heading" variant="soft" class="min-w-0">
-            <h2 id="proofs-heading" class="text-title-large text-highlighted">
-              What this page proves
-            </h2>
-            <ul class="mt-6 space-y-6">
-              <li
-                v-for="proof in proofs"
-                :key="proof.title"
-                class="flex items-start gap-3"
-              >
-                <span
-                  class="flex size-8 shrink-0 items-center justify-center rounded-full bg-secondary-container text-on-secondary-container"
-                >
-                  <UIcon :name="proof.icon" class="size-4" aria-hidden="true" />
-                </span>
-                <div class="min-w-0">
-                  <p class="text-label-large-emphasized text-highlighted">
-                    {{ proof.title }}
-                  </p>
-                  <p class="text-body-medium text-muted mt-1">
-                    {{ proof.detail }}
-                  </p>
-                </div>
-              </li>
-            </ul>
-          </UCard>
+              Last checked at {{ checkedAtLabel }}
+            </p>
+          </div>
         </div>
-      </UContainer>
+
+        <dl class="mt-6 border-t border-default">
+          <div
+            class="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 border-b border-default py-3"
+          >
+            <dt class="text-label-medium text-muted">Endpoint</dt>
+            <dd class="text-body-medium text-default font-mono break-all">
+              {{ healthEndpoint }}
+            </dd>
+          </div>
+          <div
+            class="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 border-b border-default py-3"
+          >
+            <dt class="text-label-medium text-muted">Transport</dt>
+            <dd class="text-body-medium text-default">
+              Browser fetch, no proxy
+            </dd>
+          </div>
+        </dl>
+
+        <UButton
+          class="mt-6"
+          icon="i-lucide-refresh-cw"
+          variant="soft"
+          color="primary"
+          size="md"
+          :loading="status === 'loading'"
+          @click="check"
+        >
+          Re-check API connection
+        </UButton>
+      </UCard>
+
+      <UCard as="section" aria-labelledby="proofs-heading" variant="soft" class="min-w-0">
+        <h2 id="proofs-heading" class="text-title-large text-highlighted">
+          What this page proves
+        </h2>
+        <ul class="mt-6 space-y-6">
+          <li
+            v-for="proof in proofs"
+            :key="proof.title"
+            class="flex items-start gap-3"
+          >
+            <span
+              class="flex size-8 shrink-0 items-center justify-center rounded-full bg-secondary-container text-on-secondary-container"
+            >
+              <UIcon :name="proof.icon" class="size-4" aria-hidden="true" />
+            </span>
+            <div class="min-w-0">
+              <p class="text-label-large-emphasized text-highlighted">
+                {{ proof.title }}
+              </p>
+              <p class="text-body-medium text-muted mt-1">
+                {{ proof.detail }}
+              </p>
+            </div>
+          </li>
+        </ul>
+      </UCard>
+    </div>
   </AppShell>
 </template>

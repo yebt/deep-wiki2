@@ -56,66 +56,65 @@ useSeoMeta({ title: () => (title.value ? `${title.value} — deep-wiki` : 'deep-
       </UButton>
     </template>
 
-    <!-- `max-w-measure` on the column, not on the success branch alone:
-         before this, the denied, missing and failed states rendered 1216px
-         wide while the document beside them rendered 659px, so the screen
-         changed column width with its state (docs/UI-CHECKLIST.md §4.4). -->
-    <UContainer class="py-10 sm:py-16">
-      <div class="max-w-measure">
-        <!-- Loading: a skeleton matched to the real layout (a title line
-             plus paragraph-shaped lines), not a spinner — the document's
-             shape is known in advance (docs/UI-CHECKLIST.md §3). -->
-        <div v-if="status === 'idle' || status === 'loading'" data-testid="read-skeleton" aria-hidden="true">
-          <USkeleton class="h-9 w-2/3" />
-          <div class="mt-6 space-y-3">
-            <USkeleton class="h-4 w-full" />
-            <USkeleton class="h-4 w-full" />
-            <USkeleton class="h-4 w-5/6" />
-          </div>
-          <div class="mt-6 space-y-3">
-            <USkeleton class="h-4 w-full" />
-            <USkeleton class="h-4 w-2/3" />
-          </div>
-        </div>
+    <!-- The column is `AppShell`'s `measure`, its default: this screen is
+         prose, and the reading measure is what prose takes
+         (docs/DESIGN-SYSTEM.md §2.4, checklist §4.4's 65-80 characters).
+         It holds for *every* state, not for the success branch alone —
+         before the column was one thing, the denied, missing and failed
+         panels rendered 1216px wide while the document beside them rendered
+         659px, so the screen changed width with its state. -->
 
-        <PageNotice
-          v-else-if="status === 'forbidden'"
-          icon="i-lucide-lock"
-          heading="You don't have access to this page"
-        >
-          Ask a workspace admin to grant you access, or go back to a page you can already read.
-        </PageNotice>
-
-        <PageNotice v-else-if="status === 'not-found'" icon="i-lucide-file-question" heading="This page does not exist">
-          It may have been moved or deleted.
-        </PageNotice>
-
-        <PageNotice
-          v-else-if="status === 'network-error'"
-          icon="i-lucide-circle-alert"
-          heading="Couldn't load this page"
-          tone="error"
-          role="alert"
-        >
-          {{ message }}
-          <template #actions>
-            <UButton data-testid="read-retry" variant="outline" color="error" icon="i-lucide-refresh-cw" @click="load">
-              Retry
-            </UButton>
-          </template>
-        </PageNotice>
-
-        <!-- Success: the page's own `<h1>` (its title), then the cached
-             HTML body as-is (already sanitised at render time, design.md
-             D12) — the Markdown parser and the ProseMirror editor are never
-             invoked for this request. The column's `max-w-measure` holds the
-             65-80ch reading band (docs/UI-CHECKLIST.md §4.4). -->
-        <template v-else>
-          <PageHeading :heading="title" />
-          <!-- eslint-disable-next-line vue/no-v-html -- `html` is server-produced by remark-rehype + rehype-sanitize with an explicit allowlist (design.md D12); it is never client-supplied or user-editable at this route. -->
-          <article class="doc-body text-doc-body text-default" v-html="html" />
-        </template>
+    <!-- Loading: a skeleton matched to the real layout (a title line
+         plus paragraph-shaped lines), not a spinner — the document's
+         shape is known in advance (docs/UI-CHECKLIST.md §3). -->
+    <div v-if="status === 'idle' || status === 'loading'" data-testid="read-skeleton" aria-hidden="true">
+      <USkeleton class="h-9 w-2/3" />
+      <div class="mt-6 space-y-3">
+        <USkeleton class="h-4 w-full" />
+        <USkeleton class="h-4 w-full" />
+        <USkeleton class="h-4 w-5/6" />
       </div>
-    </UContainer>
+      <div class="mt-6 space-y-3">
+        <USkeleton class="h-4 w-full" />
+        <USkeleton class="h-4 w-2/3" />
+      </div>
+    </div>
+
+    <PageNotice
+      v-else-if="status === 'forbidden'"
+      icon="i-lucide-lock"
+      heading="You don't have access to this page"
+    >
+      Ask a workspace admin to grant you access, or go back to a page you can already read.
+    </PageNotice>
+
+    <PageNotice v-else-if="status === 'not-found'" icon="i-lucide-file-question" heading="This page does not exist">
+      It may have been moved or deleted.
+    </PageNotice>
+
+    <PageNotice
+      v-else-if="status === 'network-error'"
+      icon="i-lucide-circle-alert"
+      heading="Couldn't load this page"
+      tone="error"
+      role="alert"
+    >
+      {{ message }}
+      <template #actions>
+        <UButton data-testid="read-retry" variant="outline" color="error" icon="i-lucide-refresh-cw" @click="load">
+          Retry
+        </UButton>
+      </template>
+    </PageNotice>
+
+    <!-- Success: the page's own `<h1>` (its title), then the cached
+         HTML body as-is (already sanitised at render time, design.md
+         D12) — the Markdown parser and the ProseMirror editor are never
+         invoked for this request. -->
+    <template v-else>
+      <PageHeading :heading="title" />
+      <!-- eslint-disable-next-line vue/no-v-html -- `html` is server-produced by remark-rehype + rehype-sanitize with an explicit allowlist (design.md D12); it is never client-supplied or user-editable at this route. -->
+      <article class="doc-body text-doc-body text-default" v-html="html" />
+    </template>
   </AppShell>
 </template>

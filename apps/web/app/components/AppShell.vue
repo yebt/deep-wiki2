@@ -19,7 +19,61 @@
  * 1280x900). That base is replaced centrally in `app.config.ts` with
  * `flex min-h-0 flex-1 flex-col`, which is only correct inside this
  * column; the two belong together and both are stated once.
+ *
+ * Width: the shell owns it too, for the same reason it owns the height.
+ * `UMain` has no width of its own, so until 2026-09-07 every screen wrote
+ * its own `UContainer` and its own column `div` — and being written five
+ * times, they were five chances to drift. They already had: measured at
+ * 1280x900, the read, edit and tree columns rendered 658.9px wide at
+ * x=32 with 589px of empty page to their right, because `max-w-measure`
+ * caps a width and centres nothing. The right half of a wide screen was
+ * unused on every product screen at once.
+ *
+ * Three columns exist, and the screen names which kind it is rather than
+ * restating a number:
+ *
+ *   `measure`  72ch (docs/DESIGN-SYSTEM.md §2.4) — the reading measure,
+ *              which checklist §4.4 requires to land at 65-80 characters.
+ *              Read mode is prose and takes it by definition; edit mode
+ *              takes the *same* column because switching modes must not
+ *              move the text under the cursor; and the navigation tree
+ *              takes it because a tree row is one line of `body-large`
+ *              set left-to-right, and a label that starts at x=0 and ends
+ *              at x=1216 is the scanning problem the measure exists to
+ *              solve. §2.4's exemptions — tables, code blocks, diagrams —
+ *              are content that *exceeds* the measure and scrolls inside
+ *              its own box; a tree under-fills it, which is not the same
+ *              case. This is also the one width the product has, and
+ *              checklist §4.1 asks a new screen to match the nearest
+ *              existing one rather than pick its own.
+ *   `narrow`   `max-w-md` — a single card holding a short form. The four
+ *              auth screens, through `AuthShell`.
+ *   `wide`     the container's own `--ui-container` (80rem). For a screen
+ *              whose content is a grid of panels rather than a document.
+ *              §2.4 is explicit that `--ui-container` is the app shell's
+ *              max width and **not** the reading measure, so a screen on
+ *              this column still gets its prose measured: `PageHeading`
+ *              caps its own block at `max-w-measure`.
+ *
+ * `center` adds `my-auto`, which only absorbs *positive* free space, so a
+ * block taller than the region stays top-aligned and fully reachable
+ * instead of overflowing off both edges.
  */
+const props = withDefaults(
+  defineProps<{
+    column?: 'narrow' | 'measure' | 'wide';
+    center?: boolean;
+  }>(),
+  { column: 'measure', center: false },
+);
+
+const COLUMNS = {
+  narrow: 'mx-auto w-full max-w-md',
+  measure: 'mx-auto w-full max-w-measure',
+  wide: 'w-full',
+} as const;
+
+const columnClass = computed(() => COLUMNS[props.column]);
 </script>
 
 <template>
@@ -60,7 +114,15 @@
     </UHeader>
 
     <UMain>
-      <slot />
+      <!-- The page gutter and the vertical rhythm are the shell's, not the
+           screen's: 16px at compact and 24px from medium up are M3's layout
+           margins (docs/DESIGN-SYSTEM.md §7.1), and `UContainer` already
+           ships them plus the `mx-auto` that centres the region itself. -->
+      <UContainer class="py-10 sm:py-16" :class="center ? 'my-auto' : undefined">
+        <div :class="columnClass">
+          <slot />
+        </div>
+      </UContainer>
     </UMain>
 
     <UFooter>
