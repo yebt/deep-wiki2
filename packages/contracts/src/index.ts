@@ -62,3 +62,18 @@ export type {
 
 export { UploadAvatarResponseSchema } from './uploads';
 export type { UploadAvatarResponse } from './uploads';
+
+export {
+  EditSessionRefusalSchema,
+  EditSessionResponseSchema,
+  ReadPageResponseSchema,
+  SavePageRequestSchema,
+  SavePageResponseSchema,
+} from './pages';
+export type {
+  EditSessionRefusal,
+  EditSessionResponse,
+  ReadPageResponse,
+  SavePageRequest,
+  SavePageResponse,
+} from './pages';

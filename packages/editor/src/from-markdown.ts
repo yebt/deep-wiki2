@@ -19,6 +19,25 @@ const VERBATIM_BLOCK_TYPES = new Set(['html', 'definition', 'yaml']);
 /** mdast node types carried verbatim as an opaque inline atom (design.md bucket B, inline-level members). */
 const VERBATIM_INLINE_TYPES = new Set(['html', 'linkReference', 'imageReference']);
 
+/**
+ * A construct neither bucket A nor bucket B names (design.md bucket C).
+ * Carries the offending node's type and source line so `probe.ts` — and,
+ * through it, the edit-session route's 409 body (WU-12) — can name both
+ * without re-parsing the document to find them again. Reachable only by a
+ * future remark upgrade adding a node type this pipeline does not yet
+ * claim; today's `refused/` corpus fails via `not_byte_identical` instead.
+ */
+export class UnsupportedConstructError extends Error {
+  constructor(
+    readonly construct: string,
+    readonly line: number | undefined,
+    kind: 'block' | 'inline',
+  ) {
+    super(`fromMarkdown: unsupported ${kind} node type "${construct}"`);
+    this.name = 'UnsupportedConstructError';
+  }
+}
+
 function sourceSliceOf(
   node: { position?: { start: { offset?: number }; end: { offset?: number } } },
   source: string,
@@ -98,7 +117,7 @@ class FromMarkdownConverter {
         if (VERBATIM_INLINE_TYPES.has(node.type)) {
           return [s.node('verbatimInline', { raw: sourceSliceOf(node, this.source), nodeType: node.type })];
         }
-        throw new Error(`fromMarkdown: unsupported inline node type "${node.type}"`);
+        throw new UnsupportedConstructError(node.type, node.position?.start.line, 'inline');
     }
   }
 
@@ -184,7 +203,7 @@ class FromMarkdownConverter {
         if (VERBATIM_BLOCK_TYPES.has(node.type)) {
           return s.node('verbatim', { raw: sourceSliceOf(node, this.source), nodeType: node.type, blockAnchor: null });
         }
-        throw new Error(`fromMarkdown: unsupported block node type "${node.type}"`);
+        throw new UnsupportedConstructError(node.type, node.position?.start.line, 'block');
     }
   }
 }

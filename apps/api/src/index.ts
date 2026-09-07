@@ -9,6 +9,7 @@ import { loadConfig } from './config';
 import { createAdminRoutes } from './routes/admin';
 import { createAuthRoutes } from './routes/auth';
 import { createInvitationRoutes } from './routes/invitations';
+import { createPageRoutes } from './routes/pages';
 import { createUploadRoutes } from './routes/uploads';
 
 /**
@@ -131,6 +132,15 @@ if (import.meta.main) {
       blobStore,
       sessionIdleTimeoutMinutes: config.SESSION_IDLE_TIMEOUT_MINUTES,
       maxUploadBytes: DEFAULT_MAX_UPLOAD_BYTES,
+    }),
+  );
+
+  app.route(
+    '/',
+    createPageRoutes({
+      sql,
+      sessionIdleTimeoutMinutes: config.SESSION_IDLE_TIMEOUT_MINUTES,
+      pageLockTtlSeconds: config.PAGE_LOCK_TTL_SECONDS,
     }),
   );
 

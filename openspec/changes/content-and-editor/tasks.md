@@ -300,16 +300,16 @@ dependency graph, not only by intent.
 
 ## Phase 12 (WU-12) — `feat(api): page read and save with optimistic concurrency behind can()`
 
-- [ ] 12.1 RED — `routes/pages.test.ts` (`app.request()`): read without a `read`
+- [x] 12.1 RED — `routes/pages.test.ts` (`app.request()`): read without a `read`
       grant returns no content; save without a `write` grant leaves storage
       unchanged; a stale `content_hash` returns `409` without writing. *(page-content:
       Content Access Goes Through can(), both scenarios; design D16)*
-- [ ] 12.2 RED — `GET /pages/:id/edit-session`: returns the doc when
+- [x] 12.2 RED — `GET /pages/:id/edit-session`: returns the doc when
       `toMarkdown(fromMarkdown(md)) === md`, else `409 { reason, construct, line,
       offeredExits }`; the lock is acquired atomically together with the probe
       check, in the same request. *(markdown-round-trip: Refusal states a reason;
       Read-only remains available)*
-- [ ] 12.3 GREEN — implement `apps/api/src/routes/pages.ts`.
+- [x] 12.3 GREEN — implement `apps/api/src/routes/pages.ts`.
 
 ## Phase 13 (WU-13) — `feat(api): backlinks, tags and mention candidates that disclose nothing`
 
