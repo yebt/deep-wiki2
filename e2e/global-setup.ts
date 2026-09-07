@@ -34,6 +34,9 @@ interface SeedResult {
   readonly expiredInvitationToken: string;
   readonly resetEmail: string;
   readonly resetToken: string;
+  readonly readPageId: string;
+  readonly readerSessionToken: string;
+  readonly outsiderSessionToken: string;
 }
 
 async function waitForHealth(url: string, timeoutMs: number): Promise<void> {
