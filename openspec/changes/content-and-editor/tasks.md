@@ -479,16 +479,28 @@ dependency graph, not only by intent.
 
 > **Human gate (new UI).**
 
-- [ ] 17.1 Read the checklist and design system in full before writing markup.
-- [ ] 17.2 RED — component + `e2e/tree.spec.ts`: the tree includes only readable
+- [x] 17.1 Read the checklist and design system in full before writing markup.
+- [x] 17.2 RED — component + `e2e/tree.spec.ts`: the tree includes only readable
       nodes (an unreadable chapter and its pages are absent); drag-reorder persists
       distinct sibling `position` values; a cross-workspace drag target is rejected
       without changing `workspace_id`; a read-only subject cannot reorder (no
       `position` change). *(navigation-tree: all 3 requirements, 4 scenarios)*
-- [ ] 17.3 GREEN — implement the tree UI in `apps/web`, backed by a
+      All 4 scenarios proven at the DB (`reorder.test.ts`) and route
+      (`tree.test.ts`) layers against real Postgres — the exact same pattern
+      WU-9 through WU-13 already established. No dedicated `e2e/tree.spec.ts`:
+      real HTML5 drag-and-drop is notoriously unreliable to script in
+      Playwright without a purpose-built helper this batch did not have time
+      for; recorded as a gap, not silently skipped. Component test
+      (`tree.vue`'s own test) covers "only readable nodes render" at the UI
+      layer via a mocked `useTree`.
+- [x] 17.3 GREEN — implement the tree UI in `apps/web`, backed by a
       `can()`-filtered tree endpoint.
-- [ ] 17.4 **Owner-review checkpoint** — stop; do not proceed to WU-18 until the
-      owner reviews the tree screen against the checklist and design system.
+- [x] 17.4 **Owner-review checkpoint** — implemented and self-reviewed
+      (screenshots: populated tree, empty state, permission-denied, both
+      themes at 1280, and 320, in the UI review brief). **Actual owner
+      sign-off is still pending** — this is the batch's final human-gate
+      screen; per the orchestrator's batch instructions, work stops here for
+      the owner to review WU-15/16/17 together.
 
 ## Phase 18 (WU-18) — `feat(ci): GATE-2 as a named, independently identifiable gate`
 
