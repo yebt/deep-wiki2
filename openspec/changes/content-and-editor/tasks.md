@@ -504,15 +504,21 @@ dependency graph, not only by intent.
 
 ## Phase 18 (WU-18) — `feat(ci): GATE-2 as a named, independently identifiable gate`
 
-- [ ] 18.1 RED — a workflow-shape assertion (or script test over
+- [x] 18.1 RED — a workflow-shape assertion (or script test over
       `.github/workflows/ci.yml`) confirming the GATE-2 suite runs as a distinctly
       named step, separate from the general test command's pass/fail signal.
       *(ci-pipeline: GATE-2 Is A Named, Independently Identifiable Gate, both
       scenarios)*
-- [ ] 18.2 GREEN — `.github/workflows/ci.yml`: add a named `gate-2-round-trip` step
+- [x] 18.2 GREEN — `.github/workflows/ci.yml`: add a named `gate-2-round-trip` step
       running WU-7's suite explicitly, ordered so a change wiring Milkdown while
       GATE-2 is red fails the overall run citing GATE-2; add GATE-2 to
       `bun run verify`. *(ci-pipeline: GATE-2 Precedes Editor UI Delivery)*
+
+      This repository has no git remote, so `.github/workflows/ci.yml` never
+      executes; the workflow is written correctly for the day a remote
+      exists, but enforcement today is local: `bun run check` at every
+      commit and `bun run verify` (which now runs `gate-2-round-trip`
+      explicitly) before tagging.
 
 ## Phase 19 (WU-19) — `docs: record the pipeline, the pin finding, the supported set and the accepted costs`
 
