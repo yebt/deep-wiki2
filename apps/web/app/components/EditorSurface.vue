@@ -36,6 +36,17 @@ const slashCaretRect = ref<{ top: number; left: number } | null>(null);
 /** Set once a confirmed user mention is checked against `can()` and comes back unreadable (document-editor: "Mentioning A User Does Not Silently Grant Them Access"). */
 const mentionMismatch = ref<string | null>(null);
 
+/** The id of the option the arrow keys currently sit on, or `undefined` when no menu is open. Bound to the editor's `aria-activedescendant`, which is the only wire between the focused element and a menu rendered outside it. */
+const activeOptionId = computed(() => {
+  if (mentionState.value?.active && mentionState.value.candidates.length > 0) {
+    return `dw-mention-option-${mentionState.value.selectedIndex}`;
+  }
+  if (slashState.value?.active && slashState.value.commands.length > 0) {
+    return `dw-slash-option-${slashState.value.selectedIndex}`;
+  }
+  return undefined;
+});
+
 let editorView: EditorView | undefined;
 
 const { search: searchMentions, checkAccess } = useMentionCandidates(props.workspaceId, props.pageId);
@@ -128,18 +139,44 @@ defineExpose({
 
 <template>
   <div class="relative">
+    <!-- No `focus-within:ring-*` here. `main.css` declares the focus
+         indicator unlayered — 3px `secondary` at 2px offset — so it lands
+         on the editor when it takes focus like it lands on every other
+         control. The ring this used to add was a *second*, 2px `primary`
+         indicator drawn at the same time: measured on 2026-09-07, a focused
+         editor carried both, in two different roles and two widths.
+         `min-h-64` rather than `min-h-[16rem]`: same 256px, on the scale
+         instead of beside it (docs/UI-CHECKLIST.md §4.1).
+         `aria-activedescendant` is what connects the menus below to the
+         element that actually holds focus — without it a screen-reader user
+         gets no announcement as the arrow keys move the selection. -->
     <div
       ref="rootEl"
-      class="doc-body text-doc-body text-default prosemirror-editor min-h-[16rem] rounded-lg bg-default p-4 outline-none focus-within:ring-2 focus-within:ring-primary"
+      class="doc-body text-doc-body text-default prosemirror-editor min-h-64 rounded-lg bg-default p-4"
       data-testid="editor-surface"
+      :aria-activedescendant="activeOptionId"
     />
 
+    <!-- @ mention and / slash menus. Both are `corner-medium` (12px):
+         §3.4's two-rung direction lists menus under *controls*, and every
+         menu the library renders (`UDropdownMenu`) is `rounded-md`. At
+         `rounded-lg` these two were the only 16px menus in the app.
+         Row hover is the `dw-state-layer` — a `currentColor` overlay at
+         M3's 0.08 (§5.2) — not a step to another surface rung. The
+         `hover:bg-elevated` they used to carry moved *away* from the menu's
+         own `bg-accented` in opposite directions per theme: measured
+         oklch(0.93103) → oklch(0.94828) in light (lighter) and
+         oklch(0.32759) → oklch(0.28448) in dark (darker), which is exactly
+         the "depends on the background being light or dark" failure
+         checklist §4.2 names. The selected row keeps its opaque
+         `secondary-container` fill, so selected and hovered stay
+         unmistakably different (§4.6). -->
     <!-- @ mention menu -->
     <div
       v-if="mentionState?.active"
       role="listbox"
       aria-label="Mention suggestions"
-      class="fixed z-10 min-w-56 rounded-lg bg-accented p-1 shadow-lg ring ring-default"
+      class="fixed z-10 min-w-56 rounded-md bg-accented p-1 shadow-lg ring ring-default"
       :style="mentionCaretRect ? { top: `${mentionCaretRect.top}px`, left: `${mentionCaretRect.left}px` } : {}"
     >
       <p v-if="mentionState.query === '' && mentionState.candidates.length === 0" class="px-3 py-2 text-body-small text-muted">
@@ -149,11 +186,12 @@ defineExpose({
       <ul v-else>
         <li
           v-for="(candidate, index) in mentionState.candidates"
+          :id="`dw-mention-option-${index}`"
           :key="candidate.id"
           role="option"
           :aria-selected="index === mentionState.selectedIndex"
-          class="flex items-center gap-2 rounded-md px-3 py-2 text-body-medium"
-          :class="index === mentionState.selectedIndex ? 'bg-secondary-container text-on-secondary-container' : 'text-default hover:bg-elevated'"
+          class="dw-state-layer flex items-center gap-2 rounded-md px-3 py-2 text-body-medium"
+          :class="index === mentionState.selectedIndex ? 'bg-secondary-container text-on-secondary-container' : 'text-default'"
         >
           <UIcon :name="candidate.type === 'page' ? 'i-lucide-file-text' : 'i-lucide-user'" class="size-4 shrink-0" aria-hidden="true" />
           {{ candidate.label }}
@@ -170,18 +208,19 @@ defineExpose({
       v-if="slashState?.active"
       role="listbox"
       aria-label="Block commands"
-      class="fixed z-10 min-w-64 rounded-lg bg-accented p-1 shadow-lg ring ring-default"
+      class="fixed z-10 min-w-64 rounded-md bg-accented p-1 shadow-lg ring ring-default"
       :style="slashCaretRect ? { top: `${slashCaretRect.top}px`, left: `${slashCaretRect.left}px` } : {}"
     >
       <p v-if="slashState.commands.length === 0" class="px-3 py-2 text-body-small text-muted">No matching commands</p>
       <ul v-else>
         <li
           v-for="(command, index) in slashState.commands"
+          :id="`dw-slash-option-${index}`"
           :key="command.id"
           role="option"
           :aria-selected="index === slashState.selectedIndex"
-          class="rounded-md px-3 py-2"
-          :class="index === slashState.selectedIndex ? 'bg-secondary-container text-on-secondary-container' : 'text-default hover:bg-elevated'"
+          class="dw-state-layer rounded-md px-3 py-2"
+          :class="index === slashState.selectedIndex ? 'bg-secondary-container text-on-secondary-container' : 'text-default'"
         >
           <p class="text-body-medium">{{ command.label }}</p>
           <p class="text-body-small text-muted">{{ command.description }}</p>
