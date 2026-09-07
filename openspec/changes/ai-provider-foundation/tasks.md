@@ -61,7 +61,7 @@ further decision gate blocks `sdd-apply`.
 ## Phase 0: Sequencing Gate (blocking, not code)
 
 - [x] 0.1 Confirm `openspec/changes/tenancy-and-permissions/` has archived (moved out of `openspec/changes/`) before starting any task that touches `plans`. If not yet archived, stop and re-check before Phase 11. — **Met**: archived at `openspec/changes/archive/2026-09-06-tenancy-and-permissions`.
-- [ ] 0.2 Read `packages/db/drizzle/meta/_journal.json` (read-only) immediately before writing any migration in Phases 8, 11, 14, 15, 16; use `next idx + 1` as the migration number, never a number copied from `design.md`. `content-and-editor` may have already claimed `0008`–`0010`; whichever change applies second renumbers from the journal, per the existing `docs/TODO.md` Finding (2026-09-06). — Done for Phase 8 (journal `idx` 7 → used `0008`); still applies to Phases 11/14/15/16, out of this batch's scope.
+- [x] 0.2 Read `packages/db/drizzle/meta/_journal.json` (read-only) immediately before writing any migration in Phases 8, 11, 14, 15, 16; use `next idx + 1` as the migration number, never a number copied from `design.md`. `content-and-editor` may have already claimed `0008`–`0010`; whichever change applies second renumbers from the journal, per the existing `docs/TODO.md` Finding (2026-09-06). — Done for all five: Phase 8 (`idx` 7 → `0008`), Phase 11 (`idx` 8 → `0009`), Phase 14 (`idx` 9 → `0010`), Phase 15 (`idx` 10 → `0011`), Phase 16 (`idx` 11 → `0012`).
 
 ## Phase 1: Core Purity — Close the Type-Only Import Hole
 
