@@ -497,6 +497,23 @@ body {
   outline-offset: var(--dw-focus-ring-offset);
 }
 
+/* The ARIA tree pattern puts the tab stop on the `treeitem`, which — per
+   that pattern — *contains* its own subtree. Ringing the item would ring
+   every descendant row along with the focused one: a box hundreds of
+   pixels tall on a deep book. The indicator moves to the row itself, at
+   the same width and in the same role as everywhere else. The ring is
+   relocated, never removed — checklist §5 is pass/fail on focus
+   visibility. The offset turns inward so the ring stays inside the tree's
+   own padding instead of overlapping the row above. */
+[role='treeitem']:focus-visible {
+  outline: none;
+}
+
+[role='treeitem']:focus-visible > .dw-tree-row {
+  outline: var(--dw-focus-ring-width) solid var(--ui-secondary);
+  outline-offset: calc(var(--dw-focus-ring-offset) * -1);
+}
+
 /* ─────────────────────────────────────────────────────────────
    10. STATE LAYER  (§5.2)
    The M3 model expressed literally: a translucent layer of the

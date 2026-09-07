@@ -2,18 +2,40 @@
 /**
  * One recursive level of the navigation tree (navigation-tree spec: "Drag
  * Reorder Writes Back To Position"). `UTree` (Nuxt UI) has no drag-reorder
- * support today, so this is a deliberate, minimal hand-rolled exception
- * to docs/UI-CHECKLIST.md §4.1's "use the library" rule — native HTML5
+ * support today, so this is a deliberate, minimal hand-rolled exception to
+ * docs/UI-CHECKLIST.md §4.1's "use the library" rule — native HTML5
  * drag-and-drop, not a third-party DnD library, kept to exactly the
  * mechanism the library does not provide.
  *
- * A drop in the top/bottom quarter of a row reorders among THAT ROW's
- * OWN siblings (before/after it) — hence `parentId`/`index` are required
- * props, not derived, since this component has no way to see its own
- * position in its parent's list otherwise. A drop in the middle band
- * reparents under that row, appended at the end of its children. Depth is
- * `depth * 12px` padding (DESIGN-SYSTEM §7.2's tree-indent value); each
- * row is 40px tall (that table's "default" density row height).
+ * **What that exception costs, and what has to be paid back.** The first
+ * version of this component was a `div` with `draggable="true"`, no
+ * `tabindex`, no link and no key handling. Measured on 2026-09-07, tabbing
+ * through `/workspaces/:id/tree` reached the brand link, then the theme
+ * toggle, then left the page: not one row was reachable, clicking a row did
+ * nothing, and reordering was possible only by dragging a mouse. That is
+ * docs/UI-CHECKLIST.md §5's first line ("every interactive element is
+ * reachable and operable by keyboard alone") and §6's "no inert
+ * interactions" — and it is precisely the keyboard contract §4.1 says a
+ * library primitive brings and a hand-rolled one forfeits. Reaching for the
+ * one mechanism `UTree` lacks does not license dropping the mechanisms it
+ * has, so this component carries them itself:
+ *
+ * - **Roving tabindex.** The tree is one tab stop, per the ARIA tree
+ *   pattern; `tree.vue` owns which item holds it.
+ * - **Arrow keys** move between visible rows, `Home`/`End` jump to the
+ *   ends, `ArrowLeft`/`ArrowRight` walk to parent and first child.
+ * - **`Enter` / `Space`** opens a page — the thing the screen exists for.
+ * - **`Alt` + `ArrowUp` / `ArrowDown` / `ArrowRight`** are the keyboard
+ *   equivalents of the three drop zones: move before the previous sibling,
+ *   after the next one, or reparent under the previous sibling.
+ *
+ * A drop in the top/bottom quarter of a row reorders among THAT ROW's OWN
+ * siblings (before/after it) — hence `parentId`/`index` are required props,
+ * not derived, since this component has no way to see its own position in
+ * its parent's list otherwise. A drop in the middle band reparents under
+ * that row, appended at the end of its children. Depth is `depth * 12px`
+ * padding (DESIGN-SYSTEM §7.2's tree-indent value); each row is 40px tall
+ * (that table's "default" density row height).
  */
 import type { TreeNode } from '~/composables/useTree';
 
@@ -22,10 +44,19 @@ const props = defineProps<{
   depth: number;
   parentId: string;
   index: number;
+  /** How many siblings this row sits among, for `aria-setsize`. */
+  setSize: number;
+  /** The id currently holding the tree's single tab stop. */
+  activeId: string | null;
 }>();
 
 const emit = defineEmits<{
   reorder: [payload: { draggedId: string; newParentId: string; newIndex: number }];
+  /** This row now holds the tree's tab stop. Focus only — never navigation. */
+  activate: [nodeId: string];
+  /** The user asked to open this row. Only a page has a destination this batch. */
+  open: [nodeId: string];
+  keydown: [payload: { event: KeyboardEvent; node: TreeNode; parentId: string; index: number }];
 }>();
 
 const NODE_ICONS: Record<string, string> = {
@@ -37,6 +68,9 @@ const NODE_ICONS: Record<string, string> = {
 };
 
 const dropIndicator = ref<'before' | 'after' | 'on' | null>(null);
+
+/** Only a page has a destination in this batch; a shelf, book or chapter is a container to reorder, not a place to go. */
+const isNavigable = computed(() => props.node.type === 'page');
 
 function onDragStart(event: DragEvent): void {
   event.dataTransfer?.setData('text/plain', props.node.id);
@@ -75,12 +109,32 @@ function onChildReorder(payload: { draggedId: string; newParentId: string; newIn
 </script>
 
 <template>
-  <li role="treeitem" :aria-level="depth + 1">
+  <li
+    role="treeitem"
+    :data-node-id="node.id"
+    :aria-level="depth + 1"
+    :aria-posinset="index + 1"
+    :aria-setsize="setSize"
+    :aria-expanded="node.children.length > 0 ? true : undefined"
+    :tabindex="activeId === node.id ? 0 : -1"
+    class="dw-tree-item"
+    @keydown="emit('keydown', { event: $event, node, parentId, index })"
+    @focus="emit('activate', node.id)"
+  >
     <div
       draggable="true"
-      class="dw-state-layer flex h-10 min-h-10 cursor-grab items-center gap-2 rounded-md text-body-large text-default"
+      class="dw-tree-row dw-state-layer flex h-10 min-h-10 items-center gap-2 rounded-md text-body-large text-default"
       :class="[
-        dropIndicator === 'on' ? 'bg-secondary-container text-on-secondary-container' : 'hover:bg-elevated',
+        isNavigable ? 'cursor-pointer' : 'cursor-grab',
+        // The drop target is the one place a row takes a container fill:
+        // `secondary-container` is M3's selected-state role (§1.2) and it
+        // is opaque, so it reads the same on either theme. Hover and focus
+        // are the `dw-state-layer` above — a `currentColor` overlay —
+        // never a step to another surface rung. The `hover:bg-elevated`
+        // this row used to carry was measurably a no-op: the row sits *on*
+        // `bg-elevated`, so hovering repainted the same tone
+        // (oklch(0.94828) light, oklch(0.28448) dark) over itself (§5.2).
+        dropIndicator === 'on' && 'bg-secondary-container text-on-secondary-container',
         dropIndicator === 'before' && 'border-t-2 border-primary',
         dropIndicator === 'after' && 'border-b-2 border-primary',
       ]"
@@ -89,8 +143,14 @@ function onChildReorder(payload: { draggedId: string; newParentId: string; newIn
       @dragover="onDragOver"
       @dragleave="onDragLeave"
       @drop="onDrop"
+      @click="isNavigable && emit('open', node.id)"
     >
       <UIcon :name="NODE_ICONS[node.type] ?? 'i-lucide-file'" class="size-4 shrink-0 text-muted" aria-hidden="true" />
+      <!-- The icon carries the node's type, and an icon is never the only
+           carrier of meaning (docs/UI-CHECKLIST.md §4.3) — so the
+           accessible name says it in words. `title` keeps the full title
+           available on hover once a long one truncates (§6). -->
+      <span class="sr-only">{{ node.type }}:</span>
       <span class="truncate" :title="node.title">{{ node.title }}</span>
     </div>
     <ul v-if="node.children.length > 0" role="group">
@@ -101,7 +161,12 @@ function onChildReorder(payload: { draggedId: string; newParentId: string; newIn
         :depth="depth + 1"
         :parent-id="node.id"
         :index="childIndex"
+        :set-size="node.children.length"
+        :active-id="activeId"
         @reorder="onChildReorder"
+        @activate="emit('activate', $event)"
+        @open="emit('open', $event)"
+        @keydown="emit('keydown', $event)"
       />
     </ul>
   </li>

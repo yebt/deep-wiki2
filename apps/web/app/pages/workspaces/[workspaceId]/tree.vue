@@ -20,6 +20,8 @@
  *   renders unvirtualized in this batch, a recorded scope limit for a
  *   400-page book).
  */
+import type { TreeNode } from '~/composables/useTree';
+
 const route = useRoute();
 const workspaceId = route.params.workspaceId as string;
 
@@ -39,72 +41,225 @@ async function onReorder(payload: { draggedId: string; newParentId: string; newI
   }
 }
 
+/* ─── Keyboard: the ARIA tree pattern, owned here ───────────────────────
+ * `NavigationTreeNode` is a hand-rolled exception to §4.1 because `UTree`
+ * cannot drag-reorder; the keyboard contract `UTree` *would* have brought
+ * is therefore this screen's to supply. Measured on 2026-09-07 before this
+ * existed: the whole tree was zero tab stops, so a keyboard user could
+ * neither open a page nor move one.
+ *
+ * The tree is one tab stop (roving tabindex) and the arrow keys move
+ * within it — the pattern every tree the user has met behaves like, and
+ * the reason a 400-page book does not become 400 tab stops.
+ */
+const activeId = ref<string | null>(null);
+const treeEl = ref<HTMLElement | null>(null);
+
+interface FlatNode {
+  readonly node: TreeNode;
+  readonly parentId: string;
+  readonly index: number;
+  readonly siblings: readonly TreeNode[];
+}
+
+/** Every row currently visible, in the order the eye reads them — which is the order the arrow keys must move in. */
+const visible = computed<FlatNode[]>(() => {
+  const out: FlatNode[] = [];
+  const walk = (list: readonly TreeNode[], parentId: string): void => {
+    list.forEach((node, index) => {
+      out.push({ node, parentId, index, siblings: list });
+      if (node.children.length > 0) walk(node.children, node.id);
+    });
+  };
+  walk(nodes.value, rootId.value ?? '');
+  return out;
+});
+
+/** The tab stop defaults to the first row, so `Tab` always lands somewhere real. */
+watchEffect(() => {
+  if (activeId.value && visible.value.some((v) => v.node.id === activeId.value)) return;
+  activeId.value = visible.value[0]?.node.id ?? null;
+});
+
+function focusNode(nodeId: string | undefined): void {
+  if (!nodeId) return;
+  activeId.value = nodeId;
+  void nextTick(() => {
+    treeEl.value?.querySelector<HTMLElement>(`[data-node-id="${nodeId}"]`)?.focus();
+  });
+}
+
+function onKeydown({ event, node, parentId, index }: { event: KeyboardEvent; node: TreeNode; parentId: string; index: number }): void {
+  const flat = visible.value;
+  const at = flat.findIndex((v) => v.node.id === node.id);
+  if (at === -1) return;
+  const entry = flat[at]!;
+
+  // Alt + arrows are the keyboard equivalent of the three drop zones a
+  // pointer gets. Without them, reordering — the screen's own manipulation
+  // — would be mouse-only (docs/UI-CHECKLIST.md §5).
+  if (event.altKey) {
+    if (event.key === 'ArrowUp' && index > 0) {
+      event.preventDefault();
+      void onReorder({ draggedId: node.id, newParentId: parentId, newIndex: index - 1 });
+    } else if (event.key === 'ArrowDown' && index < entry.siblings.length - 1) {
+      event.preventDefault();
+      void onReorder({ draggedId: node.id, newParentId: parentId, newIndex: index + 1 });
+    } else if (event.key === 'ArrowRight' && index > 0) {
+      event.preventDefault();
+      const newParent = entry.siblings[index - 1]!;
+      void onReorder({ draggedId: node.id, newParentId: newParent.id, newIndex: newParent.children.length });
+    }
+    return;
+  }
+
+  switch (event.key) {
+    case 'ArrowDown':
+      event.preventDefault();
+      focusNode(flat[at + 1]?.node.id);
+      break;
+    case 'ArrowUp':
+      event.preventDefault();
+      focusNode(flat[at - 1]?.node.id);
+      break;
+    case 'ArrowRight':
+      event.preventDefault();
+      focusNode(node.children[0]?.id);
+      break;
+    case 'ArrowLeft':
+      event.preventDefault();
+      focusNode(flat.find((v) => v.node.id === parentId)?.node.id);
+      break;
+    case 'Home':
+      event.preventDefault();
+      focusNode(flat[0]?.node.id);
+      break;
+    case 'End':
+      event.preventDefault();
+      focusNode(flat[flat.length - 1]?.node.id);
+      break;
+    case 'Enter':
+    case ' ':
+      if (node.type === 'page') {
+        event.preventDefault();
+        void navigateTo(`/pages/${node.id}`);
+      }
+      break;
+    default:
+      break;
+  }
+}
+
+/** A row reports itself active when it takes focus — moving the tab stop, never navigating. */
+function onActivate(nodeId: string): void {
+  activeId.value = nodeId;
+}
+
+/** Deliberate activation: a click, or Enter/Space. */
+function onOpen(nodeId: string): void {
+  activeId.value = nodeId;
+  void navigateTo(`/pages/${nodeId}`);
+}
+
 useHead({ htmlAttrs: { lang: 'en' } });
 useSeoMeta({ title: 'Navigation tree — deep-wiki' });
 </script>
 
 <template>
   <AppShell>
+    <!-- The heading and the tree share one column. The heading block was
+         rendering 1216px wide over a 659px tree, so the sentence that
+         introduces the tree did not line up with the tree it introduces. -->
     <UContainer class="py-10 sm:py-16">
-      <PageHeading heading="Navigation tree" description="Every shelf, book, chapter and page you can read." />
+      <div class="max-w-measure">
+        <PageHeading heading="Navigation tree" description="Every shelf, book, chapter and page you can read." />
 
-      <div v-if="status === 'idle' || status === 'loading'" data-testid="tree-skeleton" class="max-w-measure space-y-2" aria-hidden="true">
-        <USkeleton class="h-10 w-full" />
-        <USkeleton class="h-10 w-5/6 ms-4" />
-        <USkeleton class="h-10 w-4/6 ms-8" />
-        <USkeleton class="h-10 w-5/6 ms-4" />
-      </div>
-
-      <div v-else-if="status === 'forbidden'" role="status" class="flex items-start gap-3 rounded-lg bg-elevated p-6">
-        <UIcon name="i-lucide-lock" class="size-5 shrink-0 text-muted" aria-hidden="true" />
-        <div>
-          <h2 class="text-headline-small text-highlighted">You don't have access to this workspace</h2>
-          <p class="text-body-medium text-muted mt-2">Ask a workspace admin to grant you access.</p>
+        <div v-if="status === 'idle' || status === 'loading'" data-testid="tree-skeleton" class="space-y-2" aria-hidden="true">
+          <USkeleton class="h-10 w-full" />
+          <USkeleton class="h-10 w-5/6 ms-4" />
+          <USkeleton class="h-10 w-4/6 ms-8" />
+          <USkeleton class="h-10 w-5/6 ms-4" />
         </div>
-      </div>
 
-      <div v-else-if="status === 'not-found'" role="status" class="flex items-start gap-3 rounded-lg bg-elevated p-6">
-        <UIcon name="i-lucide-file-question" class="size-5 shrink-0 text-muted" aria-hidden="true" />
-        <div>
-          <h2 class="text-headline-small text-highlighted">This workspace does not exist</h2>
+        <PageNotice
+          v-else-if="status === 'forbidden'"
+          icon="i-lucide-lock"
+          heading="You don't have access to this workspace"
+          :level="2"
+        >
+          Ask a workspace admin to grant you access.
+        </PageNotice>
+
+        <PageNotice v-else-if="status === 'not-found'" icon="i-lucide-file-question" heading="This workspace does not exist" :level="2">
+          It may have been renamed, or the link may be wrong.
+        </PageNotice>
+
+        <PageNotice
+          v-else-if="status === 'network-error'"
+          icon="i-lucide-circle-alert"
+          heading="Couldn't load the tree"
+          :level="2"
+          tone="error"
+          role="alert"
+        >
+          {{ message }}
+          <template #actions>
+            <UButton variant="outline" color="error" icon="i-lucide-refresh-cw" @click="load">Retry</UButton>
+          </template>
+        </PageNotice>
+
+        <!-- First-run empty state, distinct from "nothing readable" — this
+             batch has no filter/search on this screen, so there is no
+             filtered-empty variant to distinguish it from. It names the
+             object in the product's own vocabulary (checklist §3). -->
+        <PageNotice v-else-if="nodes.length === 0" icon="i-lucide-library-big" heading="No shelves yet" :level="2">
+          Create a shelf to start organising books, chapters and pages.
+        </PageNotice>
+
+        <div v-else>
+          <p v-if="reorderError" role="alert" class="mb-4 rounded-md bg-error-container px-3 py-2 text-body-small text-on-error-container">
+            {{ reorderError }}
+          </p>
+          <!-- The keyboard contract is spelled out on the screen rather
+               than left to be discovered: the tree is one tab stop and the
+               arrows do the rest, which no visual affordance can say
+               (docs/UI-CHECKLIST.md §5). -->
+          <p id="tree-keyboard-help" class="text-body-small text-muted mb-2">
+            Arrow keys move through the tree, Enter opens a page, and Alt with the arrow keys moves an item among its siblings.
+          </p>
+          <!-- §1.4 gives `bg-elevated` to the navigation tree *as a pane*.
+               This screen has no panes: the tree is content in a column
+               sitting directly on the app ground, and drawn at
+               `bg-elevated` it measured oklch(0.94828) light /
+               oklch(0.28448) dark — byte-identical to the header above it.
+               A container on the app ground is the Filled card, the same
+               component and tone as the auth card (§9.4). The rows inside
+               it keep their own state layer and their `secondary-container`
+               drop target, both of which are ground-independent. -->
+          <UCard variant="soft" :ui="{ body: 'p-2' }">
+            <ul
+              ref="treeEl"
+              role="tree"
+              aria-label="Navigation tree"
+              aria-describedby="tree-keyboard-help"
+            >
+              <NavigationTreeNode
+                v-for="(node, index) in nodes"
+                :key="node.id"
+                :node="node"
+                :depth="0"
+                :parent-id="rootId ?? ''"
+                :index="index"
+                :set-size="nodes.length"
+                :active-id="activeId"
+                @reorder="onReorder"
+                @activate="onActivate"
+                @open="onOpen"
+                @keydown="onKeydown"
+              />
+            </ul>
+          </UCard>
         </div>
-      </div>
-
-      <div v-else-if="status === 'network-error'" role="alert" class="flex items-start gap-3 rounded-lg bg-error-container p-6">
-        <UIcon name="i-lucide-circle-alert" class="size-5 shrink-0 text-on-error-container" aria-hidden="true" />
-        <div>
-          <h2 class="text-headline-small text-on-error-container">Couldn't load the tree</h2>
-          <p class="text-body-medium text-on-error-container mt-2">{{ message }}</p>
-          <UButton class="mt-4" variant="outline" color="error" icon="i-lucide-refresh-cw" @click="load">Retry</UButton>
-        </div>
-      </div>
-
-      <!-- First-run empty state, distinct from "nothing readable" — this
-           batch has no filter/search on this screen, so there is no
-           filtered-empty variant to distinguish it from. -->
-      <div v-else-if="nodes.length === 0" class="flex flex-col items-start gap-3 rounded-lg bg-elevated p-6">
-        <UIcon name="i-lucide-library-big" class="size-8 text-muted" aria-hidden="true" />
-        <div>
-          <h2 class="text-headline-small text-highlighted">No shelves yet</h2>
-          <p class="text-body-medium text-muted mt-2">Create a shelf to start organising books, chapters and pages.</p>
-        </div>
-      </div>
-
-      <div v-else class="max-w-measure">
-        <p v-if="reorderError" role="alert" class="mb-4 rounded-md bg-error-container px-3 py-2 text-body-small text-on-error-container">
-          {{ reorderError }}
-        </p>
-        <ul role="tree" aria-label="Navigation tree" class="rounded-lg bg-elevated p-2">
-          <NavigationTreeNode
-            v-for="(node, index) in nodes"
-            :key="node.id"
-            :node="node"
-            :depth="0"
-            :parent-id="rootId ?? ''"
-            :index="index"
-            @reorder="onReorder"
-          />
-        </ul>
       </div>
     </UContainer>
   </AppShell>
