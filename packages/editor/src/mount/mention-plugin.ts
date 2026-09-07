@@ -8,28 +8,17 @@
  */
 import { type EditorState, Plugin, PluginKey, type Transaction } from 'prosemirror-state';
 import { schema } from '../schema';
+import type { MentionCandidate, MentionState } from '../types';
 import { isInsideCodeBlock, matchTrigger } from './trigger';
 
-export interface MentionCandidate {
-  readonly id: string;
-  readonly type: 'user' | 'cell' | 'page';
-  readonly label: string;
-}
-
-export interface MentionState {
-  readonly active: boolean;
-  readonly from: number;
-  readonly to: number;
-  readonly query: string;
-  readonly candidates: readonly MentionCandidate[];
-  readonly selectedIndex: number;
-}
+export type { MentionCandidate, MentionState };
 
 export const INACTIVE_MENTION_STATE: MentionState = { active: false, from: 0, to: 0, query: '', candidates: [], selectedIndex: 0 };
 
 export type MentionAction =
   | { readonly type: 'trigger'; readonly from: number; readonly to: number; readonly query: string }
   | { readonly type: 'setCandidates'; readonly candidates: readonly MentionCandidate[] }
+  | { readonly type: 'moveSelection'; readonly delta: number }
   | { readonly type: 'noTrigger' }
   | { readonly type: 'dismiss' };
 
@@ -48,6 +37,8 @@ export function reduceMentionState(state: MentionState, action: MentionAction): 
       return { active: true, from: action.from, to: action.to, query: action.query, candidates: [], selectedIndex: 0 };
     case 'setCandidates':
       return { ...state, candidates: action.candidates };
+    case 'moveSelection':
+      return { ...state, selectedIndex: moveSelection(state.selectedIndex, action.delta, state.candidates.length) };
     case 'noTrigger':
     case 'dismiss':
       return INACTIVE_MENTION_STATE;
@@ -116,11 +107,8 @@ export function createMentionPlugin(options: MentionPluginOptions): Plugin<Menti
           return true;
         }
         if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-          // Selection movement is applied by the host via setMentionSelection,
-          // called from the same keydown handler apps/web wires up — kept out
-          // of the plugin itself because it holds no view-independent effect
-          // beyond a number the floating menu component already reads
-          // reactively from plugin state through `onStateChange`.
+          const delta = event.key === 'ArrowDown' ? 1 : -1;
+          view.dispatch(view.state.tr.setMeta(mentionPluginKey, { type: 'moveSelection', delta } satisfies MentionAction));
           return true;
         }
         if (event.key === 'Enter' || event.key === 'Tab') {
@@ -133,7 +121,7 @@ export function createMentionPlugin(options: MentionPluginOptions): Plugin<Menti
         return false;
       },
     },
-    view(editorView) {
+    view() {
       return {
         update(view) {
           const state = mentionPluginKey.getState(view.state);

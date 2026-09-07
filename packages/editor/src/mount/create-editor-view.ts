@@ -36,7 +36,10 @@ export interface CreateEditorViewOptions {
   readonly doc: Node;
   readonly editable?: boolean;
   readonly onUpdate?: (view: EditorView, transactionCount: number) => void;
-  readonly mention?: Omit<MentionPluginOptions, 'onConfirm'>;
+  readonly mention?: Omit<MentionPluginOptions, 'onConfirm'> & {
+    /** Fired once a candidate is confirmed and inserted — apps/web uses this to run the "Mentioning A User Does Not Silently Grant Them Access" check, which needs a network round trip this package never makes itself. */
+    readonly onConfirmed?: (candidate: Parameters<MentionPluginOptions['onConfirm']>[0]) => void;
+  };
   readonly slash?: SlashPluginOptions;
 }
 
@@ -69,7 +72,10 @@ function buildKeymap() {
 export function createEditorView(options: CreateEditorViewOptions): EditorView {
   const mentionPlugin = createMentionPlugin({
     ...options.mention,
-    onConfirm: (candidate, range, tr) => insertMention(candidate, range, tr),
+    onConfirm: (candidate, range, tr) => {
+      options.mention?.onConfirmed?.(candidate);
+      return insertMention(candidate, range, tr);
+    },
   });
   const slashPlugin = createSlashPlugin(options.slash);
 
@@ -80,7 +86,15 @@ export function createEditorView(options: CreateEditorViewOptions): EditorView {
   });
 
   let transactionCount = 0;
-  const view = new EditorView(options.dom, {
+  // `{ mount: options.dom }` rather than `new EditorView(options.dom, …)`:
+  // the legacy `place`-node form APPENDS a new contentEditable child
+  // inside the given element instead of making the element itself
+  // editable, leaving apps/web's own `data-testid="editor-surface"` node
+  // a non-editable wrapper one level removed from where ProseMirror
+  // actually places the caret. `mount` makes the passed element itself
+  // the editable surface, matching what EditorSurface.vue's template and
+  // its e2e/manual tests actually click and type into.
+  const view = new EditorView({ mount: options.dom }, {
     state,
     editable: () => options.editable ?? true,
     dispatchTransaction(tr) {

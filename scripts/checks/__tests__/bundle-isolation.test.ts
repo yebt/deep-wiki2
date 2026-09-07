@@ -46,4 +46,17 @@ describe('checkBundleIsolation', () => {
 
     expect(result.errors.some((e) => e.includes('@deep-wiki/editor/mount'))).toBe(false);
   });
+
+  // node:crypto has no browser build; apps/web's edit route imports the
+  // "." export directly in the browser (fromMarkdown/toMarkdown), so this
+  // closure must never reach it either — the same class of problem as
+  // Milkdown/ProseMirror-view, just a different forbidden dependency
+  // (packages/markdown/src/pipeline.ts's own doc comment records the
+  // real incident this generalises from).
+  test('fails when the "." export transitively reaches node:crypto', () => {
+    const result = checkBundleIsolation(join(FIXTURES_DIR, 'violating-node-crypto'));
+
+    expect(result.ok).toBe(false);
+    expect(result.errors.some((e) => e.includes('node:crypto') || e.includes('crypto'))).toBe(true);
+  });
 });

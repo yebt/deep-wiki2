@@ -14,3 +14,4 @@ export { toMarkdown } from './to-markdown';
 export { probe } from './probe';
 export type { ProbeResult } from './probe';
 export { roundTrip } from './round-trip';
+export type { MentionCandidate, MentionState, SlashCommandSummary, SlashState } from './types';

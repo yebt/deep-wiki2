@@ -47,6 +47,15 @@ describe('reduceMentionState', () => {
     expect(reduceMentionState(triggered, { type: 'dismiss' }).active).toBe(false);
     expect(reduceMentionState(triggered, { type: 'noTrigger' }).active).toBe(false);
   });
+
+  test('moveSelection wraps within the current candidate list', () => {
+    const triggered = reduceMentionState(INACTIVE_MENTION_STATE, { type: 'trigger', from: 5, to: 6, query: '' });
+    const withCandidates = reduceMentionState(triggered, { type: 'setCandidates', candidates: CANDIDATES });
+    const movedDown = reduceMentionState(withCandidates, { type: 'moveSelection', delta: 1 });
+    expect(movedDown.selectedIndex).toBe(1);
+    const wrapped = reduceMentionState({ ...withCandidates, selectedIndex: CANDIDATES.length - 1 }, { type: 'moveSelection', delta: 1 });
+    expect(wrapped.selectedIndex).toBe(0);
+  });
 });
 
 describe('moveSelection', () => {

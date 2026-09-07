@@ -10,12 +10,21 @@ import type { NodeType } from 'prosemirror-model';
 import { type EditorState, Plugin, PluginKey, type Transaction } from 'prosemirror-state';
 import { wrapInList } from 'prosemirror-schema-list';
 import { schema } from '../schema';
+import type { SlashCommandSummary, SlashState } from '../types';
+import { moveSelection } from './mention-plugin';
 import { isInsideCodeBlock, matchTrigger } from './trigger';
 
-export interface SlashCommand {
-  readonly id: string;
-  readonly label: string;
-  readonly description: string;
+export type { SlashCommandSummary, SlashState };
+
+/**
+ * The runnable command, kept internal to `packages/editor` — `run`
+ * closes over `prosemirror-state`/`-commands` types, so it can never be
+ * part of `SlashCommandSummary` (the shape `"."` re-exports for
+ * apps/web's type-only needs). `SlashState.commands` only ever holds the
+ * summary; `handleKeyDown`'s Enter case looks the full command back up by
+ * id from `SLASH_COMMANDS` at confirm time.
+ */
+export interface SlashCommand extends SlashCommandSummary {
   readonly run: (state: EditorState, dispatch: (tr: Transaction) => void) => boolean;
 }
 
@@ -55,26 +64,31 @@ export function filterSlashCommands(query: string): readonly SlashCommand[] {
   return SLASH_COMMANDS.filter((command) => command.label.toLowerCase().includes(needle));
 }
 
-export interface SlashState {
-  readonly active: boolean;
-  readonly from: number;
-  readonly to: number;
-  readonly query: string;
-  readonly commands: readonly SlashCommand[];
-  readonly selectedIndex: number;
+function toSummary(command: SlashCommand): SlashCommandSummary {
+  return { id: command.id, label: command.label, description: command.description };
 }
 
 export const INACTIVE_SLASH_STATE: SlashState = { active: false, from: 0, to: 0, query: '', commands: [], selectedIndex: 0 };
 
 export type SlashAction =
   | { readonly type: 'trigger'; readonly from: number; readonly to: number; readonly query: string }
+  | { readonly type: 'moveSelection'; readonly delta: number }
   | { readonly type: 'noTrigger' }
   | { readonly type: 'dismiss' };
 
 export function reduceSlashState(state: SlashState, action: SlashAction): SlashState {
   switch (action.type) {
     case 'trigger':
-      return { active: true, from: action.from, to: action.to, query: action.query, commands: filterSlashCommands(action.query), selectedIndex: 0 };
+      return {
+        active: true,
+        from: action.from,
+        to: action.to,
+        query: action.query,
+        commands: filterSlashCommands(action.query).map(toSummary),
+        selectedIndex: 0,
+      };
+    case 'moveSelection':
+      return { ...state, selectedIndex: moveSelection(state.selectedIndex, action.delta, state.commands.length) };
     case 'noTrigger':
     case 'dismiss':
       return INACTIVE_SLASH_STATE;
@@ -128,10 +142,19 @@ export function createSlashPlugin(options: SlashPluginOptions = {}): Plugin<Slas
           view.dispatch(view.state.tr.setMeta(slashPluginKey, { type: 'dismiss' } satisfies SlashAction));
           return true;
         }
-        if (event.key === 'ArrowDown' || event.key === 'ArrowUp') return true; // selection movement: host-driven, see mention-plugin.ts's same note
+        if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+          const delta = event.key === 'ArrowDown' ? 1 : -1;
+          view.dispatch(view.state.tr.setMeta(slashPluginKey, { type: 'moveSelection', delta } satisfies SlashAction));
+          return true;
+        }
         if (event.key === 'Enter' || event.key === 'Tab') {
-          const command = state.commands[state.selectedIndex];
-          if (!command) return true; // no-results: inert
+          const summary = state.commands[state.selectedIndex];
+          if (!summary) return true; // no-results: inert
+          // `state.commands` only ever holds the render-facing summary
+          // (see `SlashCommandSummary`'s doc comment) — the runnable
+          // command is looked up by id at confirm time.
+          const command = SLASH_COMMANDS.find((candidate) => candidate.id === summary.id);
+          if (!command) return true;
 
           // Two dispatches, not one transaction: `setBlockType`/`wrapIn`/
           // `wrapInList` are Commands that always build their own

@@ -9,6 +9,19 @@ import { Schema, type MarkSpec, type NodeSpec } from 'prosemirror-model';
  * (`packages/markdown/src/extensions/block-anchor.ts`) it is its own node
  * because the extension is tested independently there; here it folds onto
  * whichever block it anchors, exactly as design.md's schema table states.
+ *
+ * `toDOM` on every node/mark below is additive, WU-16 work: GATE-2
+ * (`round-trip.test.ts`) exercises `fromMarkdown`/`toMarkdown` only and
+ * never touches DOM serialization, so adding it does not change any
+ * property that suite verifies. It exists because `prosemirror-view`
+ * (behind `"./mount"`, never imported here) requires every node/mark it
+ * renders to have one — without it, mounting a real `EditorView` throws
+ * `node.type.spec.toDOM is not a function` the first time it encounters
+ * a node this schema names. `parseDOM` is deliberately omitted for now:
+ * nothing in this batch pastes rich HTML into the editor, and adding
+ * paste-parsing rules without a fixture proving they round-trip would be
+ * exactly the untested promise design.md's own bucket model argues
+ * against.
  */
 
 const blockAnchorAttr = { blockAnchor: { default: null as string | null } };
@@ -21,16 +34,19 @@ const nodes: Record<string, NodeSpec> = {
     content: 'inline*',
     group: 'block',
     attrs: blockAnchorAttr,
+    toDOM: () => ['p', 0],
   },
   heading: {
     content: 'inline*',
     group: 'block',
     attrs: { level: { default: 1 }, ...blockAnchorAttr },
+    toDOM: (node) => [`h${node.attrs.level}`, 0],
   },
   blockquote: {
     content: 'block+',
     group: 'block',
     attrs: blockAnchorAttr,
+    toDOM: () => ['blockquote', 0],
   },
   list: {
     content: 'listItem+',
@@ -42,10 +58,12 @@ const nodes: Record<string, NodeSpec> = {
       bulletChar: { default: null as string | null },
       ...blockAnchorAttr,
     },
+    toDOM: (node) => (node.attrs.ordered ? ['ol', { start: node.attrs.start !== 1 ? node.attrs.start : null }, 0] : ['ul', 0]),
   },
   listItem: {
     content: 'block+',
     attrs: blockAnchorAttr,
+    toDOM: () => ['li', 0],
   },
   code: {
     content: 'text*',
@@ -53,27 +71,33 @@ const nodes: Record<string, NodeSpec> = {
     code: true,
     group: 'block',
     attrs: { lang: { default: null as string | null }, meta: { default: null as string | null }, ...blockAnchorAttr },
+    toDOM: () => ['pre', ['code', 0]],
   },
   thematicBreak: {
     group: 'block',
     attrs: blockAnchorAttr,
+    toDOM: () => ['hr'],
   },
   table: {
     content: 'tableRow+',
     group: 'block',
     attrs: blockAnchorAttr,
+    toDOM: () => ['table', ['tbody', 0]],
   },
   tableRow: {
     content: 'tableCell+',
+    toDOM: () => ['tr', 0],
   },
   tableCell: {
     content: 'inline*',
     attrs: { align: { default: null as 'left' | 'right' | 'center' | null } },
+    toDOM: (node) => ['td', node.attrs.align ? { style: `text-align: ${node.attrs.align}` } : {}, 0],
   },
   footnoteDefinition: {
     content: 'block+',
     group: 'block',
     attrs: { identifier: { default: '' }, ...blockAnchorAttr },
+    toDOM: (node) => ['div', { class: 'footnote-definition', 'data-identifier': node.attrs.identifier }, 0],
   },
 
   // --- Bucket A: inline nodes --------------------------------------------
@@ -83,12 +107,14 @@ const nodes: Record<string, NodeSpec> = {
     group: 'inline',
     atom: true,
     attrs: { spelling: { default: 'backslash' as 'space' | 'backslash' } },
+    toDOM: () => ['br'],
   },
   footnoteReference: {
     inline: true,
     group: 'inline',
     atom: true,
     attrs: { identifier: { default: '' } },
+    toDOM: (node) => ['sup', { class: 'footnote-reference' }, `[${node.attrs.identifier}]`],
   },
   wikiLink: {
     inline: true,
@@ -100,12 +126,14 @@ const nodes: Record<string, NodeSpec> = {
       anchor: { default: null as string | null },
       alias: { default: null as string | null },
     },
+    toDOM: (node) => ['a', { class: 'wiki-link', 'data-target': node.attrs.target }, node.attrs.alias || node.attrs.target],
   },
   tag: {
     inline: true,
     group: 'inline',
     atom: true,
     attrs: { name: { default: '' } },
+    toDOM: (node) => ['span', { class: 'tag' }, `#${node.attrs.name}`],
   },
 
   // --- Bucket B: carried verbatim ----------------------------------------
@@ -119,6 +147,7 @@ const nodes: Record<string, NodeSpec> = {
     atom: true,
     selectable: true,
     attrs: { raw: { default: '' }, nodeType: { default: '' }, ...blockAnchorAttr },
+    toDOM: (node) => ['div', { class: 'verbatim', contenteditable: 'false' }, node.attrs.raw],
   },
   verbatimInline: {
     inline: true,
@@ -126,6 +155,7 @@ const nodes: Record<string, NodeSpec> = {
     atom: true,
     selectable: true,
     attrs: { raw: { default: '' }, nodeType: { default: '' } },
+    toDOM: (node) => ['span', { class: 'verbatim-inline', contenteditable: 'false' }, node.attrs.raw],
   },
 };
 
@@ -147,12 +177,13 @@ const nodes: Record<string, NodeSpec> = {
  * `prosemirror-markdown` has for the identical reason.
  */
 const marks: Record<string, MarkSpec> = {
-  strong: {},
-  emphasis: {},
-  delete: {},
-  inlineCode: {},
+  strong: { toDOM: () => ['strong', 0] },
+  emphasis: { toDOM: () => ['em', 0] },
+  delete: { toDOM: () => ['del', 0] },
+  inlineCode: { toDOM: () => ['code', 0] },
   link: {
     attrs: { href: { default: '' }, title: { default: null as string | null } },
+    toDOM: (mark) => ['a', { href: mark.attrs.href, title: mark.attrs.title }, 0],
   },
 };
 

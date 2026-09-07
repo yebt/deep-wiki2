@@ -26,7 +26,7 @@ describe('checkBuildOutputIsolation', () => {
     const result = await checkBuildOutputIsolation(join(FIXTURES_DIR, 'missing-route'));
 
     expect(result.ok).toBe(false);
-    expect(result.errors.some((e) => e.includes('pages/pages/[id].vue'))).toBe(true);
+    expect(result.errors.some((e) => e.includes('pages/pages/[id]/index.vue'))).toBe(true);
   });
 
   test('skips gracefully — not a failure — when no build output exists yet', async () => {

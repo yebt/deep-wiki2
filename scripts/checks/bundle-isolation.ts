@@ -49,11 +49,20 @@ const RELATIVE_EXTENSIONS = ['.ts', '.tsx'];
 const SOURCE_EXTENSIONS = new Set(['.ts', '.tsx', '.vue', '.js', '.mjs']);
 const SKIP_DIRS = new Set(['node_modules', 'dist', '.nuxt', '.output', '.git', 'drizzle', '__fixtures__']);
 
-/** milkdown/@milkdown, @tiptap, or any prosemirror-* other than prosemirror-model (design D21). */
+/**
+ * milkdown/@milkdown, @tiptap, or any prosemirror-* other than
+ * prosemirror-model (design D21) — plus `node:crypto`/`crypto`, which has
+ * no browser build and reached this closure once already via
+ * `@deep-wiki/markdown`'s single barrel file before that package split
+ * out a crypto-free `"./pipeline"` export (packages/markdown/src/pipeline.ts).
+ * Same property, same enforcement point: "." is a browser-safe surface,
+ * not just a ProseMirror-editing-safe one.
+ */
 function isForbiddenEditingSurface(specifier: string): boolean {
   if (specifier === 'milkdown' || specifier.startsWith('@milkdown/')) return true;
   if (specifier.startsWith('@tiptap/')) return true;
   if (specifier.startsWith('prosemirror-') && specifier !== 'prosemirror-model') return true;
+  if (specifier === 'node:crypto' || specifier === 'crypto') return true;
   return false;
 }
 

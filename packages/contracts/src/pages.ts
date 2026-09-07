@@ -39,6 +39,8 @@ export type EditSessionRefusal = z.infer<typeof EditSessionRefusalSchema>;
 export const EditSessionResponseSchema = z.object({
   markdown: z.string(),
   title: z.string(),
+  /** Needed client-side for the `@` mention endpoints, which are scoped by workspace. */
+  workspaceId: z.string(),
   lock: z.object({ holderUserId: z.string(), acquiredAt: z.string(), heartbeatAt: z.string() }),
 });
 export type EditSessionResponse = z.infer<typeof EditSessionResponseSchema>;

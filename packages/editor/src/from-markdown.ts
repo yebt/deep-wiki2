@@ -1,4 +1,9 @@
-import { parse, type ParseOptions } from '@deep-wiki/markdown';
+// Imports the crypto-free "./pipeline" subpath, not the package root: the
+// root barrel also re-exports block-index.ts/match-blocks.ts, both of
+// which import node:crypto — fine for packages/db and apps/api (server
+// only), fatal for apps/web's edit route, which imports this module
+// directly in the browser (see packages/markdown/src/pipeline.ts).
+import { parse, type ParseOptions } from '@deep-wiki/markdown/pipeline';
 import type {
   BlockContent,
   Code,

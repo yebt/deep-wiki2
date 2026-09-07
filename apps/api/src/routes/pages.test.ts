@@ -170,8 +170,9 @@ describe('GET /pages/:id/edit-session', () => {
     const res = await app.request(`/pages/${fixture.pageId}/edit-session`, { headers: { cookie: fixture.writerCookie } });
 
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { markdown: string; lock: { holderUserId: string } };
+    const body = (await res.json()) as { markdown: string; workspaceId: string; lock: { holderUserId: string } };
     expect(body.markdown).toBe('# Hello\n');
+    expect(body.workspaceId).toBe(fixture.workspaceId);
     expect(body.lock.holderUserId).toBeDefined();
 
     const [lockRow] = await sql`SELECT holder_user_id FROM page_locks WHERE node_id = ${fixture.pageId}`;

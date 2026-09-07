@@ -75,3 +75,22 @@ test('a document can be constructed from a paragraph node', () => {
   expect(doc.type.name).toBe('doc');
   expect(doc.textContent).toBe('hello');
 });
+
+/**
+ * A regression guard for the exact failure mounting a real `EditorView`
+ * (behind `"./mount"`) throws when it is missing:
+ * `node.type.spec.toDOM is not a function`. GATE-2 only exercises
+ * `fromMarkdown`/`toMarkdown`, never DOM serialization, so a node without
+ * `toDOM` could pass every existing test here and still crash the first
+ * time a real editor tries to render it — this test is what would have
+ * caught that before WU-16's mount surface did, at runtime, in a browser.
+ */
+test('every node and mark other than doc/text declares toDOM', () => {
+  for (const [name, type] of Object.entries(schema.nodes)) {
+    if (name === 'doc' || name === 'text') continue;
+    expect(typeof type.spec.toDOM, `node "${name}" has no toDOM`).toBe('function');
+  }
+  for (const [name, type] of Object.entries(schema.marks)) {
+    expect(typeof type.spec.toDOM, `mark "${name}" has no toDOM`).toBe('function');
+  }
+});

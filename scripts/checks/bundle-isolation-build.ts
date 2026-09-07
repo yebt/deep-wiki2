@@ -35,7 +35,7 @@ export interface BuildOutputIsolationResult {
 const FORBIDDEN_PATTERN = /prosemirror|milkdown|tiptap/i;
 
 /** The read route this batch (WU-15) ships. A future route added alongside it needs its own entry here — the check is deliberately route-specific, not "every route", so it stays fast and its failures name exactly one thing. */
-const READ_ROUTE_SRC = 'pages/pages/[id].vue';
+const READ_ROUTE_SRC = 'pages/pages/[id]/index.vue';
 
 interface PreloadNode {
   readonly name?: string;

@@ -21,10 +21,11 @@ describe('filterSlashCommands', () => {
 });
 
 describe('reduceSlashState', () => {
-  test('a trigger with no query shows every command', () => {
+  test('a trigger with no query shows every command, as render-facing summaries', () => {
     const next = reduceSlashState(INACTIVE_SLASH_STATE, { type: 'trigger', from: 0, to: 1, query: '' });
     expect(next.active).toBe(true);
-    expect(next.commands).toEqual(SLASH_COMMANDS);
+    expect(next.commands.map((c) => c.id)).toEqual(SLASH_COMMANDS.map((c) => c.id));
+    expect(next.commands[0]).not.toHaveProperty('run');
   });
 
   test('a query narrows the command list and resets selection', () => {
@@ -39,5 +40,11 @@ describe('reduceSlashState', () => {
     const triggered = reduceSlashState(INACTIVE_SLASH_STATE, { type: 'trigger', from: 0, to: 1, query: '' });
     expect(reduceSlashState(triggered, { type: 'dismiss' }).active).toBe(false);
     expect(reduceSlashState(triggered, { type: 'noTrigger' }).active).toBe(false);
+  });
+
+  test('moveSelection wraps within the current command list', () => {
+    const triggered = reduceSlashState(INACTIVE_SLASH_STATE, { type: 'trigger', from: 0, to: 1, query: '' });
+    const movedUp = reduceSlashState(triggered, { type: 'moveSelection', delta: -1 });
+    expect(movedUp.selectedIndex).toBe(triggered.commands.length - 1);
   });
 });

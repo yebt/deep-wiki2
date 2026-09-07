@@ -1,5 +1,5 @@
 import { sliceBlocks } from './blocks';
-import { parse } from './index';
+import { parse } from './pipeline';
 
 export interface Chunk {
   blockIds: string[];

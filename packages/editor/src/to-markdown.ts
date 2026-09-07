@@ -1,4 +1,7 @@
-import { stringify } from '@deep-wiki/markdown';
+// See from-markdown.ts's same comment: "./pipeline" avoids the root
+// barrel's transitive node:crypto import (block-index.ts/match-blocks.ts),
+// which apps/web's edit route would otherwise load in the browser.
+import { stringify } from '@deep-wiki/markdown/pipeline';
 import type {
   BlockContent,
   DefinitionContent,
