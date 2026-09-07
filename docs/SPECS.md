@@ -269,9 +269,36 @@ document is only an in-memory representation used while editing.
 Without this suite, the editor silently corrupts user documents over time. This is the
 single highest-risk area of the codebase.
 
-The editor is built on **ProseMirror via Milkdown** — chosen over TipTap because Milkdown
-is Markdown-first rather than treating Markdown as a serialisation plugin, which matches
-the canonical-format decision.
+> **GATE-2 — Status: SATISFIED (2026-09-07).** The full fixture corpus round-trips
+> byte-identical through the real ProseMirror schema (`packages/editor/src/round-trip.ts`),
+> 69 fixture-driven tests green (`packages/editor/src/round-trip.test.ts`), and the suite
+> runs as a named, independently identifiable step (`gate-2-round-trip`) ahead of the
+> build step in `.github/workflows/ci.yml` and in `bun run verify`. This repository has
+> no git remote, so that workflow file never executes; enforcement today is local —
+> `bun run check` on every commit, `bun run verify` before tagging.
+
+The editor is built directly on ProseMirror (`prosemirror-view`/`-state`/`-keymap`/
+`-commands`/`-history`/`-inputrules`/`-schema-list`) rather than on the Milkdown package —
+a deviation from the original plan, recorded where it was made (WU-16.6's commit message)
+— chosen over TipTap because it stays Markdown-first rather than treating Markdown as a
+serialisation plugin, which matches the canonical-format decision.
+
+**The supported and refused construct set.** Every construct a document can contain falls
+into exactly one of three buckets, and `classify()` (`packages/editor/src/classify.ts`) is
+derived from the ProseMirror schema rather than written beside it, so the buckets cannot
+silently drift from what the schema actually models:
+
+| Bucket | Constructs | Behaviour |
+| --- | --- | --- |
+| **Modelled** | Paragraphs, headings, nested and mixed-marker lists (tight and loose, ordered and unordered), blockquotes, tables (incl. ragged alignment), code fences with and without an info string, footnotes, hard line breaks, entities and escapes, mixed emphasis and strong markers, wiki-links (resolved, unresolved, anchored), tags, block-anchor syntax (` ^id`), diagram fences | Byte-identical round trip through the real ProseMirror schema; edit mode opens |
+| **Verbatim** | Raw HTML (block and inline), reference-style links and images, frontmatter | Carried opaquely through the schema, not modelled node-by-node; byte-identical round trip; edit mode opens |
+| **Refused** | Setext headings, indented code blocks, and one non-canonical spelling per pinned serialiser option (bullet marker, ordered-list marker, emphasis marker, strong marker, fence style, list-item indent, resource-link spacing, thematic-break rule, tight definitions) | The edit-session probe (`packages/editor/src/probe.ts`) returns a `409` naming the reason and the construct; edit mode does not open. The refusal is surfaced in-product, not only in this document — see the read/edit screens' refusal UI (`document-editor` capability) |
+
+Byte-identity holds for canonical markdown in the modelled and verbatim buckets. It does
+not hold for non-canonical input, which is refused or normalised on purpose, and it makes
+no claim about markdown a future `remark` version parses differently — a dependency bump
+that changes parsing surfaces as a failing fixture test, never as a silently rewritten
+document.
 
 ### 5.2 Editor capabilities
 

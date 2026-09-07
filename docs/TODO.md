@@ -33,13 +33,13 @@ This file has three working sections plus a parking lot.
 
 ## Status
 
-_Last updated 2026-09-04 — HEAD `60521d8`, 63 commits._
+_Last updated 2026-09-07._
 
 | Phase | State |
 | --- | --- |
 | 0 — Foundations | Complete and archived (`openspec/changes/archive/2026-09-03-bootstrap-monorepo-foundations/`) |
 | 1 — Tenancy and permissions | SDD change complete — 85/85 tasks, all 18 work units. GATE-1 satisfied. Owner-reviewed and approved (`docs/UI-CHECKLIST.md` Review Log). One broader roadmap item stays open past this change: Super Root plan-authoring admin route (see the unticked bullet below) |
-| 2 — Content and editor | Not started |
+| 2 — Content and editor | SDD change complete — 93/93 tasks, all 19 work units (`openspec/changes/content-and-editor/`). GATE-2 satisfied. One roadmap bullet stays partially shipped past this change: `/` slash commands cover heading/list/quote/code-block/divider only, not table/diagram-fence/callout/link-to-page (see the unticked bullet above) |
 | 3–9 | Not started |
 
 `openspec/changes/tenancy-and-permissions/` is ready to archive; see that change's
@@ -69,13 +69,18 @@ These are hard gates. Work that depends on them does not start until they are gr
 > fixture corpus, running in CI, before Milkdown is wired into a user-facing screen.
 > Markdown is the source of truth; a lossy serializer silently corrupts user documents.
 >
-> **Status: UNSTARTED.** `packages/editor/src/round-trip.ts` today is
-> `stringify(parse(markdown))` — markdown to mdast and back through `packages/markdown`
-> on both legs, proving the `remark-stringify` pin holds (see the Findings entry) but
-> nothing about a ProseMirror schema, which does not exist yet. Its 7-fixture corpus
-> contains none of the classes that would make the guarantee meaningful (nested lists,
-> tables, code fences, footnotes, HTML blocks, hard breaks, entities, mixed emphasis).
-> Only the serialiser half of this gate exists.
+> **Status: SATISFIED (2026-09-07).** `packages/editor/src/round-trip.ts` runs the
+> real `markdown -> ProseMirror doc -> markdown` path (`from-markdown.ts`/`to-markdown.ts`
+> against the actual schema, not only `packages/markdown`'s mdast-level `parse`/
+> `stringify`). The corpus grew to the classes the gate exists to cover — nested lists,
+> tables, code fences with and without a language hint, footnotes, hard breaks, entities
+> and escapes, mixed emphasis, wiki-links, tags, the block-anchor syntax, diagram fences,
+> raw HTML — split across `modelled/`/`verbatim/`/`refused/`; 69 fixture-driven tests
+> green (`packages/editor/src/round-trip.test.ts`). The suite runs as a named,
+> independently identifiable step (`gate-2-round-trip`) in `.github/workflows/ci.yml`
+> and in `bun run verify` (WU-18). This repository has no git remote, so that workflow
+> file itself never executes — enforcement today is local: `bun run check` at every
+> commit, `bun run verify` before tagging.
 
 > **GATE-3 — `workspace_id` filtered inside every vector query.**
 > Tenant isolation in retrieval is a security boundary, not a convenience. The filter
@@ -207,39 +212,41 @@ lives or dies; it is deliberately front-loaded.
 
 The markdown pipeline and the two document modes.
 
-- [ ] Add page content storage to the schema. After Phase 1, `packages/db/src/schema.ts`
-      holds 11 tables and every one of them is tenancy or auth (`plans`, `users`,
-      `workspaces`, `nodes`, `cells`, `cell_members`, `permissions`, `sessions`,
-      `password_resets`, `instance_settings`, `invitations`) — there is no column
-      anywhere that stores a page's markdown. This must land before the editor can
-      persist anything; see the Findings entry below.
-- [ ] Build `packages/markdown` as the single unified/remark pipeline, imported by the
+- [x] Add page content storage to the schema. `page_content` (WU-8): canonical
+      markdown, cached `rendered_html`, `block_index`, `content_hash`, `pipeline_version`.
+- [x] Build `packages/markdown` as the single unified/remark pipeline, imported by the
       editor, the API and the future indexer. No second parser anywhere in the codebase.
-- [ ] Implement stable block IDs: every block-level node (paragraph, heading, list item,
+- [x] Implement stable block IDs: every block-level node (paragraph, heading, list item,
       code fence, table) carries a persistent identifier that survives edits above it.
-- [ ] Implement wiki-link parsing and a normalised link representation.
-- [ ] Implement tag parsing.
-- [ ] Implement the chunking function used later by RAG, keyed on block IDs so retrieval
+- [x] Implement wiki-link parsing and a normalised link representation.
+- [x] Implement tag parsing.
+- [x] Implement the chunking function used later by RAG, keyed on block IDs so retrieval
       citations resolve back to a real anchor in the document.
-- [ ] Build the markdown -> ProseMirror doc parser and the ProseMirror doc -> markdown
+- [x] Build the markdown -> ProseMirror doc parser and the ProseMirror doc -> markdown
       serializer in `packages/editor`.
-- [ ] **GATE-2**: assemble the fixture corpus (nested lists, tables, code fences with
+- [x] **GATE-2**: assemble the fixture corpus (nested lists, tables, code fences with
       language hints, mixed emphasis, footnotes, wiki-links, tags, diagram fences, HTML
-      passthrough) and assert byte-identical round-trips in CI.
-- [ ] Implement Read mode: markdown rendered to HTML at save time, cached, served without
+      passthrough) and assert byte-identical round-trips in CI. Named CI step
+      `gate-2-round-trip` (WU-18); this repository has no remote, so the workflow file
+      itself never executes — enforcement is local (`bun run check` per commit,
+      `bun run verify` before tagging).
+- [x] Implement Read mode: markdown rendered to HTML at save time, cached, served without
       booting ProseMirror. This is the default mode and carries the majority of traffic.
-- [ ] Implement Edit mode with a soft lock: acquire on entry, heartbeat while open,
+- [x] Implement Edit mode with a soft lock: acquire on entry, heartbeat while open,
       expire on silence. Offer "take over" and "open read-only" rather than a hard block.
-- [ ] Implement `@` mentions in the editor (users and cells), resolving against the
+- [x] Implement `@` mentions in the editor (users and cells), resolving against the
       permission model so a user cannot mention someone into a document they cannot see.
 - [ ] Implement `/` slash commands in the editor (insert heading, table, diagram fence,
-      callout, link to page).
-- [ ] Derive and store the `links` table on every save; replace rows rather than patching.
+      callout, link to page). Partially shipped (WU-16): heading levels 1–3, bulleted and
+      numbered lists, quote, code block, divider. Table, diagram fence, callout, and
+      link-to-page insertion are not implemented — left unticked rather than claiming the
+      full bullet.
+- [x] Derive and store the `links` table on every save; replace rows rather than patching.
       The graph is a projection of content and is never user-editable directly.
-- [ ] Implement backlinks as an index lookup over the derived `links` table.
-- [ ] Implement tag listing and tag-filtered navigation.
-- [ ] Implement the navigation tree UI over `nodes` (shelves, books, chapters, pages) with
-      drag reordering writing back to `position`.
+- [x] Implement backlinks as an index lookup over the derived `links` table.
+- [x] Implement tag listing and tag-filtered navigation.
+- [x] Implement the navigation tree UI over `nodes` (shelves, books, chapters, pages) with
+      drag reordering writing back to `position` (WU-17).
 
 ### Phase 3 — Versioning, diffs, comments and presence
 
@@ -1130,6 +1137,35 @@ Impact: `scripts/checks/bundle-isolation.ts` (exists, enforced locally
 today); `apps/web`'s build-output test and its CI step (WU-15, not yet
 created); `.github/workflows/ci.yml` (WU-18 adds GATE-2 as a named step
 under this same "no remote executes it yet" constraint).
+
+### 2026-09-07 — `pipeline_version` couples render and chunk versions as an accepted cost
+
+`page_content.pipeline_version` (design.md, `page_content` schema; D11) is
+one integer covering both the render pipeline and the chunk-boundary
+policy. Bumping it means "rerender and, from Phase 5 onward, reindex" — a
+render-only change therefore forces an unneeded reindex, which is accepted
+as cheaper than two independently-tracked versions that can silently
+disagree and leave a citation resolving to nothing.
+
+**What a two-column split would take**, if a measured reindex cost from
+real Phase 5 traffic later shows the coupling is expensive (design.md D11's
+own reversal criterion): a migration adding the second column backfilled
+from the current `pipeline_version`; splitting the "bump on pipeline
+change" call site so a render-only change stops touching the
+chunk-boundary version; and Phase 5's reindex job keying off its own column
+instead of the shared one.
+
+**Cross-references, not restated here** (recorded in full where task 3.6
+and task 14.5 landed them, to avoid duplicating a Finding): the block-match
+threshold `τ = 0.5` is a judgement, not a measurement — see "2026-09-06 —
+Block-match threshold τ = 0.5 is a judgement, not a measurement," above.
+The bundle-isolation CI gap — layer 2 runs today inside `bun run check`,
+layer 3 needs a CI step this repository's remote-less state cannot
+execute — see "2026-09-06 — Bundle-isolation's three layers do not all run
+in the same place yet," above.
+
+Impact: `packages/db/src/schema.ts` (`pipeline_version`, unchanged by this
+entry — documentation only); no code change.
 
 ---
 

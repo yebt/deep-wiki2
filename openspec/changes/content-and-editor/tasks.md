@@ -522,20 +522,48 @@ dependency graph, not only by intent.
 
 ## Phase 19 (WU-19) — `docs: record the pipeline, the pin finding, the supported set and the accepted costs`
 
-- [ ] 19.1 `docs/TODO.md` Findings: add the `remark-stringify` list/emphasis pin
+- [x] 19.1 `docs/TODO.md` Findings: add the `remark-stringify` list/emphasis pin
       entry (per the proposal's correction — recorded in code and in Phase 0's
       archived tasks, but not yet in this log).
-- [ ] 19.2 `docs/TODO.md` Findings: cross-reference the τ = 0.5 judgement (3.6);
+
+      Already present — "2026-09-04 — The `remark-stringify` list/emphasis pin has
+      no Findings entry" — confirmed, not re-added, per this batch's explicit
+      instruction not to duplicate a recorded Finding.
+- [x] 19.2 `docs/TODO.md` Findings: cross-reference the τ = 0.5 judgement (3.6);
       record `pipeline_version` coupling render and chunk versions as an accepted
       cost, and what a two-column split would take (design D11); record the
       bundle-isolation CI gap plainly — layer 2 runs today, layer 3 needs a step
       this repository's remote-less state cannot execute (cross-ref 14.5).
-- [ ] 19.3 `docs/SPECS.md`: update the GATE-2 status line to SATISFIED with date;
+
+      The τ = 0.5 judgement (task 3.6) and the bundle-isolation CI gap (task 14.5)
+      already have their own full Findings entries — cross-referenced from the new
+      "2026-09-07 — `pipeline_version` couples render and chunk versions as an
+      accepted cost" entry rather than restated.
+- [x] 19.3 `docs/SPECS.md`: update the GATE-2 status line to SATISFIED with date;
       document the supported/refused construct set (§3.3/§5.1) as the user-facing
       reference the WU-16.5 refusal UI links to.
-- [ ] 19.4 `docs/TODO.md`: tick Phase 2's roadmap bullets against what shipped.
-- [ ] 19.5 Run `bun run verify` (`check && lint && typecheck && test`) green on the
+- [x] 19.4 `docs/TODO.md`: tick Phase 2's roadmap bullets against what shipped.
+
+      One bullet (`/` slash commands) left unticked and annotated: only
+      heading/list/quote/code-block/divider shipped, not table/diagram-fence/
+      callout/link-to-page.
+- [x] 19.5 Run `bun run verify` (`check && lint && typecheck && test`) green on the
       full branch before requesting owner review.
+
+      Exit 0. `@deep-wiki/core` 51 pass, `@deep-wiki/contracts` 42 pass,
+      `@deep-wiki/landing` 5 pass, `@deep-wiki/markdown` 196 pass, `@deep-wiki/editor`
+      120 pass (GATE-2 included), `@deep-wiki/db` 236 pass, `@deep-wiki/api` 85 pass,
+      `@deep-wiki/web` 97 pass across 20 files, `bun test scripts/checks` 74 pass, and
+      the explicit `gate-2-round-trip` step 69 pass — all 0 fail. First attempt on this
+      shared 4-core host hit `@deep-wiki/api`'s known pre-existing podman-compose
+      concurrency race (documented in every prior batch: concurrent `provisionTestDatabase()`
+      calls across 16 test files racing `podman network create` under host load); isolated
+      and re-ran per this batch's instructions — a serial (`--parallel=1`) run reproduced
+      the same pre-existing single-hook-timeout signature (81 pass/2 fail, matching the
+      prior batch's 82/2), confirming it as environmental and unrelated to this batch's
+      diff (CI workflow, `package.json`, one new test file, and docs only — no production
+      code touched). A clean re-run of the full `bun run verify` on a quieter host moment
+      came back fully green, reported above.
 
 ---
 
