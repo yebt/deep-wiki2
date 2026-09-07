@@ -408,6 +408,23 @@ makes conventions portable across projects.
 
 Discoveries and constraints. Newest first.
 
+### 2026-09-06 — Route modules shipped unreachable, twice
+
+In Phase 1, `admin`, `invitations` and `uploads` were fully implemented and unit-tested while
+`apps/api`'s composition root wired only `createAuthRoutes`. Every test passed; no browser could
+reach any of them. It was found only when the UI tried to call one. In Phase 5 the same thing
+happened to `ai-credentials`, in a track that had the Phase 1 incident recorded in its own briefing.
+
+Neither typecheck nor the test suite can see it. Unit tests invoke the route factory directly and
+never traverse the running server, and an unmounted module is still a perfectly valid module. The
+only signal is a request that never arrives, which surfaces later as "the API is down".
+
+**Impact:** `scripts/checks/routes-mounted.ts` fails the build when a route module exports a
+`create*Routes` factory that `apps/api/src/index.ts` never references. The first occurrence was
+fixed by hand; a second occurrence in a track that knew about the first is the evidence that a
+manual fix was never going to hold. This is the fourth time this session the same shape has
+appeared — **a rule enforced by memory is enforced by nobody.**
+
 ### 2026-09-06 — Two parallel changes both claim migration numbers 0008-0010
 
 `content-and-editor` and `ai-provider-foundation` were designed concurrently and each planned its
