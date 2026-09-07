@@ -220,6 +220,10 @@ further decision gate blocks `sdd-apply`.
 
 ---
 
+## Phase 20: Verify Remediation (CRITICAL finding closure)
+
+- [x] 20.1 RED→GREEN: `packages/db/src/ai/embedding-index.test.ts` — add the two missing `embedding-index-integrity` "Declared Vector Dimension" scenarios (`ANN index builds successfully`, `Undimensioned column is not used`). RED proven against real Postgres before either assertion could pass: querying `pg_class`/`pg_am`/`pg_index` for an HNSW index on `chunks` before creating one returns no row, and `format_type(atttypid, atttypmod)` against a scratch bare-`vector` column returns `vector`, not `vector(1536)`. GREEN: creating `CREATE INDEX ... USING hnsw` and reading the real `chunks.embedding` column both satisfy the assertions. Also renamed and re-commented the existing `vector_dims CHECK` test — it was passing for the wrong reason (pgvector's type cast rejects a 1024-length literal before the named CHECK can run; the CHECK cannot fail independently given both the column and `workspace_embedding_indexes.dimensions` are hard-pinned to 1536), so its name and comment now say plainly that the cast is the enforcing mechanism and the CHECK is defence in depth. Full `@deep-wiki/db` suite re-run after the change: 213/213 pass (was 211).
+
 ## Requirement Traceability
 
 | Capability spec | Requirements | Covered by |

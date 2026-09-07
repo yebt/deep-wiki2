@@ -150,7 +150,19 @@ describe('chunks — every write is pinned to a declared generation', () => {
     `);
   });
 
-  test('the vector_dims CHECK rejects a vector whose length disagrees with its declared dimensions', async () => {
+  // This assertion is satisfied by the Postgres type cast on `chunks.embedding
+  // vector(1536)`, not by the `chunks_vector_dims_check` CHECK named below —
+  // proven directly by `Declared Vector Dimension`'s second test, which reads
+  // the rejection's own error text. The CHECK
+  // (`vector_dims(embedding) = dimensions`) cannot fail independently in this
+  // schema: the column's dimension and `workspace_embedding_indexes.dimensions`
+  // are both hard-pinned to 1536
+  // (`workspace_embedding_indexes_dimensions_check`), so any row whose type
+  // cast succeeds already has `vector_dims(embedding) = 1536 = dimensions`.
+  // It stays in the schema as defence in depth against a future migration
+  // that makes the dimension configurable per workspace (design.md D14's
+  // residual — SPECS §14) — it is not the enforcing mechanism today.
+  test('a vector literal disagreeing with the declared column dimension is rejected before the named vector_dims CHECK could run', async () => {
     const { workspaceId, pageId } = await seedWorkspaceWithPage();
     await seedGeneration(workspaceId, 'text-embedding-3-small', 1536);
 
@@ -158,6 +170,51 @@ describe('chunks — every write is pinned to a declared generation', () => {
       INSERT INTO chunks (workspace_id, page_id, content, embedding, embedding_model, dimensions)
       VALUES (${workspaceId}, ${pageId}, 'hello', ${vectorLiteral(1024)}, 'text-embedding-3-small', 1536)
     `);
+  });
+});
+
+describe('Declared Vector Dimension (embedding-index-integrity spec)', () => {
+  test('an HNSW index builds over the declared vector(1536) column, verified in the catalog rather than by absence of a throw', async () => {
+    await sql`CREATE INDEX "chunks_embedding_hnsw_test_idx" ON "chunks" USING hnsw ("embedding" vector_cosine_ops)`;
+
+    const [row] = await sql<{ amname: string }[]>`
+      SELECT am.amname
+      FROM pg_class idx
+      JOIN pg_am am ON idx.relam = am.oid
+      JOIN pg_index i ON i.indexrelid = idx.oid
+      JOIN pg_class tbl ON i.indrelid = tbl.oid
+      WHERE tbl.relname = 'chunks' AND idx.relname = 'chunks_embedding_hnsw_test_idx'
+    `;
+
+    expect(row?.amname).toBe('hnsw');
+  });
+
+  test('the embedding column declares its dimension, so a 1024-length vector is rejected by the type cast on write', async () => {
+    const [column] = await sql<{ declared_type: string }[]>`
+      SELECT format_type(atttypid, atttypmod) AS declared_type
+      FROM pg_attribute
+      WHERE attrelid = 'chunks'::regclass AND attname = 'embedding'
+    `;
+    expect(column?.declared_type).toBe('vector(1536)');
+
+    const { workspaceId, pageId } = await seedWorkspaceWithPage();
+    await seedGeneration(workspaceId, 'text-embedding-3-small', 1536);
+
+    let rejectionMessage = '';
+    try {
+      await sql`
+        INSERT INTO chunks (workspace_id, page_id, content, embedding, embedding_model, dimensions)
+        VALUES (${workspaceId}, ${pageId}, 'hello', ${vectorLiteral(1024)}, 'text-embedding-3-small', 1536)
+      `;
+    } catch (error) {
+      rejectionMessage = String(error);
+    }
+
+    // pgvector's own type-cast error, not the generic "violates check
+    // constraint" wording a CHECK-constraint failure would produce — this is
+    // what proves the column's declared dimension, not the named CHECK, is
+    // what rejected the write.
+    expect(rejectionMessage).toMatch(/expected 1536 dimensions, not 1024/);
   });
 });
 
