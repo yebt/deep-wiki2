@@ -53,3 +53,24 @@ test('a data: image target is stripped by the URL-scheme allowlist', () => {
   const html = render(markdown);
   expect(html).not.toContain('data:text/html');
 });
+
+// knowledge-graph: Unresolved-Link Rendering Does Not Disclose Existence.
+// `render()` takes only a markdown string — it has no channel to receive a
+// wiki-link's resolution status (that lives in packages/db, resolved per
+// save against the workspace's pages), so its output structurally cannot
+// depend on whether a given `[[Target]]` happened to resolve. Both a
+// resolved-looking and an unresolved-looking target therefore always
+// render with identical treatment (docs/TODO.md Finding: render() does not
+// yet hyperlink wiki-links at all — this property holds today by
+// construction and MUST be preserved whenever that gap is closed).
+test('a wiki-link to a title that could resolve and one that could not render with identical treatment', () => {
+  const resolvable = render('See [[Existing Page]] for more.\n');
+  const unresolvable = render('See [[Totally Nonexistent Page]] for more.\n');
+
+  // Neither is turned into a distinguishing wrapper (an anchor tag, a
+  // "resolved"/"unresolved" class) — both are the same plain paragraph
+  // structure around their own bracketed text.
+  expect(resolvable).not.toContain('<a ');
+  expect(unresolvable).not.toContain('<a ');
+  expect(resolvable.replace('Existing Page', 'X')).toBe(unresolvable.replace('Totally Nonexistent Page', 'X'));
+});

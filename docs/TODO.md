@@ -1072,6 +1072,37 @@ preventing. Until then this is a one-constant change, not a mechanism change
 Impact: `packages/markdown/src/match-blocks.ts` only; `packages/db`'s save
 transaction (a later phase) calls `matchBlocks` but does not itself decide τ.
 
+### 2026-09-06 — `render()` does not yet hyperlink wiki-links, which is why non-disclosure holds today "for free"
+
+`packages/markdown/src/render.ts` runs an unextended `remark-parse` pipeline
+(WU-5's own deferred gap): a `[[Target]]` wiki-link is not a custom node to
+this pipeline, so it renders as literal bracketed text, never as an `<a>`.
+knowledge-graph's "Unresolved-Link Rendering Does Not Disclose Existence"
+(a resolved and an unresolved wiki-link must render identically) is
+therefore satisfied today by construction — `render()` has no channel to
+receive a link's resolution status at all, since that status lives only in
+`packages/db`, resolved per save against the workspace's pages.
+
+**The real gap this masks.** `page_content.rendered_html` is cached once
+per save and served to every viewer identically (page-content spec: Read
+Mode Serves Pre-Rendered HTML Without Reparsing). Once `render()` is
+extended to actually hyperlink a *resolved* wiki-link, that cached HTML
+cannot safely bake in "resolved -> `<a href>`" at save time: a viewer who
+cannot read the target must still see it exactly as unresolved, but
+permissions are per-viewer and the cache is per-page. Closing this
+properly needs one of: (a) a per-request rewrite pass over the cached HTML
+that re-checks each embedded link's target against the current viewer via
+`canManyResources` before serving, or (b) rendering every wiki-link as an
+inert placeholder resolved client-side through the same non-disclosing
+endpoint mention/backlink autocomplete already use. Whichever is chosen
+must preserve the identical-treatment property this Finding currently gets
+for free — it will not survive naively wiring in `<a href="/pages/{id}">` at
+save time.
+
+Impact: `packages/markdown/src/render.ts` (wiki-link hyperlinking, not yet
+implemented); `apps/api/src/routes/pages.ts`'s read route, whichever
+approach above is chosen, once this is picked up.
+
 ---
 
 ## Open Questions

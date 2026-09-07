@@ -313,25 +313,25 @@ dependency graph, not only by intent.
 
 ## Phase 13 (WU-13) — `feat(api): backlinks, tags and mention candidates that disclose nothing`
 
-- [ ] 13.1 RED — `routes/links.test.ts`: backlinks filtered through
+- [x] 13.1 RED — `routes/links.test.ts`: backlinks filtered through
       `canManyResources(read)`; an unreadable source page is absent with no title or
       existence leaked; counts are computed post-filter. *(knowledge-graph:
       Backlinks Resolve Through can(), both scenarios)*
-- [ ] 13.2 RED — `routes/mentions.test.ts`: page/user/cell mention candidates
+- [x] 13.2 RED — `routes/mentions.test.ts`: page/user/cell mention candidates
       filtered through `can()`; a query matching only an unreadable page or user
       returns nothing, checked with `expectNoDisclosure` from the unauthorised
       subject's point of view. *(document-editor: Mention Autocomplete Is Filtered
       By can(); knowledge-graph: Link And Mention Autocomplete Never Discloses)*
-- [ ] 13.3 RED — `routes/tags.test.ts`: tag-filtered listing excludes an unreadable
+- [x] 13.3 RED — `routes/tags.test.ts`: tag-filtered listing excludes an unreadable
       tagged page. *(knowledge-graph: Tag-Filtered Navigation Resolves Through
       can())*
-- [ ] 13.4 RED — an unreadable link target renders identically to a non-existent
+- [x] 13.4 RED — an unreadable link target renders identically to a non-existent
       one. *(knowledge-graph: Unresolved-Link Rendering Does Not Disclose Existence)*
-- [ ] 13.5 RED — mentioning a user with no read access surfaces the mismatch rather
+- [x] 13.5 RED — mentioning a user with no read access surfaces the mismatch rather
       than completing silently; mentioning a user with access proceeds normally.
       *(document-editor: Mentioning A User Does Not Silently Grant Them Access, both
       scenarios)*
-- [ ] 13.6 GREEN — implement `apps/api/src/routes/{links,tags,mentions}.ts`.
+- [x] 13.6 GREEN — implement `apps/api/src/routes/{links,tags,mentions}.ts`.
 
 ## Phase 14 (WU-14) — `feat(checks): read mode can never reach the prosemirror bundle`
 

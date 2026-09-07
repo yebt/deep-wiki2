@@ -9,7 +9,10 @@ import { loadConfig } from './config';
 import { createAdminRoutes } from './routes/admin';
 import { createAuthRoutes } from './routes/auth';
 import { createInvitationRoutes } from './routes/invitations';
+import { createLinkRoutes } from './routes/links';
+import { createMentionRoutes } from './routes/mentions';
 import { createPageRoutes } from './routes/pages';
+import { createTagRoutes } from './routes/tags';
 import { createUploadRoutes } from './routes/uploads';
 
 /**
@@ -143,6 +146,10 @@ if (import.meta.main) {
       pageLockTtlSeconds: config.PAGE_LOCK_TTL_SECONDS,
     }),
   );
+
+  app.route('/', createLinkRoutes({ sql, sessionIdleTimeoutMinutes: config.SESSION_IDLE_TIMEOUT_MINUTES }));
+  app.route('/', createTagRoutes({ sql, sessionIdleTimeoutMinutes: config.SESSION_IDLE_TIMEOUT_MINUTES }));
+  app.route('/', createMentionRoutes({ sql, sessionIdleTimeoutMinutes: config.SESSION_IDLE_TIMEOUT_MINUTES }));
 
   console.log(`apps/api: listening on port ${config.PORT}`);
   Bun.serve({ port: config.PORT, fetch: app.fetch });

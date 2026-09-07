@@ -42,6 +42,8 @@ export { canManyResources, canManySubjects } from './permissions/can-many';
 export type { CanManyResourcesInput, CanManySubjectsInput } from './permissions/can-many';
 export { readableResourceIds, readableSubjectIds } from './permissions/readable';
 export type { ReadableResourceIdsInput, ReadableSubjectIdsInput } from './permissions/readable';
+export { listWorkspaceMemberCandidates } from './permissions/candidates';
+export type { ListWorkspaceMemberCandidatesInput, UserCandidate } from './permissions/candidates';
 export { NotCanonicalError, savePage, StaleContentError } from './content/save-page';
 export type { SavePageInput as SavePageDbInput, SavePageResult } from './content/save-page';
 export { readPageHtml, readPageMarkdown } from './content/read-page';
