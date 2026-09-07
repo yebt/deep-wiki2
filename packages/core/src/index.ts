@@ -60,3 +60,13 @@ export type {
   SealedCredential,
   UsageLedger,
 } from './ai/ports';
+export type {
+  EmbeddingModelCandidate,
+  EmbeddingRegistrationRefusal,
+  EmbeddingRegistrationRefusalReason,
+  LocalFallbackResult,
+  RegisteredEmbeddingModel,
+} from './ai/embedding-registration';
+export { EMBEDDING_DIMENSION, registerEmbeddingModel, resolveLocalFallback } from './ai/embedding-registration';
+export type { EffectiveEmbeddingProvider, EmbeddingConfigurationInput } from './ai/embedding-configuration';
+export { offeredEmbeddingProviderIds, resolveEffectiveEmbeddingProvider } from './ai/embedding-configuration';

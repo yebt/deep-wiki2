@@ -78,6 +78,13 @@
       "when": 1735689600010,
       "tag": "0010_ai_capability_observations",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1735689600011,
+      "tag": "0011_embedding_indexes_and_chunks",
+      "breakpoints": true
     }
   ]
 }

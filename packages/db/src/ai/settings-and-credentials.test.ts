@@ -173,12 +173,15 @@ describe('composite (id, workspace_id) pins a credential to its own workspace', 
 });
 
 const DOWN_MIGRATION_PATH = join(import.meta.dir, '..', '..', 'drizzle', 'down', '0008_ai_settings_and_credentials.down.sql');
-// `ai_usage_events.degradation_level` (0009) and both
-// `ai_capability_observations` level columns (0010) reference
-// `ai_structured_output_level`, a type 0008 owns — reversing 0008 alone
-// while 0009/0010 are still applied is not a real rollback order, exactly
-// as applying either before 0008 would not be. This down-migration proof
-// reverses in the correct order: the latest migration first.
+// `ai_usage_events.degradation_level` (0009), both
+// `ai_capability_observations` level columns (0010), and
+// `workspace_embedding_indexes.embedding_provider` (0011) all reference a
+// type 0008 owns (`ai_structured_output_level` or `ai_provider`) —
+// reversing 0008 alone while any later migration is still applied is not
+// a real rollback order, exactly as applying a later one before 0008
+// would not be. This down-migration proof reverses in the correct order:
+// the latest migration first.
+const EMBEDDING_INDEXES_DOWN_MIGRATION_PATH = join(import.meta.dir, '..', '..', 'drizzle', 'down', '0011_embedding_indexes_and_chunks.down.sql');
 const OBSERVATIONS_DOWN_MIGRATION_PATH = join(import.meta.dir, '..', '..', 'drizzle', 'down', '0010_ai_capability_observations.down.sql');
 const LEDGER_DOWN_MIGRATION_PATH = join(import.meta.dir, '..', '..', 'drizzle', 'down', '0009_ai_usage_ledger.down.sql');
 
@@ -187,6 +190,7 @@ describe('down migration', () => {
     const { workspaceId } = await seedWorkspace();
     await insertCredential(workspaceId, 'openai');
 
+    await sql.file(EMBEDDING_INDEXES_DOWN_MIGRATION_PATH);
     await sql.file(OBSERVATIONS_DOWN_MIGRATION_PATH);
     await sql.file(LEDGER_DOWN_MIGRATION_PATH);
     await sql.file(DOWN_MIGRATION_PATH);

@@ -28,6 +28,22 @@ const bytea = customType<{ data: Uint8Array }>({
   },
 });
 
+/**
+ * `drizzle-orm/pg-core` has no built-in pgvector column either. The
+ * dimension is hard-coded at 1536 (embedding-index-integrity spec —
+ * "Declared Vector Dimension"; embedding-configuration spec — "Embedding
+ * Dimension Fixed at 1536") — an undimensioned `vector` column cannot be
+ * HNSW-indexed, verified empirically against a real Postgres instance.
+ */
+const vector1536 = customType<{ data: readonly number[] }>({
+  dataType() {
+    return 'vector(1536)';
+  },
+  toDriver(value) {
+    return `[${value.join(',')}]`;
+  },
+});
+
 export const nodeType = pgEnum('node_type', ['workspace', 'shelf', 'book', 'chapter', 'page']);
 
 /**
@@ -58,6 +74,8 @@ export const aiCredentialValidationErrorCode = pgEnum('ai_credential_validation_
 export const aiUsageOperation = pgEnum('ai_usage_operation', ['chat', 'embed']);
 /** Mirrors `@deep-wiki/core`'s `ReservationState` (`ai/budget.ts`). */
 export const aiReservationState = pgEnum('ai_reservation_state', ['reserved', 'settled', 'voided']);
+/** A generation's lifecycle (embedding-index-integrity spec — "Reindexing Is an Explicit Tracked Job"). */
+export const embeddingIndexState = pgEnum('embedding_index_state', ['building', 'active', 'retired']);
 
 export const plans = pgTable('plans', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -336,4 +354,44 @@ export const aiCapabilityObservations = pgTable('ai_capability_observations', {
   observedLevel: aiStructuredOutputLevel('observed_level').notNull(),
   errorCode: text('error_code'),
   observedAt: timestamp('observed_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * Index generations, not columns on settings (design.md — "Why the
+ * embedding pair is a table and not two columns on settings"; D14). The
+ * `UNIQUE (workspace_id, embedding_model, dimensions)` constraint and the
+ * partial `UNIQUE (workspace_id) WHERE state = 'active'` index are
+ * declared only in the migration SQL (see the module doc comment above).
+ */
+export const workspaceEmbeddingIndexes = pgTable('workspace_embedding_indexes', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  workspaceId: uuid('workspace_id')
+    .notNull()
+    .references(() => workspaces.id, { onDelete: 'cascade' }),
+  embeddingProvider: aiProvider('embedding_provider').notNull(),
+  embeddingModel: text('embedding_model').notNull(),
+  dimensions: integer('dimensions').notNull(),
+  state: embeddingIndexState('state').notNull().default('building'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  activatedAt: timestamp('activated_at', { withTimezone: true }),
+});
+
+/**
+ * Ships with no writer and no query (D15) — the integrity contract has
+ * to exist before rows do. The composite FKs to `nodes (id,
+ * workspace_id)` and to `workspace_embedding_indexes`' own composite
+ * unique key are declared only in the migration SQL.
+ */
+export const chunks = pgTable('chunks', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  workspaceId: uuid('workspace_id')
+    .notNull()
+    .references(() => workspaces.id, { onDelete: 'cascade' }),
+  pageId: uuid('page_id').notNull(),
+  blockIds: text('block_ids').array().notNull().default([]),
+  content: text('content').notNull(),
+  embedding: vector1536('embedding').notNull(),
+  embeddingModel: text('embedding_model').notNull(),
+  dimensions: integer('dimensions').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
