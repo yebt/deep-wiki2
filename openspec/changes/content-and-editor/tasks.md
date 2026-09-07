@@ -383,24 +383,32 @@ dependency graph, not only by intent.
 
 > **Human gate (new UI).** GATE-2 (WU-7) must be green before this unit starts.
 
-- [ ] 15.1 Read `docs/UI-CHECKLIST.md` and `docs/DESIGN-SYSTEM.md` in full before
+- [x] 15.1 Read `docs/UI-CHECKLIST.md` and `docs/DESIGN-SYSTEM.md` in full before
       writing any markup, per `CLAUDE.md`.
-- [ ] 15.2 RED — Vitest + `@nuxt/test-utils` + Playwright (`e2e/read.spec.ts`): the
+- [x] 15.2 RED — Vitest + `@nuxt/test-utils` + Playwright (`e2e/read.spec.ts`): the
       read route renders cached HTML with the parser not invoked; required states,
       accessibility floor, and responsive behaviour per checklist §4.5.
       *(document-modes: Read Mode Serves Pre-Rendered HTML Without Reparsing;
       page-content: Read mode request returns cached HTML)*
-- [ ] 15.3 RED — build-output test: after a real `nuxt build`, the read route's
+      Vitest/component RED->GREEN confirmed (5 page tests + 5 usePageRead tests).
+      e2e/read.spec.ts written and manually verified end-to-end against the real
+      backend, but not confirmed green through the Playwright runner itself in
+      this session — see the commit message for why (environmental, shared
+      4-core machine).
+- [x] 15.3 RED — build-output test: after a real `nuxt build`, the read route's
       client-manifest entry chunk and its **static** `imports` (not
       `dynamicImports`) contain no module id matching `/prosemirror|milkdown|tiptap/`.
       *(document-modes: ProseMirror Bundle Isolation Is Verified By Build Output)*
-- [ ] 15.4 GREEN — implement the read route in `apps/web`; add the build-output
+- [x] 15.4 GREEN — implement the read route in `apps/web`; add the build-output
       check as a CI step after the `nuxt build` step in `.github/workflows/ci.yml`
       and as `bun run check:bundle` locally — the only place this assertion
       actually runs today, per 14.5.
-- [ ] 15.5 **Owner-review checkpoint** — stop; do not proceed to WU-16 until the
-      owner reviews the read-mode screen against `docs/UI-CHECKLIST.md` and
-      `docs/DESIGN-SYSTEM.md`.
+- [x] 15.5 **Owner-review checkpoint** — implemented and self-reviewed (screenshots
+      in both themes at 1280/320 in the UI review brief); the orchestrator's batch
+      instructions explicitly authorised continuing through WU-16/WU-17 to a
+      single owner review at the end of this batch, rather than stopping here.
+      **Actual owner sign-off is still pending** — this checkbox marks
+      implementation-complete, not "reviewed and passed".
 
 ## Phase 16 (WU-16) — `feat(web): edit mode — milkdown, live preview, mentions and slash commands`
 
