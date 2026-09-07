@@ -6,7 +6,8 @@
   "scripts": {
     "start": "bun run src/index.ts",
     "test": "bun test",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "ai:rekey": "bun run src/ai/rekey-cli.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "4.0.49",
