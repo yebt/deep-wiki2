@@ -1,12 +1,18 @@
 import { createHash } from 'node:crypto';
+import type { BlobStore, CredentialCipher, MailSender, PasswordHasher } from '@deep-wiki/core';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import postgres from 'postgres';
+import { buildKeyProvider } from './adapters/ai/key-provider/build-key-provider';
+import { buildCipher } from './adapters/ai/credentials/build-cipher';
 import { Argon2idPasswordHasher } from './adapters/crypto/argon2id-password-hasher';
 import { createBlobStore } from './adapters/blob';
 import { SmtpMailSender } from './adapters/mail/smtp-mail-sender';
-import { loadConfig } from './config';
+import { createVercelAiValidationProbe } from './ai/gateway/validation-probe';
+import type { CredentialValidationProbe } from './adapters/ai/credentials/validation-probe';
+import { assertKeyringComplete, loadConfig } from './config';
 import { createAdminRoutes } from './routes/admin';
+import { createAiCredentialRoutes } from './routes/ai-credentials';
 import { createAuthRoutes } from './routes/auth';
 import { createInvitationRoutes } from './routes/invitations';
 import { createUploadRoutes } from './routes/uploads';
@@ -64,15 +70,111 @@ function computeSmtpConfigHash(env: {
 
 const DEFAULT_MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 
+/**
+ * Every adapter `composeApp` mounts routes against. Grouped apart from
+ * `AppSettings` below because these carry behaviour (a `sql` connection,
+ * a cipher, a probe), not configuration values.
+ */
+export interface AppAdapters {
+  readonly sql: postgres.Sql;
+  readonly mailSender: MailSender;
+  readonly passwordHasher: PasswordHasher;
+  readonly blobStore: BlobStore;
+  readonly smtpConfigHash: string;
+  readonly cipher: CredentialCipher;
+  readonly validationProbe: CredentialValidationProbe;
+}
+
+export interface AppSettings {
+  readonly appUrl: string;
+  readonly sessionIdleTimeoutMinutes: number;
+  readonly sessionAbsoluteTimeoutDays: number;
+  readonly passwordResetTtlMinutes: number;
+  readonly invitationTtlDays: number;
+  readonly maxUploadBytes: number;
+}
+
+/**
+ * The actual composition root: every route module the repository ships
+ * gets mounted here, and nowhere else. `apps/api/src/index.test.ts`
+ * exercises this function through `app.request()`, not the individual
+ * route factories — that is what makes an unmounted route fail a test
+ * instead of only `scripts/checks/routes-mounted.ts`'s static "is the
+ * factory name mentioned" check (which `admin`, `invitations`, `uploads`
+ * and `ai-credentials` all satisfied while being unreachable, per
+ * docs/TODO.md's 2026-09-06 Finding).
+ */
+export function composeApp(adapters: AppAdapters, settings: AppSettings): Hono {
+  const app = createApp({ appUrl: settings.appUrl });
+
+  app.route(
+    '/',
+    createAuthRoutes({
+      sql: adapters.sql,
+      passwordHasher: adapters.passwordHasher,
+      sessionIdleTimeoutMinutes: settings.sessionIdleTimeoutMinutes,
+      sessionAbsoluteTimeoutDays: settings.sessionAbsoluteTimeoutDays,
+      mailSender: adapters.mailSender,
+      passwordResetTtlMinutes: settings.passwordResetTtlMinutes,
+      appUrl: settings.appUrl,
+    }),
+  );
+
+  app.route(
+    '/',
+    createAdminRoutes({
+      sql: adapters.sql,
+      passwordHasher: adapters.passwordHasher,
+      mailSender: adapters.mailSender,
+      smtpConfigHash: adapters.smtpConfigHash,
+      sessionIdleTimeoutMinutes: settings.sessionIdleTimeoutMinutes,
+    }),
+  );
+
+  app.route(
+    '/',
+    createInvitationRoutes({
+      sql: adapters.sql,
+      passwordHasher: adapters.passwordHasher,
+      mailSender: adapters.mailSender,
+      appUrl: settings.appUrl,
+      invitationTtlDays: settings.invitationTtlDays,
+      sessionIdleTimeoutMinutes: settings.sessionIdleTimeoutMinutes,
+    }),
+  );
+
+  app.route(
+    '/',
+    createUploadRoutes({
+      sql: adapters.sql,
+      blobStore: adapters.blobStore,
+      sessionIdleTimeoutMinutes: settings.sessionIdleTimeoutMinutes,
+      maxUploadBytes: settings.maxUploadBytes,
+    }),
+  );
+
+  app.route(
+    '/',
+    createAiCredentialRoutes({
+      sql: adapters.sql,
+      cipher: adapters.cipher,
+      validationProbe: adapters.validationProbe,
+      sessionIdleTimeoutMinutes: settings.sessionIdleTimeoutMinutes,
+    }),
+  );
+
+  return app;
+}
+
 // Config and every real adapter are only constructed (and can only fail
 // fast) when this module is run as the actual server entry point — not
-// merely imported, e.g. by tests exercising `app` directly against an
-// in-memory request.
+// merely imported, e.g. by tests exercising `app`/`composeApp` directly
+// against an in-memory request.
 if (import.meta.main) {
   const config = loadConfig();
   const sql = postgres(config.DATABASE_URL);
 
-  const app = createApp({ appUrl: config.APP_URL });
+  await assertKeyringComplete(sql, config);
 
   // `refineEnv()` (packages/contracts) already guarantees these are set —
   // `loadConfig()` above would have thrown otherwise.
@@ -87,51 +189,19 @@ if (import.meta.main) {
   const passwordHasher = new Argon2idPasswordHasher();
   const blobStore = createBlobStore(config);
   const smtpConfigHash = computeSmtpConfigHash(config);
+  const cipher = buildCipher(buildKeyProvider(config));
+  const validationProbe = createVercelAiValidationProbe();
 
-  app.route(
-    '/',
-    createAuthRoutes({
-      sql,
-      passwordHasher,
+  const app = composeApp(
+    { sql, mailSender, passwordHasher, blobStore, smtpConfigHash, cipher, validationProbe },
+    {
+      appUrl: config.APP_URL,
       sessionIdleTimeoutMinutes: config.SESSION_IDLE_TIMEOUT_MINUTES,
       sessionAbsoluteTimeoutDays: config.SESSION_ABSOLUTE_TIMEOUT_DAYS,
-      mailSender,
       passwordResetTtlMinutes: config.PASSWORD_RESET_TTL_MINUTES,
-      appUrl: config.APP_URL,
-    }),
-  );
-
-  app.route(
-    '/',
-    createAdminRoutes({
-      sql,
-      passwordHasher,
-      mailSender,
-      smtpConfigHash,
-      sessionIdleTimeoutMinutes: config.SESSION_IDLE_TIMEOUT_MINUTES,
-    }),
-  );
-
-  app.route(
-    '/',
-    createInvitationRoutes({
-      sql,
-      passwordHasher,
-      mailSender,
-      appUrl: config.APP_URL,
       invitationTtlDays: config.INVITATION_TTL_DAYS,
-      sessionIdleTimeoutMinutes: config.SESSION_IDLE_TIMEOUT_MINUTES,
-    }),
-  );
-
-  app.route(
-    '/',
-    createUploadRoutes({
-      sql,
-      blobStore,
-      sessionIdleTimeoutMinutes: config.SESSION_IDLE_TIMEOUT_MINUTES,
       maxUploadBytes: DEFAULT_MAX_UPLOAD_BYTES,
-    }),
+    },
   );
 
   console.log(`apps/api: listening on port ${config.PORT}`);
