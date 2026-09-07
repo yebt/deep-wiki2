@@ -280,46 +280,67 @@ The markdown pipeline and the two document modes.
 ### Phase 5 — AI layer
 
 Multi-provider inference, retrieval, and the idea-to-design-document flow.
+`ai-provider-foundation` (2026-09-06) delivered the provider half — everything depending on
+`packages/markdown` (chunking, retrieval, the idea-to-design-document flow, AI editor actions)
+remains in a later change, per that proposal's own "Out of Scope" section; items below are marked
+accordingly rather than left as a blanket unchecked list.
 
-- [ ] Integrate the Vercel AI SDK as the single inference abstraction.
-- [ ] Wire providers: Anthropic, OpenAI, Google Gemini, DeepSeek, OpenRouter.
-- [ ] Build a per-model **capability registry**: tool calling, structured output, prompt
+- [x] Integrate the Vercel AI SDK as the single inference abstraction.
+- [x] Wire providers: Anthropic, OpenAI, Google Gemini, DeepSeek, OpenRouter.
+- [x] Build a per-model **capability registry**: tool calling, structured output, prompt
       caching, vision, context window, embedding support. Providers are not interchangeable
       and the app must degrade deliberately rather than fail at runtime.
-- [ ] Implement BYOK per workspace: envelope encryption at rest, decryption server-side
+- [x] Implement BYOK per workspace: envelope encryption at rest, decryption server-side
       only, credentials never serialised to the client under any code path.
-- [ ] Validate a credential when it is saved (cheap models-list call) and store the
+- [x] Validate a credential when it is saved (cheap models-list call) and store the
       validation result so misconfiguration surfaces at settings time, not mid-generation.
-- [ ] **Separate `chat_provider` from `embedding_provider` in configuration.** They are
+- [x] **Separate `chat_provider` from `embedding_provider` in configuration.** They are
       independent settings with independent credentials. Do not assume a workspace's chat
       provider can produce embeddings.
-- [ ] Verify embedding support per provider before wiring it, and record the outcome as a
-      Finding.
-- [ ] Provide a local embedding fallback so an operator holding only a chat credential
-      still gets working retrieval.
-- [ ] Store `embedding_model` and `dimensions` on every chunk row.
-- [ ] Reject writes that would mix embedding models or dimensions within one index.
-- [ ] Implement reindexing as an explicit, tracked, resumable job with progress reporting —
+- [ ] ~~Verify embedding support per provider before wiring it, and record the outcome as a
+      Finding.~~ **Partially resolved 2026-09-06**: Anthropic and DeepSeek confirmed absent via
+      vendor documentation (no probe needed). OpenAI, Gemini and OpenRouter remain **unknown** —
+      `ai:probe` was built and run, but no provider key was available in this session. See the
+      2026-09-06 Finding "Per-provider embedding support: OpenAI, Gemini and OpenRouter remain
+      unverified this session". Left unchecked until a real probe run resolves the remaining three.
+- [ ] ~~Provide a local embedding fallback so an operator holding only a chat credential
+      still gets working retrieval.~~ **Seam built, not satisfied, 2026-09-06**: the registration
+      guard and resolution path exist (`packages/core/src/ai/embedding-registration.ts`,
+      `embedding-configuration.ts`), but no local model emitting the required 1536 dimensions was
+      identified — bge-m3 and e5-large emit 1024. `resolveLocalFallback()` reports "none available"
+      today, honestly. See the 2026-09-06 Finding "No local embedding model exists that emits 1536
+      dimensions: air-gapped RAG has no path today". Left unchecked — the operator-facing outcome
+      this item describes does not exist yet.
+- [x] Store `embedding_model` and `dimensions` on every chunk row.
+- [x] Reject writes that would mix embedding models or dimensions within one index.
+- [x] Implement reindexing as an explicit, tracked, resumable job with progress reporting —
       changing the embedding model invalidates the entire vector index.
 - [ ] Implement pgvector similarity search with **GATE-3**: `workspace_id` in the SQL
-      `WHERE`, never a post-filter.
+      `WHERE`, never a post-filter. — *deferred to the retrieval slice (needs `packages/markdown`
+      chunking); explicitly Out of Scope for `ai-provider-foundation`.*
 - [ ] Return citations that resolve to `(page_id, block_id)` so every RAG answer links
-      back into the document.
+      back into the document. — *deferred to the retrieval slice, same reason.*
 - [ ] Build the idea -> interrogation -> design-document flow: the model generates
       clarifying questions, surfaces gaps, challenges assumptions, and converges on a
-      structured design document with modules and phases.
+      structured design document with modules and phases. — *deferred; no UI ships in
+      `ai-provider-foundation` (proposal — "Out of Scope").*
 - [ ] Use `generateObject` structured output for the design-document schema so the result
-      is parseable rather than prose to be scraped.
+      is parseable rather than prose to be scraped. — *deferred with the design-document flow
+      above. The structured-output degradation ladder it will run on on already ships
+      (`apps/api/src/ai/gateway/structured.ts`).*
 - [ ] Implement AI actions scoped to a selection: expand, summarise, critique, convert to
-      diagram, extract tasks — anchored on block ranges.
+      diagram, extract tasks — anchored on block ranges. — *deferred; needs `packages/markdown`
+      block anchoring from Phase 2.*
 - [ ] Land every AI edit as a **pending revision** reviewed through the diff view, never a
-      direct write.
-- [ ] Order every prompt for cache reuse: stable prefix first (tools, then resolved rule
+      direct write. — *deferred; needs the diff view (Phase 2).*
+- [x] Order every prompt for cache reuse: stable prefix first (tools, then resolved rule
       packs and system instructions), volatile content last (document body, user question).
-- [ ] Implement per-workspace token and cost accounting: log provider, model, input and
+- [x] Implement per-workspace token and cost accounting: log provider, model, input and
       output tokens, and cost for every call.
-- [ ] Enforce plan limits from the accounting ledger, with clear user-facing messaging when
-      a workspace hits its budget.
+- [x] Enforce plan limits from the accounting ledger — pre-call admission refuses an
+      over-budget request with a machine-readable reason (limit, outstanding). *User-facing
+      **messaging** (a rendered UI string) is deferred with the rest of the AI panel — no UI
+      ships in `ai-provider-foundation`.*
 
 ### Phase 6 — Team rule packs
 
@@ -407,6 +428,58 @@ makes conventions portable across projects.
 ## Findings
 
 Discoveries and constraints. Newest first.
+
+### 2026-09-06 — Per-provider embedding support: OpenAI, Gemini and OpenRouter remain unverified this session
+
+`ai-provider-foundation`'s Phase 18 built `apps/api/src/ai/probe.ts` and the opt-in
+`bun run -F @deep-wiki/api ai:probe` specifically to answer the question the 2026-09-03 Finding
+below ("Chat providers and embedding providers are not the same set") left open: which of OpenAI,
+Google Gemini and OpenRouter expose a first-party embeddings endpoint. Anthropic and DeepSeek are
+already excluded — both vendors' own documentation confirms neither offers one — and are not
+reprobed here.
+
+The probe ran in this session against all three. **No provider API key was available** (checked
+`AI_PROBE_OPENAI_KEY`, `AI_PROBE_GOOGLE_KEY`, `AI_PROBE_OPENROUTER_KEY`, and the shell environment
+directly — none set), so the actual, honest outcome is:
+
+| Provider | Outcome | Evidence |
+|---|---|---|
+| OpenAI | **unknown** | probe did not run — no key available |
+| Google Gemini | **unknown** | probe did not run — no key available |
+| OpenRouter | **unknown** | probe did not run — no key available |
+
+**Impact:** `packages/core/src/ai/registry.ts` keeps `embeddings: false` for OpenAI, Gemini and
+OpenRouter — unchanged from before this Finding, and correctly so: an unrun probe is *unknown*,
+never *unsupported* and never *supported*. `offeredEmbeddingProviderIds()` (Phase 15.11) therefore
+still offers none of the five providers for `embedding_provider` selection; this is the honest
+state of a workspace configuring embeddings today, not a bug. Whoever runs `ai:probe` next with a
+real key for one of these three providers **updates the registry's `embeddings` field strictly
+from that run's output**, per Phase 18.3 — never from assumption, and never by copying this table
+forward without re-running the probe.
+
+### 2026-09-06 — No local embedding model exists that emits 1536 dimensions: air-gapped RAG has no path today
+
+The 2026-09-04 Open Question ("Embedding provider and model to standardise on") settled the
+dimension at 1536 and named the unresolved half as Phase 5's job: find a local embedding model
+that emits exactly 1536 dimensions, or record that self-hosted air-gapped RAG is unavailable.
+`ai-provider-foundation` Phase 15 built the seam (`registerEmbeddingModel`, `resolveLocalFallback`
+in `packages/core/src/ai/embedding-registration.ts`) and tested it against the two obvious
+open-source candidates: **bge-m3 and e5-large both emit 1024 dimensions**, not 1536, and are
+rejected by the registration guard rather than silently accepted at the wrong width.
+
+No third candidate was identified or evaluated in this session. `resolveLocalFallback()` therefore
+returns "none available" unconditionally today — not a placeholder, not an approximation.
+
+**Impact, stated as a product limitation rather than left implicit in a design document: a fully
+air-gapped deep-wiki instance has no RAG path today.** A workspace with only a self-hosted
+chat-capable local model still has no way to produce embeddings, and `embedding_configuration.ts`'s
+`resolveEffectiveEmbeddingProvider()` correctly resolves such a workspace to `none-available`
+rather than fabricating one. Closing this gap needs either (a) identifying a 1536-dimension local
+model, (b) adding a supported dimension-reduction path for a larger local model the way OpenAI's
+`text-embedding-3-large` already has one (Phase 15.4), or (c) accepting a per-deployment migration
+to a different `dimensions` value for air-gapped operators specifically (design.md D14's own
+"what would reverse it" column). None of the three is decided here; this Finding exists so the gap
+is visible rather than discovered later by an operator with no network egress.
 
 ### 2026-09-06 — Route modules shipped unreachable, twice
 
