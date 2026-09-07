@@ -322,3 +322,18 @@ export const workspaceAiBudgetPeriods = pgTable('workspace_ai_budget_periods', {
   limitMicroUsd: bigint('limit_micro_usd', { mode: 'number' }).notNull(),
   tokenLimit: bigint('token_limit', { mode: 'number' }),
 });
+
+/**
+ * Runtime-contradiction drift detection (design.md — "Drift detection";
+ * D11, D20). No `workspace_id`: this records the registry's own
+ * correctness, not tenant content (see the migration SQL's comment).
+ */
+export const aiCapabilityObservations = pgTable('ai_capability_observations', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  provider: aiProvider('provider').notNull(),
+  model: text('model').notNull(),
+  declaredLevel: aiStructuredOutputLevel('declared_level').notNull(),
+  observedLevel: aiStructuredOutputLevel('observed_level').notNull(),
+  errorCode: text('error_code'),
+  observedAt: timestamp('observed_at', { withTimezone: true }).notNull().defaultNow(),
+});

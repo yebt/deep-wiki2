@@ -170,13 +170,13 @@ further decision gate blocks `sdd-apply`.
 
 ## Phase 14: Structured-Output Degradation
 
-- [ ] 14.1 Derive migration number per Phase 0.2; write `NNNN_ai_capability_observations.sql`.
-- [ ] 14.2 RED: `apps/api/src/ai/gateway/structured.test.ts` — a `schema`-level model uses the native path with no repair pass; a `tool-call`-level model is coerced through a single required tool; a `prompted`-level model whose first response fails validation gets exactly one repair pass carrying the validation error verbatim, and a typed `structured_output_failed` (never a silent `{}`) if the repair also fails; the runtime never attempts a rung above the declared level.
-- [ ] 14.3 GREEN: `apps/api/src/ai/gateway/structured.ts` implementing the ladder against a fake provider.
-- [ ] 14.4 RED: dropping below the declared level at runtime writes an `ai_capability_observations` row and degrades that call one rung.
-- [ ] 14.5 GREEN: wire the observation write into 14.3's degrade-on-contradiction path.
-- [ ] 14.6 RED: every rung is a ledger event — a repair pass produces its own `ai_usage_events` row.
-- [ ] 14.7 GREEN: call `ledger.admit`/`settle` per rung in `structured.ts`.
+- [x] 14.1 Derive migration number per Phase 0.2; write `NNNN_ai_capability_observations.sql`. — journal `idx` was 9; used `0010_ai_capability_observations`.
+- [x] 14.2 RED: `apps/api/src/ai/gateway/structured.test.ts` — a `schema`-level model uses the native path with no repair pass; a `tool-call`-level model is coerced through a single required tool; a `prompted`-level model whose first response fails validation gets exactly one repair pass carrying the validation error verbatim, and a typed `structured_output_failed` (never a silent `{}`) if the repair also fails; the runtime never attempts a rung above the declared level.
+- [x] 14.3 GREEN: `apps/api/src/ai/gateway/structured.ts` implementing the ladder against a fake provider. **Scope note**: this ladder operates purely at the "which rung, how many attempts, how to validate, how to phrase one repair" policy level over the existing `ChatModelPort.generate`; it does not implement each real Phase-13 adapter's native JSON-schema-response-format or tool-forcing wire mechanics (e.g. via `generateObject` or a forced tool call) — that per-adapter mechanical work is unstarted and explicitly out of this batch, tracked as a gap rather than silently assumed done.
+- [x] 14.4 RED: dropping below the declared level at runtime writes an `ai_capability_observations` row and degrades that call one rung.
+- [x] 14.5 GREEN: wire the observation write into 14.3's degrade-on-contradiction path.
+- [x] 14.6 RED: every rung is a ledger event — a repair pass produces its own `ai_usage_events` row.
+- [x] 14.7 GREEN: call `ledger.admit`/`settle` per rung in `structured.ts`, injected as thunks (`StructuredLedgerDeps`) so this module never needs `LedgerAdmissionInput`'s full attribution shape — the gateway binds workspace/subject context once. Reversing `0010` also had to be added to Phase 8's own down-migration test, for the same cross-migration type-dependency reason `0009` required it.
 
 ## Phase 15: Embedding Index Generations and Chunks
 
