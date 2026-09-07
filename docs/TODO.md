@@ -1103,6 +1103,34 @@ Impact: `packages/markdown/src/render.ts` (wiki-link hyperlinking, not yet
 implemented); `apps/api/src/routes/pages.ts`'s read route, whichever
 approach above is chosen, once this is picked up.
 
+### 2026-09-06 — Bundle-isolation's three layers do not all run in the same place yet
+
+design.md "Read mode never reaches the ProseMirror bundle" names three
+enforcement layers. Stated plainly, since the gap does not close itself:
+
+- **Layer 1** (the `packages/editor` export-map split) is static
+  `package.json`/`src/index.ts` shape, not something that "runs" at all.
+- **Layer 2** (`scripts/checks/bundle-isolation.ts`, the specifier check)
+  runs today, inside `bun run check` — and therefore inside `bun run test`'s
+  sibling and any CI workflow that calls either.
+- **Layer 3** (the build-manifest test asserting the read route's chunk
+  closure) needs real `nuxt build` output to inspect and cannot run inside
+  `bun run test`. It lands in WU-15 as `bun run check:bundle` after a local
+  build, and as a dedicated CI step placed after the build step. This
+  repository has no remote, so "in CI" today describes a workflow file
+  nothing executes — the actually-enforcing run is the local one.
+
+Also fixed in this pass, not merely recorded: layer 2's own denylist could
+not be `prosemirror-*` read literally, because the `"."` export's real
+ProseMirror schema needs `prosemirror-model` — design D21 scopes the
+denylist to exclude that one package while keeping every ProseMirror
+view/editing package (and Milkdown, and TipTap) forbidden.
+
+Impact: `scripts/checks/bundle-isolation.ts` (exists, enforced locally
+today); `apps/web`'s build-output test and its CI step (WU-15, not yet
+created); `.github/workflows/ci.yml` (WU-18 adds GATE-2 as a named step
+under this same "no remote executes it yet" constraint).
+
 ---
 
 ## Open Questions

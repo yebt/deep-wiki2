@@ -86,9 +86,13 @@ export function checkFile(relPath: string, contents: string): string[] {
  * A check that describes forbidden patterns necessarily contains them. Its
  * own source and tests are excluded, following the precedent set by
  * `query-boundaries.ts`, which flagged itself for the same reason.
+ * `bundle-isolation.ts` (and its test, and its fixtures' violating cases)
+ * shares this exemption: it also compares against and asserts on
+ * `milkdown`/`@milkdown/`/`@tiptap/` string literals to describe the exact
+ * specifiers its own denylist forbids.
  */
 export function isSelfReferential(relPath: string): boolean {
-  return /(^|\/)single-parser(\.test)?\.ts$/.test(relPath);
+  return /(^|\/)(single-parser|bundle-isolation)(\.test)?\.ts$/.test(relPath);
 }
 
 export function checkSingleParser(root: string, roots: readonly string[]): SingleParserResult {

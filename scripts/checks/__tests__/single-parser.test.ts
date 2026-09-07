@@ -48,4 +48,12 @@ describe('isSelfReferential', () => {
     expect(isSelfReferential('scripts/checks/__tests__/single-parser.test.ts')).toBe(true);
     expect(isSelfReferential('apps/web/app/pages/edit.vue')).toBe(false);
   });
+
+  // bundle-isolation.ts shares the same self-referential problem — it also
+  // compares against milkdown/@milkdown//@tiptap/ literals to describe the
+  // exact specifiers its own denylist forbids.
+  test('the check also excludes bundle-isolation.ts and its test', () => {
+    expect(isSelfReferential('scripts/checks/bundle-isolation.ts')).toBe(true);
+    expect(isSelfReferential('scripts/checks/__tests__/bundle-isolation.test.ts')).toBe(true);
+  });
 });

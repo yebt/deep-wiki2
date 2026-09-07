@@ -335,24 +335,45 @@ dependency graph, not only by intent.
 
 ## Phase 14 (WU-14) — `feat(checks): read mode can never reach the prosemirror bundle`
 
-- [ ] 14.1 RED — `bundle-isolation.test.ts` against violating fixtures: the
+- [x] 14.1 RED — `bundle-isolation.test.ts` against violating fixtures: the
       transitive closure of `packages/editor/src/index.ts` reaching `milkdown`,
       `@milkdown/*`, `prosemirror-*`, or `@tiptap/*`; an eager static import of
       `@deep-wiki/editor/mount` from `apps/web` (only dynamic `import()` allowed).
       *(document-modes: An eager shared import fails the test)*
-- [ ] 14.2 GREEN — `scripts/checks/bundle-isolation.ts`; add it to `bun run check`
+
+      **Design correction (D21):** the literal denylist above forbids every
+      `prosemirror-*` specifier, but the real ProseMirror schema needs
+      `prosemirror-model` — a pure schema/data-model package with no DOM
+      dependency, required for the `"."` export to exist at all. Implemented
+      denylist forbids `milkdown`/`@milkdown/*`/`@tiptap/*` and every
+      `prosemirror-*` package **except** `prosemirror-model`; see design.md D21
+      for the rationale and reversal condition, and `bundle-isolation.ts`'s own
+      doc comment for the same reasoning at the enforcement site.
+- [x] 14.2 GREEN — `scripts/checks/bundle-isolation.ts`; add it to `bun run check`
       and a `check:bundle` script.
-- [ ] 14.3 GREEN — extend `scripts/checks/single-parser.ts`'s `FORBIDDEN_SPECIFIERS`
+- [x] 14.3 GREEN — extend `scripts/checks/single-parser.ts`'s `FORBIDDEN_SPECIFIERS`
       with `milkdown`/`@milkdown/` before any Milkdown package is installed
       (`packages/editor/` stays the sole owner via the existing `PARSER_OWNERS`
       list). This closes a real gap distinct from D14's existing `@tiptap`/`@nuxt/ui`
       denylist: nothing today stops a stray `milkdown` import outside
       `packages/editor` from passing `single-parser.ts`.
-- [ ] 14.4 GREEN — split `packages/editor/package.json` `exports`: `"."` → schema,
+
+      Already landed by a prior work unit (`FORBIDDEN_SPECIFIERS` already carried
+      `milkdown`/`@milkdown/` with `single-parser.test.ts` coverage) — confirmed,
+      not re-implemented. This work unit only extended `isSelfReferential()` to
+      also exempt `bundle-isolation.ts`/its test, which legitimately compare
+      against the same literals to describe them.
+- [x] 14.4 GREEN — split `packages/editor/package.json` `exports`: `"."` → schema,
       `classify`, `fromMarkdown`, `toMarkdown` (deps: `@deep-wiki/markdown` only);
       `"./mount"` → the Milkdown surface; `src/index.ts` must never re-export
       `./mount`.
-- [ ] 14.5 Record — `docs/TODO.md` Finding: layer 2 (this specifier check) runs
+
+      `"./mount"` points at `packages/editor/src/mount/index.ts`, a deliberately
+      empty stub (`export {}`) — no Milkdown dependency is installed before WU-16,
+      so the sequencing constraint stays enforced by the dependency graph, not
+      only by intent. `src/index.ts`'s non-re-export of `./mount` is asserted by
+      `index.test.ts`.
+- [x] 14.5 Record — `docs/TODO.md` Finding: layer 2 (this specifier check) runs
       today inside `bun run check`; layer 3 (the build-manifest test, WU-15.3) needs
       a CI step this repository's remote-less state cannot execute — enforcement is
       local `bun run check` at every commit and `bun run verify` before tagging,
