@@ -136,6 +136,21 @@ dependency graph, not only by intent.
       Finding: state the bias (an orphan is preferred over a misattribution) and the
       reversal criterion — a measured mis-assignment rate at τ from real edit
       traffic, per `design.md` D8's "What would reverse it".
+- [x] 3.7 **CRITICAL remediation (`sdd-verify`)** — RED/GREEN: the checked-in "merge"
+      test in `src/match-blocks.test.ts` was titled for the merge/supersede branch
+      but its fixture scored `0` against the single shared slot, so it never left
+      the ordinary below-threshold tombstone path and `matchBlocks()`'s `superseded`
+      output had zero test coverage. Replaced it with a fixture where both
+      claimants individually clear `MATCH_THRESHOLD` against the same slot
+      (`0.58` and `0.64`), genuinely reaching `claimantsBySlot`; the higher scorer
+      survives `active`, the loser is `superseded`, and the test additionally
+      resolves `supersededBy` back to an `active` assignment, proving the mapping
+      is not dangling. The original fixture is kept, correctly retitled, as its own
+      `matchBlocks: tombstone despite a shared claimed slot` case. Proved genuine
+      RED by temporarily reverting the `superseded` branch to `tombstoned` in
+      `match-blocks.ts` and confirming the new test fails; restored and confirmed
+      GREEN. *(markdown-pipeline: Block Merge Keeps One ID And Supersedes The
+      Other, both scenarios)*
 
 ## Phase 4 (WU-4) — `feat(markdown): deterministic chunk boundaries with golden files`
 
@@ -155,6 +170,29 @@ dependency graph, not only by intent.
 - [x] 5.2 RED — URL-scheme allowlist test for `link` and `image` targets.
 - [x] 5.3 GREEN — implement `src/render.ts` (`remark-rehype` + `rehype-sanitize`,
       explicit allowlist; sanitising at render time only, never at save — D12).
+- [x] 5.4 **CRITICAL remediation (`sdd-verify`)** — RED/GREEN: `render.ts` built its
+      own bare `unified().use(remarkParse)` instead of reusing the shared
+      pipeline, so `page_content.rendered_html` — the surface every reader sees —
+      shipped with no GFM, no frontmatter, and none of the wiki-link/tag/
+      block-anchor extensions. Tables rendered as raw pipe text, footnote
+      references lost their link to their definition, and wiki-links/tags
+      rendered as inert literal brackets/hashes. Fixed by parsing through
+      `./pipeline`'s `parse()` and adding `remark-rehype` handlers for the three
+      custom node types (`wikiLink`, `tag`, `blockAnchor`) it doesn't know natively;
+      GFM tables and footnotes now use `mdast-util-to-hast`'s own default
+      handling for free. `wikiLink`/`tag` render as plain, unlinked `<span>`s
+      (matching `packages/editor/src/schema.ts`'s DOM classes) — still not
+      clickable, so the knowledge-graph non-disclosure property (both a resolved-
+      and unresolved-looking target render byte-identically) and SPECS §14's
+      per-viewer/per-page-cache tension both stay exactly as before, now proven
+      against the real pipeline rather than a pipeline that never parsed
+      wiki-links at all. `blockAnchor` renders nothing (a persisted ` ^id` is
+      internal bookkeeping, never reader-facing content). Added 5 new
+      `render.test.ts` cases (table, footnote reference/definition link,
+      wiki-link, tag, block-anchor) proving RED against the unmodified `render.ts`
+      before the fix, then GREEN after; all 6 pre-existing sanitisation/
+      non-disclosure tests still pass unchanged. *(markdown-pipeline; page-content:
+      Save Regenerates The Cached Render And Block Index)*
 
 ## Phase 6 (WU-6) — `feat(editor): prosemirror schema with verbatim carry and bucket classification`
 
@@ -378,6 +416,26 @@ dependency graph, not only by intent.
       a CI step this repository's remote-less state cannot execute — enforcement is
       local `bun run check` at every commit and `bun run verify` before tagging,
       stated plainly rather than implied.
+- [x] 14.6 **CRITICAL-adjacent remediation (`sdd-verify`)** — RED/GREEN: this check
+      verified import ownership *by package*, so a second `unified()`/
+      `remarkParse` pipeline instantiated *inside* `packages/markdown` (an already-
+      allowed `PARSER_OWNERS` entry) passed untouched — exactly how `render.ts`'s
+      second, unextended pipeline (5.4 above) shipped undetected. Added
+      `SOLE_PIPELINE_OWNER` (`packages/markdown/src/pipeline.ts`): inside
+      `PARSER_OWNERS`, only that one file — or a `.test.ts` file building a
+      deliberate throwaway comparison pipeline, the same exemption
+      `isSelfReferential` already grants this check's own test — may reach for
+      `remark-parse`/`remark-stringify`. Every other file in `packages/markdown`
+      or `packages/editor` must import `parse()`/`stringify()` from `pipeline.ts`
+      instead. Added 4 fixture-based `single-parser.test.ts` cases proving both
+      directions: a second pipeline elsewhere in `packages/markdown` fails, a
+      second pipeline elsewhere in `packages/editor` fails (`PARSER_OWNERS` is not
+      a blanket exemption), a `.test.ts` file's comparison pipeline still passes,
+      and `pipeline.ts` itself still passes. Confirmed RED against the pre-fix
+      test file, then GREEN after implementing; independently confirmed the new
+      check flags the exact pre-fix `render.ts` source verbatim, and that
+      `bun run scripts/checks/single-parser.ts` still reports `ok` against the
+      current, fixed tree.
 
 ## Phase 15 (WU-15) — `feat(web): read mode served from cached html`
 
