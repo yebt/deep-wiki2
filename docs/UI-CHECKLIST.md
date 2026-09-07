@@ -82,6 +82,9 @@ Derived from this project's actual stack and domain.
 - [ ] No arbitrary Tailwind values (`w-[437px]`, `text-[13.5px]`, `bg-[#1a1a1a]`) fighting the library's scale. If the scale is genuinely wrong for this product, the scale gets changed once, centrally.
 - [ ] Reka UI primitives are used for anything with interaction semantics (menus, dialogs, comboboxes). Hand-rolled versions lose focus trapping, `aria-*` wiring, and keyboard handling that this checklist requires elsewhere.
 - [ ] No wrapper component that exists only to rename a Nuxt UI prop.
+- [ ] **Anything that appears on more than one screen is one component, not one copy per screen.** The header, the footer, the page heading block, the card that holds a form, the panel a screen shows instead of its content. A second copy is a defect even while the two copies are identical, because they will not stay identical — this is how the app bar came to say two different things and only one of two screens got a layout fix.
+- [ ] **Before building a screen, open the screen nearest to it and match its measured values** — container radius and tone, control height, heading size, the gaps between blocks. A screen may pass every box below in isolation and still make the product look unsystematic; this checklist audits one screen, so the comparison to the others has to be made deliberately.
+- [ ] **A hand-rolled replacement for a library primitive owes the keyboard and ARIA contract that primitive would have brought.** Reaching past the library for the one mechanism it lacks is sometimes right; dropping the mechanisms it *has* never is. Before writing one, list what the library component provides — tab order, roving focus, arrow keys, activation, `aria-*` wiring, focus return — and implement each. The navigation tree reached for drag-reorder, which `UTree` has no answer for, and shipped with zero tab stops: a screen whose whole purpose is finding a page could not open one without a mouse (2026-09-07 review).
 
 ### 4.2 Theming — user-selectable themes via CSS variables
 
@@ -108,6 +111,9 @@ Derived from this project's actual stack and domain.
 - [ ] Reading comfort beats visual flourish. No gradient text, no animated headers, no decorative motion in the document body.
 - [ ] Code blocks and tables scroll inside their own container and never widen the page (see section 6).
 - [ ] Chrome (nav, toolbars, panels) is visually quieter than content. If the sidebar competes with the document for attention, the sidebar loses.
+- [ ] **An eyebrow above a heading must add context the heading does not.** Repeating a word of the `h1` spends a hierarchy level for nothing. Added after the 2026-09-04 review removed the eyebrow from all four auth screens; recorded then in the Review Log but not here, which is why `/` kept "Phase 0 · Bootstrap" above "Bootstrap smoke page" for two more reviews.
+- [ ] **A page description is chrome, not document prose.** It takes `body-large` (16px on 24px leading), not `doc-body` (16px on 26px) — `docs/DESIGN-SYSTEM.md` §2.3 reserves the longer leading for the reading surface. The same sentence must not be set solid two ways on two screens.
+- [ ] **A screen's `<h1>` keeps one type role across every state it has.** The state changes the words, not the hierarchy: a permission-denied screen, a not-found screen and a loaded screen all render the page's one heading at the same size. Read and edit mode rendered theirs at `headline-medium` when the page loaded and `headline-small` when it did not, so the type scale reported how the request went (2026-09-07 review).
 
 ### 4.5 Read mode vs. edit mode
 
@@ -175,6 +181,8 @@ Non-negotiable. Each item is **pass/fail**, not an aspiration. A fail blocks the
 - [ ] **Focus order matches visual order.** No jumps to the end of the DOM and back.
 - [ ] **Focus is trapped in modals and returned on close** to the element that opened them.
 - [ ] **No keyboard trap.** Every transient surface can be escaped with Escape.
+- [ ] **Every pointer-only manipulation has a stated keyboard equivalent.** Drag-and-drop, resize, and reorder are the usual offenders: if the only way to move an item is to drag it, the feature does not exist for a keyboard user. Name the keys in the UI, not only in a comment — the navigation tree's reorder is `Alt` with the arrow keys, and the screen says so.
+- [ ] **A control that is unavailable uses `aria-disabled`, not the `disabled` attribute, whenever it carries an explanation.** The attribute removes the control from the tab order, which puts its own reason — required on hover *and* focus by §3 — behind a hover a keyboard user cannot perform.
 - [ ] **Contrast:** 4.5:1 for body text, 3:1 for large text and for the boundary of interactive controls. Verified in every theme shipped, not just the default.
 - [ ] **Color is never the sole carrier of meaning.** Diff add/remove, presence status, validation state, and pending-revision marking all carry a second signal (icon, text, pattern).
 - [ ] **Every form input has a programmatically associated label.** Placeholder text is not a label.
@@ -196,6 +204,7 @@ The app shell is a three-pane wiki: navigation tree · document · contextual pa
 - [ ] **Medium (768–1279px):** the contextual panel becomes an overlay or is collapsible. The document stays readable.
 - [ ] **Narrow (<768px):** single pane. The navigation tree becomes a drawer that traps focus and closes on selection and on Escape.
 - [ ] **The page body never scrolls horizontally.** At any breakpoint. Verify at 320px width.
+- [ ] **The page body never scrolls vertically on content that fits, and this is verified by measuring the rendered box** — `document.documentElement.scrollHeight === window.innerHeight` at 1280×900 and 320×900 — not by looking at a screenshot, which hides vertical overflow below the fold. Any page pairing `UMain` with `UFooter` is the specific trap: `UMain`'s base height is the viewport minus the *header* only, so the page overflows by exactly the footer's height. Recorded in the Review Log on 2026-09-04 and fixed there inside `AuthShell`; `/` was the one screen not using that shell and still carried 49px of scroll. The height now comes from `AppShell` plus the central `main` override in `app.config.ts`, so it cannot be had per screen — but the measurement is still the check.
 - [ ] **Tables scroll inside their own `overflow-x: auto` container** with a visible affordance that more content exists.
 - [ ] **Code blocks scroll inside their own container** and do not wrap by default.
 - [ ] **Diagrams scroll or scale inside their own container** and never overflow the document column.
@@ -365,6 +374,161 @@ Append a new entry after every owner review. **Never delete an entry** — if a 
 - The two-icon-pack requirement (§4.3) remains untested — only `lucide` is installed.
 - Contrast was measured on the specific pairs named above, not audited exhaustively across every
   component.
+
+---
+
+### 2026-09-07 — Phase 2 product screens (read, edit, navigation tree) against the five existing screens
+
+**Reviewer:** Eduardo
+**Verdict:** Pass with follow-ups
+
+The three new screens were compared **to the five that already existed** rather than
+each to this checklist on its own. Computed styles were extracted from the running
+app at 1280×900 in both themes, for eight screens plus four extra states (locked,
+refused, permission-denied, empty), and tabulated per component class; a value that
+differed between two screens is a finding even where both sides are defensible
+alone. Chrome measured identical everywhere before and after — header 56px, footer
+49px, `oklch(0.94828)` light / `oklch(0.28448)` dark — and no screen carried
+vertical overflow at 1280×900 or horizontal overflow at 320px, in either theme.
+
+**Findings** (max 3, ordered by user impact)
+
+1. **The navigation tree could not be used without a mouse, and a click on a row did nothing at all.**
+   - *Observable evidence:* at 1280×900 in both themes, tabbing through
+     `/workspaces/:id/tree` produced exactly two stops — the brand mark and the
+     theme toggle — and then left the page. Every row measured `tabindex: null`,
+     `role: null` on the element carrying the label, `isLink: false`, and
+     `cursor: grab`; clicking one changed nothing. The screen's own pre-build
+     contract says its user is there to "find a page", and there was no way to
+     open one by keyboard or by mouse. Reordering existed only as a drag.
+   - *Root cause:* `NavigationTreeNode` is a deliberate hand-rolled exception to
+     §4.1, taken because `UTree` cannot drag-reorder. The exception was scoped to
+     the *drawing* and silently took the *behaviour* with it: `UTree`'s roving
+     tabindex, arrow-key navigation, activation and `aria-*` wiring were all
+     forfeited along with the one feature it lacks. Nothing in §4.1 said that a
+     hand-rolled primitive still owes the contract the library one brings, so the
+     trade read as sanctioned.
+   - *Correction applied:* the tree is now one tab stop with a roving tabindex;
+     arrows move between rows, `Home`/`End` jump to the ends, `ArrowLeft`/`Right`
+     walk to parent and first child, `Enter`/`Space` opens a page, and `Alt` with
+     the arrow keys is the keyboard equivalent of the three drop zones — stated on
+     the screen, not only in a comment. Rows carry `aria-level`, `aria-posinset`,
+     `aria-setsize` and `aria-expanded`, the icon's meaning is also given in text,
+     and the focus ring is relocated from the `treeitem` (which contains its whole
+     subtree) to the row, at the same width and role. Three tests in
+     `tree.test.ts` now hold it. Re-measured: the tab order is brand → toggle →
+     tree.
+   - *Rule added:* §4.1 — a hand-rolled replacement for a library primitive owes
+     the keyboard and ARIA contract that primitive would have brought, enumerated
+     before it is written. §5 — every pointer-only manipulation has a stated
+     keyboard equivalent, and an unavailable control that carries an explanation
+     uses `aria-disabled` rather than the attribute that removes it from the tab
+     order.
+
+2. **Every container on the three new screens sat on the chrome's tonal rung, measuring byte-identical to the header above it.**
+   - *Observable evidence:* the permission-denied, not-found, locked, empty and
+     network-error panels, and the tree's own list, were all hand-rolled
+     `div.flex.items-start.gap-3.rounded-lg.bg-elevated.p-6` and measured
+     `oklch(0.94828 0.002 262)` light / `oklch(0.28448 0.004 262)` dark — the same
+     values measured on the header and footer of the same screen. The auth card,
+     the nearest existing container, measured `oklch(0.91379)` / `oklch(0.34483)`,
+     one rung up. Same object, same radius, same padding, two tones on two screens.
+     The `<h1>` inside them measured 24px against 28px on the same screens' loaded
+     state, so the type scale reported how the request had gone; and they spanned
+     1216px while the document beside them held 659px.
+   - *Root cause:* the containers were built by hand, so the tone was chosen by
+     eye rather than read from a ruling. `docs/DESIGN-SYSTEM.md` §9.4 ruled only on
+     a card *inside a pane*, and none of these screens has a pane — the case that
+     actually occurs had no rule. §1.4's row naming "navigation tree" as
+     `bg-elevated` is about the tree as a pane, and was read as licence for the
+     tree rendered as a column.
+   - *Correction applied:* one `PageNotice.vue` replaces all eight copies — a
+     `UCard variant="soft"`, the same component and tone as the auth card, with the
+     heading *element* chosen by `level` and its *size* following §2.3 from that
+     level, so an `h1` is `headline-medium` in every state. The tree's list moved
+     into the same card. Both new columns are `max-w-measure` at the column, not
+     per branch. Re-measured: every content container on all eight screens is
+     `oklch(0.91379)` / `oklch(0.34483)`, the two deliberate exceptions being the
+     editor body at `bg-default` (§1.4's document canvas) and the error panels at
+     `error-container` (an accent role, not a surface rung).
+   - *Rule added:* §4.1 — anything on more than one screen is one component; and
+     compare against the nearest existing screen before building. §4.4 — a
+     screen's `<h1>` keeps one type role across every state. `docs/DESIGN-SYSTEM.md`
+     §9.4 now states which card a container on the app ground gets, and that
+     `bg-elevated` is never it.
+
+3. **Hover was painted by stepping to another surface rung, which was invisible on the tree and reversed direction between themes in the editor menus.**
+   - *Observable evidence:* a tree row's `hover:bg-elevated` resolved to
+     `oklch(0.94828)` in light over a container already at `oklch(0.94828)`, and
+     `oklch(0.28448)` over `oklch(0.28448)` in dark — the same tone painted over
+     itself, in both themes. The mention and slash menu rows carried the same class
+     over `bg-accented`: measured `oklch(0.93103)` → `oklch(0.94828)` in light
+     (lighter) and `oklch(0.32759)` → `oklch(0.28448)` in dark (darker). Those two
+     menus were also the only 16px menus in the app, beside `UDropdownMenu` at
+     12px, and a focused editor carried two focus indicators at once — the global
+     3px `secondary` outline plus a 2px `primary` ring of its own.
+   - *Root cause:* §5.2 supplied the state-layer mechanism and M3's opacities but
+     never said in one line that a surface rung is not a state, so reaching for
+     `hover:bg-*` passed a reading of the section that produced it. The 16px menus
+     came from §3.4 listing "menus" under Controls without saying the row binds a
+     menu the project draws itself.
+   - *Correction applied:* both the tree rows and both menus use `dw-state-layer` —
+     M3's `currentColor` overlay at 0.08/0.12 — so hover moves away from whatever
+     ground it is on, identically in both themes; the opaque
+     `secondary-container` fill is kept for the genuinely selected row, so selected
+     and hovered stay unmistakably different. Menus moved to `rounded-md`. The
+     editor's own ring was removed in favour of the one global indicator, and the
+     menus gained `aria-activedescendant` so the arrow keys are announced.
+   - *Rule added:* `docs/DESIGN-SYSTEM.md` §5.2 — a new subsection, "a state is a
+     layer, never a step to another surface rung", with both measured failure
+     modes. §3.4 — the Controls row's "menus" binds project-authored menus.
+
+**Checked and found already correct — no action**
+
+- **Read mode never boots the editor.** `scripts/checks/bundle-isolation.ts` and
+  `bundle-isolation-build.ts` both exit 0, and the read route's built chunk closure
+  was walked directly: 11 nodes, zero matching `prosemirror|milkdown|tiptap`, with
+  `packages/editor/src/mount/index.ts` reachable only through the edit route's
+  `dynamicImports`. Driving the real screen, 895 requests were made and none was
+  editor-shaped.
+- **The soft lock reads as a soft lock.** "Open read-only" and "Take over editing"
+  render simultaneously, both at 40px, and "Take over" states its consequence for
+  the other person before the confirm dialog (§4.8).
+- **The refused state names the construct and the line** ("Found *a setext heading*
+  on line 42") and offers both exits.
+- **Both editor menus are keyboard-first:** Escape dismisses and returns focus to
+  the editor at the cursor; neither fires inside a code block (verified by placing
+  the caret in a `<pre>` and typing `@`); the mention menu has a distinct
+  empty-query state ("Type to search people and pages…") and a no-results state
+  ("No matches"), and the slash menu shows its full command list on an empty query
+  and "No matching commands" on a miss.
+- **The tree's empty state names the object in the product's vocabulary** — "No
+  shelves yet" / "Create a shelf to start organising books, chapters and pages".
+- **Wiki-links are inert, and an unreadable target is indistinguishable from a
+  nonexistent one.** `render()` emits `[[Target]]` as literal text with no anchor,
+  class or attribute, so the two are byte-identical by construction. This holds
+  *because* nothing hyperlinks them yet; `docs/SPECS.md` §14 and `docs/TODO.md`
+  already record that closing that gap has to preserve the property, and it is the
+  one item here that a later batch can silently break.
+- Text fields: 56px tall, 12px radius, 16px text, 16px inset, identical on all four
+  auth screens. Container padding 64/64/32 on all eight screens.
+
+**Follow-ups carried forward, not fixed**
+
+- `e2e/auth-layout.spec.ts` still enumerates only the four auth paths. Its
+  measurement is what catches the `UMain` + `UFooter` trap, and the three new
+  screens are not in its list. Not done here — `e2e/**` is outside this review's
+  owned paths.
+- The tree renders unvirtualized. §6's "a book with 400 pages" is unmet; `UTree`'s
+  `virtualize` is the intended answer and is blocked on the same drag-reorder gap
+  that produced the hand-rolled node.
+- The three-pane shell of §6 does not exist yet: all three screens are a single
+  centred column, so the medium/narrow pane rules could not be exercised beyond
+  measuring that nothing overflows.
+- The two-icon-pack requirement (§4.3) remains untested — only `lucide` is
+  installed. Unchanged since 2026-09-04.
+- Contrast was not re-audited exhaustively; the tones in use here are the ones
+  measured on 2026-09-04, and no new colour pair was introduced.
 
 ---
 
