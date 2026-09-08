@@ -1,0 +1,9 @@
+[
+  {
+    "blockIds": [
+      "d:ea4acec59c6b#0"
+    ],
+    "text": "- first paragraph of the item\n\n  > a quoted second block in the same item\n\n- a second, tight item",
+    "ordinal": 0
+  }
+]

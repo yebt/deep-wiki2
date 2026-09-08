@@ -8,6 +8,7 @@
     "./pipeline": "./src/pipeline.ts"
   },
   "scripts": {
+    "goldens:update": "UPDATE_CHUNK_GOLDENS=1 bun test src/chunk-golden.test.ts",
     "test": "bun test",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },

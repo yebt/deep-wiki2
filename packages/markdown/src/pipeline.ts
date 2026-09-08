@@ -46,23 +46,35 @@ import { applyWikiLinks, wikiLinkToMarkdown, type WikiLinkResolver } from './ext
  * *meaning* (design.md "The pinned-options rule, made mechanical"; docs/TODO.md
  * 2026-09-04 finding). Two kinds of entry live here, and both matter:
  *
- * - **Efficacious** pins (`bullet`, `emphasis`, `strong`, `resourceLink`,
- *   `tightDefinitions`): the pinned value differs from remark's own default,
- *   so removing the key changes the serialised bytes. `bullet`'s efficacy is
- *   asserted by an executable test (`canonical.test.ts`); the fixture per key
- *   documents the rest.
- * - **Defensive** pins (`bulletOrdered`, `fence`, `fences`, `listItemIndent`,
- *   `rule`, `setext`): the pinned value already matches remark's default,
- *   chosen deliberately over an efficacious-but-unconventional alternative
- *   (e.g. `)`-style ordered lists, tab-padded bullets) to keep this
+ * - **Efficacious** pins — `bullet`, `emphasis`, `resourceLink`, `strong`,
+ *   `tightDefinitions` (5 keys): the pinned value differs from remark's own
+ *   default, so deleting the key changes the serialised bytes of a fixture.
+ * - **Defensive** pins — `bulletOrdered`, `fence`, `fences`, `listItemIndent`,
+ *   `rule`, `setext` (6 keys): the pinned value already restates remark's
+ *   default, chosen deliberately over an efficacious-but-unconventional
+ *   alternative (e.g. `)`-style ordered lists, tab-padded bullets) to keep this
  *   product's canonical Markdown unsurprising to the humans who read it.
- *   They are pinned anyway so a future remark upgrade that changes its
- *   default cannot silently change this pipeline's canonical spelling out
- *   from under a fixture.
+ *   Deleting one of these is a byte no-op today, so an output diff alone could
+ *   never catch its loss; they are pinned — and their presence asserted — so a
+ *   future remark upgrade that moves its own default cannot silently change
+ *   this pipeline's canonical spelling out from under a fixture.
  *
- * `fixtures/pins/pin-<key>.md` must exist for every key here — see the pin
- * coverage test, which reads these keys rather than a hardcoded list so it
- * cannot drift.
+ * Nothing here is documentation-only. `canonical.test.ts` runs three named
+ * assertions against **every** key in this object, efficacious and defensive
+ * alike, each backed by `fixtures/pins/pin-<key>.md`:
+ *
+ * 1. the key is present with exactly the value frozen here, and the pinned
+ *    options reproduce that fixture's bytes — deleting any key fails this;
+ * 2. the fixture serialises differently under another legal value for the
+ *    option — proof the fixture exercises the option instead of decorating it;
+ * 3. dropping the key changes the bytes, or provably does not — the
+ *    `differsWhenRemoved` flag in that file's `PIN_CASES` is the machine-checked
+ *    record of which group above each key belongs to, asserted in both
+ *    directions, so a remark release that moves a default fails a named test
+ *    rather than drifting.
+ *
+ * That test reads this object's own keys rather than a hardcoded list, so a
+ * new pin without a case, or a case outliving its pin, fails there too.
  */
 export const PINNED_OPTIONS = {
   bullet: '-',
