@@ -415,6 +415,103 @@ makes conventions portable across projects.
 
 Discoveries and constraints. Newest first.
 
+### 2026-09-07 — A green GATE-2 was measuring a third of what its number claimed
+
+GATE-2 reported "69/69 byte-identical round trips". It called `roundTrip()` at three call sites:
+22 `modelled/` + 5 `verbatim/` + 1 pin regression = **28** byte comparisons. The other 41 cases were
+probe accept/refuse assertions and two meta-tests — real tests, but not byte-identity tests. The
+count was published in the verify report and the archive report and repeated downstream, including
+by me to the project owner.
+
+What the missing coverage was hiding, found the moment the assertions were added:
+
+- **`listItem` dropped `checked` and `spread`.** `- [ ] todo` came back from the editor as `- todo`;
+  GFM task lists silently lost their checkbox, and a multi-block list item lost its second block.
+  No fixture contained a task list, so the gate stayed green over a live data-loss path.
+- **The canonical verdict was inverted for definitions.** `[a]: /a\n[b]: /b` (canonical) was refused
+  by the probe while the spaced, non-canonical form was accepted. `definition` travelled as an
+  opaque node and `mdast-util-to-markdown`'s join rule keys on `node.type`. A committed comment
+  asserted the opposite behaviour and was simply false.
+- **"Insertions undo as one step" was defended by a comment, not a test.** `grep undo` across every
+  `.test.ts` returned zero. The first undo restored the paragraph and left the `/quote` trigger
+  deleted — two steps. `prosemirror-history` groups adjacent transactions only when `isAdjacentTo`
+  also holds, and a block transform changes ranges at the block's boundaries, not at the caret.
+
+**Impact:** a test-count is not a coverage measure, and a gate that reports one invites the
+substitution. GATE-2 now tags every `describe` with what it measures — `[byte identity]`,
+`[byte inequality]`, `[invariant]`, `[probe accept]`, `[corpus shape]`, `[regression]` — so the
+number cannot be read as something it is not. Byte comparisons went 28/69 → 58/162, and a new
+corpus-wide invariant states the thing the buckets only implied: **if the probe accepts a document,
+canonicalising it must not change it.** Edit mode must never open what the save path would rewrite.
+
+### 2026-09-07 — The coverage gate measured workspace members, so one assertion covered an app
+
+`test-coverage.ts` required each workspace *member* to hold at least one test file with at least one
+`expect(`. A single assertion anywhere in `apps/web` satisfied the gate for the entire application.
+That is how `EditorSurface.vue` — carrying three spec requirements, including the menu repositioning
+and the `aria-activedescendant` wiring — shipped with no test of any kind while `bun run check`
+stayed green, along with every other component in the app.
+
+The gate now measures **per source file**. A file is covered when a test imports it, imports one of
+its exported bindings *by name* through a pure barrel or a workspace entry, or has a named sibling
+test. A wildcard `import * as` credits the barrel and nothing behind it: a barrel is transparent,
+never absorbent, and crediting everything it re-exports is the member-level hole in file-level
+clothing.
+
+Exemptions are mechanical rather than by name — a file is exempt when it **erases to nothing at
+runtime**, measured with `Bun.Transpiler().transformSync(code).trim().length === 0`. A `types.ts`
+earns the exemption by containing no runtime code and loses it the moment someone adds a `const`.
+Two anti-decay rules keep it honest: a test with zero assertions is an error in its own right and
+credits nothing, and an `ALLOW_LIST` entry that names a missing or now-covered file is also an
+error, so the list can only shrink without a deliberate edit.
+
+**Impact:** this is the fourth structural check in this repository found to have a hole — after
+`core-purity` (missed devDependencies), `single-parser` (missed a second pipeline inside an allowed
+package) and `routes-mounted` (accepts a bare textual mention). The pattern is stable enough to
+state as a rule: **when you write a gate, the acceptance criterion is not that it passes — it is
+that you watched it fail against real uncovered code and it named the right files.** This one was
+proven against a clean `git archive HEAD` export, where it exited 1 naming seven files with no false
+positives.
+
+Its honest ceiling is documented in the file: it is static, so it proves a test *names* a file, not
+that it exercises a line. Real instrumentation cannot live in `bun run check`, which runs in the
+commit hook and must not require the Postgres half the suite provisions.
+
+### 2026-09-07 — A golden test that writes its own expectation cannot fail the first time
+
+`chunk-golden.test.ts` auto-wrote a golden JSON file whenever one was missing. The point of a golden
+is that a human read it once and committed it; a self-writing golden converts "the output changed"
+into "the output is whatever the code just produced". Six new fixtures had just been added, so the
+next ordinary run would have manufactured six expectations nobody reviewed.
+
+The write gate now lives inside `golden.ts` rather than at the call site, so "the ordinary run never
+writes a golden" is a property of the module instead of a convention every caller must remember.
+Regeneration is a deliberate act: `bun run -F @deep-wiki/markdown goldens:update`. Stale goldens —
+one outliving the fixture that produced it — were undetectable in the other direction and now fail a
+named test.
+
+**Impact:** this is the same family as the pgvector `CHECK` test, the block-merge fixture and the
+wiki-link non-disclosure test — **tests that passed for the wrong reason**. The common shape is a
+test whose green state does not depend on the behaviour it claims to protect. The counter-practice
+that keeps catching these is cheap and non-negotiable: **break the thing on purpose and watch the
+test go red for an assertion reason.** Every test added in this batch was mutation-checked that way.
+
+### 2026-09-07 — A markdown option pin splits into efficacious and defensive, and only one kind is testable by removal
+
+`PINNED_OPTIONS` freezes 11 `remark-stringify` options so canonical serialisation cannot drift. The
+spec says "removing a pin fails a named fixture", and the obvious reading — delete the key, watch
+bytes change — only works for **5** of them (`bullet`, `emphasis`, `resourceLink`, `strong`,
+`tightDefinitions`), whose pinned value differs from the library's default. The other **6**
+(`bulletOrdered`, `fence`, `fences`, `listItemIndent`, `rule`, `setext`) pin a value that *is*
+remark's default, so removal is a byte no-op no matter what the fixture contains. They are defensive
+pins: they exist so a future library default change cannot silently rewrite the corpus.
+
+**Impact:** the protection a defensive pin needs is an assertion on its **presence and value**, not
+on its effect. All 11 keys now carry three named tests each, plus a parity test so a new pin without
+a case fails. Group membership is machine-checked via `PIN_CASES.differsWhenRemoved` rather than
+maintained as a third hand-written list — the repository's standing rule against writing the same
+fact twice and trusting a comment.
+
 ### 2026-09-06 — Two parallel changes both claim migration numbers 0008-0010
 
 `content-and-editor` and `ai-provider-foundation` were designed concurrently and each planned its
@@ -1173,6 +1270,30 @@ entry — documentation only); no code change.
 
 Decisions still owed. Move an entry out of this section once answered and record the answer
 in Findings.
+
+- **Two canonical constructs the editor cannot round trip.** Both fail closed at the probe, so no
+  saved document is corrupted — edit mode simply refuses to open them — but neither fits an existing
+  fixture bucket, because `modelled/` requires a byte-identical round trip and `refused/` requires
+  the source to be non-canonical. These are canonical markdown that the editor cannot represent.
+  1. **Inline images.** `![alt](url)` throws `UnsupportedConstructError`; `image` is in neither the
+     ProseMirror schema nor `VERBATIM_INLINE_TYPES`. Reference-style images work.
+  2. **Mark nesting is fixed by declaration rank.** `~~removed __bold__~~` serialises to the
+     corrupted `~~removed ~~__~~bold~~__`, and `[__bold link__](url)` inverts to
+     `__[bold link](url)__`. `schema.ts` documents this for `strong`/`emphasis` only; it applies to
+     `delete` and `link` too.
+  The decision owed is whether the editor gains real support (a schema node for images, nesting-aware
+  mark serialisation) or whether refusal becomes the documented product behaviour with a message
+  telling the author why. Refusing silently on a construct as ordinary as an inline image is not a
+  stable answer.
+- **The mention menu's ARIA ownership is incomplete on a screen the owner already passed.** The
+  editor `div` sets `aria-activedescendant` to an option id that is **not its descendant**, carries
+  no `aria-controls`/`aria-owns`, no `role="combobox"` and no `aria-expanded`, and the options sit
+  inside a plain `<ul>` between the `role="listbox"` and its `role="option"` children. Under the
+  ARIA spec both break listbox ownership, so most screen readers will announce nothing as the arrow
+  keys move the highlight — even though the `aria-activedescendant` value itself is correct and
+  tested. Fixing it is a markup change to a surface reviewed and passed on 2026-09-07, so it needs
+  the owner's review rather than a silent in-batch edit (UI-CHECKLIST §1). Until then the keyboard
+  path works visually and is untrustworthy assistively.
 
 - **Rule pack sharing scope.** Are rule packs shareable only across books within a single
   workspace, or across workspaces entirely? Cross-workspace sharing requires packs to carry
