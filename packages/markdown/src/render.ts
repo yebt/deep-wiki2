@@ -88,6 +88,19 @@ const tagHandler: Handler = (_state, node) => {
  */
 const blockAnchorHandler: Handler = () => undefined;
 
+/**
+ * Bumped whenever the render pipeline's *output shape* changes in a way a
+ * saved `page_content.pipeline_version` must be able to detect as stale
+ * (versioning-and-collaboration design.md Decision 6, "Staleness
+ * detection and backfill"). `savePage` writes this on every save;
+ * `content_hash` alone cannot detect the case where the Markdown did not
+ * change but the pipeline did. 1 was the column's own migration default
+ * (`0008_page_content.sql:27`) and was never actually written by any
+ * code path before this constant existed — 2 is therefore the first
+ * value any save has ever truthfully written.
+ */
+export const CURRENT_PIPELINE_VERSION = 2;
+
 const renderTransform = unified()
   .use(remarkRehype, {
     allowDangerousHtml: true,

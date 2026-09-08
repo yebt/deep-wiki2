@@ -27,6 +27,6 @@ export { chunk } from './chunk';
 export type { Chunk, ChunkOptions } from './chunk';
 export { deriveBlockId, matchBlocks, mintBlockId, MATCH_THRESHOLD } from './match-blocks';
 export type { BlockAssignment, BlockAssignmentStatus, MatchBlocksResult, PersistedBlockRecord } from './match-blocks';
-export { render } from './render';
+export { CURRENT_PIPELINE_VERSION, render } from './render';
 export { PINNED_OPTIONS, canonicalise, parse, stringify } from './pipeline';
 export type { ParseOptions } from './pipeline';

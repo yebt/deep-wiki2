@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import postgres from 'postgres';
 import { provisionTestDatabase, type ProvisionedTestDatabase } from '../../testing/provision';
+import { CURRENT_PIPELINE_VERSION } from '@deep-wiki/markdown';
 import { NotCanonicalError, savePage, StaleContentError } from './save-page';
 
 let db: ProvisionedTestDatabase;
@@ -121,6 +122,41 @@ describe('savePage', () => {
     await expect(
       savePage(sql, { nodeId, workspaceId, markdown: '* one\n* two\n', expectedContentHash: null }),
     ).rejects.toThrow(NotCanonicalError);
+  });
+});
+
+// versioning-and-collaboration page-content spec: "Save Regenerates The
+// Cached Render And Block Index" — pipeline_version must be truthful so a
+// future staleness check (Phase 6) can trust it. Before this fix, savePage
+// never wrote pipeline_version at all and every row silently kept
+// 0008_page_content.sql's DEFAULT 1 forever.
+describe('savePage — pipeline_version', () => {
+  test('an INSERT save writes the current pipeline version, not the column default', async () => {
+    const { workspaceId, nodeId } = await seedPageNode();
+
+    await savePage(sql, { nodeId, workspaceId, markdown: '# Hello\n', expectedContentHash: null });
+
+    const [row] = await sql<{ pipeline_version: number }[]>`
+      SELECT pipeline_version FROM page_content WHERE node_id = ${nodeId}
+    `;
+    expect(row!.pipeline_version).toBe(CURRENT_PIPELINE_VERSION);
+  });
+
+  test('an UPDATE save also writes the current pipeline version', async () => {
+    const { workspaceId, nodeId } = await seedPageNode();
+    const first = await savePage(sql, { nodeId, workspaceId, markdown: '# First\n', expectedContentHash: null });
+
+    await savePage(sql, {
+      nodeId,
+      workspaceId,
+      markdown: '# Second\n',
+      expectedContentHash: first.contentHash,
+    });
+
+    const [row] = await sql<{ pipeline_version: number }[]>`
+      SELECT pipeline_version FROM page_content WHERE node_id = ${nodeId}
+    `;
+    expect(row!.pipeline_version).toBe(CURRENT_PIPELINE_VERSION);
   });
 });
 

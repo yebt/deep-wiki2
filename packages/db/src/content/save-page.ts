@@ -10,7 +10,7 @@
  * from the caller.
  */
 import { createHash } from 'node:crypto';
-import { buildBlockIndex, canonicalise, parse, render, type BlockIndex } from '@deep-wiki/markdown';
+import { buildBlockIndex, canonicalise, CURRENT_PIPELINE_VERSION, parse, render, type BlockIndex } from '@deep-wiki/markdown';
 import type postgres from 'postgres';
 import { reconcileDerived } from './rebuild-derived';
 
@@ -63,10 +63,10 @@ export async function savePage(sql: postgres.Sql, input: SavePageInput): Promise
 
     if (input.expectedContentHash === null) {
       const rows = await tx`
-        INSERT INTO page_content (node_id, workspace_id, markdown, rendered_html, block_index, content_hash, updated_by)
+        INSERT INTO page_content (node_id, workspace_id, markdown, rendered_html, block_index, content_hash, pipeline_version, updated_by)
         VALUES (
           ${input.nodeId}, ${input.workspaceId}, ${canonical}, ${renderedHtml},
-          ${tx.json(JSON.parse(JSON.stringify(blockIndex)))}, ${contentHash}, ${input.updatedBy ?? null}
+          ${tx.json(JSON.parse(JSON.stringify(blockIndex)))}, ${contentHash}, ${CURRENT_PIPELINE_VERSION}, ${input.updatedBy ?? null}
         )
         ON CONFLICT (node_id) DO NOTHING
         RETURNING node_id
@@ -86,6 +86,7 @@ export async function savePage(sql: postgres.Sql, input: SavePageInput): Promise
                rendered_html = ${renderedHtml},
                block_index = ${tx.json(JSON.parse(JSON.stringify(blockIndex)))},
                content_hash = ${contentHash},
+               pipeline_version = ${CURRENT_PIPELINE_VERSION},
                updated_by = ${input.updatedBy ?? null},
                updated_at = now()
          WHERE node_id = ${input.nodeId}
