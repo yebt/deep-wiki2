@@ -177,14 +177,113 @@ describe('resolveChangeset', () => {
     const authorId = await seedUser();
 
     const first = await resolveChangeset(sql, { workspaceId, bookId, authorId, windowMinutes: 30 });
-    // Simulate the first changeset's activity having lapsed well past the window.
-    await sql`UPDATE changeset SET last_activity_at = now() - interval '1 hour' WHERE id = ${first}`;
+    // Simulate the first changeset's activity having lapsed well past the
+    // window, and keep the exact value written so retirement can be checked
+    // against it rather than against "not null" — which now() satisfies too.
+    const [stamped] = await sql<{ last_activity_at: Date }[]>`
+      UPDATE changeset SET last_activity_at = now() - interval '1 hour' WHERE id = ${first}
+      RETURNING last_activity_at
+    `;
 
     const second = await resolveChangeset(sql, { workspaceId, bookId, authorId, windowMinutes: 30 });
 
     expect(second).not.toBe(first);
-    const [closed] = await sql<{ closed_at: Date | null }[]>`SELECT closed_at FROM changeset WHERE id = ${first}`;
+    const [closed] = await sql<{ closed_at: Date | null; last_activity_at: Date }[]>`
+      SELECT closed_at, last_activity_at FROM changeset WHERE id = ${first}
+    `;
+    // The docstring is explicit: retirement stamps the last activity, not
+    // the moment of retirement. An hour separates the two here.
     expect(closed!.closed_at).not.toBeNull();
+    expect(closed!.closed_at!.getTime()).toBe(stamped!.last_activity_at.getTime());
+    expect(closed!.last_activity_at.getTime()).toBe(stamped!.last_activity_at.getTime());
+    expect(Date.now() - closed!.closed_at!.getTime()).toBeGreaterThan(30 * 60 * 1000);
+  });
+
+  // versioning-and-collaboration changesets spec: "Changeset Tenant
+  // Isolation And Book Scope". Every test above uses one book in one
+  // workspace, so an implementation that joined by author_id alone —
+  // across books and across tenants — passed all of them.
+  test('two books in one workspace never share a changeset', async () => {
+    const { workspaceId, rootId } = await seedWorkspace();
+    const bookA = await seedBook(workspaceId, rootId);
+    const bookB = await seedBook(workspaceId, rootId);
+    const authorId = await seedUser();
+
+    const idA = await resolveChangeset(sql, { workspaceId, bookId: bookA, authorId, windowMinutes: 30 });
+    const idB = await resolveChangeset(sql, { workspaceId, bookId: bookB, authorId, windowMinutes: 30 });
+
+    expect(idA).not.toBe(idB);
+    const rows = await sql<{ id: string; book_id: string }[]>`
+      SELECT id, book_id FROM changeset WHERE workspace_id = ${workspaceId} AND author_id = ${authorId} ORDER BY book_id
+    `;
+    expect(rows).toHaveLength(2);
+    expect(rows.map((r) => r.book_id).sort()).toEqual([bookA, bookB].sort());
+    // Re-resolving each book returns that book's own row, not the other's.
+    expect(await resolveChangeset(sql, { workspaceId, bookId: bookA, authorId, windowMinutes: 30 })).toBe(idA);
+    expect(await resolveChangeset(sql, { workspaceId, bookId: bookB, authorId, windowMinutes: 30 })).toBe(idB);
+  });
+
+  test('one author in two workspaces never crosses workspace_id', async () => {
+    const first = await seedWorkspace();
+    const second = await seedWorkspace();
+    const bookOne = await seedBook(first.workspaceId, first.rootId);
+    const bookTwo = await seedBook(second.workspaceId, second.rootId);
+    const authorId = await seedUser();
+
+    const idOne = await resolveChangeset(sql, {
+      workspaceId: first.workspaceId,
+      bookId: bookOne,
+      authorId,
+      windowMinutes: 30,
+    });
+    const idTwo = await resolveChangeset(sql, {
+      workspaceId: second.workspaceId,
+      bookId: bookTwo,
+      authorId,
+      windowMinutes: 30,
+    });
+
+    expect(idOne).not.toBe(idTwo);
+    const [rowOne] = await sql<{ workspace_id: string; book_id: string }[]>`
+      SELECT workspace_id, book_id FROM changeset WHERE id = ${idOne}
+    `;
+    const [rowTwo] = await sql<{ workspace_id: string; book_id: string }[]>`
+      SELECT workspace_id, book_id FROM changeset WHERE id = ${idTwo}
+    `;
+    expect(rowOne!.workspace_id).toBe(first.workspaceId);
+    expect(rowOne!.book_id).toBe(bookOne);
+    expect(rowTwo!.workspace_id).toBe(second.workspaceId);
+    expect(rowTwo!.book_id).toBe(bookTwo);
+    // Neither workspace's query can see the other's row.
+    const firstRows = await sql`SELECT id FROM changeset WHERE workspace_id = ${first.workspaceId} AND author_id = ${authorId}`;
+    const secondRows = await sql`SELECT id FROM changeset WHERE workspace_id = ${second.workspaceId} AND author_id = ${authorId}`;
+    expect(firstRows).toHaveLength(1);
+    expect(secondRows).toHaveLength(1);
+  });
+
+  // windowMinutes is a parameter, not a constant: the same last_activity_at
+  // must join under one window and retire under a shorter one. A hardcoded
+  // window passes only one of these two.
+  test('the same 45-minute-old activity joins at windowMinutes 60 and retires at 30', async () => {
+    const { workspaceId, rootId } = await seedWorkspace();
+    const bookId = await seedBook(workspaceId, rootId);
+    const wideAuthor = await seedUser();
+    const narrowAuthor = await seedUser();
+
+    const wideFirst = await resolveChangeset(sql, { workspaceId, bookId, authorId: wideAuthor, windowMinutes: 60 });
+    await sql`UPDATE changeset SET last_activity_at = now() - interval '45 minutes' WHERE id = ${wideFirst}`;
+    const wideSecond = await resolveChangeset(sql, { workspaceId, bookId, authorId: wideAuthor, windowMinutes: 60 });
+    expect(wideSecond).toBe(wideFirst);
+
+    const narrowFirst = await resolveChangeset(sql, { workspaceId, bookId, authorId: narrowAuthor, windowMinutes: 30 });
+    await sql`UPDATE changeset SET last_activity_at = now() - interval '45 minutes' WHERE id = ${narrowFirst}`;
+    const narrowSecond = await resolveChangeset(sql, { workspaceId, bookId, authorId: narrowAuthor, windowMinutes: 30 });
+    expect(narrowSecond).not.toBe(narrowFirst);
+
+    const [wideRow] = await sql<{ closed_at: Date | null }[]>`SELECT closed_at FROM changeset WHERE id = ${wideFirst}`;
+    const [narrowRow] = await sql<{ closed_at: Date | null }[]>`SELECT closed_at FROM changeset WHERE id = ${narrowFirst}`;
+    expect(wideRow!.closed_at).toBeNull();
+    expect(narrowRow!.closed_at).not.toBeNull();
   });
 
   test('different authors never share a changeset', async () => {
