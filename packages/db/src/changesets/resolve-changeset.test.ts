@@ -56,6 +56,22 @@ async function seedPageUnder(workspaceId: string, parentId: string): Promise<str
   return page!.id as string;
 }
 
+async function seedChapterUnder(workspaceId: string, parentId: string): Promise<string> {
+  const [chapter] = await sql`
+    INSERT INTO nodes (workspace_id, parent_id, type, path, position, slug, title)
+    VALUES (${workspaceId}, ${parentId}, 'chapter', '', 0, ${`chapter-${crypto.randomUUID()}`}, 'Chapter') RETURNING id
+  `;
+  return chapter!.id as string;
+}
+
+async function seedBookUnder(workspaceId: string, parentId: string): Promise<string> {
+  const [book] = await sql`
+    INSERT INTO nodes (workspace_id, parent_id, type, path, position, slug, title)
+    VALUES (${workspaceId}, ${parentId}, 'book', '', 0, ${`book-${crypto.randomUUID()}`}, 'Book') RETURNING id
+  `;
+  return book!.id as string;
+}
+
 async function seedUser(): Promise<string> {
   const [plan] = await sql`
     INSERT INTO plans (name, max_workspaces, max_seats, max_storage_bytes, max_ai_tokens_monthly)
@@ -79,6 +95,54 @@ describe('resolveBookId', () => {
 
     const resolved = await resolveBookId(sql, { nodeId: pageId, workspaceId });
     expect(resolved).toBe(bookId);
+  });
+
+  // The single-hop fixture above passes even for an implementation that
+  // only ever looks at the page's own parent. This one is two hops below
+  // its book, so nothing but the recursive arm can reach it.
+  test('walks past an intermediate chapter to a book two levels up', async () => {
+    const { workspaceId, rootId } = await seedWorkspace();
+    const bookId = await seedBook(workspaceId, rootId);
+    const chapterId = await seedChapterUnder(workspaceId, bookId);
+    const pageId = await seedPageUnder(workspaceId, chapterId);
+
+    const resolved = await resolveBookId(sql, { nodeId: pageId, workspaceId });
+    expect(resolved).toBe(bookId);
+    // Pin the shape the assertion depends on: the page really is two hops
+    // below the book, so a one-hop implementation cannot pass by accident.
+    const [parent] = await sql<{ parent_id: string; type: string }[]>`
+      SELECT parent_id, type FROM nodes WHERE id = ${pageId}
+    `;
+    expect(parent!.parent_id).toBe(chapterId);
+    expect(parent!.type).toBe('page');
+  });
+
+  // Defensive: `LEGAL_PARENT_TYPES` in nodes/move.ts forbids a book under a
+  // book, so this shape is only reachable by direct insert. The walk still
+  // has to answer deterministically — `LIMIT 1` over a recursive CTE has no
+  // inherent order — and "nearest" is the only answer that means anything.
+  test('the nearest book wins when books are nested', async () => {
+    const { workspaceId, rootId } = await seedWorkspace();
+    const outerBookId = await seedBook(workspaceId, rootId);
+    const innerBookId = await seedBookUnder(workspaceId, outerBookId);
+    const pageId = await seedPageUnder(workspaceId, innerBookId);
+
+    const resolved = await resolveBookId(sql, { nodeId: pageId, workspaceId });
+    expect(resolved).toBe(innerBookId);
+    expect(resolved).not.toBe(outerBookId);
+  });
+
+  // The walk is workspace-scoped at its seed: asking for a node under the
+  // wrong tenant resolves nothing, rather than reaching into that tenant's
+  // tree because the id happened to be known.
+  test('a node addressed with another workspace id resolves to null', async () => {
+    const first = await seedWorkspace();
+    const second = await seedWorkspace();
+    const bookId = await seedBook(first.workspaceId, first.rootId);
+    const pageId = await seedPageUnder(first.workspaceId, bookId);
+
+    expect(await resolveBookId(sql, { nodeId: pageId, workspaceId: first.workspaceId })).toBe(bookId);
+    expect(await resolveBookId(sql, { nodeId: pageId, workspaceId: second.workspaceId })).toBeNull();
   });
 
   test('a page with no book ancestor resolves to null', async () => {

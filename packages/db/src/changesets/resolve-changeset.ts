@@ -35,15 +35,17 @@ export interface ResolveBookIdInput {
  */
 export async function resolveBookId(sql: SqlExecutor, input: ResolveBookIdInput): Promise<string | null> {
   const rows = await sql<{ id: string }[]>`
-    WITH RECURSIVE ancestors(id, parent_id, type) AS (
-      SELECT id, parent_id, type FROM nodes WHERE id = ${input.nodeId} AND workspace_id = ${input.workspaceId}
+    WITH RECURSIVE ancestors(id, parent_id, type, depth) AS (
+      SELECT id, parent_id, type, 0 FROM nodes WHERE id = ${input.nodeId} AND workspace_id = ${input.workspaceId}
       UNION ALL
-      SELECT n.id, n.parent_id, n.type
+      SELECT n.id, n.parent_id, n.type, a.depth + 1
         FROM nodes n
         JOIN ancestors a ON n.id = a.parent_id
        WHERE n.workspace_id = ${input.workspaceId}
     )
-    SELECT id FROM ancestors WHERE type = 'book' LIMIT 1
+    -- LIMIT 1 over a recursive CTE has no inherent order, so "nearest"
+    -- is stated rather than inherited from the evaluation strategy.
+    SELECT id FROM ancestors WHERE type = 'book' ORDER BY depth LIMIT 1
   `;
   return rows[0]?.id ?? null;
 }
