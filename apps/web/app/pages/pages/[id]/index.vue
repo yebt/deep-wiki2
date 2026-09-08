@@ -75,10 +75,15 @@ useSeoMeta({ title: () => (title.value ? `${title.value} — deep-wiki` : 'deep-
 
            Icon-only, which checklist §4.3 allows only "where space
            genuinely forbids" a visible label — so it was measured, not
-           assumed. At 320x900 the bar holds the brand (143px at x=8),
-           "Edit" (64px at x=206) and the theme toggle (28px at x=276):
-           55px free, and a label of Edit's own shape already needs 70px
-           with its gap before "History" is spelled longer than "Edit".
+           assumed, and then re-measured with the control in place, which
+           corrected the figure: at 320x900 the bar holds the brand
+           (ending x=151), this control (172-200), "Edit" (206-270) and
+           the theme toggle (276-304), with a 16px right margin. The slack
+           is the single 21px gap between brand and history -- not the
+           55px counted before this button existed, which it consumed 34px
+           of. A labelled "History" needs ~70px against those 21, so the
+           exception binds harder than the first measurement suggested;
+           what is gone is any headroom for a fourth control at this width.
            §4.3's exception therefore binds, and it demands *both* halves —
            an accessible name and a tooltip — because the same glyph is
            ambiguous across icon packs. "Revision history", not "History":
