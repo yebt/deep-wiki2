@@ -48,11 +48,11 @@ Chain strategy: pending
 
 ## Phase 2: Core Domain Types and Ports (`packages/core`)
 
-- [ ] 2.1 RED: `packages/core/src/content/revision.test.ts`, `changeset.test.ts`, `comment.test.ts`, `diff.test.ts` — type-level/shape assertions (construction, readonly fields) for `Revision`, `Changeset`, `CommentAnchor`, `BlockDiff`/`BlockChange`.
-- [ ] 2.2 GREEN: create `packages/core/src/content/{revision,changeset,comment,diff}.ts` — types only, zero imports, per design.md Decision 1 and Decision 2's type split.
-- [ ] 2.3 RED: `packages/core/src/ports/presence-broadcaster.test.ts` — a fake implementation of the port satisfies its interface contract (publish/subscribe shape).
-- [ ] 2.4 GREEN: create `packages/core/src/ports/presence-broadcaster.ts` — the `PresenceBroadcaster` port.
-- [ ] 2.5 Run `bun run -F @deep-wiki/core check` (core-purity) to confirm zero framework/Node-built-in imports across all new files.
+- [x] 2.1 RED: `packages/core/src/content/revision.test.ts`, `changeset.test.ts`, `comment.test.ts`, `diff.test.ts` — type-level/shape assertions (construction, readonly fields) for `Revision`, `Changeset`, `CommentAnchor`, `BlockDiff`/`BlockChange`.
+- [x] 2.2 GREEN: create `packages/core/src/content/{revision,changeset,comment,diff}.ts` — types only, zero imports, per design.md Decision 1 and Decision 2's type split.
+- [x] 2.3 RED: `packages/core/src/ports/presence-broadcaster.test.ts` — a fake implementation of the port satisfies its interface contract (publish/subscribe shape).
+- [x] 2.4 GREEN: create `packages/core/src/ports/presence-broadcaster.ts` — the `PresenceBroadcaster` port.
+- [x] 2.5 Run `bun run -F @deep-wiki/core check` (core-purity) to confirm zero framework/Node-built-in imports across all new files.
 
 ## Phase 3: Schema Foundation — Split Provenance, Revisions, Changesets
 
