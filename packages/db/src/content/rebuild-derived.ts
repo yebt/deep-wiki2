@@ -18,11 +18,13 @@ import {
   matchBlocks,
   sliceBlocks,
   parse,
+  type BlockAssignment,
   type BlockSlice,
   type PersistedBlockRecord,
 } from '@deep-wiki/markdown';
 import { createHash } from 'node:crypto';
 import type postgres from 'postgres';
+import { reconcileComments } from '../comments/reconcile-comments';
 
 type SqlExecutor = postgres.Sql | postgres.TransactionSql;
 /** `packages/markdown` does not export the mdast `Root` type itself — this
@@ -115,11 +117,22 @@ async function upsertActiveBlock(
   `;
 }
 
+export interface ReconcileBlocksResult {
+  readonly assignments: readonly BlockAssignment[];
+  readonly mintedIds: ReadonlyArray<{ id: string; slot: number; splitFrom: string }>;
+  readonly nextBlocks: readonly BlockSlice[];
+}
+
 /**
  * Reconciles `page_blocks` via `matchBlocks` (design.md "Block identity").
  * `matchBlocks`' own threshold algorithm is unit-tested against generated
  * edit sequences in `packages/markdown/src/match-blocks.test.ts` — this
- * function only wires it to the persisted registry.
+ * function only wires it to the persisted registry. Returns its own
+ * `matchBlocks` result plus `nextBlocks` so `reconcileComments` (called
+ * later, after `compressChains`) can reconcile every comment anchor
+ * against this exact save's block set without recomputing it (design.md
+ * Decision 1, "The confidence rule": "Matching the document twice would be
+ * the same fact computed in two places").
  */
 async function reconcileBlocks(
   tx: SqlExecutor,
@@ -128,7 +141,7 @@ async function reconcileBlocks(
   tree: Root,
   canonicalMarkdown: string,
   previousMarkdown: string | null,
-): Promise<void> {
+): Promise<ReconcileBlocksResult> {
   const nextBlocks: BlockSlice[] = sliceBlocks(tree, canonicalMarkdown);
   const nextTexts = nextBlocks.map((block) => block.text);
 
@@ -191,6 +204,8 @@ async function reconcileBlocks(
     if (existingActiveIds.has(block.anchorId) || handledIds.has(block.anchorId)) continue;
     await upsertActiveBlock(tx, nodeId, workspaceId, block.anchorId, block.text);
   }
+
+  return { assignments, mintedIds, nextBlocks };
 }
 
 /**
@@ -276,6 +291,16 @@ async function compressChains(tx: SqlExecutor, nodeId: string): Promise<void> {
 export async function reconcileDerived(tx: SqlExecutor, input: ReconcileDerivedInput): Promise<void> {
   await replaceLinks(tx, input.nodeId, input.workspaceId, input.tree);
   await replaceTags(tx, input.nodeId, input.workspaceId, input.tree);
-  await reconcileBlocks(tx, input.nodeId, input.workspaceId, input.tree, input.canonicalMarkdown, input.previousMarkdown);
+  const blocksResult = await reconcileBlocks(tx, input.nodeId, input.workspaceId, input.tree, input.canonicalMarkdown, input.previousMarkdown);
   await compressChains(tx, input.nodeId);
+  // Runs after compressChains: a merged comment anchor's survivor id is
+  // already the compressed terminal by the time this reads page_blocks
+  // (design.md Data Flow: reconcileBlocks -> compressChains ->
+  // reconcileComments).
+  await reconcileComments(tx, {
+    nodeId: input.nodeId,
+    assignments: blocksResult.assignments,
+    mintedIds: blocksResult.mintedIds,
+    nextBlocks: blocksResult.nextBlocks,
+  });
 }
