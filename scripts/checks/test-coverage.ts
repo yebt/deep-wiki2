@@ -139,10 +139,6 @@ export const ALLOW_LIST: readonly Exemption[] = [
       'Coverage debt: only the argv/exit-code shell is untested.',
   },
   {
-    file: 'packages/db/src/permissions/candidates.ts',
-    reason: 'Coverage debt: @-mention candidate gathering is exercised only through apps/api/src/routes/mentions.test.ts, which does not name it.',
-  },
-  {
     file: 'packages/db/src/permissions/grants.ts',
     reason: 'Coverage debt: the permissions write path has no test of its own.',
   },

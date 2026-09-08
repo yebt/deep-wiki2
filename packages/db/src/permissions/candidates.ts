@@ -42,3 +42,28 @@ export async function listWorkspaceMemberCandidates(
   `;
   return rows.map((row) => ({ id: row.id, displayName: row.display_name }));
 }
+
+export interface IsWorkspaceMemberInput {
+  readonly workspaceId: string;
+  readonly userId: string;
+}
+
+/**
+ * The boolean form of `listWorkspaceMemberCandidates`' own predicate,
+ * for a single known user rather than a name-prefix search — the presence
+ * stream's connect-time gate (versioning-and-collaboration design.md
+ * Decision 5: "`sessionMiddleware` first, then a workspace-membership
+ * check to open the stream at all"). This gate only decides whether the
+ * stream opens; it authorises nothing about any individual page's
+ * presence event, which is re-checked per event through `can()`.
+ */
+export async function isWorkspaceMember(sql: SqlExecutor, input: IsWorkspaceMemberInput): Promise<boolean> {
+  const [row] = await sql<{ exists: boolean }[]>`
+    SELECT (
+      EXISTS (SELECT 1 FROM permissions p WHERE p.workspace_id = ${input.workspaceId} AND p.subject_type = 'user' AND p.subject_id = ${input.userId})
+      OR EXISTS (SELECT 1 FROM cell_members cm WHERE cm.workspace_id = ${input.workspaceId} AND cm.user_id = ${input.userId})
+      OR ${input.userId} = (SELECT owner_id FROM workspaces WHERE id = ${input.workspaceId})
+    ) AS "exists"
+  `;
+  return row?.exists ?? false;
+}
