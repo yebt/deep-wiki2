@@ -1264,6 +1264,99 @@ in the same place yet," above.
 Impact: `packages/db/src/schema.ts` (`pipeline_version`, unchanged by this
 entry — documentation only); no code change.
 
+### 2026-09-07 — A slash command that could not apply still ate the user's typed text
+
+Symptom: type `/quote` inside a table cell, press Enter — the six characters
+disappear, no blockquote appears, and the keypress is reported as handled so
+nothing else runs either.
+
+Cause: `confirmSlashCommand` discarded `command.run`'s boolean. A ProseMirror
+`Command` returns `false` *without calling dispatch* when it cannot apply, but
+the transaction had already been built with the trigger-text `delete` in it,
+and the sole call site dispatched it unconditionally. Reachable because
+`schema.ts` gives `tableCell` the content `inline*`, so it can host no block at
+all and `wrapIn`/`setBlockType`/`wrapInList` all refuse there — while
+`trigger.ts`'s `isInsideCodeBlock` is the only content-context guard on trigger
+activation and does not exclude inline-only containers.
+
+A second defect of the same shape sat beside it: the `divider` command called
+`dispatch` unconditionally after `replaceSelectionWith` and always reported
+success. `Transform.replaceRange` escalates depth until the slice fits, so
+inside a table cell it did not no-op — it walked out of the whole table and
+appended the horizontal rule *after* it, leaving `/divider` sitting in the cell.
+
+Fix: `SlashCommand.run` now takes an OPTIONAL dispatch, which is the real
+ProseMirror `Command` contract and makes `run(state)` a dry run;
+`confirmSlashCommand` returns `Transaction | null` and returns `null` unless the
+command both reported success and actually dispatched; `divider` checks
+`canInsertAtCaret` (the caret's own container only, unlike
+prosemirror-example-setup's `canInsert`, which walks up ancestors and would call
+the escalated placement legal); and the menu no longer *offers* a command that
+cannot run where the caret is (`applicableSlashCommandIds` +
+`filterSlashCommands(query, applicable)`), so a table cell shows the existing
+no-results state instead of eight dead entries.
+
+Impact: `confirmSlashCommand`'s return type is a public API change within
+`packages/editor` (exported through `src/mount/index.ts`); its only call site is
+the plugin's own `handleKeyDown`. `packages/editor/src/mount/insertions.test.ts`
+now exercises all eight commands in an inapplicable context — it previously
+tested them only against a bare single-paragraph document, which is exactly why
+this shipped.
+
+### 2026-09-07 — The coverage gate credited type-only imports and commented-out assertions
+
+Symptom: none observed — found by adversarial review of the commit that
+introduced per-file coverage. A file full of untested runtime logic passed
+`bun run check` as soon as any test imported one of its exported *types*, or as
+soon as a test file carried a commented-out `expect(`.
+
+Cause: three independent holes in `scripts/checks/test-coverage.ts`.
+`NAMED_IMPORT` matched `import type { X } from` exactly as it matched a value
+import, and `BARE_FROM` credited the specifier of *any* `from '…'` besides —
+so a type-only statement earned E1 credit even with no names taken from it. A
+type-only import erases at compile time and cannot exercise a line; crediting it
+is the mirror image of the hole `core-purity.ts` already documents, where
+`Bun.Transpiler().scanImports()` elides exactly these and a raw scan had to be
+added to see them. Separately, `hasAssertion` ran its regex over the raw bytes,
+so `// TODO: expect(bar(1)).toBe(2)` both certified a module and hid the
+placeholder test carrying it from the assertion-free rule — the gate broke its
+own invariant twice in one line, while `stripComments()` sat unused two
+functions above it. Finally `CONFIG_FILE_PATTERN` matched on the basename alone,
+so a hypothetical `packages/core/src/retry.config.ts` holding real logic was
+exempt, in a file whose header promises exemptions are mechanical rather than by
+name.
+
+Fix: one `blankNonCode` scanner now answers "which bytes of this file are code"
+once — comments always, string and template contents on request, with regex
+literals recognised so `/["']/` neither opens a string nor eats a line —
+and `stripComments`/`stripCommentsAndStrings` are two questions asked of it
+rather than two implementations. `scanImportRecords` drops type-only statements
+entirely (no names *and* no bare specifier) in every spelling: whole-clause,
+inline `{ type X, y }` where `y` still counts, `import type X from` (default),
+and `export type { X } from`; `scanReExports` leaves type-only re-exports out of
+the map `credit()` walks a barrel by, so a type name is never carried through
+one. X3 keeps the `<tool>.config.<ext>` name test and adds the structural half
+that makes it mechanical: a tool loads its config by path, so no module imports
+it — a `*.config.ts` something imports is a module.
+
+One more defect surfaced while running the corrected gate across the repository
+to check for lost credit: `checkTestCoverage` did not normalise its root
+argument, and `resolveSpecifier` always produces absolute paths while `walk`
+inherits whatever shape the root was given. Under a relative root E1/E2
+therefore credited nothing, and `bun run scripts/checks/test-coverage.ts .`
+reported nine files that the same check with no argument does not. Fixed with a
+`resolve()` and a test asserting the two spellings agree.
+
+Impact: **no real file in this repository loses coverage credit** — the gate's
+output over the whole tree is byte-identical before and after, and green. The
+holes were real and reachable (repo test files carry 14 whole-clause type-only
+import statements and 48 inline `type X` specifiers) but none was load-bearing:
+every target is also reached by a genuine value import or a sibling test. All
+six `*.config.*` files keep X3, including `apps/web/app/app.config.ts`, which
+sits under `app/` rather than at the member root and which nothing imports.
+Fixtures kept permanently at `scripts/checks/__fixtures__/test-coverage/`:
+`type-only-import`, `commented-assertion`, `nested-config`.
+
 ---
 
 ## Open Questions
