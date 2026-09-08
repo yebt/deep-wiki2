@@ -3,6 +3,7 @@ import type { Handler } from 'mdast-util-to-hast';
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
 import remarkRehype from 'remark-rehype';
 import { unified } from 'unified';
+import { findBlockAnchor } from './extensions/block-anchor';
 import type { TagNode } from './extensions/tag';
 import type { WikiLinkNode } from './extensions/wiki-link';
 import { parse } from './pipeline';
@@ -28,6 +29,11 @@ const SANITIZE_SCHEMA = {
     // `<span>`, which the default schema does not otherwise allow a
     // `className` on.
     span: [...(defaultSchema.attributes?.span ?? []), 'className'],
+    // versioning-and-collaboration design.md Decision 6: `dataBlockId`
+    // must survive sanitisation on any element, not just one tag — the
+    // transform below applies it to whichever block-level element a
+    // persisted anchor happens to land on.
+    '*': [...(defaultSchema.attributes?.['*'] ?? []), 'dataBlockId'],
   },
   // `mdast-util-to-hast`'s footnote handlers already apply their own
   // `user-content-` clobber prefix (default) to build matching `id`/`href`
@@ -131,9 +137,44 @@ const renderTransform = unified()
  * byte, exactly as GATE-2 requires, and this function is what stands
  * between that stored content and a browser. `resolveWikiLink` is
  * deliberately never passed to `parse()` here — see `wikiLinkHandler`.
+ *
+ * `render()` parses its own local `tree` here, never one shared with
+ * `savePage`/`reconcileDerived` — the `hProperties` mutation below is
+ * therefore isolated by construction, and `data.hProperties` is ignored by
+ * `remark-stringify`, so GATE-2 round-trip is unaffected either way
+ * (versioning-and-collaboration design.md Decision 6).
  */
 export function render(markdown: string): string {
   const tree = parse(markdown);
+
+  // A transform over root children only (design.md Decision 6):
+  // `mdast-util-to-hast` honours `node.data.hProperties`, so no positional
+  // mdast->hast mapping is needed and no second pipeline is constructed.
+  // `blockAnchorHandler` above still renders nothing for the anchor's own
+  // inline node — it cannot set an attribute on its parent block, which is
+  // exactly why this runs one level up instead.
+  for (const child of tree.children) {
+    const anchor = findBlockAnchor(child);
+    if (!anchor) continue;
+    // The hProperty key is the camelCase *property* name (`dataBlockId`),
+    // not the kebab-case attribute (`data-block-id`) — `hast-util-sanitize`
+    // resolves an unknown property strictly by this camelCase form via
+    // `property-information`'s schema lookup, and a kebab-case key here
+    // fails that lookup and is silently stripped, even with the attribute
+    // allowed in `SANITIZE_SCHEMA`. `hast-util-to-html` renders it back out
+    // as `data-block-id` regardless of which spelling produced it.
+    //
+    // `child.data` is typed too wide to read `.hProperties` directly:
+    // `RootContent` includes `VerbatimNode`/`VerbatimInlineNode`
+    // (extensions/verbatim.ts), which extend unist's own bare `Node` rather
+    // than mdast's `Parent`/`Literal` — so their `data` field carries
+    // unist's own `Data`, never augmented with `hProperties`, and a direct
+    // property read across that union is a type error even though no real
+    // block ever reaches this loop as one of those two node types.
+    const existingData = child.data as { hProperties?: Record<string, unknown> } | undefined;
+    child.data = { ...child.data, hProperties: { ...existingData?.hProperties, dataBlockId: anchor.id } };
+  }
+
   const hast = renderTransform.runSync(tree);
   return toHtml(hast);
 }

@@ -1,5 +1,5 @@
-import { expect, test } from 'bun:test';
-import { canonicalise } from './index';
+import { describe, expect, test } from 'bun:test';
+import { canonicalise, parse, stringify } from './index';
 import { render } from './render';
 
 // Threat matrix — executable-file/active-content classification: markdown
@@ -106,12 +106,68 @@ test('a tag renders as a distinct span, not literal hash text folded into the pa
   expect(html).toContain('<span class="tag">#important</span>');
 });
 
-test('a persisted block anchor does not leak its raw id into the rendered text', () => {
+test('a persisted block anchor does not leak its raw id into the visible rendered text', () => {
   const markdown = 'A paragraph with a persisted anchor. ^abc123\n';
 
   const html = render(markdown);
-  expect(html).not.toContain('abc123');
+  expect(html).not.toContain('^abc123');
   expect(html).toContain('A paragraph with a persisted anchor.');
+});
+
+// comment-overlay: "render() Emits An Invisible Block Identity Attribute" —
+// carries no visible change, but the id is now available to the client as
+// a `data-block-id` attribute rather than leaking into visible text.
+describe('data-block-id emission', () => {
+  test('an anchored block carries data-block-id on its rendered element', () => {
+    const markdown = 'A paragraph with a persisted anchor. ^abc123\n';
+
+    const html = render(markdown);
+    expect(html).toContain('data-block-id="abc123"');
+    // The attribute carries no visible change: the text itself is unchanged.
+    expect(html).toContain('A paragraph with a persisted anchor.');
+  });
+
+  test('an unanchored block carries no data-block-id attribute', () => {
+    const markdown = 'A paragraph with no persisted anchor at all.\n';
+
+    const html = render(markdown);
+    expect(html).not.toContain('data-block-id');
+  });
+
+  test('the data-block-id attribute survives rehypeSanitize', () => {
+    // Sanitisation happens inside render() itself (rehypeSanitize is part
+    // of renderTransform) — this asserts the attribute survives that exact
+    // pipeline, not merely that it exists in a pre-sanitised hast tree.
+    const markdown = 'A heading with a persisted anchor ^headid\n\nA second, unrelated paragraph.\n';
+
+    const html = render(markdown);
+    expect(html).toContain('data-block-id="headid"');
+  });
+
+  test('only the anchored block carries the attribute; a sibling block does not', () => {
+    const markdown = 'First paragraph, anchored. ^first1\n\nSecond paragraph, not anchored.\n';
+
+    const html = render(markdown);
+    expect(html).toContain('data-block-id="first1"');
+    // Exactly one occurrence — the second paragraph must not also carry it.
+    expect(html.split('data-block-id').length - 1).toBe(1);
+  });
+
+  // GATE-2: the hProperties mutation must never touch the tree
+  // reconcileDerived receives — render() parses and mutates its own local
+  // tree, so stringifying a tree built the ordinary way (parse ->
+  // stringify, exactly what `canonicalise` and `reconcileDerived` do) must
+  // stay byte-identical whether or not render() has run first.
+  test('the hProperties mutation never leaks into a tree serialised independently of render()', () => {
+    const markdown = 'A paragraph with a persisted anchor. ^abc123\n\nA second paragraph.\n';
+
+    const beforeRender = stringify(parse(markdown));
+    render(markdown); // mutates only its own internal tree
+    const afterRender = stringify(parse(markdown));
+
+    expect(afterRender).toBe(beforeRender);
+    expect(canonicalise(markdown)).toBe(markdown);
+  });
 });
 
 // knowledge-graph: Unresolved-Link Rendering Does Not Disclose Existence.

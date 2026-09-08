@@ -13,6 +13,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "migrate": "bun run migrate.ts",
     "seed": "bun run seed.ts",
+    "backfill:render": "bun run backfill-render.ts",
     "verify:paths": "bun run verify-paths.ts"
   },
   "dependencies": {

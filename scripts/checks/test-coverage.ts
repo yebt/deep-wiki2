@@ -164,6 +164,12 @@ export const ALLOW_LIST: readonly Exemption[] = [
       'Needs a real DOM. packages/editor runs under `bun test` with no DOM; the EditorView is exercised ' +
       'by e2e/editor.spec.ts in a browser instead. Coverage debt until packages/editor gains a DOM harness.',
   },
+  {
+    file: 'packages/db/backfill-render.ts',
+    reason:
+      'Operational entry point (bun run backfill:render), mirroring migrate.ts/seed.ts above. Its own ' +
+      'src/content/backfill-render.ts is directly tested; only the argv/exit-code shell is untested.',
+  },
 ];
 
 const SOURCE_EXTENSIONS = new Set(['.ts', '.tsx', '.vue', '.js', '.mjs', '.astro']);
