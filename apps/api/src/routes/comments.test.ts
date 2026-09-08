@@ -41,6 +41,9 @@ interface Fixture {
   readonly readerCookie: string;
   readonly commenterCookie: string;
   readonly commenterUserId: string;
+  readonly outsiderCookie: string;
+  readonly mentionedReaderUserId: string;
+  readonly mentionedReaderEmail: string;
   readonly mentionedNoReadUserId: string;
   readonly mentionedNoReadEmail: string;
 }
@@ -65,6 +68,12 @@ async function buildFixture(): Promise<Fixture> {
   const commenter = await seedUser(`commenter-${crypto.randomUUID()}@example.com`);
   const mentionedNoReadEmail = `noread-${crypto.randomUUID()}@example.com`;
   const mentionedNoRead = await seedUser(mentionedNoReadEmail);
+  // A mentionable recipient who is neither the comment's author nor the
+  // caller: mentioning the author back would let a route that mails the
+  // wrong person still look correct.
+  const mentionedReaderEmail = `mentioned-${crypto.randomUUID()}@example.com`;
+  const mentionedReader = await seedUser(mentionedReaderEmail);
+  const outsider = await seedUser(`outsider-${crypto.randomUUID()}@example.com`);
 
   const [ws] = await sql<{ id: string }[]>`
     INSERT INTO workspaces (owner_id, name, slug) VALUES (${owner!.id}, 'WS', ${`ws-${crypto.randomUUID()}`}) RETURNING id
@@ -89,7 +98,11 @@ async function buildFixture(): Promise<Fixture> {
     INSERT INTO permissions (workspace_id, subject_type, subject_id, resource_id, action, effect)
     VALUES (${ws!.id}, 'user', ${commenter}, ${page!.id}, 'comment', 'allow')
   `;
-  // mentionedNoRead deliberately gets no grant at all on this page.
+  await sql`
+    INSERT INTO permissions (workspace_id, subject_type, subject_id, resource_id, action, effect)
+    VALUES (${ws!.id}, 'user', ${mentionedReader}, ${page!.id}, 'read', 'allow')
+  `;
+  // mentionedNoRead and outsider deliberately get no grant at all on this page.
 
   return {
     workspaceId: ws!.id,
@@ -97,6 +110,9 @@ async function buildFixture(): Promise<Fixture> {
     readerCookie: await cookieFor(reader),
     commenterCookie: await cookieFor(commenter),
     commenterUserId: commenter,
+    outsiderCookie: await cookieFor(outsider),
+    mentionedReaderUserId: mentionedReader,
+    mentionedReaderEmail,
     mentionedNoReadUserId: mentionedNoRead,
     mentionedNoReadEmail,
   };
@@ -159,6 +175,123 @@ describe('GET /pages/:id/comments/indicators — non-disclosure', () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as { indicators: { blockId: string; count: number }[] };
     expect(body.indicators).toEqual([{ blockId: 'blockb', count: 1 }]);
+  });
+});
+
+// The same non-disclosure rule the password-reset route already holds and
+// that wiki-link rendering holds: absence and denial-of-read must be
+// indistinguishable. A caller with no grant at all must not be able to tell
+// "this page does not exist" from "this page exists and you cannot see it".
+// `can-many.ts`/`readable.ts` express the rule for sets by dropping an
+// unreadable id from the result entirely; the singular analogue is the
+// not-found response, so `read` is the gate that must answer first.
+describe('page-existence probing — absence and denial answer identically', () => {
+  const MISSING_PAGE_ID = '00000000-0000-4000-8000-0000000000ff';
+
+  test('GET indicators: a nonexistent page and an unreadable page are byte-identical', async () => {
+    const fixture = await buildFixture();
+    await sql`
+      INSERT INTO page_content (node_id, workspace_id, markdown, content_hash)
+      VALUES (${fixture.pageId}, ${fixture.workspaceId}, 'Some text. ^blocke\n', 'hash')
+    `;
+    const app = buildApp();
+
+    const missing = await app.request(`/pages/${MISSING_PAGE_ID}/comments/indicators`, {
+      headers: { cookie: fixture.outsiderCookie },
+    });
+    const denied = await app.request(`/pages/${fixture.pageId}/comments/indicators`, {
+      headers: { cookie: fixture.outsiderCookie },
+    });
+
+    const missingBody = await missing.text();
+    const deniedBody = await denied.text();
+
+    expect(denied.status).toBe(missing.status);
+    expect(deniedBody).toBe(missingBody);
+    // Pinned so a future change cannot make them identically *disclosing*.
+    expect(missing.status).toBe(404);
+    expect(denied.status).toBe(404);
+    expectNoDisclosure(deniedBody, { id: fixture.pageId });
+  });
+
+  test('POST a comment: a nonexistent page and an unreadable page are byte-identical', async () => {
+    const fixture = await buildFixture();
+    await sql`
+      INSERT INTO page_content (node_id, workspace_id, markdown, content_hash)
+      VALUES (${fixture.pageId}, ${fixture.workspaceId}, 'Some text. ^blockf\n', 'hash')
+    `;
+    const app = buildApp();
+    const body = JSON.stringify({ blockId: 'blockf', offsetStart: 0, offsetEnd: 4, quote: 'Some', body: 'probe' });
+    const headers = { 'content-type': 'application/json', cookie: fixture.outsiderCookie };
+
+    const missing = await app.request(`/pages/${MISSING_PAGE_ID}/comments`, { method: 'POST', headers, body });
+    const denied = await app.request(`/pages/${fixture.pageId}/comments`, { method: 'POST', headers, body });
+
+    const missingBody = await missing.text();
+    const deniedBody = await denied.text();
+
+    expect(denied.status).toBe(missing.status);
+    expect(deniedBody).toBe(missingBody);
+    expect(missing.status).toBe(404);
+    expect(denied.status).toBe(404);
+
+    // The probe must also not have written anything.
+    const rows = await sql`SELECT id FROM comments WHERE page_id = ${fixture.pageId}`;
+    expect(rows).toHaveLength(0);
+  });
+
+  test('PATCH thread resolution: a nonexistent thread and an unreadable one are byte-identical', async () => {
+    const fixture = await buildFixture();
+    await sql`
+      INSERT INTO page_content (node_id, workspace_id, markdown, content_hash)
+      VALUES (${fixture.pageId}, ${fixture.workspaceId}, 'Some text. ^blockg\n', 'hash')
+    `;
+    await sql`
+      INSERT INTO page_blocks (page_id, workspace_id, block_id, status, content_hash, excerpt)
+      VALUES (${fixture.pageId}, ${fixture.workspaceId}, 'blockg', 'active', 'h', 'excerpt')
+    `;
+    const [thread] = await sql<{ id: string }[]>`
+      INSERT INTO comments (workspace_id, page_id, body, block_id, offset_start, offset_end, quote, quote_hash, status)
+      VALUES (${fixture.workspaceId}, ${fixture.pageId}, 'a thread', 'blockg', 0, 4, 'Some', 'h', 'anchored')
+      RETURNING id
+    `;
+    const app = buildApp();
+    const body = JSON.stringify({ resolved: true });
+    const headers = { 'content-type': 'application/json', cookie: fixture.outsiderCookie };
+    const MISSING_THREAD_ID = '00000000-0000-4000-8000-0000000000fe';
+
+    const missing = await app.request(`/comments/${MISSING_THREAD_ID}/resolved`, { method: 'PATCH', headers, body });
+    const denied = await app.request(`/comments/${thread!.id}/resolved`, { method: 'PATCH', headers, body });
+
+    const missingBody = await missing.text();
+    const deniedBody = await denied.text();
+
+    expect(denied.status).toBe(missing.status);
+    expect(deniedBody).toBe(missingBody);
+    expect(missing.status).toBe(404);
+    expect(denied.status).toBe(404);
+
+    const [row] = await sql<{ resolved_at: Date | null }[]>`SELECT resolved_at FROM comments WHERE id = ${thread!.id}`;
+    expect(row!.resolved_at).toBeNull();
+  });
+
+  // A caller who already holds `read` learns nothing new from a 403: they
+  // can see the page. Denial of the *stronger* action stays distinguishable.
+  test('a subject who holds read but not comment still gets 403, not 404', async () => {
+    const fixture = await buildFixture();
+    await sql`
+      INSERT INTO page_content (node_id, workspace_id, markdown, content_hash)
+      VALUES (${fixture.pageId}, ${fixture.workspaceId}, 'Some text.\n', 'hash')
+    `;
+    const app = buildApp();
+
+    const res = await app.request(`/pages/${fixture.pageId}/comments`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie: fixture.readerCookie },
+      body: JSON.stringify({ blockId: 'd:whatever#0', offsetStart: 0, offsetEnd: 4, quote: 'Some', body: 'hi' }),
+    });
+
+    expect(res.status).toBe(403);
   });
 });
 

@@ -27,7 +27,7 @@ import {
   SetThreadResolvedRequestSchema,
 } from '@deep-wiki/contracts';
 import { mintAnchorAtBlock } from '@deep-wiki/markdown';
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import type postgres from 'postgres';
 import { sessionMiddleware, type SessionVariables } from '../middleware/session';
 
@@ -54,6 +54,23 @@ interface NodeRow {
   workspace_id: string;
 }
 
+/**
+ * Absence and denial-of-read answer with the *same* response object, from
+ * the same call site — a caller with no grant cannot distinguish "this page
+ * does not exist" from "this page exists and you may not see it". This is
+ * the singular analogue of what `can-many.ts`/`readable.ts` already do for
+ * sets, where an unreadable id is simply dropped from the result rather
+ * than reported as denied, and the same rule the password-reset route
+ * holds for account existence.
+ *
+ * Denial of a *stronger* action (`comment` on a page the caller can already
+ * read) still answers 403: that caller can see the page, so the distinction
+ * discloses nothing. Read is therefore always the first gate.
+ */
+function notFound(c: Context): Response {
+  return c.json(ErrorResponseSchema.parse({ error: 'not found' }), 404);
+}
+
 export function createCommentRoutes(deps: CommentRouteDeps): Hono<{ Variables: SessionVariables }> {
   const app = new Hono<{ Variables: SessionVariables }>();
   const auth = sessionMiddleware(deps.sql, { idleTimeoutMinutes: deps.sessionIdleTimeoutMinutes });
@@ -67,10 +84,12 @@ export function createCommentRoutes(deps: CommentRouteDeps): Hono<{ Variables: S
     const session = c.get('session');
 
     const [node] = await deps.sql<NodeRow[]>`SELECT workspace_id FROM nodes WHERE id = ${pageId}`;
-    if (!node) return c.json(ErrorResponseSchema.parse({ error: 'not found' }), 404);
-
-    const canRead = await can(deps.sql, { subjectType: 'user', subjectId: session.userId, resourceId: pageId, action: 'read' });
-    if (!canRead) return c.json(ErrorResponseSchema.parse({ error: 'forbidden' }), 403);
+    const canRead =
+      node !== undefined &&
+      (await can(deps.sql, { subjectType: 'user', subjectId: session.userId, resourceId: pageId, action: 'read' }));
+    // `!node` is redundant with `canRead` at runtime and present only so the
+    // compiler narrows `node` below; the response is one expression either way.
+    if (!node || !canRead) return notFound(c);
 
     const canComment = await can(deps.sql, { subjectType: 'user', subjectId: session.userId, resourceId: pageId, action: 'comment' });
     if (!canComment) {
@@ -91,7 +110,12 @@ export function createCommentRoutes(deps: CommentRouteDeps): Hono<{ Variables: S
     const session = c.get('session');
 
     const [node] = await deps.sql<NodeRow[]>`SELECT workspace_id FROM nodes WHERE id = ${pageId}`;
-    if (!node) return c.json(ErrorResponseSchema.parse({ error: 'not found' }), 404);
+    const canRead =
+      node !== undefined &&
+      (await can(deps.sql, { subjectType: 'user', subjectId: session.userId, resourceId: pageId, action: 'read' }));
+    // `!node` is redundant with `canRead` at runtime and present only so the
+    // compiler narrows `node` below; the response is one expression either way.
+    if (!node || !canRead) return notFound(c);
 
     const authorized = await can(deps.sql, { subjectType: 'user', subjectId: session.userId, resourceId: pageId, action: 'comment' });
     if (!authorized) return c.json(ErrorResponseSchema.parse({ error: 'forbidden' }), 403);
@@ -117,7 +141,7 @@ export function createCommentRoutes(deps: CommentRouteDeps): Hono<{ Variables: S
       }
 
       const content = await readPageMarkdown(deps.sql, { nodeId: pageId, workspaceId: node.workspace_id });
-      if (!content) return c.json(ErrorResponseSchema.parse({ error: 'not found' }), 404);
+      if (!content) return notFound(c);
 
       const minted = mintAnchorAtBlock(content.markdown, parsed.data.blockId);
       let resolvedBlockId = parsed.data.blockId;
@@ -187,7 +211,10 @@ export function createCommentRoutes(deps: CommentRouteDeps): Hono<{ Variables: S
     const [thread] = await deps.sql<{ workspace_id: string; page_id: string }[]>`
       SELECT workspace_id, page_id FROM comments WHERE id = ${threadId} AND parent_id IS NULL
     `;
-    if (!thread) return c.json(ErrorResponseSchema.parse({ error: 'not found' }), 404);
+    const canRead =
+      thread !== undefined &&
+      (await can(deps.sql, { subjectType: 'user', subjectId: session.userId, resourceId: thread.page_id, action: 'read' }));
+    if (!thread || !canRead) return notFound(c);
 
     const authorized = await can(deps.sql, { subjectType: 'user', subjectId: session.userId, resourceId: thread.page_id, action: 'comment' });
     if (!authorized) return c.json(ErrorResponseSchema.parse({ error: 'forbidden' }), 403);
@@ -202,7 +229,7 @@ export function createCommentRoutes(deps: CommentRouteDeps): Hono<{ Variables: S
       resolved: parsed.data.resolved,
       resolvedBy: session.userId,
     });
-    if (!ok) return c.json(ErrorResponseSchema.parse({ error: 'not found' }), 404);
+    if (!ok) return notFound(c);
 
     return c.json({ ok: true });
   });
