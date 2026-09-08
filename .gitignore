@@ -43,3 +43,6 @@ e2e/.auth-fixtures.json
 !scripts/checks/__fixtures__/bundle-isolation-build/**
 !scripts/checks/__fixtures__/bundle-isolation-build/**/.output/
 !scripts/checks/__fixtures__/bundle-isolation-build/**/.output/**
+
+# CodeGraph index — per checkout, never shared or committed
+.codegraph/

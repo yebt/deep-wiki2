@@ -17,7 +17,9 @@
     "db:seed": "bun run --filter @deep-wiki/db seed",
     "compose:smoke": "bun run scripts/checks/compose-smoke.ts",
     "gate-2-round-trip": "bun test packages/editor/src/round-trip.test.ts",
-    "verify": "bun run check && bun run scripts/checks/env-consistency.ts && bun run lint && bun run typecheck && bun run test && bun run gate-2-round-trip",
+    "e2e": "bun run scripts/e2e.ts",
+    "e2e:install": "playwright install --with-deps chromium",
+    "verify": "bun run check && bun run scripts/checks/env-consistency.ts && bun run lint && bun run typecheck && bun run test && bun run gate-2-round-trip && bun run e2e",
     "setup:hooks": "git config core.hooksPath .githooks",
     "env:check": "bun run scripts/checks/env-consistency.ts"
   },
