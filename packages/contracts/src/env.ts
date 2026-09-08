@@ -42,6 +42,14 @@ export const envSchema = z.object({
   PAGE_LOCK_TTL_SECONDS: z.coerce.number().int().positive().default(120),
   PAGE_LOCK_HEARTBEAT_SECONDS: z.coerce.number().int().positive().default(20),
 
+  // The implicit changeset grouping window (versioning-and-collaboration
+  // design.md Decision 4, changesets spec). Deliberately has NO zod
+  // default: the number lives in env.example and nowhere else, so a
+  // second copy is not merely discouraged — there is no second place to
+  // put it. A missing value fails at boot (`parseEnv`), loudly, rather
+  // than falling back to a stale duplicate.
+  CHANGESET_WINDOW_MINUTES: z.coerce.number().int().positive(),
+
   // SMTP (mail-delivery spec). SMTP_HOST and MAIL_FROM are required by
   // `refineEnv()` unconditionally — there is no "mail disabled" mode, the
   // application always needs a MailSender for invitations and password

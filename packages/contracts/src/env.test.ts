@@ -14,6 +14,7 @@ function validRawEnv(overrides: Record<string, string | undefined> = {}): Record
     SMTP_HOST: 'localhost',
     MAIL_FROM: 'noreply@deep-wiki.local',
     BLOB_STORE_FS_ROOT: './.data/blobs',
+    CHANGESET_WINDOW_MINUTES: '30',
     ...overrides,
   };
 }
@@ -76,6 +77,27 @@ describe('parseEnv', () => {
     if (result.ok) {
       expect(result.value.PAGE_LOCK_TTL_SECONDS).toBe(60);
       expect(result.value.PAGE_LOCK_HEARTBEAT_SECONDS).toBe(10);
+    }
+  });
+
+  // changesets spec: "The Grouping Window Is One Named Constant" — no
+  // `.default()` on this key, deliberately: a missing value must fail at
+  // boot rather than silently falling back to a second copy of the number.
+  test('CHANGESET_WINDOW_MINUTES has no default and fails fast when omitted', () => {
+    const result = parseEnv(validRawEnv({ CHANGESET_WINDOW_MINUTES: undefined }));
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.some((issue) => issue.variable === 'CHANGESET_WINDOW_MINUTES')).toBe(true);
+    }
+  });
+
+  test('CHANGESET_WINDOW_MINUTES parses an explicit value', () => {
+    const result = parseEnv(validRawEnv({ CHANGESET_WINDOW_MINUTES: '45' }));
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.CHANGESET_WINDOW_MINUTES).toBe(45);
     }
   });
 });

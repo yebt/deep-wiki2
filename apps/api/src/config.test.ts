@@ -9,6 +9,7 @@ function validRawEnv(overrides: Record<string, string | undefined> = {}): Record
     SMTP_HOST: 'localhost',
     MAIL_FROM: 'noreply@deep-wiki.local',
     BLOB_STORE_FS_ROOT: './.data/blobs',
+    CHANGESET_WINDOW_MINUTES: '30',
     ...overrides,
   };
 }

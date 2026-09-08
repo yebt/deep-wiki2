@@ -48,6 +48,10 @@ export { NotCanonicalError, savePage, StaleContentError } from './content/save-p
 export type { SavePageInput as SavePageDbInput, SavePageResult } from './content/save-page';
 export { readPageHtml, readPageMarkdown } from './content/read-page';
 export type { PageContentRef, PageHtml, PageMarkdown } from './content/read-page';
+export { backfillOneRow, backfillRender } from './content/backfill-render';
+export type { BackfillOneRowInput, BackfillOneRowOutcome, BackfillRenderOptions, BackfillRenderResult } from './content/backfill-render';
+export { resolveBookId, resolveChangeset } from './changesets/resolve-changeset';
+export type { ResolveBookIdInput, ResolveChangesetInput } from './changesets/resolve-changeset';
 export { acquireLock, heartbeatLock, readLockStatus, takeOverLock } from './locks/page-lock';
 export type {
   AcquireLockInput,

@@ -25,6 +25,8 @@ export interface PageRouteDeps {
   readonly sql: postgres.Sql;
   readonly sessionIdleTimeoutMinutes: number;
   readonly pageLockTtlSeconds: number;
+  /** `CHANGESET_WINDOW_MINUTES`, threaded from `loadConfig()` exactly as `pageLockTtlSeconds` is. */
+  readonly changesetWindowMinutes: number;
 }
 
 async function readJsonBody(request: Request): Promise<Record<string, unknown>> {
@@ -81,6 +83,7 @@ export function createPageRoutes(deps: PageRouteDeps): Hono<{ Variables: Session
         markdown: parsed.data.markdown,
         expectedContentHash: parsed.data.expectedContentHash,
         updatedBy: session.userId,
+        changesetWindowMinutes: deps.changesetWindowMinutes,
       });
       return c.json({ contentHash: result.contentHash });
     } catch (error) {

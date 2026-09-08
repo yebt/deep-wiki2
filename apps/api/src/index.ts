@@ -145,6 +145,7 @@ if (import.meta.main) {
       sql,
       sessionIdleTimeoutMinutes: config.SESSION_IDLE_TIMEOUT_MINUTES,
       pageLockTtlSeconds: config.PAGE_LOCK_TTL_SECONDS,
+      changesetWindowMinutes: config.CHANGESET_WINDOW_MINUTES,
     }),
   );
 

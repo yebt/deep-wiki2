@@ -79,7 +79,7 @@ async function buildFixture(): Promise<Fixture> {
 }
 
 function buildApp() {
-  return createPageRoutes({ sql, sessionIdleTimeoutMinutes: 30, pageLockTtlSeconds: 120 });
+  return createPageRoutes({ sql, sessionIdleTimeoutMinutes: 30, pageLockTtlSeconds: 120, changesetWindowMinutes: 30 });
 }
 
 // page-content: Content Access Goes Through can(), both scenarios.
@@ -157,6 +157,61 @@ describe('PUT /pages/:id', () => {
     expect(res.status).toBe(200);
     const [row] = await sql`SELECT markdown FROM page_content WHERE node_id = ${fixture.pageId}`;
     expect(row!.markdown).toBe('# Changed\n');
+  });
+
+  // versioning-and-collaboration design.md Decision 4: changesetWindowMinutes
+  // is threaded from route deps through to savePage(), mirroring
+  // pageLockTtlSeconds's propagation path exactly.
+  test('a save on a page under a book joins a changeset using the configured window', async () => {
+    const [owner] = await sql<{ id: string }[]>`
+      INSERT INTO users (email, password_hash, display_name) VALUES (${`owner-${crypto.randomUUID()}@example.com`}, 'hash', 'Owner') RETURNING id
+    `;
+    const [writer] = await sql<{ id: string }[]>`
+      INSERT INTO users (email, password_hash, display_name) VALUES (${`writer-${crypto.randomUUID()}@example.com`}, 'hash', 'Writer') RETURNING id
+    `;
+    const [ws] = await sql<{ id: string }[]>`
+      INSERT INTO workspaces (owner_id, name, slug) VALUES (${owner!.id}, 'WS', ${`ws-${crypto.randomUUID()}`}) RETURNING id
+    `;
+    const [root] = await sql<{ id: string }[]>`
+      INSERT INTO nodes (workspace_id, parent_id, type, path, position, slug, title)
+      VALUES (${ws!.id}, NULL, 'workspace', '', 0, 'root', 'Root') RETURNING id
+    `;
+    const [shelf] = await sql<{ id: string }[]>`
+      INSERT INTO nodes (workspace_id, parent_id, type, path, position, slug, title)
+      VALUES (${ws!.id}, ${root!.id}, 'shelf', '', 0, 'shelf', 'Shelf') RETURNING id
+    `;
+    const [book] = await sql<{ id: string }[]>`
+      INSERT INTO nodes (workspace_id, parent_id, type, path, position, slug, title)
+      VALUES (${ws!.id}, ${shelf!.id}, 'book', '', 0, 'book', 'Book') RETURNING id
+    `;
+    const [page] = await sql<{ id: string }[]>`
+      INSERT INTO nodes (workspace_id, parent_id, type, path, position, slug, title)
+      VALUES (${ws!.id}, ${book!.id}, 'page', '', 0, ${`page-${crypto.randomUUID()}`}, 'A Page') RETURNING id
+    `;
+    await sql`
+      INSERT INTO permissions (workspace_id, subject_type, subject_id, resource_id, action, effect)
+      VALUES (${ws!.id}, 'user', ${writer!.id}, ${page!.id}, 'write', 'allow')
+    `;
+    const writerCookie = await cookieFor(writer!.id);
+
+    const app = createPageRoutes({ sql, sessionIdleTimeoutMinutes: 30, pageLockTtlSeconds: 120, changesetWindowMinutes: 30 });
+
+    const res = await app.request(`/pages/${page!.id}`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json', cookie: writerCookie },
+      body: JSON.stringify({ markdown: '# Hello\n', expectedContentHash: null }),
+    });
+
+    expect(res.status).toBe(200);
+    const [revision] = await sql<{ changeset_id: string | null }[]>`
+      SELECT changeset_id FROM page_revision WHERE page_id = ${page!.id}
+    `;
+    expect(revision!.changeset_id).not.toBeNull();
+    const [changeset] = await sql<{ book_id: string; author_id: string }[]>`
+      SELECT book_id, author_id FROM changeset WHERE id = ${revision!.changeset_id}
+    `;
+    expect(changeset!.book_id).toBe(book!.id);
+    expect(changeset!.author_id).toBe(writer!.id);
   });
 });
 

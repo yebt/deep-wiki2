@@ -266,3 +266,49 @@ describe('savePage — block reconciliation', () => {
     expect(rows[0]!.status).toBe('tombstoned');
   });
 });
+
+// versioning-and-collaboration revision-history spec: "Revision Is Written
+// In The Save Transaction" — a save must write exactly one page_revision
+// row matching the newly saved content, and a failed save must write
+// neither page_content nor page_revision.
+describe('savePage — revisions', () => {
+  test('a successful save writes exactly one new page_revision row matching the saved content', async () => {
+    const { workspaceId, nodeId } = await seedPageNode();
+
+    const result = await savePage(sql, { nodeId, workspaceId, markdown: '# Hello\n', expectedContentHash: null });
+
+    const rows = await sql<{ content: string; content_hash: string }[]>`
+      SELECT content, content_hash FROM page_revision WHERE page_id = ${nodeId}
+    `;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.content).toBe('# Hello\n');
+    expect(rows[0]!.content_hash).toBe(result.contentHash);
+  });
+
+  test('a second save writes a second revision, leaving the first untouched', async () => {
+    const { workspaceId, nodeId } = await seedPageNode();
+    const first = await savePage(sql, { nodeId, workspaceId, markdown: '# First\n', expectedContentHash: null });
+
+    await savePage(sql, { nodeId, workspaceId, markdown: '# Second\n', expectedContentHash: first.contentHash });
+
+    const rows = await sql<{ content: string }[]>`
+      SELECT content FROM page_revision WHERE page_id = ${nodeId} ORDER BY created_at ASC
+    `;
+    expect(rows).toHaveLength(2);
+    expect(rows.map((r) => r.content)).toEqual(['# First\n', '# Second\n']);
+  });
+
+  test('a failed save (stale content hash) writes neither page_content nor page_revision', async () => {
+    const { workspaceId, nodeId } = await seedPageNode();
+    await savePage(sql, { nodeId, workspaceId, markdown: '# First\n', expectedContentHash: null });
+
+    await expect(
+      savePage(sql, { nodeId, workspaceId, markdown: '# Second\n', expectedContentHash: 'wrong-hash' }),
+    ).rejects.toThrow(StaleContentError);
+
+    const revisionRows = await sql`SELECT 1 AS x FROM page_revision WHERE page_id = ${nodeId} AND content = '# Second\n'`;
+    expect(revisionRows).toHaveLength(0);
+    const contentRows = await sql<{ markdown: string }[]>`SELECT markdown FROM page_content WHERE node_id = ${nodeId}`;
+    expect(contentRows[0]!.markdown).toBe('# First\n');
+  });
+});

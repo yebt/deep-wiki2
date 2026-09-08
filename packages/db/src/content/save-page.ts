@@ -12,6 +12,7 @@
 import { createHash } from 'node:crypto';
 import { buildBlockIndex, canonicalise, CURRENT_PIPELINE_VERSION, parse, render, type BlockIndex } from '@deep-wiki/markdown';
 import type postgres from 'postgres';
+import { writeRevision } from '../revisions/insert-revision';
 import { reconcileDerived } from './rebuild-derived';
 
 export class NotCanonicalError extends Error {
@@ -35,6 +36,15 @@ export interface SavePageInput {
   /** `null` for the first save; otherwise the `contentHash` last read. */
   readonly expectedContentHash: string | null;
   readonly updatedBy?: string;
+  /**
+   * `CHANGESET_WINDOW_MINUTES` (design.md Decision 4), threaded in by the
+   * caller — `packages/db` never reads env. Optional so callers that do
+   * not care about changeset grouping (most of this package's own tests,
+   * pages with no book ancestor) are not forced to supply it; omitting it
+   * skips changeset resolution entirely rather than falling back to a
+   * second copy of the number. Route wiring always supplies it.
+   */
+  readonly changesetWindowMinutes?: number;
 }
 
 export interface SavePageResult {
@@ -96,6 +106,21 @@ export async function savePage(sql: postgres.Sql, input: SavePageInput): Promise
       `;
       if (rows.length === 0) throw new StaleContentError(input.nodeId);
     }
+
+    // Ordered per design.md Decision 3: resolve the owning book, resolve
+    // (or open) its changeset, then write the immutable revision snapshot
+    // — all before `reconcileDerived`, and all inside this one
+    // transaction, so a failure anywhere here rolls back the content
+    // write too.
+    await writeRevision(tx, {
+      nodeId: input.nodeId,
+      workspaceId: input.workspaceId,
+      content: canonical,
+      contentHash,
+      blockIndex,
+      updatedBy: input.updatedBy,
+      changesetWindowMinutes: input.changesetWindowMinutes,
+    });
 
     await reconcileDerived(tx, {
       nodeId: input.nodeId,

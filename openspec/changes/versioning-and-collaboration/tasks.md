@@ -68,7 +68,7 @@ Chain strategy: pending
 - [x] 3.8 GREEN: migration `packages/db/drizzle/NNNN_page_revisions_and_changesets.sql` — `changeset` (`closed_at`, partial unique index `changeset_open_per_author_idx` on `(workspace_id, book_id, author_id) WHERE closed_at IS NULL`, `UNIQUE (id, workspace_id)`, book-only CHECK), `page_revision` (columns and indexes per design.md Decision 7), `BEFORE UPDATE` immutability trigger on `page_revision` that raises. Update `packages/db/src/schema.ts`.
 - [x] 3.9 RED: attempt an `UPDATE` on an existing `page_revision` row in a test and assert it raises.
 - [x] 3.10 GREEN: confirm the trigger from 3.8 satisfies 3.9 (no separate implementation task — verifies the migration, not new code).
-- [ ] 3.11 REFACTOR: extract the chain-compression CTE and the changeset-resolution statements into named functions in `packages/db/src/content/rebuild-derived.ts` / a new `packages/db/src/changesets/resolve-changeset.ts`, keeping `savePage()`'s own transaction body readable per design.md Decision 3's ordering list.
+- [x] 3.11 REFACTOR: extract the chain-compression CTE and the changeset-resolution statements into named functions in `packages/db/src/content/rebuild-derived.ts` / a new `packages/db/src/changesets/resolve-changeset.ts`, keeping `savePage()`'s own transaction body readable per design.md Decision 3's ordering list.
 
 ## Phase 4: Block Diff Engine (pure, `packages/markdown`)
 
@@ -86,28 +86,28 @@ Chain strategy: pending
 
 ## Phase 5: Save-Time Wiring — Changeset Resolution, Revision Insert
 
-- [ ] 5.1 RED: `packages/db/src/content/save-page.test.ts` — a successful save produces exactly one new `page_revision` row with the current `content_hash`; a save that fails (e.g., stale `content_hash`) writes neither `page_content` nor `page_revision`.
-- [ ] 5.2 GREEN: wire `page_revision` INSERT and `resolveChangeset()` call into `savePage()`'s transaction (`packages/db/src/content/save-page.ts`), ordered per design.md Decision 3.
-- [ ] 5.3 RED (concurrency, quality-bar flag): two **genuinely concurrent** transactions — same author, same book, two different pages, both racing the changeset window query at the database level (use two real overlapping transactions against the provisioned test Postgres, not two sequential calls) — must resolve to exactly one `changeset` row. **Prove the race actually happens**: assert both transactions' window queries observe zero existing rows before either commits (e.g., via a `pg_sleep` or an explicit barrier), otherwise the test proves nothing about `changeset_open_per_author_idx`.
-- [ ] 5.4 GREEN: `resolveChangeset()` — the two-statement window-retirement + `INSERT ... ON CONFLICT ... DO UPDATE ... RETURNING id` sequence from design.md Decision 3.
-- [ ] 5.5 RED: two saves by different authors in the same book within the window never share a changeset, even though both fall inside `CHANGESET_WINDOW_MINUTES`.
-- [ ] 5.6 GREEN: confirm 5.4's per-author partial index satisfies 5.5 (verification task, no new code expected).
-- [ ] 5.7 GREEN: add `CHANGESET_WINDOW_MINUTES: z.coerce.number().int().positive()` (no `.default()`) to `packages/contracts/src/env.ts`; add `CHANGESET_WINDOW_MINUTES=30` to `env.example` as the only place the number exists.
-- [ ] 5.8 GREEN: thread `changesetWindowMinutes` from `loadConfig()` through route deps to `savePage()`, mirroring `PAGE_LOCK_TTL_SECONDS`'s propagation path exactly.
-- [ ] 5.9 Run `bun run check` to confirm `env-example.ts`'s presence check (unaffected — no default exists for this key) and Phase 1's new defaults-agreement rule both pass.
+- [x] 5.1 RED: `packages/db/src/content/save-page.test.ts` — a successful save produces exactly one new `page_revision` row with the current `content_hash`; a save that fails (e.g., stale `content_hash`) writes neither `page_content` nor `page_revision`.
+- [x] 5.2 GREEN: wire `page_revision` INSERT and `resolveChangeset()` call into `savePage()`'s transaction (`packages/db/src/content/save-page.ts`), ordered per design.md Decision 3.
+- [x] 5.3 RED (concurrency, quality-bar flag): two **genuinely concurrent** transactions — same author, same book, two different pages, both racing the changeset window query at the database level (use two real overlapping transactions against the provisioned test Postgres, not two sequential calls) — must resolve to exactly one `changeset` row. **Prove the race actually happens**: assert both transactions' window queries observe zero existing rows before either commits (e.g., via a `pg_sleep` or an explicit barrier), otherwise the test proves nothing about `changeset_open_per_author_idx`.
+- [x] 5.4 GREEN: `resolveChangeset()` — the two-statement window-retirement + `INSERT ... ON CONFLICT ... DO UPDATE ... RETURNING id` sequence from design.md Decision 3.
+- [x] 5.5 RED: two saves by different authors in the same book within the window never share a changeset, even though both fall inside `CHANGESET_WINDOW_MINUTES`.
+- [x] 5.6 GREEN: confirm 5.4's per-author partial index satisfies 5.5 (verification task, no new code expected).
+- [x] 5.7 GREEN: add `CHANGESET_WINDOW_MINUTES: z.coerce.number().int().positive()` (no `.default()`) to `packages/contracts/src/env.ts`; add `CHANGESET_WINDOW_MINUTES=30` to `env.example` as the only place the number exists.
+- [x] 5.8 GREEN: thread `changesetWindowMinutes` from `loadConfig()` through route deps to `savePage()`, mirroring `PAGE_LOCK_TTL_SECONDS`'s propagation path exactly.
+- [x] 5.9 Run `bun run check` to confirm `env-example.ts`'s presence check (unaffected — no default exists for this key) and Phase 1's new defaults-agreement rule both pass.
 
 ## Phase 6: Render Format Change and Backfill
 
 *Sequenced after Phase 1 (pipeline_version must be truthful before staleness detection means anything) and before comment-overlay work.*
 
-- [ ] 6.1 RED: `packages/markdown/src/render.test.ts` — `render()` output for a document with an anchored block carries `data-block-id="<id>"` on the corresponding element, and an unanchored block carries none.
-- [ ] 6.2 GREEN: `render.ts` — the `hProperties` transform over `tree.children` from design.md Decision 6, applied before `remark-rehype`.
-- [ ] 6.3 RED: the same fixture's `data-block-id` attribute **survives `rehypeSanitize`** — assert it is still present post-sanitisation, not merely present in the pre-sanitised hast tree.
-- [ ] 6.4 GREEN: add `dataBlockId` to `SANITIZE_SCHEMA.attributes['*']` in `packages/markdown/src/render.ts:18-31`.
-- [ ] 6.5 RED: GATE-2 corpus round-trip test — serialising the tree that received the `hProperties` mutation must be byte-identical to serialising the same markdown through the existing pipeline (i.e., the transform must never touch the tree `reconcileDerived` receives).
-- [ ] 6.6 GREEN: confirm `render()` parses its own tree (`render.ts:123`) separately from `savePage`'s tree, and that `data.hProperties` is ignored by `remark-stringify`. No production code change expected if isolation already holds; if it does not, isolate the transform to `render()`'s own local tree.
-- [ ] 6.7 RED: `packages/db/src/content/backfill-render.test.ts` — a stale row (`pipeline_version < CURRENT_PIPELINE_VERSION`) is re-rendered and its `pipeline_version` updated; a row saved concurrently during the backfill (content_hash changed after the backfill read it) is skipped, not clobbered.
-- [ ] 6.8 GREEN: `packages/db/src/content/backfill-render.ts` — batched (200 rows), resumable, `content_hash`-guarded re-render, plus a `backfill:render` script entry.
+- [x] 6.1 RED: `packages/markdown/src/render.test.ts` — `render()` output for a document with an anchored block carries `data-block-id="<id>"` on the corresponding element, and an unanchored block carries none.
+- [x] 6.2 GREEN: `render.ts` — the `hProperties` transform over `tree.children` from design.md Decision 6, applied before `remark-rehype`.
+- [x] 6.3 RED: the same fixture's `data-block-id` attribute **survives `rehypeSanitize`** — assert it is still present post-sanitisation, not merely present in the pre-sanitised hast tree.
+- [x] 6.4 GREEN: add `dataBlockId` to `SANITIZE_SCHEMA.attributes['*']` in `packages/markdown/src/render.ts:18-31`.
+- [x] 6.5 RED: GATE-2 corpus round-trip test — serialising the tree that received the `hProperties` mutation must be byte-identical to serialising the same markdown through the existing pipeline (i.e., the transform must never touch the tree `reconcileDerived` receives).
+- [x] 6.6 GREEN: confirm `render()` parses its own tree (`render.ts:123`) separately from `savePage`'s tree, and that `data.hProperties` is ignored by `remark-stringify`. No production code change expected if isolation already holds; if it does not, isolate the transform to `render()`'s own local tree.
+- [x] 6.7 RED: `packages/db/src/content/backfill-render.test.ts` — a stale row (`pipeline_version < CURRENT_PIPELINE_VERSION`) is re-rendered and its `pipeline_version` updated; a row saved concurrently during the backfill (content_hash changed after the backfill read it) is skipped, not clobbered.
+- [x] 6.8 GREEN: `packages/db/src/content/backfill-render.ts` — batched (200 rows), resumable, `content_hash`-guarded re-render, plus a `backfill:render` script entry.
 - [ ] 6.9 Manual/documented check: a pre-backfill page missing `data-block-id` degrades to "no anchors known" in the orphan surface (Phase 10), never an error — cross-reference in Phase 10's orphan-surface task.
 
 ## Phase 7: Comments — Schema, Reconciliation, Overlay, Mentions
