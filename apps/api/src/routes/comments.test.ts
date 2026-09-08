@@ -329,19 +329,20 @@ describe('POST /pages/:id/comments — anchor minting', () => {
     // "anchor not minted" and "route crashed" would look identical.
     const [row] = await sql<{ markdown: string }[]>`SELECT markdown FROM page_content WHERE node_id = ${fixture.pageId}`;
     const [persistedBlock] = sliceBlocks(parse(row!.markdown), row!.markdown);
-    expect(persistedBlock!.anchorId).not.toBeNull();
-    expect(row!.markdown).toContain(`^${persistedBlock!.anchorId}`);
+    const persistedAnchorId = persistedBlock!.anchorId;
+    expect(persistedAnchorId).not.toBeNull();
+    expect(row!.markdown).toContain(`^${persistedAnchorId}`);
 
     // The reconciled block row must name the same anchor the markdown does.
     const [blockRow] = await sql<{ block_id: string }[]>`
       SELECT block_id FROM page_blocks WHERE page_id = ${fixture.pageId} AND status = 'active'
     `;
-    expect(blockRow!.block_id).toBe(persistedBlock!.anchorId);
+    expect(blockRow!.block_id).toBe(persistedAnchorId!);
 
     // Only now the route's own answer, and the comment it wrote.
     expect(res.status).toBe(201);
     const created = (await res.json()) as { id: string; blockId: string };
-    expect(created.blockId).toBe(persistedBlock!.anchorId);
+    expect(created.blockId).toBe(persistedAnchorId!);
     expect(created.blockId).not.toBe(derivedBlock!.id);
 
     const [commentRow] = await sql<{ block_id: string }[]>`SELECT block_id FROM comments WHERE id = ${created.id}`;
