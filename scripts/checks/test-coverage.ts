@@ -24,14 +24,18 @@
  * (SOURCE_EXTENSIONS) that is not itself a test file must satisfy ONE of:
  *
  *  E1  a test file directly imports it — some `*.test.ts`/`*.spec.ts`
- *      containing at least one `expect(`/`assert(` has an import
- *      specifier that resolves to this exact file;
+ *      containing at least one `expect(`/`assert(` **in code** has a
+ *      *value* import specifier that resolves to this exact file. An
+ *      assertion inside a comment or a string literal is not an assertion,
+ *      and a type-only import is not an import: `import type { X } from
+ *      './x'` erases at compile time and cannot exercise a line of `./x`;
  *
  *  E2  a test file imports one of its exported bindings *by name* through
  *      a pure re-export barrel or a workspace package entry point. Named
  *      bindings only: `import * as x from './index'` credits nothing
  *      beyond the barrel itself, because "one test imported the barrel"
- *      is the member-level hole in file-level clothing;
+ *      is the member-level hole in file-level clothing. Value names only,
+ *      for E1's reason — a type name is not carried through a barrel;
  *
  *  E3  a named test file sits beside it — `<stem>.test.ts`,
  *      `<stem>.<qualifier>.test.ts`, or the same under `__tests__/` — and
@@ -53,7 +57,12 @@
  *      `export … from '…'`. A barrel has no behaviour of its own, and E2
  *      makes it transparent rather than absorbent;
  *
- *  X3  it is tool configuration (`*.config.ts` and friends);
+ *  X3  it is tool configuration: it is named `<tool>.config.<ext>` AND no
+ *      module in the repository imports it. The second half is what makes
+ *      this mechanical rather than a naming convention — a tool loads its
+ *      config by path, so `packages/core/src/retry.config.ts` full of
+ *      retry logic that another module imports is a module, and is not
+ *      exempt;
  *
  *  X4  it is generated or vendored output (SKIP_DIRS);
  *
@@ -62,7 +71,10 @@
  * Two further rules keep this from decaying into the check it replaced:
  *
  *  - A test file with zero assertions is an error in its own right, and
- *    is never counted as evidence for anything.
+ *    is never counted as evidence for anything. Zero assertions is
+ *    measured over the file's *code*: `// TODO: expect(bar(1)).toBe(2)`
+ *    is prose, and it used to both certify `bar`'s module and hide the
+ *    placeholder test carrying it from this very rule.
  *  - An ALLOW_LIST entry that names a file which no longer exists, or one
  *    that is now covered or exempt for another reason, is an error. The
  *    list can only shrink without somebody deciding to grow it.
@@ -191,16 +203,168 @@ export function isTestFile(path: string): boolean {
   return TEST_FILE_PATTERN.test(basename(path));
 }
 
+/**
+ * An assertion counts only when it is *code*. The regex used to run over
+ * the raw bytes, so `// TODO: expect(bar(1)).toBe(2)` certified a file
+ * whose function nothing calls — and the placeholder test carrying that
+ * comment also escaped the assertion-free rule, so one line broke both
+ * halves of the contract at once. `const help = "call expect(x) here"`
+ * was the same hole with quotes instead of a slash.
+ */
 export function hasAssertion(code: string): boolean {
-  return ASSERTION_PATTERN.test(code);
+  return ASSERTION_PATTERN.test(stripCommentsAndStrings(code));
 }
 
 export function isConfigFile(path: string): boolean {
   return CONFIG_FILE_PATTERN.test(basename(path));
 }
 
+/**
+ * X3, the structural half. `<tool>.config.ts` is a *name*, and this file's
+ * header promises exemptions are mechanical rather than by name — so the
+ * name alone exempted any `*.config.ts` anywhere under a member, a
+ * hypothetical `packages/core/src/retry.config.ts` holding real backoff
+ * logic included. What actually makes a file tool configuration is
+ * structural: the tool loads it by path, so no module in the repository
+ * imports it. A `*.config.ts` that some module imports is a module.
+ *
+ * `importedBySource` holds only imports written in NON-test source. A
+ * config a test imports is covered by E1 anyway, and would fail here for
+ * the wrong reason.
+ */
+export function isToolConfig(path: string, importedBySource: ReadonlySet<string>): boolean {
+  return isConfigFile(path) && !importedBySource.has(path);
+}
+
+/**
+ * `/` opens a regular expression only where a value cannot already have
+ * ended. `<` and `>` are deliberately absent: they would read `</p>` in a
+ * `.vue` template as the start of one and swallow the markup to the next
+ * slash, and `a < /re/.test(b)` is not a thing anyone writes.
+ */
+const REGEX_MAY_FOLLOW = /(?:[([{,;:=!&|?+\-*%~^]|\b(?:return|typeof|instanceof|in|of|new|delete|void|do|else|case|yield|await))$/;
+
+/**
+ * One pass over the source, blanking what is not executable code:
+ * comments always, and string/template contents when `blankStrings` is
+ * set. Regular-expression literals are recognised so that a quote or a
+ * `//` inside one (`/["']/`) neither opens a string nor eats the rest of
+ * the line.
+ *
+ * There is exactly one of these because there is exactly one fact here —
+ * "which bytes of this file are code". `stripComments` and
+ * `stripCommentsAndStrings` are two questions asked of it, not two
+ * implementations of it: `isBarrel`/`scanReExports`/`scanImportRecords`
+ * need the string CONTENTS (module specifiers live in them), and
+ * `hasAssertion` must not see them.
+ */
+function blankNonCode(code: string, blankStrings: boolean): string {
+  let out = '';
+  // One frame per nesting level. A template literal's `${…}` opens a code
+  // frame, so an assertion written inside one is still an assertion.
+  const frames: Array<{ kind: 'code' | 'template'; braces: number }> = [{ kind: 'code', braces: 0 }];
+  let i = 0;
+
+  while (i < code.length) {
+    const frame = frames[frames.length - 1]!;
+    const ch = code[i]!;
+
+    if (frame.kind === 'template') {
+      if (ch === '\\') {
+        if (!blankStrings) out += code.slice(i, i + 2);
+        i += 2;
+      } else if (ch === '`') {
+        out += '`';
+        frames.pop();
+        i += 1;
+      } else if (ch === '$' && code[i + 1] === '{') {
+        out += '${';
+        frames.push({ kind: 'code', braces: 0 });
+        i += 2;
+      } else {
+        if (!blankStrings) out += ch;
+        i += 1;
+      }
+      continue;
+    }
+
+    const next = code[i + 1];
+
+    if (ch === '/' && next === '/') {
+      while (i < code.length && code[i] !== '\n') i += 1;
+      continue;
+    }
+    if (ch === '/' && next === '*') {
+      const close = code.indexOf('*/', i + 2);
+      i = close === -1 ? code.length : close + 2;
+      continue;
+    }
+    if (ch === '/' && REGEX_MAY_FOLLOW.test(out.slice(-16).trimEnd())) {
+      i += 1;
+      let inClass = false;
+      while (i < code.length) {
+        const c = code[i]!;
+        if (c === '\\') {
+          i += 2;
+          continue;
+        }
+        if (c === '\n') break;
+        i += 1;
+        if (c === '[') inClass = true;
+        else if (c === ']') inClass = false;
+        else if (c === '/' && !inClass) break;
+      }
+      out += ' ';
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      out += ch;
+      i += 1;
+      while (i < code.length && code[i] !== ch && code[i] !== '\n') {
+        if (code[i] === '\\') {
+          if (!blankStrings) out += code.slice(i, i + 2);
+          i += 2;
+          continue;
+        }
+        if (!blankStrings) out += code[i];
+        i += 1;
+      }
+      out += ch;
+      i += 1;
+      continue;
+    }
+    if (ch === '`') {
+      out += '`';
+      frames.push({ kind: 'template', braces: 0 });
+      i += 1;
+      continue;
+    }
+    if (ch === '{') {
+      frame.braces += 1;
+    } else if (ch === '}') {
+      // The `}` that closes a `${…}` substitution hands the frame back to
+      // the template that opened it.
+      if (frame.braces === 0 && frames.length > 1) {
+        out += '}';
+        frames.pop();
+        i += 1;
+        continue;
+      }
+      frame.braces -= 1;
+    }
+    out += ch;
+    i += 1;
+  }
+
+  return out;
+}
+
 function stripComments(code: string): string {
-  return code.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/g, '$1');
+  return blankNonCode(code, false);
+}
+
+function stripCommentsAndStrings(code: string): string {
+  return blankNonCode(code, true);
 }
 
 const RE_EXPORT_STATEMENT = /export\s+(?:type\s+)?(?:\*(?:\s+as\s+\w+)?|\{[^}]*\})\s+from\s+["'][^"']+["']\s*;?/g;
@@ -238,24 +402,67 @@ export interface ImportRecord {
   readonly names: readonly string[];
 }
 
-const NAMED_IMPORT = /\bimport\s+(?:type\s+)?\{([^}]*)\}\s*from\s*["']([^"']+)["']/g;
-const BARE_FROM = /\bfrom\s*["']([^"']+)["']/g;
+/**
+ * `import './x'` (side effect), and `import`/`export … from '…'` with the
+ * clause captured. The clause may not contain a quote, a backtick or a
+ * semicolon, which is what keeps it from running past the end of its own
+ * statement.
+ */
+const MODULE_STATEMENT =
+  /\bimport\s*["']([^"']+)["']|\b(?:import|export)\s+([^;"'`]*?)\s*\bfrom\s*["']([^"']+)["']/g;
 
-/** Every `from '…'` in the file, with the names taken through it where they exist. */
+/**
+ * The value bindings a clause brings in, and whether it brings in any
+ * value at all.
+ *
+ * A type-only clause brings in nothing. `import type { X } from './x'`
+ * erases at compile time and cannot exercise a line of `./x`, so it is not
+ * evidence — and neither is `import { type X }`, `import type X from`
+ * (default), `export type { X } from`, `export type * from`, or a brace
+ * clause whose every specifier carries an inline `type`: all of them
+ * erase. This is the exact mirror of the hole `core-purity.ts` documents,
+ * where `Bun.Transpiler().scanImports()` elides these and a raw scan had
+ * to be added to see them; here they were counted where they must not be.
+ */
+function parseModuleClause(clause: string): { readonly names: string[]; readonly importsValues: boolean } {
+  const trimmed = clause.trim();
+  if (/^type\b/.test(trimmed)) return { names: [], importsValues: false };
+
+  const braced = /\{([^}]*)\}/.exec(trimmed);
+  // Whatever sits outside the braces is a default binding, a `* as ns`, or
+  // a bare `*` — every one of them a value.
+  const outside = trimmed.replace(/\{[^}]*\}/, '').replace(/,/g, ' ').trim();
+
+  const names: string[] = [];
+  for (const raw of braced?.[1]?.split(',') ?? []) {
+    const specifier = raw.trim();
+    if (!specifier || /^type\b/.test(specifier)) continue;
+    const name = specifier.split(/\s+as\s+/)[0]?.trim();
+    if (name) names.push(name);
+  }
+
+  return { names, importsValues: outside.length > 0 || names.length > 0 };
+}
+
+/**
+ * Every module specifier this file actually pulls a value from, with the
+ * names taken through it. A statement that erases at compile time produces
+ * no record at all — not even a bare specifier, or E1 would credit the
+ * target on the strength of an import that never runs.
+ */
 export function scanImportRecords(code: string): ImportRecord[] {
   const bySpecifier = new Map<string, Set<string>>();
 
-  for (const [, clause, specifier] of code.matchAll(NAMED_IMPORT)) {
-    const set = bySpecifier.get(specifier!) ?? new Set<string>();
-    for (const raw of clause!.split(',')) {
-      const name = raw.trim().replace(/^type\s+/, '').split(/\s+as\s+/)[0]?.trim();
-      if (name) set.add(name);
+  for (const [, sideEffect, clause, specifier] of stripComments(code).matchAll(MODULE_STATEMENT)) {
+    if (sideEffect !== undefined) {
+      if (!bySpecifier.has(sideEffect)) bySpecifier.set(sideEffect, new Set());
+      continue;
     }
+    const { names, importsValues } = parseModuleClause(clause ?? '');
+    if (!importsValues) continue;
+    const set = bySpecifier.get(specifier!) ?? new Set<string>();
+    for (const name of names) set.add(name);
     bySpecifier.set(specifier!, set);
-  }
-
-  for (const [, specifier] of code.matchAll(BARE_FROM)) {
-    if (!bySpecifier.has(specifier!)) bySpecifier.set(specifier!, new Set());
   }
 
   return [...bySpecifier].map(([specifier, names]) => ({ specifier, names: [...names] }));
@@ -269,19 +476,31 @@ export interface ReExportMap {
 }
 
 const RE_EXPORT_WITH_TARGET =
-  /export\s+(?:type\s+)?(\*(?:\s+as\s+\w+)?|\{[^}]*\})\s+from\s+["']([^"']+)["']/g;
+  /export\s+(type\s+)?(\*(?:\s+as\s+\w+)?|\{[^}]*\})\s+from\s+["']([^"']+)["']/g;
 
+/**
+ * The map `credit()` walks a barrel by. Type-only re-exports are left out
+ * of it in both spellings — `export type { X } from '…'` and the inline
+ * `export { type X } from '…'` — so a type name can never be carried
+ * through a barrel to credit the module that declares it. `scanImportRecords`
+ * already drops such names on the way in; this is the same fact stated
+ * where the walk happens, because a barrel is the one place a name arrives
+ * without the statement that introduced it.
+ */
 export function scanReExports(code: string): ReExportMap {
   const named = new Map<string, string>();
   const wildcards: string[] = [];
 
-  for (const [, clause, specifier] of stripComments(code).matchAll(RE_EXPORT_WITH_TARGET)) {
+  for (const [, typeOnly, clause, specifier] of stripComments(code).matchAll(RE_EXPORT_WITH_TARGET)) {
+    if (typeOnly) continue;
     if (clause!.startsWith('*')) {
       wildcards.push(specifier!);
       continue;
     }
     for (const raw of clause!.slice(1, -1).split(',')) {
-      const parts = raw.trim().replace(/^type\s+/, '').split(/\s+as\s+/);
+      const trimmed = raw.trim();
+      if (!trimmed || /^type\b/.test(trimmed)) continue;
+      const parts = trimmed.split(/\s+as\s+/);
       const local = parts[0]?.trim();
       const exported = (parts[1] ?? parts[0])?.trim();
       if (local && exported) named.set(exported, specifier!);
@@ -343,9 +562,15 @@ interface FileFacts {
 const MAX_BARREL_DEPTH = 8;
 
 export function checkTestCoverage(
-  root: string,
+  rootArg: string,
   allowList: readonly Exemption[] = ALLOW_LIST,
 ): TestCoverageResult {
+  // `resolveSpecifier` always produces absolute paths, while `walk`
+  // inherits whatever shape the root was given. Under a relative root the
+  // two never met, so E1/E2 credited nothing and only sibling-tested files
+  // survived — `bun run scripts/checks/test-coverage.ts .` reported nine
+  // files that the same check run with no argument does not.
+  const root = resolve(rootArg);
   const errors: string[] = [];
   const memberDirs = findMemberDirs(root);
   const allFiles = memberDirs.flatMap((dir) => walk(dir));
@@ -353,11 +578,21 @@ export function checkTestCoverage(
   const sourceFiles = allFiles.filter((f) => !isTestFile(f));
   const entryPoints = workspaceEntryPoints(memberDirs);
 
+  const sources = new Map<string, string>();
+  const sourceOf = (file: string): string => {
+    let code = sources.get(file);
+    if (code === undefined) {
+      code = readFileSync(file, 'utf8');
+      sources.set(file, code);
+    }
+    return code;
+  };
+
   const facts = new Map<string, FileFacts>();
   const factsFor = (file: string): FileFacts => {
     let cached = facts.get(file);
     if (!cached) {
-      const code = readFileSync(file, 'utf8');
+      const code = sourceOf(file);
       cached = { barrel: isBarrel(code), reExports: scanReExports(code) };
       facts.set(file, cached);
     }
@@ -372,6 +607,16 @@ export function checkTestCoverage(
     if (specifier.startsWith(WORKSPACE_SCOPE)) return entryPoints.get(specifier) ?? null;
     return null;
   };
+
+  // X3's structural half: what non-test source actually imports. A
+  // `*.config.ts` some module imports is a module, not tool configuration.
+  const importedBySource = new Set<string>();
+  for (const file of sourceFiles) {
+    for (const record of scanImportRecords(sourceOf(file))) {
+      const target = resolveSpecifier(file, record.specifier);
+      if (target) importedBySource.add(target);
+    }
+  }
 
   const covered = new Set<string>();
 
@@ -397,7 +642,7 @@ export function checkTestCoverage(
   };
 
   for (const testFile of testFiles) {
-    const code = readFileSync(testFile, 'utf8');
+    const code = sourceOf(testFile);
     if (!hasAssertion(code)) {
       errors.push(
         `${rel(testFile)}: test file contains no assertion (no expect()/assert() call) — an ` +
@@ -414,7 +659,7 @@ export function checkTestCoverage(
   // E3: a named test file beside the source (or in its `__tests__/`).
   const assertingTestsByDir = new Map<string, string[]>();
   for (const testFile of testFiles) {
-    if (!hasAssertion(readFileSync(testFile, 'utf8'))) continue;
+    if (!hasAssertion(sourceOf(testFile))) continue;
     const dir = dirname(testFile);
     const list = assertingTestsByDir.get(dir) ?? [];
     list.push(testFile);
@@ -438,8 +683,8 @@ export function checkTestCoverage(
 
   /** X1-X4 and the three evidence rules, for one file. */
   const status = (file: string): 'covered' | 'exempt' | 'uncovered' => {
-    if (isConfigFile(file)) return 'exempt';
-    const code = readFileSync(file, 'utf8');
+    if (isToolConfig(file, importedBySource)) return 'exempt';
+    const code = sourceOf(file);
     if (erasesToNothing(file, code)) return 'exempt';
     if (isBarrel(code)) return 'exempt';
     if (covered.has(file) || hasNamedSiblingTest(file)) return 'covered';

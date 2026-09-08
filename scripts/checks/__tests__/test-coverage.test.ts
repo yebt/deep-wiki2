@@ -41,12 +41,13 @@
  *   so the list can only shrink without a deliberate edit.
  */
 import { describe, expect, test } from 'bun:test';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import {
   ALLOW_LIST,
   checkAllowList,
   checkTestCoverage,
   erasesToNothing,
+  hasAssertion,
   isBarrel,
   isConfigFile,
   scanImportRecords,
@@ -160,6 +161,134 @@ describe('an assertion-free test file is an error, and is evidence for nothing',
   });
 });
 
+// A type-only import erases at compile time — `Bun.Transpiler().scanImports()`
+// does not even report it, which is why `core-purity.ts` had to add a raw
+// scan beside it to see one at all. This gate had the mirror-image hole:
+// it counted them. A file of untested runtime logic passed as soon as any
+// test imported one of its exported *types*.
+describe('a type-only import is not evidence — it cannot exercise a line', () => {
+  test('every type-only spelling leaves its target uncovered, and value imports still count', () => {
+    const result = check('type-only-import');
+    const named = result.errors.join('\n');
+
+    expect(result.ok).toBe(false);
+    // `import type { Whole } from './whole'` — the whole-clause spelling.
+    expect(named).toContain('packages/thing/src/whole.ts');
+    // `import { type Inline } from './inline'` — the inline specifier.
+    expect(named).toContain('packages/thing/src/inline.ts');
+    // `import type Defaulted from './defaulted'` — the default binding.
+    expect(named).toContain('packages/thing/src/defaulted.ts');
+    // `export type { Reexported } from './reexported'` written in the test.
+    expect(named).toContain('packages/thing/src/reexported.ts');
+    // `import { type Shape, valued } from './index'` — a type name must not
+    // be carried through a barrel, while `valued` beside it still is.
+    expect(named).toContain('packages/thing/src/shaped.ts');
+    expect(named).not.toContain('valued.ts');
+    expect(result.errors).toHaveLength(5);
+  });
+
+  test('scanImportRecords drops type-only names and type-only statements alike', () => {
+    const records = scanImportRecords(
+      [
+        "import { a, b as c } from './x';",
+        "import type { D } from './x';",
+        "import type { E } from './type-only';",
+        "import { type F, g } from './mixed';",
+        "import { type H } from './all-type';",
+        "import type I from './default-type';",
+        "export type { J } from './type-reexport';",
+        "import def from './y';",
+        "import * as z from './z';",
+        "import './side-effect';",
+      ].join('\n'),
+    );
+    const bySpecifier = new Map(records.map((r) => [r.specifier, [...r.names].sort()]));
+
+    // `./x` is still reached — by the value import on the line above it.
+    expect(bySpecifier.get('./x')).toEqual(['a', 'b']);
+    expect(bySpecifier.get('./mixed')).toEqual(['g']);
+    expect(bySpecifier.get('./y')).toEqual([]);
+    expect(bySpecifier.get('./z')).toEqual([]);
+    expect(bySpecifier.get('./side-effect')).toEqual([]);
+    // A statement that erases is not a record at all: not even the bare
+    // specifier survives, or E1 would credit the file regardless.
+    expect(bySpecifier.has('./type-only')).toBe(false);
+    expect(bySpecifier.has('./all-type')).toBe(false);
+    expect(bySpecifier.has('./default-type')).toBe(false);
+    expect(bySpecifier.has('./type-reexport')).toBe(false);
+  });
+
+  test('scanReExports does not map a type-only re-export back to its module', () => {
+    const map = scanReExports(
+      [
+        "export { a } from './ab';",
+        "export type { t } from './types';",
+        "export { type u, v } from './mixed';",
+        "export type * from './all-types';",
+        "export * from './rest';",
+      ].join('\n'),
+    );
+
+    expect(map.named.get('a')).toBe('./ab');
+    expect(map.named.get('v')).toBe('./mixed');
+    expect(map.named.has('t')).toBe(false);
+    expect(map.named.has('u')).toBe(false);
+    expect(map.wildcards).toEqual(['./rest']);
+  });
+});
+
+// `stripComments()` already existed in this file and `isBarrel()` already
+// called it; `hasAssertion()` ran its regex over the raw bytes instead. So
+// a commented-out `expect(` certified a file AND hid the placeholder test
+// from the assertion-free rule — the gate broke its own invariant twice in
+// one file.
+describe('an assertion has to be code', () => {
+  test('an expect( in a comment or a string counts for nothing, and a real one still counts', () => {
+    const result = check('commented-assertion');
+    const joined = result.errors.join('\n');
+
+    expect(result.ok).toBe(false);
+    expect(joined).toContain('real.test.ts');
+    expect(joined).toContain('strung.test.ts');
+    expect(joined).toContain('packages/thing/src/real.ts');
+    expect(joined).toContain('packages/thing/src/strung.ts');
+    // The file whose test has a commented-out assertion AND a real one is
+    // covered, and its test is not flagged.
+    expect(joined).not.toContain('genuine');
+    expect(result.errors).toHaveLength(4);
+  });
+
+  test('hasAssertion reads code, not prose', () => {
+    expect(hasAssertion('// expect(x).toBe(1)\ntest("t", () => {});')).toBe(false);
+    expect(hasAssertion('/* assert(x) */\ntest("t", () => {});')).toBe(false);
+    expect(hasAssertion('const s = "call expect(x) here";')).toBe(false);
+    expect(hasAssertion('const s = `call expect(x) here`;')).toBe(false);
+    expect(hasAssertion("const s = 'expect(x)'; // expect(y)\nexpect(z).toBe(1);")).toBe(true);
+    expect(hasAssertion('expect(x).toBe(1);')).toBe(true);
+    expect(hasAssertion('assert(x);')).toBe(true);
+    // A URL is not a line comment, and a regex is not a string.
+    expect(hasAssertion('const u = "https://x/y"; expect(u).toBe(1);')).toBe(true);
+    expect(hasAssertion('const r = /["\']/; expect(r.test("a")).toBe(false);')).toBe(true);
+  });
+});
+
+// X3 claimed to be mechanical while matching on the basename alone, so any
+// `*.config.ts` anywhere under a member was exempt — `src/retry.config.ts`
+// full of retry logic included. What actually makes a file tool
+// configuration is structural: a tool loads it by path, so no module
+// imports it.
+describe('tool configuration is what nothing imports, not what is named config', () => {
+  test('a *.config.ts a module imports is a module and needs a test', () => {
+    const result = check('nested-config');
+
+    expect(result.ok).toBe(false);
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0]).toContain('packages/thing/src/retry.config.ts');
+    // The one nothing imports keeps its exemption.
+    expect(result.errors.join('\n')).not.toContain('tool.config.ts');
+  });
+});
+
 describe('the allow-list can only shrink on its own', () => {
   const uncovered = (): 'uncovered' => 'uncovered';
 
@@ -205,6 +334,22 @@ describe('the allow-list can only shrink on its own', () => {
   });
 });
 
+// Found by running the corrected gate over the real tree: `bun run
+// scripts/checks/test-coverage.ts .` reported nine files that
+// `bun run check` (which passes no argument and gets an absolute cwd) does
+// not. `resolveSpecifier` resolves to absolute paths while `walk` inherits
+// whatever shape the root was given, so under a relative root E1/E2 credit
+// nothing and only sibling-tested files survive. A gate that answers
+// differently depending on how its own path was spelled is not a gate.
+describe('the answer does not depend on how the root was spelled', () => {
+  test('a relative root gives exactly the result an absolute one gives', () => {
+    const absolute = join(FIXTURES, 'barrel');
+    expect(checkTestCoverage(relative(process.cwd(), absolute), [])).toEqual(
+      checkTestCoverage(absolute, []),
+    );
+  });
+});
+
 describe('import scanning', () => {
   test('scanImportRecords records named bindings per specifier', () => {
     const records = scanImportRecords(
@@ -217,7 +362,9 @@ describe('import scanning', () => {
     );
     const bySpecifier = new Map(records.map((r) => [r.specifier, [...r.names].sort()]));
 
-    expect(bySpecifier.get('./x')).toEqual(['D', 'a', 'b']);
+    // `D` arrives through `import type { D }` and is NOT here: the value
+    // import on the line above is the only reason `./x` is reached at all.
+    expect(bySpecifier.get('./x')).toEqual(['a', 'b']);
     expect(bySpecifier.get('./y')).toEqual([]);
     expect(bySpecifier.get('./z')).toEqual([]);
   });
