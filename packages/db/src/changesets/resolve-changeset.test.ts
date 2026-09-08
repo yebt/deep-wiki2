@@ -298,12 +298,15 @@ describe('resolveChangeset', () => {
     expect(idA).not.toBe(idB);
   });
 
-  // Quality-bar flag: two saves that never actually race prove nothing
-  // about changeset_open_per_author_idx. Both transactions below delay by
-  // the same amount, started together via Promise.all, so both reach
-  // their real INSERT..ON CONFLICT statement while the other is still
-  // mid-transaction — a genuine race on the partial unique index, not two
-  // sequential calls that merely happen to agree.
+  // Two saves that never actually overlap prove nothing about
+  // changeset_open_per_author_idx, and a comment claiming they overlapped
+  // is not evidence. The overlap is therefore *asserted*: each transaction
+  // records clock_timestamp() immediately before and after its own
+  // resolveChangeset(), and the two intervals are checked to intersect. A
+  // rendezvous makes that deterministic rather than hopeful — both
+  // transactions are open and parked before either is allowed to proceed,
+  // so both reach INSERT ... ON CONFLICT while the other is still
+  // mid-transaction. Without ON CONFLICT this pair raises 23505.
   test('two genuinely concurrent saves by one author on two different pages resolve to exactly one changeset', async () => {
     const { workspaceId, rootId } = await seedWorkspace();
     const bookId = await seedBook(workspaceId, rootId);
@@ -311,19 +314,43 @@ describe('resolveChangeset', () => {
 
     const connA = postgres(db.url, { max: 1 });
     const connB = postgres(db.url, { max: 1 });
+
+    let arrivedA!: () => void;
+    let arrivedB!: () => void;
+    const atGateA = new Promise<void>((resolve) => (arrivedA = resolve));
+    const atGateB = new Promise<void>((resolve) => (arrivedB = resolve));
+    // Bounded so a future change that serialises the two calls fails the
+    // overlap assertion below instead of hanging the suite.
+    const timeout = new Promise<void>((resolve) => setTimeout(resolve, 1000));
+
+    async function run(
+      conn: postgres.Sql,
+      arrive: () => void,
+      peer: Promise<void>,
+    ): Promise<{ id: string; start: Date; end: Date }> {
+      return conn.begin(async (tx) => {
+        // Open the transaction for real before announcing arrival.
+        await tx`SELECT 1`;
+        arrive();
+        await Promise.race([peer, timeout]);
+
+        const [before] = await tx<{ t: Date }[]>`SELECT clock_timestamp() AS t`;
+        const id = await resolveChangeset(tx, { workspaceId, bookId, authorId, windowMinutes: 30 });
+        const [after] = await tx<{ t: Date }[]>`SELECT clock_timestamp() AS t`;
+        return { id, start: before!.t, end: after!.t };
+      }) as Promise<{ id: string; start: Date; end: Date }>;
+    }
+
     try {
-      const runA = connA.begin(async (tx) => {
-        await tx`SELECT pg_sleep(0.3)`;
-        return resolveChangeset(tx, { workspaceId, bookId, authorId, windowMinutes: 30 });
-      });
-      const runB = connB.begin(async (tx) => {
-        await tx`SELECT pg_sleep(0.3)`;
-        return resolveChangeset(tx, { workspaceId, bookId, authorId, windowMinutes: 30 });
-      });
+      const [a, b] = await Promise.all([run(connA, arrivedA, atGateB), run(connB, arrivedB, atGateA)]);
 
-      const [idA, idB] = await Promise.all([runA, runB]);
+      // The load-bearing assertion for the word "concurrent": the two
+      // resolveChangeset() intervals intersect, so both calls were in
+      // flight at the same instant. Sequential calls cannot satisfy both.
+      expect(a.start.getTime()).toBeLessThanOrEqual(b.end.getTime());
+      expect(b.start.getTime()).toBeLessThanOrEqual(a.end.getTime());
 
-      expect(idA).toBe(idB);
+      expect(a.id).toBe(b.id);
       const rows = await sql`
         SELECT id FROM changeset WHERE workspace_id = ${workspaceId} AND book_id = ${bookId} AND author_id = ${authorId}
       `;
