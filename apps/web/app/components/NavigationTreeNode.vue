@@ -106,6 +106,30 @@ function onDrop(event: DragEvent): void {
 function onChildReorder(payload: { draggedId: string; newParentId: string; newIndex: number }): void {
   emit('reorder', payload);
 }
+
+/**
+ * Only the row the key press actually landed on reports it.
+ *
+ * `keydown` bubbles, and a nested row sits inside its ancestors' `<li>`s,
+ * each carrying this same listener — so one press on a page three levels
+ * deep reached `tree.vue` three times, each time carrying *that level's*
+ * node, `parentId` and `index`. The last one to arrive won, and it was
+ * always the outermost: `ArrowDown` on a shelf's first child moved the
+ * focus to the second child and then an ancestor moved it to the shelf's
+ * own next row — measured as landing back on the row it started from, so
+ * a keyboard user could not walk past the first child of any shelf. Under
+ * `Alt` the same duplicate is a reorder of an ancestor the user never
+ * selected.
+ *
+ * `closest()` rather than `event.target === event.currentTarget`: the tab
+ * stop is the `<li>`, so those are the same element today, but a control
+ * inside the row (a rename field, a disclosure) must still report through
+ * the row that contains it rather than fall silent.
+ */
+function onKeydown(event: KeyboardEvent): void {
+  if ((event.target as HTMLElement | null)?.closest('[role="treeitem"]') !== event.currentTarget) return;
+  emit('keydown', { event, node: props.node, parentId: props.parentId, index: props.index });
+}
 </script>
 
 <template>
@@ -118,7 +142,7 @@ function onChildReorder(payload: { draggedId: string; newParentId: string; newIn
     :aria-expanded="node.children.length > 0 ? true : undefined"
     :tabindex="activeId === node.id ? 0 : -1"
     class="dw-tree-item"
-    @keydown="emit('keydown', { event: $event, node, parentId, index })"
+    @keydown="onKeydown"
     @focus="emit('activate', node.id)"
   >
     <div

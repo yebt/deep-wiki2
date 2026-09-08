@@ -132,6 +132,22 @@ describe('navigation tree page', () => {
       expect(navigateToMock).toHaveBeenCalledWith('/pages/page-1');
     });
 
+    test('an arrow key from a nested row moves one row, not back to where it started', async () => {
+      mockTree({ status: 'success', nodes: NODES });
+      const component = await mountSuspended(PageInApp);
+      const items = component.findAll('[role="treeitem"]');
+
+      // From the shelf's first child, ArrowDown is the next visible row.
+      await items[1]!.trigger('keydown', { key: 'ArrowDown' });
+
+      // The tab stop is where the focus went, so it is what says where the
+      // user is: a keydown that reaches this screen more than once per press
+      // moves it twice, and the second mover is an ancestor reporting *its*
+      // position rather than the focused row's.
+      expect(items[2]!.attributes('tabindex')).toBe('0');
+      expect(items.filter((item) => item.attributes('tabindex') === '0')).toHaveLength(1);
+    });
+
     test('Alt with an arrow key reorders among siblings, the keyboard equivalent of a drag', async () => {
       const { reorder } = mockTree({ status: 'success', nodes: NODES });
       const component = await mountSuspended(PageInApp);

@@ -17,6 +17,7 @@
 import { fromMarkdown, toMarkdown } from '@deep-wiki/editor';
 import type { MentionCandidate, MentionState, SlashState } from '@deep-wiki/editor';
 import type { EditorView } from 'prosemirror-view';
+import { positionMenu } from '~/utils/menu-position';
 
 const props = defineProps<{
   markdown: string;
@@ -51,26 +52,6 @@ let editorView: EditorView | undefined;
 
 const { search: searchMentions, checkAccess } = useMentionCandidates(props.workspaceId, props.pageId);
 
-/**
- * `coordsAtPos()` returns viewport-relative coordinates, which is exactly
- * what a `position: fixed` element needs directly — no ancestor-offset
- * math (docs/UI-CHECKLIST.md §4.6: "Menus reposition to stay in the
- * viewport near the bottom or right edge… never render clipped or
- * off-screen"). `MENU_HEIGHT_ESTIMATE`/`MENU_WIDTH_ESTIMATE` are the
- * menus' own `min-w-*` plus a handful of rows — real content can be
- * shorter, never taller by more than a row or two, so flipping a little
- * early is the safe direction to be wrong in.
- */
-const MENU_HEIGHT_ESTIMATE = 220;
-const MENU_WIDTH_ESTIMATE = 260;
-
-function positionMenu(coords: { top: number; bottom: number; left: number }): { top: number; left: number } {
-  const spaceBelow = window.innerHeight - coords.bottom;
-  const top = spaceBelow < MENU_HEIGHT_ESTIMATE ? Math.max(8, coords.top - MENU_HEIGHT_ESTIMATE) : coords.bottom + 4;
-  const left = Math.min(coords.left, window.innerWidth - MENU_WIDTH_ESTIMATE - 8);
-  return { top, left: Math.max(8, left) };
-}
-
 async function mount(): Promise<void> {
   const mod = await import('@deep-wiki/editor/mount');
   if (!rootEl.value) return;
@@ -89,8 +70,19 @@ async function mount(): Promise<void> {
           mentionCaretRect.value = positionMenu(coords);
           mentionMismatch.value = null;
           if (state.query !== lastMentionQuery) {
-            lastMentionQuery = state.query;
-            void searchMentions(state.query).then((candidates: MentionCandidate[]) => {
+            const query = state.query;
+            lastMentionQuery = query;
+            void searchMentions(query).then((candidates: MentionCandidate[]) => {
+              // Two requests can answer in either order, and the slower one
+              // is not always the older one: a fetch for `@a` landing behind
+              // one for `@ab` repainted the menu with candidates for a query
+              // the user had already typed past — the staleness
+              // `reduceMentionState`'s `trigger` reset exists to prevent,
+              // arriving after that reset has already run. Only the response
+              // for the query still on screen may be rendered;
+              // `lastMentionQuery` is null once the menu closes, so a
+              // response that outlives its menu is discarded too.
+              if (lastMentionQuery !== query) return;
               editorView?.dispatch(editorView.state.tr.setMeta(mod.mentionPluginKey, { type: 'setCandidates', candidates }));
             });
           }
