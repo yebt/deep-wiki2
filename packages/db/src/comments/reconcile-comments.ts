@@ -108,31 +108,13 @@ function nearestOccurrence(indices: readonly number[], target: number): number {
   return indices.reduce((best, index) => (Math.abs(index - target) < Math.abs(best - target) ? index : best));
 }
 
-async function resolveOneAnchor(
-  tx: SqlExecutor,
-  nodeId: string,
-  root: AnchoredRoot,
-  textByBlockId: ReadonlyMap<string, string>,
-): Promise<ReconcileOutcome> {
-  const [blockRow] = await tx<{ status: string; superseded_by: string | null }[]>`
-    SELECT status, superseded_by FROM page_blocks WHERE page_id = ${nodeId} AND block_id = ${root.block_id}
-  `;
-
-  if (!blockRow || blockRow.status === 'tombstoned') {
-    return { kind: 'orphan' };
-  }
-
-  // `compressChains` already ran: `superseded_by` is the compressed,
-  // active terminal — never an intermediate hop.
-  const survivorId = blockRow.status === 'superseded' ? blockRow.superseded_by! : root.block_id;
-  const survivorText = textByBlockId.get(survivorId);
-  if (survivorText === undefined) {
-    return { kind: 'orphan' };
-  }
-
+/** Confidence-table rows 2-4: the quote is still an exact substring of the survivor's own current text, at the old offset, elsewhere once, or at the nearest of several occurrences. `null` when none apply — row 5 takes over. */
+function matchExactSubstring(survivorText: string, survivorId: string, root: AnchoredRoot): ReconcileOutcome | null {
   const atOldOffset = survivorText.slice(root.offset_start, root.offset_end);
   if (atOldOffset === root.quote) {
-    return survivorId === root.block_id ? { kind: 'unchanged' } : { kind: 'migrate', blockId: survivorId, offsetStart: root.offset_start, offsetEnd: root.offset_end };
+    return survivorId === root.block_id
+      ? { kind: 'unchanged' }
+      : { kind: 'migrate', blockId: survivorId, offsetStart: root.offset_start, offsetEnd: root.offset_end };
   }
 
   const occurrences = allIndicesOf(survivorText, root.quote);
@@ -144,9 +126,17 @@ async function resolveOneAnchor(
     return { kind: 'migrate', blockId: survivorId, offsetStart: nearest, offsetEnd: nearest + root.quote.length };
   }
 
-  // No exact match in the survivor's own text: score it and every block
-  // that split off from it, and take the highest — a tie at the top
-  // orphans rather than guessing between two equally-plausible fragments.
+  return null;
+}
+
+/** Confidence-table row 5: no exact match anywhere in the survivor's own text — score it and every block split from it, and take the highest. A tie at the top orphans rather than guessing between two equally-plausible fragments. */
+async function matchByContainment(
+  tx: SqlExecutor,
+  nodeId: string,
+  survivorId: string,
+  root: AnchoredRoot,
+  textByBlockId: ReadonlyMap<string, string>,
+): Promise<ReconcileOutcome> {
   const splitRows = await tx<{ block_id: string }[]>`
     SELECT block_id FROM page_blocks WHERE page_id = ${nodeId} AND split_from = ${survivorId} AND status = 'active'
   `;
@@ -168,19 +158,45 @@ async function resolveOneAnchor(
     }
   }
 
-  if (bestCandidate && !tie && bestScore >= ANCHOR_CONTAINMENT_THRESHOLD) {
-    const candidateText = textByBlockId.get(bestCandidate)!;
-    const exactIndex = candidateText.indexOf(root.quote);
-    if (exactIndex !== -1) {
-      return { kind: 'migrate', blockId: bestCandidate, offsetStart: exactIndex, offsetEnd: exactIndex + root.quote.length };
-    }
-    // No exact substring anywhere in the winning candidate either — the
-    // best available window is the candidate's whole text; precise
-    // sub-window alignment for a purely fuzzy match is out of scope here.
-    return { kind: 'migrate', blockId: bestCandidate, offsetStart: 0, offsetEnd: candidateText.length };
+  if (!bestCandidate || tie || bestScore < ANCHOR_CONTAINMENT_THRESHOLD) {
+    return { kind: 'orphan' };
   }
 
-  return { kind: 'orphan' };
+  const candidateText = textByBlockId.get(bestCandidate)!;
+  const exactIndex = candidateText.indexOf(root.quote);
+  if (exactIndex !== -1) {
+    return { kind: 'migrate', blockId: bestCandidate, offsetStart: exactIndex, offsetEnd: exactIndex + root.quote.length };
+  }
+  // No exact substring anywhere in the winning candidate either — the best
+  // available window is the candidate's whole text; precise sub-window
+  // alignment for a purely fuzzy match is out of scope here.
+  return { kind: 'migrate', blockId: bestCandidate, offsetStart: 0, offsetEnd: candidateText.length };
+}
+
+async function resolveOneAnchor(
+  tx: SqlExecutor,
+  nodeId: string,
+  root: AnchoredRoot,
+  textByBlockId: ReadonlyMap<string, string>,
+): Promise<ReconcileOutcome> {
+  const [blockRow] = await tx<{ status: string; superseded_by: string | null }[]>`
+    SELECT status, superseded_by FROM page_blocks WHERE page_id = ${nodeId} AND block_id = ${root.block_id}
+  `;
+
+  // Confidence-table row 1: tombstoned, unconditionally.
+  if (!blockRow || blockRow.status === 'tombstoned') {
+    return { kind: 'orphan' };
+  }
+
+  // `compressChains` already ran: `superseded_by` is the compressed,
+  // active terminal — never an intermediate hop.
+  const survivorId = blockRow.status === 'superseded' ? blockRow.superseded_by! : root.block_id;
+  const survivorText = textByBlockId.get(survivorId);
+  if (survivorText === undefined) {
+    return { kind: 'orphan' };
+  }
+
+  return matchExactSubstring(survivorText, survivorId, root) ?? (await matchByContainment(tx, nodeId, survivorId, root, textByBlockId));
 }
 
 export async function reconcileComments(tx: SqlExecutor, input: ReconcileCommentsInput): Promise<void> {

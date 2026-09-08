@@ -151,6 +151,13 @@ export const ALLOW_LIST: readonly Exemption[] = [
     reason: 'Coverage debt: the page request/response schemas have no test of their own.',
   },
   {
+    file: 'packages/contracts/src/comments.ts',
+    reason:
+      'Coverage debt, same shape as pages.ts above: the comment request/response schemas are exercised ' +
+      'through apps/api/src/routes/comments.ts (a non-test import, so E1/E2 do not credit it) rather than ' +
+      'named directly by a test.',
+  },
+  {
     file: 'packages/markdown/src/extensions/hard-break.ts',
     reason: 'Coverage debt: hard-break spelling preservation is asserted at pipeline level (corpus.test.ts), not against this module.',
   },

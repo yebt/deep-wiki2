@@ -8,6 +8,7 @@ import { SmtpMailSender } from './adapters/mail/smtp-mail-sender';
 import { loadConfig } from './config';
 import { createAdminRoutes } from './routes/admin';
 import { createAuthRoutes } from './routes/auth';
+import { createCommentRoutes } from './routes/comments';
 import { createInvitationRoutes } from './routes/invitations';
 import { createLinkRoutes } from './routes/links';
 import { createMentionRoutes } from './routes/mentions';
@@ -153,6 +154,15 @@ if (import.meta.main) {
   app.route('/', createTagRoutes({ sql, sessionIdleTimeoutMinutes: config.SESSION_IDLE_TIMEOUT_MINUTES }));
   app.route('/', createMentionRoutes({ sql, sessionIdleTimeoutMinutes: config.SESSION_IDLE_TIMEOUT_MINUTES }));
   app.route('/', createTreeRoutes({ sql, sessionIdleTimeoutMinutes: config.SESSION_IDLE_TIMEOUT_MINUTES }));
+  app.route(
+    '/',
+    createCommentRoutes({
+      sql,
+      mailSender,
+      sessionIdleTimeoutMinutes: config.SESSION_IDLE_TIMEOUT_MINUTES,
+      changesetWindowMinutes: config.CHANGESET_WINDOW_MINUTES,
+    }),
+  );
 
   console.log(`apps/api: listening on port ${config.PORT}`);
   Bun.serve({ port: config.PORT, fetch: app.fetch });

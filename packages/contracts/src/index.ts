@@ -81,3 +81,18 @@ export type {
   SavePageResponse,
   TakeOverResponse,
 } from './pages';
+
+export {
+  CommentIndicatorSchema,
+  CommentIndicatorsResponseSchema,
+  CreateCommentRequestSchema,
+  CreateCommentResponseSchema,
+  SetThreadResolvedRequestSchema,
+} from './comments';
+export type {
+  CommentIndicator,
+  CommentIndicatorsResponse,
+  CreateCommentRequest,
+  CreateCommentResponse,
+  SetThreadResolvedRequest,
+} from './comments';

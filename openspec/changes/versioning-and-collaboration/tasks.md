@@ -120,13 +120,13 @@ Chain strategy: pending
 - [x] 7.4 GREEN: `reconcileComments()` in `packages/db/src/content/rebuild-derived.ts` (or a new `packages/db/src/comments/reconcile-comments.ts`) — consumes `reconcileBlocks`'s returned `{ assignments, mintedIds, nextBlocks }` (change `reconcileBlocks` to return this rather than `void`); implements the confidence table exactly, checking `trigramContainment` over `B'` **and** every block whose `split_from = B'`.
 - [x] 7.5 RED: an orphaned comment is never re-anchored by a later save, even if a subsequent edit would now score above threshold.
 - [x] 7.6 GREEN: confirm 7.4's orphan status is a one-way write (no code path transitions `orphaned` back to `anchored`); add the guard if reconciliation is written generically enough to need one.
-- [ ] 7.7 RED: `apps/api/testing/expect-no-disclosure.ts`-based test — a subject with `read` but not `comment` receives no comment id, text, author, or count; the response is indistinguishable from a page with zero comments.
-- [ ] 7.8 GREEN: `apps/api/src/routes/comments.ts` — indicator/count endpoint gated by `can('comment')`, comment creation endpoint, all behind `can()`.
-- [ ] 7.9 RED: a comment on an unanchored block, once created, mints and persists an anchor into canonical markdown that round-trips byte-identically through the GATE-2 corpus.
-- [ ] 7.10 GREEN: anchor-minting path in the comment-creation route/service, reusing the lazy-assignment mechanism already covered by the GATE-2 corpus.
-- [ ] 7.11 RED: mention notification test — a mentioned user without `read` on the page receives no notification; no credential/hash/token is logged or rendered.
-- [ ] 7.12 GREEN: wire mention notifications through the existing `MailSender` port.
-- [ ] 7.13 REFACTOR: once 7.3–7.10 are green, consolidate the five confidence-table branches into one clearly named function per branch if `reconcileComments()` has grown past a single readable unit.
+- [x] 7.7 RED: `apps/api/testing/expect-no-disclosure.ts`-based test — a subject with `read` but not `comment` receives no comment id, text, author, or count; the response is indistinguishable from a page with zero comments.
+- [x] 7.8 GREEN: `apps/api/src/routes/comments.ts` — indicator/count endpoint gated by `can('comment')`, comment creation endpoint, all behind `can()`.
+- [x] 7.9 RED: a comment on an unanchored block, once created, mints and persists an anchor into canonical markdown that round-trips byte-identically through the GATE-2 corpus.
+- [x] 7.10 GREEN: anchor-minting path in the comment-creation route/service, reusing the lazy-assignment mechanism already covered by the GATE-2 corpus.
+- [x] 7.11 RED: mention notification test — a mentioned user without `read` on the page receives no notification; no credential/hash/token is logged or rendered.
+- [x] 7.12 GREEN: wire mention notifications through the existing `MailSender` port.
+- [x] 7.13 REFACTOR: once 7.3–7.10 are green, consolidate the five confidence-table branches into one clearly named function per branch if `reconcileComments()` has grown past a single readable unit.
 
 ## Phase 8: Editing Presence
 
