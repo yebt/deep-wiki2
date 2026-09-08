@@ -415,6 +415,85 @@ makes conventions portable across projects.
 
 Discoveries and constraints. Newest first.
 
+### 2026-09-08 — Looking a page up before calling `can()` turns every route into an existence oracle
+
+A mutation audit of `apps/api/src/routes/comments.ts` found the indicators endpoint answering
+**404** for a page that does not exist and **403** for a page the caller may not read. A caller with
+no grant could therefore probe for page existence — the exact class the password-reset response and
+wiki-link rendering already close. The shape is structural, not local: every route in this app looks
+the node up first and consults `can()` second, so the same oracle existed in `POST /pages/:id/comments`,
+`PATCH /comments/:threadId/resolved`, `GET /pages/:id/backlinks`, and — in the `200`/`404` form rather
+than the `403`/`404` one — `GET /pages/:id/mentions/:userId/check`, which never consulted the caller's
+own grant at all.
+
+The rule now applied to those five: **`read` is the first gate, and absence and denial-of-read return
+the same response from the same call site.** Denial of a *stronger* action (`comment` on a page the
+caller can already read) still answers `403`, because that caller can see the page and learns nothing.
+This is the singular analogue of what `can-many.ts`/`readable.ts` already do for sets, where an
+unreadable id is dropped from the result rather than reported as denied.
+
+**Deliberately not changed:** `apps/api/src/routes/pages.ts` has the same shape, and
+`docs/UI-CHECKLIST.md` records it as a reviewed decision — a direct URL request gets a real `403`,
+and the not-found screen is built to render `403` and `404` byte-identically so the ambiguity is the
+*client's* to choose. `PATCH /nodes/:id/position` (tree.ts) still answers `403` to a subject with no
+read; it is a node-position mutation rather than an answer about a page, and it is left as a recorded
+follow-up rather than changed under a comment-route audit.
+
+**Impact:** "look the row up, then authorise it" reads as the obvious order and is wrong by default
+whenever the row's *existence* is itself privileged. Any new route that takes an id in its path
+should be written with the read gate first.
+
+### 2026-09-08 — Five tests that could not fail: the audit's own findings
+
+The same audit applied 15 mutations across `resolve-changeset.ts` and `comments.ts`; five stayed
+green. Each one is a different way for a test to pass without depending on the behaviour it names:
+
+- **A parameter nobody varied.** Every `resolveChangeset` case used `windowMinutes: 30` with an
+  activity either seconds or an hour old, so hardcoding a 1-minute window passed. Two cases against
+  the *same* 45-minute-old activity — joining at 60, retiring at 30 — is what makes the parameter
+  load-bearing.
+- **A fixture too shallow for the code path.** The only `resolveBookId` fixture parented its page
+  directly under the book, so a one-hop parent lookup passed and the recursive CTE was never
+  exercised. Related: `LIMIT 1` over a recursive CTE has no inherent order, so "the nearest book
+  wins" was true only by Postgres's incidental `UNION ALL` evaluation; it now says `ORDER BY depth`.
+- **A scope that only one fixture could ever exercise.** One book in one workspace cannot detect an
+  implementation that joins by `author_id` alone. Worth noting: the two `workspace_id` filters in the
+  ancestor walk are each individually sufficient, so removing *either* alone is undetectable —
+  only removing both is observable. That is defence in depth, not redundancy to delete.
+- **An assertion weaker than the docstring.** `expect(closed.closed_at).not.toBeNull()` passes for
+  `now()`, though retirement is specified to stamp the last activity. Assert against the value the
+  test itself wrote.
+- **Concurrency asserted in a comment.** Two saves slept the same amount and were started with
+  `Promise.all`, but every assertion would have held had they run sequentially. The overlap is now
+  asserted: each transaction records `clock_timestamp()` either side of its own call and the two
+  intervals must intersect.
+- **A recipient nobody named.** The mention tests counted notifications without asserting `to`, so
+  sending one to `attacker@example.invalid` stayed green — and the "readable recipient" fixture
+  mentioned the comment's own author, which a route mailing the wrong person also satisfies.
+- **An assertion that could not fail independently.** `expect(sent.map(s => s.to)).not.toContain(x)`
+  sat immediately after `expect(sent).toHaveLength(0)`. It is now the load-bearing half of a
+  mixed-recipient case where one notification really is sent.
+- **A status line that swallowed every distinct failure.** Every way of breaking anchor minting also
+  trips `comments_block_fk` and returns 500, so the test died on `expect(res.status).toBe(201)` and
+  could not tell "anchor not minted" from "route crashed". Storage is now read first.
+
+**Impact:** all of these are the family already recorded here — *tests that pass for the wrong
+reason*. The counter-practice is unchanged and still the only thing that catches them: break the
+behaviour on purpose and watch the test go red **for an assertion reason**.
+
+### 2026-09-08 — A non-disclosure helper that reads only the body leaves the headers open
+
+`apps/api/testing/expect-no-disclosure.ts` scanned `JSON.stringify(body)` and nothing else, so a
+route that put a hidden id — or a comment count — in a response header passed every non-disclosure
+test in the repository. Headers are now scanned too, **names as well as values** (`x-page-<id>: 1`
+leaks as surely as `x-node-id: <id>`), and `HiddenNode` takes a `values` list for anything that is
+not an id, slug or title.
+
+The `headers` argument is **required**, not optional: an optional channel is one a call site can
+silently skip, which is the same defect class as the leak the helper exists to catch. All five
+existing call sites were updated and none of them broke — nothing in this app sets a response header
+carrying node data today.
+
 ### 2026-09-07 — A green GATE-2 was measuring a third of what its number claimed
 
 GATE-2 reported "69/69 byte-identical round trips". It called `roundTrip()` at three call sites:
