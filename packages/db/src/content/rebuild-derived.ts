@@ -193,8 +193,89 @@ async function reconcileBlocks(
   }
 }
 
+/**
+ * Raised when `compressChains` cannot resolve one or more `superseded_by`
+ * chains to a clean, `active` terminal in one recursive walk — either a
+ * genuine cycle (guarded by `NOT b.block_id = ANY(c.path)`) or a chain
+ * deeper than the 64-hop runaway guard (design.md Decision 1, "Chain
+ * resolution and compression"). Both are a bug in the data, not a
+ * condition to loop through silently — steady-state chain depth is 1
+ * because compression already ran at the end of every prior save.
+ */
+export class ChainCompressionError extends Error {
+  constructor(
+    readonly nodeId: string,
+    readonly blockIds: readonly string[],
+  ) {
+    super(
+      `chain compression on page ${nodeId} could not resolve block(s) ${blockIds.join(', ')} to a clean ` +
+        'active terminal — this indicates either a cycle in superseded_by or a chain deeper than the 64-hop safety guard',
+    );
+    this.name = 'ChainCompressionError';
+  }
+}
+
+/**
+ * Rewrites every `superseded_by` on `nodeId`'s blocks to point directly at
+ * its terminal, `active` survivor, regardless of how many merges chained
+ * together to reach it (page-content spec: "The Superseded Chain Is
+ * Walkable And Path-Compressed"). Runs at save time, immediately after
+ * `reconcileBlocks` writes its edges — never at read time
+ * (`page-lock.ts:6`'s "a read never writes"), so steady-state chain depth
+ * is 1 and this recursive walk is a safety net, not the hot path.
+ */
+async function compressChains(tx: SqlExecutor, nodeId: string): Promise<void> {
+  const unresolved = await tx<{ block_id: string }[]>`
+    WITH RECURSIVE chain(block_id, target, depth, path) AS (
+      SELECT block_id, superseded_by, 0, ARRAY[block_id]
+        FROM page_blocks WHERE page_id = ${nodeId} AND superseded_by IS NOT NULL
+      UNION ALL
+      SELECT c.block_id, b.superseded_by, c.depth + 1, c.path || b.block_id
+        FROM chain c JOIN page_blocks b ON b.page_id = ${nodeId} AND b.block_id = c.target
+       WHERE b.superseded_by IS NOT NULL AND c.depth < 64 AND NOT b.block_id = ANY(c.path)
+    ),
+    terminal AS (
+      SELECT DISTINCT ON (block_id) block_id, target
+        FROM chain
+       ORDER BY block_id, depth DESC
+    )
+    SELECT terminal.block_id
+      FROM terminal
+      JOIN page_blocks t ON t.page_id = ${nodeId} AND t.block_id = terminal.target
+     WHERE t.status <> 'active' OR t.superseded_by IS NOT NULL
+  `;
+
+  if (unresolved.length > 0) {
+    throw new ChainCompressionError(
+      nodeId,
+      unresolved.map((row) => row.block_id),
+    );
+  }
+
+  await tx`
+    WITH RECURSIVE chain(block_id, target, depth, path) AS (
+      SELECT block_id, superseded_by, 0, ARRAY[block_id]
+        FROM page_blocks WHERE page_id = ${nodeId} AND superseded_by IS NOT NULL
+      UNION ALL
+      SELECT c.block_id, b.superseded_by, c.depth + 1, c.path || b.block_id
+        FROM chain c JOIN page_blocks b ON b.page_id = ${nodeId} AND b.block_id = c.target
+       WHERE b.superseded_by IS NOT NULL AND c.depth < 64 AND NOT b.block_id = ANY(c.path)
+    ),
+    terminal AS (
+      SELECT DISTINCT ON (block_id) block_id, target
+        FROM chain
+       ORDER BY block_id, depth DESC
+    )
+    UPDATE page_blocks p
+       SET superseded_by = terminal.target, updated_at = now()
+      FROM terminal
+     WHERE p.page_id = ${nodeId} AND p.block_id = terminal.block_id AND p.superseded_by IS DISTINCT FROM terminal.target
+  `;
+}
+
 export async function reconcileDerived(tx: SqlExecutor, input: ReconcileDerivedInput): Promise<void> {
   await replaceLinks(tx, input.nodeId, input.workspaceId, input.tree);
   await replaceTags(tx, input.nodeId, input.workspaceId, input.tree);
   await reconcileBlocks(tx, input.nodeId, input.workspaceId, input.tree, input.canonicalMarkdown, input.previousMarkdown);
+  await compressChains(tx, input.nodeId);
 }
