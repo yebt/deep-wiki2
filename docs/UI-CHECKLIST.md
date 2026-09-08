@@ -172,6 +172,31 @@ Derived from this project's actual stack and domain.
 - [ ] **This checklist remains the authority on required states, the accessibility floor, and responsive behaviour.** Where the two disagree on any of those, this file wins and the design system gets corrected.
 - [ ] Any deviation from the design system is deliberate and recorded in that file's change log — not improvised in a component.
 
+### 4.11 Timestamps
+
+Added 2026-09-08, after the page-history screen shipped with a decision this file had no rule
+for. deep-wiki is built for teams that are not in one place; a time is only useful if the reader
+knows which time it is.
+
+- [ ] Every timestamp renders in the **viewer's own timezone**, never the server's and never
+      forced to UTC.
+- [ ] The rendered string **names its zone** (`Sep 8, 2026, 10:07 AM GMT-5`). A bare local time
+      is ambiguous the moment two readers are in different places, which for this product is the
+      normal case rather than the edge one.
+- [ ] The exact instant is carried in a `<time datetime="…">` element as ISO 8601, so precision
+      survives however the visible text is formatted, and so a machine reading the page — this
+      product's other audience — gets the unambiguous value.
+- [ ] **The screen does not server-render a localised time.** The server does not know the
+      viewer's zone, so formatting during SSR renders the *server's* zone and then changes after
+      hydration: a visible flicker and a Vue hydration mismatch. Either the value is fetched
+      client-side and never server-rendered, or the localisation is explicitly deferred to the
+      client. Whichever holds, say so at the call site — an implicit invariant is one the next
+      person breaks by moving a fetch.
+- [ ] A test forces **at least two distinct timezones** and asserts the same instant renders
+      differently in each. A timezone test that runs only in the machine's own zone proves
+      nothing. Prefer a pair whose offset crosses a calendar day, so a whole-day error is caught
+      and not just a clock offset.
+
 ---
 
 ## 5. Accessibility floor
