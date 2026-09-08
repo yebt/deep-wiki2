@@ -132,26 +132,26 @@ Chain strategy: pending
 
 *The view has no migration prerequisite of its own; sequence its creation only after confirming Phase 2–7 changes left `page_locks` untouched.*
 
-- [ ] 8.1 Verify `packages/db/src/locks/page-lock.ts` and `page_locks`' schema are unmodified by every prior phase (diff review against Phase 2 base) before proceeding — this is the "untouched-and-verified" gate the design requires before the view can safely assume the lock table's shape.
-- [ ] 8.2 GREEN: migration `packages/db/drizzle/NNNN_presence_view.sql` — `CREATE VIEW presence AS SELECT ... FROM page_locks` per design.md Decision 5. No RED test precedes a pure view definition; its correctness is proven by 8.4–8.7 below.
-- [ ] 8.3 GREEN: `apps/api/src/presence/broadcaster.ts` — in-memory `Map<workspaceId, Set<Subscriber>>` implementation of the `PresenceBroadcaster` port from Phase 2.
-- [ ] 8.4 RED (non-disclosure, quality-bar flag — the highest-risk requirement in this change): a workspace member without `read` on page X receives **no event mentioning page X**, not even a page id with the title omitted. Build the fixture as a genuine **workspace-scoped fan-out** (broadcast to every workspace subscriber, then filter) so the test actually exercises per-subscriber filtering rather than a channel that was never workspace-wide to begin with; assert the id field is absent from the serialised frame, not merely that the title is absent — a test that only checks the title would pass against an implementation that still leaks the id.
-- [ ] 8.5 GREEN: `apps/api/src/routes/presence.ts` — `GET /workspaces/:workspaceId/presence/stream`, `sessionMiddleware` then membership check to open the stream, then per-event `can(user, event.pageId, 'read')` before emitting, silently dropping otherwise.
-- [ ] 8.6 RED: heartbeat route test — `PATCH /pages/:id/lock` refreshing the lock also publishes to the broadcaster in the same request; assert no other code path calls the broadcaster's publish method (structural/grep-style check).
-- [ ] 8.7 GREEN: wire `heartbeatLock`'s success path in `page-lock.ts` to call `broadcaster.publish(...)`.
-- [ ] 8.8 RED: the SSE route also polls the `presence` view on each keep-alive tick and emits presence not yet sent for that connection (multi-process degradation path from design.md Decision 5).
-- [ ] 8.9 GREEN: keep-alive tick handler in `presence.ts` — poll `presence` view, diff against already-sent state per connection.
-- [ ] 8.10 RED: `apps/api/src/index.test.ts` — the presence stream endpoint answers with `Access-Control-Allow-Origin`, proving it was registered via `app.route(...)` after `createApp()`'s CORS middleware, never at module scope (the `/health` failure mode from `index.ts:19-35`).
-- [ ] 8.11 GREEN: mount `createPresenceRoutes(deps)` via `app.route('/', ...)` in `index.ts`'s `import.meta.main` block.
-- [ ] 8.12 RED: stale presence (heartbeat past `PAGE_LOCK_TTL_SECONDS`) reports no active presence, with no separate presence TTL anywhere in the code.
+- [x] 8.1 Verify `packages/db/src/locks/page-lock.ts` and `page_locks`' schema are unmodified by every prior phase (diff review against Phase 2 base) before proceeding — this is the "untouched-and-verified" gate the design requires before the view can safely assume the lock table's shape.
+- [x] 8.2 GREEN: migration `packages/db/drizzle/NNNN_presence_view.sql` — `CREATE VIEW presence AS SELECT ... FROM page_locks` per design.md Decision 5. No RED test precedes a pure view definition; its correctness is proven by 8.4–8.7 below.
+- [x] 8.3 GREEN: `apps/api/src/presence/broadcaster.ts` — in-memory `Map<workspaceId, Set<Subscriber>>` implementation of the `PresenceBroadcaster` port from Phase 2.
+- [x] 8.4 RED (non-disclosure, quality-bar flag — the highest-risk requirement in this change): a workspace member without `read` on page X receives **no event mentioning page X**, not even a page id with the title omitted. Build the fixture as a genuine **workspace-scoped fan-out** (broadcast to every workspace subscriber, then filter) so the test actually exercises per-subscriber filtering rather than a channel that was never workspace-wide to begin with; assert the id field is absent from the serialised frame, not merely that the title is absent — a test that only checks the title would pass against an implementation that still leaks the id.
+- [x] 8.5 GREEN: `apps/api/src/routes/presence.ts` — `GET /workspaces/:workspaceId/presence/stream`, `sessionMiddleware` then membership check to open the stream, then per-event `can(user, event.pageId, 'read')` before emitting, silently dropping otherwise.
+- [x] 8.6 RED: heartbeat route test — `PATCH /pages/:id/lock` refreshing the lock also publishes to the broadcaster in the same request; assert no other code path calls the broadcaster's publish method (structural/grep-style check).
+- [x] 8.7 GREEN: wire `heartbeatLock`'s success path in `page-lock.ts` to call `broadcaster.publish(...)`.
+- [x] 8.8 RED: the SSE route also polls the `presence` view on each keep-alive tick and emits presence not yet sent for that connection (multi-process degradation path from design.md Decision 5).
+- [x] 8.9 GREEN: keep-alive tick handler in `presence.ts` — poll `presence` view, diff against already-sent state per connection.
+- [x] 8.10 RED: `apps/api/src/index.test.ts` — the presence stream endpoint answers with `Access-Control-Allow-Origin`, proving it was registered via `app.route(...)` after `createApp()`'s CORS middleware, never at module scope (the `/health` failure mode from `index.ts:19-35`).
+- [x] 8.11 GREEN: mount `createPresenceRoutes(deps)` via `app.route('/', ...)` in `index.ts`'s `import.meta.main` block.
+- [x] 8.12 RED: stale presence (heartbeat past `PAGE_LOCK_TTL_SECONDS`) reports no active presence, with no separate presence TTL anywhere in the code.
 
 ## Phase 9: Remaining Route Wiring
 
-- [ ] 9.1 RED: `GET /pages/:id/history` returns revisions newest-first, gated by `can('read')`.
-- [ ] 9.2 GREEN: `apps/api/src/routes/revisions.ts`.
-- [ ] 9.3 RED: `GET /pages/:id/diff?from=&to=` loads two `page_revision.content` values and calls `diffBlocks()`, gated by `can('read')`; a book-level `GET .../diff?since=` aggregates changed pages from changesets.
-- [ ] 9.4 GREEN: `apps/api/src/routes/diff.ts`.
-- [ ] 9.5 Mount `revisions.ts` and `diff.ts` in `apps/api/src/index.ts` alongside Phase 8's presence and Phase 7's comments routes; re-run 8.10's CORS-registration pattern check against all four.
+- [x] 9.1 RED: `GET /pages/:id/history` returns revisions newest-first, gated by `can('read')`.
+- [x] 9.2 GREEN: `apps/api/src/routes/revisions.ts`.
+- [x] 9.3 RED: `GET /pages/:id/diff?from=&to=` loads two `page_revision.content` values and calls `diffBlocks()`, gated by `can('read')`; a book-level `GET .../diff?since=` aggregates changed pages from changesets.
+- [x] 9.4 GREEN: `apps/api/src/routes/diff.ts`.
+- [x] 9.5 Mount `revisions.ts` and `diff.ts` in `apps/api/src/index.ts` alongside Phase 8's presence and Phase 7's comments routes; re-run 8.10's CORS-registration pattern check against all four.
 
 ## Phase 10: UI Screens — One Owner-Review Gate Per Surface
 
