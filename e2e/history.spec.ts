@@ -64,6 +64,91 @@ test('a reader sees every revision newest-first, with its author and changeset m
 });
 
 /**
+ * The screen is only shipped if a user can get to it.
+ *
+ * `/pages/:id/history` existed, was unit-tested, and had a passing e2e
+ * suite above — and nothing anywhere linked to it, so it was reachable
+ * only by typing the URL. Every other test in this file starts with
+ * `page.goto(.../history)`, which is exactly why none of them could catch
+ * that: they would all still pass with the control deleted. **These two
+ * are the only tests here that fail if the affordance disappears**, so
+ * they navigate the way a user does — from the read screen, by the
+ * control — and never by address.
+ *
+ * Proven by deletion, not by assumption: with the `UTooltip`/`UButton`
+ * pair removed from `apps/web/app/pages/pages/[id]/index.vue`, both fail
+ * on the locator ("Revision history" resolves to nothing) while the five
+ * URL-driven tests around them stay green. That asymmetry is the whole
+ * point of the pair.
+ */
+test('the history screen is reachable from the read screen by its control, not only by its URL', async ({ page, context }) => {
+  await signInAs(context, fixtures.readerSessionToken);
+
+  await page.goto(`/pages/${fixtures.historyPageId}`);
+  await expect(page.getByRole('heading', { level: 1, name: 'E2E History Page' })).toBeVisible({ timeout: 30000 });
+
+  // By accessible name (docs/UI-CHECKLIST.md §7): the control is
+  // icon-only, so the name is the entire contract — a test that reached
+  // for a test id would pass on an unnamed glyph, which is the §4.3
+  // failure the name exists to prevent.
+  const history = page.getByRole('link', { name: 'Revision history' });
+  await expect(history).toBeVisible();
+
+  await history.click();
+
+  await expect(page).toHaveURL(`/pages/${fixtures.historyPageId}/history`);
+  await expect(page.getByRole('heading', { level: 1, name: 'Revision history' })).toBeVisible();
+  // Arrived at the history of *this* page, not merely at the route: the
+  // seeded page has two revisions and the empty one has none.
+  await expect(page.getByRole('listitem')).toHaveCount(2, { timeout: 30000 });
+});
+
+test('the history control is operable with the keyboard alone, and names itself on focus', async ({ page, context }) => {
+  await signInAs(context, fixtures.readerSessionToken);
+
+  await page.goto(`/pages/${fixtures.historyPageId}`);
+  await expect(page.getByRole('heading', { level: 1, name: 'E2E History Page' })).toBeVisible({ timeout: 30000 });
+
+  const history = page.getByRole('link', { name: 'Revision history' });
+  await expect(history).toBeVisible();
+
+  // Tabbed to, not focused programmatically: `.focus()` would pass on a
+  // control with `tabindex="-1"` that no keyboard user can ever reach.
+  // The bar is brand → history → Edit → theme toggle, so this lands on
+  // the second stop; the loop is bounded rather than fixed so a later
+  // chrome addition fails the *assertion* below instead of this line.
+  let tabs = 0;
+  while (tabs < 6 && !(await history.evaluate((element) => element === document.activeElement))) {
+    await page.keyboard.press('Tab');
+    tabs += 1;
+  }
+  await expect(history).toBeFocused();
+  expect(tabs).toBe(2);
+
+  // §4.3 wants both halves of an icon-only control. The accessible name
+  // is asserted by the locator above; the tooltip is the other half, and
+  // it must open on *focus* — a tooltip that only answers a hover is not
+  // available to the keyboard user this test is standing in for.
+  //
+  // Asserted through `aria-describedby` rather than `getByRole('tooltip')`
+  // deliberately: Reka renders the tooltip's screen-reader copy inside an
+  // `aria-hidden` popper wrapper, so the default role query resolves to
+  // nothing and a `getByRole('tooltip')` assertion would report the
+  // tooltip missing whether it was open or not. `aria-describedby` is
+  // also the actual contract — it is what carries the description to the
+  // user, not the role.
+  await expect(history).toHaveAttribute('data-state', /open/);
+  const describedBy = await history.getAttribute('aria-describedby');
+  expect(describedBy, 'focus must open the tooltip that names the glyph').not.toBeNull();
+  await expect(page.locator(`#${describedBy}`)).toHaveText('Revision history');
+
+  await page.keyboard.press('Enter');
+
+  await expect(page).toHaveURL(`/pages/${fixtures.historyPageId}/history`);
+  await expect(page.getByRole('heading', { level: 1, name: 'Revision history' })).toBeVisible();
+});
+
+/**
  * The owner decision of 2026-09-08: revision timestamps read in the
  * *viewer's* timezone, not UTC. Two real browsers in two real zones is
  * the only place that can be proved end to end — a unit test can force

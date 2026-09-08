@@ -27,6 +27,23 @@ const nodeId = route.params.id as string;
 
 const { status, html, title, message, load } = usePageRead(nodeId);
 
+/**
+ * Whether the app bar may offer the page's other two surfaces at all.
+ *
+ * `forbidden` and `not-found` are the two states where every route that
+ * takes this node id can only refuse: `/edit` denies, and `/history`
+ * answers with the byte-identical not-found the API deliberately returns
+ * for both absence and denial. Offering either is a dead end, not a
+ * transition (docs/UI-CHECKLIST.md §3, "Disabled" — a control with no
+ * honest enabled state is worse than absent). Loading and network-error
+ * are transient and keep both: the page may well resolve into one that
+ * has an editor and a history.
+ *
+ * One predicate, not one per control: the same rule written twice is two
+ * chances to drift (checklist §4.1).
+ */
+const offersPageSurfaces = computed(() => status.value !== 'forbidden' && status.value !== 'not-found');
+
 onMounted(() => {
   void load();
 });
@@ -38,6 +55,46 @@ useSeoMeta({ title: () => (title.value ? `${title.value} — deep-wiki` : 'deep-
 <template>
   <AppShell>
     <template #header-end>
+      <!-- The way to this page's revision history. Until now `/pages/:id/
+           history` was reachable only by typing the URL — a screen nobody
+           can navigate to is not shipped, which is this repository's
+           twice-repeated "route module nobody mounts" arriving one layer
+           up (scripts/checks/routes-mounted.ts).
+
+           It sits here, in the app bar, because that is where this page's
+           *other* view already lives: read/edit is the transition the
+           chrome carries, and history is the third view of the same node,
+           not content about it. checklist §4.1 asks a new control to match
+           the nearest existing one rather than invent a place, and the
+           nearest one is 6px to the right. Read mode is ~95% of this
+           product's traffic (docs/SPECS.md §5.3), so the chrome added here
+           is paid on every page view — one 28px control, at the quietest
+           emphasis the ladder has (`ghost` is M3's Text button,
+           docs/DESIGN-SYSTEM.md §9.1), before the emphasised Edit, the
+           same order edit mode already uses for "Read" then "Save".
+
+           Icon-only, which checklist §4.3 allows only "where space
+           genuinely forbids" a visible label — so it was measured, not
+           assumed. At 320x900 the bar holds the brand (143px at x=8),
+           "Edit" (64px at x=206) and the theme toggle (28px at x=276):
+           55px free, and a label of Edit's own shape already needs 70px
+           with its gap before "History" is spelled longer than "Edit".
+           §4.3's exception therefore binds, and it demands *both* halves —
+           an accessible name and a tooltip — because the same glyph is
+           ambiguous across icon packs. "Revision history", not "History":
+           the name has to survive being read on its own, and it is the
+           `<h1>` of the screen it lands on. -->
+      <UTooltip v-if="offersPageSurfaces" text="Revision history">
+        <UButton
+          icon="i-lucide-history"
+          variant="ghost"
+          color="neutral"
+          size="sm"
+          aria-label="Revision history"
+          :to="`/pages/${nodeId}/history`"
+        />
+      </UTooltip>
+
       <!-- Withheld on forbidden/not-found: offering an action the next
            screen can only refuse is a dead end, not a transition
            (docs/UI-CHECKLIST.md §3, "Disabled" — a control with no honest
@@ -45,7 +102,7 @@ useSeoMeta({ title: () => (title.value ? `${title.value} — deep-wiki` : 'deep-
            network-error: both are transient, and the page may well be
            editable once it resolves. -->
       <UButton
-        v-if="status !== 'forbidden' && status !== 'not-found'"
+        v-if="offersPageSurfaces"
         icon="i-lucide-pencil"
         variant="soft"
         color="primary"
