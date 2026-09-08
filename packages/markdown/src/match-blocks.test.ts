@@ -57,6 +57,19 @@ describe('matchBlocks: split', () => {
     const slots = result.assignments.filter((a) => a.status === 'active').map((a) => a.slot);
     expect(new Set(slots).size).toBe(2);
   });
+
+  // versioning-and-collaboration page-content spec: "Page Blocks Record
+  // Split Provenance" — the minted fragment's origin must be exposed on
+  // the result, not merely derivable from adjacency by the caller.
+  test('the minted fragment names the surviving original as its split origin', () => {
+    const previous = [{ id: 'id-0', text: 'Apples and oranges are tasty fruits, and bananas are also delicious.' }];
+    const next = ['Apples and oranges are tasty fruits.', 'Bananas are also delicious.'];
+
+    const result = matchBlocks(previous, next);
+
+    expect(result.mintedIds).toHaveLength(1);
+    expect(result.mintedIds[0]!.splitFrom).toBe('id-0');
+  });
 });
 
 describe('matchBlocks: merge', () => {

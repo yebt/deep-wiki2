@@ -58,10 +58,10 @@ Chain strategy: pending
 
 *Split provenance ships before any comment-anchor work (proposal headline sequencing requirement).*
 
-- [ ] 3.1 RED: `packages/db/src/content/rebuild-derived.test.ts` — a generated split (one previous block matches two adjacent next slots) asserts the minted fragment's `page_blocks.split_from` equals the surviving original's id. **Must fail today**: no `split_from` column exists.
-- [ ] 3.2 GREEN: migration `packages/db/drizzle/NNNN_block_split_provenance.sql` — `ALTER TABLE page_blocks ADD COLUMN split_from text` + composite FK `(page_id, split_from) REFERENCES page_blocks(page_id, block_id)`; update `packages/db/src/schema.ts`.
-- [ ] 3.3 GREEN: widen `MatchBlocksResult.mintedIds` in `packages/markdown/src/match-blocks.ts` to `Array<{ id: string; slot: number; splitFrom: string }>`, populated from pass 3's `assignment.id` (currently discarded per design.md Decision 1).
-- [ ] 3.4 GREEN: `upsertActiveBlock()` in `packages/db/src/content/rebuild-derived.ts:101` gains a `splitFrom?: string` parameter, written only on first insert — `ON CONFLICT DO UPDATE` must not touch it once set.
+- [x] 3.1 RED: `packages/db/src/content/rebuild-derived.test.ts` — a generated split (one previous block matches two adjacent next slots) asserts the minted fragment's `page_blocks.split_from` equals the surviving original's id. **Must fail today**: no `split_from` column exists.
+- [x] 3.2 GREEN: migration `packages/db/drizzle/NNNN_block_split_provenance.sql` — `ALTER TABLE page_blocks ADD COLUMN split_from text` + composite FK `(page_id, split_from) REFERENCES page_blocks(page_id, block_id)`; update `packages/db/src/schema.ts`.
+- [x] 3.3 GREEN: widen `MatchBlocksResult.mintedIds` in `packages/markdown/src/match-blocks.ts` to `Array<{ id: string; slot: number; splitFrom: string }>`, populated from pass 3's `assignment.id` (currently discarded per design.md Decision 1).
+- [x] 3.4 GREEN: `upsertActiveBlock()` in `packages/db/src/content/rebuild-derived.ts:101` gains a `splitFrom?: string` parameter, written only on first insert — `ON CONFLICT DO UPDATE` must not touch it once set.
 - [ ] 3.5 RED: property test over generated split/merge/delete sequences (`packages/db` against provisioned test Postgres) — every `superseded_by` chain resolves to a status `'active'` terminal survivor with no cycle and depth ≤ 64.
 - [ ] 3.6 GREEN: recursive CTE chain-compression query, run inside the save transaction immediately after `reconcileBlocks` writes its edges (design.md Decision 1, "Chain resolution and compression"). Cycle guard `NOT b.block_id = ANY(c.path)` and `depth < 64` must both fail loudly (thrown error), not loop silently.
 - [ ] 3.7 RED: `packages/db/src/revisions/*.test.ts` — inserting a `page_revision` with a cross-tenant `(page_id, workspace_id)` or `(changeset_id, workspace_id)` pair is rejected by the FK.

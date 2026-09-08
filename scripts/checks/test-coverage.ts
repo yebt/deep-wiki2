@@ -147,10 +147,6 @@ export const ALLOW_LIST: readonly Exemption[] = [
     reason: 'Coverage debt: the permissions write path has no test of its own.',
   },
   {
-    file: 'packages/db/src/content/rebuild-derived.ts',
-    reason: 'Coverage debt: derived-row reconciliation is exercised only indirectly through save-page.test.ts.',
-  },
-  {
     file: 'packages/contracts/src/pages.ts',
     reason: 'Coverage debt: the page request/response schemas have no test of their own.',
   },

@@ -22,8 +22,12 @@ export interface BlockAssignment {
 
 export interface MatchBlocksResult {
   assignments: BlockAssignment[];
-  /** Freshly minted ids for new fragments produced by a split, mapped to their slot in `next`. */
-  mintedIds: Array<{ id: string; slot: number }>;
+  /**
+   * Freshly minted ids for new fragments produced by a split, mapped to
+   * their slot in `next` and the id of the block they split from
+   * (page-content spec: "Page Blocks Record Split Provenance").
+   */
+  mintedIds: Array<{ id: string; slot: number; splitFrom: string }>;
 }
 
 /**
@@ -189,7 +193,7 @@ export function matchBlocks(previous: PersistedBlockRecord[], next: string[]): M
   // in document order, to the fragment that *did* win, and still shares at
   // least some content with the original (ruling out an unrelated
   // paragraph that merely happens to land next to a matched one).
-  const mintedIds: Array<{ id: string; slot: number }> = [];
+  const mintedIds: Array<{ id: string; slot: number; splitFrom: string }> = [];
   const mintedSoFar = new Set(previous.map((b) => b.id));
 
   for (const assignment of assignments) {
@@ -204,7 +208,7 @@ export function matchBlocks(previous: PersistedBlockRecord[], next: string[]): M
       const freshId = mintBlockId(mintedSoFar);
       mintedSoFar.add(freshId);
       claimedSlots.add(adjacentSlot);
-      mintedIds.push({ id: freshId, slot: adjacentSlot });
+      mintedIds.push({ id: freshId, slot: adjacentSlot, splitFrom: assignment.id });
       assignments.push({ id: freshId, status: 'active', slot: adjacentSlot, score });
     }
   }

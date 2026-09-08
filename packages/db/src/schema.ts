@@ -234,6 +234,8 @@ export const pageBlocks = pgTable('page_blocks', {
   blockId: text('block_id').notNull(),
   status: blockStatus('status').notNull(),
   supersededBy: text('superseded_by'),
+  /** The id of the block this one split from, written once at insert (0011_block_split_provenance.sql). */
+  splitFrom: text('split_from'),
   contentHash: text('content_hash').notNull(),
   excerpt: text('excerpt').notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

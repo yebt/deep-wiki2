@@ -98,10 +98,17 @@ async function replaceTags(tx: SqlExecutor, nodeId: string, workspaceId: string,
   }
 }
 
-async function upsertActiveBlock(tx: SqlExecutor, nodeId: string, workspaceId: string, blockId: string, text: string): Promise<void> {
+async function upsertActiveBlock(
+  tx: SqlExecutor,
+  nodeId: string,
+  workspaceId: string,
+  blockId: string,
+  text: string,
+  splitFrom?: string,
+): Promise<void> {
   await tx`
-    INSERT INTO page_blocks (page_id, workspace_id, block_id, status, content_hash, excerpt)
-    VALUES (${nodeId}, ${workspaceId}, ${blockId}, 'active', ${excerptHashOf(text)}, ${excerptOf(text)})
+    INSERT INTO page_blocks (page_id, workspace_id, block_id, status, content_hash, excerpt, split_from)
+    VALUES (${nodeId}, ${workspaceId}, ${blockId}, 'active', ${excerptHashOf(text)}, ${excerptOf(text)}, ${splitFrom ?? null})
     ON CONFLICT (page_id, block_id) DO UPDATE SET
       status = 'active', superseded_by = NULL, content_hash = EXCLUDED.content_hash,
       excerpt = EXCLUDED.excerpt, updated_at = now()
@@ -143,8 +150,17 @@ async function reconcileBlocks(
 
   const { assignments, mintedIds } = matchBlocks(previousRecords, nextTexts);
   const handledIds = new Set<string>();
+  // `matchBlocks`' pass 3 also pushes each minted id into `assignments`
+  // (status 'active', no splitFrom) so callers that only read `assignments`
+  // still see it. That entry must NOT be upserted here: doing so would
+  // INSERT the row before the mintedIds loop below runs, and the
+  // ON CONFLICT DO UPDATE branch never touches `split_from` — silently
+  // discarding the very origin this task exists to persist. The mintedIds
+  // loop below is the sole writer for every freshly minted id.
+  const mintedIdSet = new Set(mintedIds.map((minted) => minted.id));
 
   for (const assignment of assignments) {
+    if (mintedIdSet.has(assignment.id)) continue;
     handledIds.add(assignment.id);
     if (assignment.status === 'active') {
       await upsertActiveBlock(tx, nodeId, workspaceId, assignment.id, nextTexts[assignment.slot!]!);
@@ -163,7 +179,7 @@ async function reconcileBlocks(
 
   for (const minted of mintedIds) {
     handledIds.add(minted.id);
-    await upsertActiveBlock(tx, nodeId, workspaceId, minted.id, nextTexts[minted.slot]!);
+    await upsertActiveBlock(tx, nodeId, workspaceId, minted.id, nextTexts[minted.slot]!, minted.splitFrom);
   }
 
   // First-time registration: an anchor can arrive already written into the
