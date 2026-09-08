@@ -136,6 +136,16 @@ useSeoMeta({ title: 'Revision history — deep-wiki' });
               <UIcon name="i-lucide-user-round" class="size-4 shrink-0 text-muted" aria-hidden="true" />
               <span class="truncate">{{ revision.authorDisplayName ?? 'Unknown author' }}</span>
             </p>
+            <!-- The timestamp reads in the VIEWER's timezone (owner
+                 decision, 2026-09-08), which is only safe because this
+                 list is fetched in `onMounted` and so is never
+                 server-rendered — see `formatRevisionDate`'s note.
+                 Moving this fetch to `useAsyncData`/`useFetch` would
+                 render these rows on the server, in the SERVER's zone,
+                 and hydrate into a mismatch. `datetime` carries the
+                 instant itself, so the exact moment survives the display
+                 choice either way; `e2e/history.spec.ts` holds both
+                 halves against two real browser timezones. -->
             <p class="mt-1 text-body-medium text-muted">
               <time :datetime="revision.createdAt">{{ formatRevisionDate(revision.createdAt) }}</time>
               <span v-if="revision.changesetId"> · Part of a changeset</span>
