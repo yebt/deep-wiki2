@@ -64,10 +64,10 @@ Chain strategy: pending
 - [x] 3.4 GREEN: `upsertActiveBlock()` in `packages/db/src/content/rebuild-derived.ts:101` gains a `splitFrom?: string` parameter, written only on first insert — `ON CONFLICT DO UPDATE` must not touch it once set.
 - [x] 3.5 RED: property test over generated split/merge/delete sequences (`packages/db` against provisioned test Postgres) — every `superseded_by` chain resolves to a status `'active'` terminal survivor with no cycle and depth ≤ 64.
 - [x] 3.6 GREEN: recursive CTE chain-compression query, run inside the save transaction immediately after `reconcileBlocks` writes its edges (design.md Decision 1, "Chain resolution and compression"). Cycle guard `NOT b.block_id = ANY(c.path)` and `depth < 64` must both fail loudly (thrown error), not loop silently.
-- [ ] 3.7 RED: `packages/db/src/revisions/*.test.ts` — inserting a `page_revision` with a cross-tenant `(page_id, workspace_id)` or `(changeset_id, workspace_id)` pair is rejected by the FK.
-- [ ] 3.8 GREEN: migration `packages/db/drizzle/NNNN_page_revisions_and_changesets.sql` — `changeset` (`closed_at`, partial unique index `changeset_open_per_author_idx` on `(workspace_id, book_id, author_id) WHERE closed_at IS NULL`, `UNIQUE (id, workspace_id)`, book-only CHECK), `page_revision` (columns and indexes per design.md Decision 7), `BEFORE UPDATE` immutability trigger on `page_revision` that raises. Update `packages/db/src/schema.ts`.
-- [ ] 3.9 RED: attempt an `UPDATE` on an existing `page_revision` row in a test and assert it raises.
-- [ ] 3.10 GREEN: confirm the trigger from 3.8 satisfies 3.9 (no separate implementation task — verifies the migration, not new code).
+- [x] 3.7 RED: `packages/db/src/revisions/*.test.ts` — inserting a `page_revision` with a cross-tenant `(page_id, workspace_id)` or `(changeset_id, workspace_id)` pair is rejected by the FK.
+- [x] 3.8 GREEN: migration `packages/db/drizzle/NNNN_page_revisions_and_changesets.sql` — `changeset` (`closed_at`, partial unique index `changeset_open_per_author_idx` on `(workspace_id, book_id, author_id) WHERE closed_at IS NULL`, `UNIQUE (id, workspace_id)`, book-only CHECK), `page_revision` (columns and indexes per design.md Decision 7), `BEFORE UPDATE` immutability trigger on `page_revision` that raises. Update `packages/db/src/schema.ts`.
+- [x] 3.9 RED: attempt an `UPDATE` on an existing `page_revision` row in a test and assert it raises.
+- [x] 3.10 GREEN: confirm the trigger from 3.8 satisfies 3.9 (no separate implementation task — verifies the migration, not new code).
 - [ ] 3.11 REFACTOR: extract the chain-compression CTE and the changeset-resolution statements into named functions in `packages/db/src/content/rebuild-derived.ts` / a new `packages/db/src/changesets/resolve-changeset.ts`, keeping `savePage()`'s own transaction body readable per design.md Decision 3's ordering list.
 
 ## Phase 4: Block Diff Engine (pure, `packages/markdown`)

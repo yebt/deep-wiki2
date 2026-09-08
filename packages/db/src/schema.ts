@@ -308,3 +308,44 @@ export const pageLocks = pgTable('page_locks', {
   takenOverFrom: uuid('taken_over_from').references(() => users.id, { onDelete: 'set null' }),
   takenOverAt: timestamp('taken_over_at', { withTimezone: true }),
 });
+
+/**
+ * Book-scoped, implicit grouping of page revisions by author and window
+ * (versioning-and-collaboration design.md Decision 3, changesets spec).
+ * The composite `(book_id, workspace_id, book_node_type)` FK into `nodes`
+ * and the `changeset_open_per_author_idx` partial unique index are
+ * declared only in the migration SQL.
+ */
+export const changeset = pgTable('changeset', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  workspaceId: uuid('workspace_id')
+    .notNull()
+    .references(() => workspaces.id, { onDelete: 'cascade' }),
+  bookId: uuid('book_id').notNull(),
+  bookNodeType: nodeType('book_node_type').notNull().default('book'),
+  authorId: uuid('author_id').references(() => users.id, { onDelete: 'set null' }),
+  message: text('message'),
+  lastActivityAt: timestamp('last_activity_at', { withTimezone: true }).notNull().defaultNow(),
+  closedAt: timestamp('closed_at', { withTimezone: true }),
+});
+
+/**
+ * An immutable snapshot of a page's canonical Markdown and block index,
+ * written inside the same transaction as the ordinary save (design.md
+ * Decision 7, revision-history spec). The composite FKs into
+ * `page_content` and `changeset`, and the `BEFORE UPDATE`
+ * immutability trigger, are declared only in the migration SQL.
+ */
+export const pageRevision = pgTable('page_revision', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  workspaceId: uuid('workspace_id')
+    .notNull()
+    .references(() => workspaces.id, { onDelete: 'cascade' }),
+  pageId: uuid('page_id').notNull(),
+  authorId: uuid('author_id').references(() => users.id, { onDelete: 'set null' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  content: text('content').notNull(),
+  contentHash: text('content_hash').notNull(),
+  blockIndex: jsonb('block_index').notNull().default({}),
+  changesetId: uuid('changeset_id'),
+});

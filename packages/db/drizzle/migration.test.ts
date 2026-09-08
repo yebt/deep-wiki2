@@ -164,6 +164,53 @@ describe('after migrate: hand-written objects exist', () => {
     `;
     expect(fk).toHaveLength(1);
   });
+
+  test('page_blocks carries the split_from column and its composite self-referential foreign key', async () => {
+    const columns = await sql<{ column_name: string }[]>`
+      SELECT column_name FROM information_schema.columns
+      WHERE table_name = 'page_blocks' AND column_name = 'split_from'
+    `;
+    expect(columns).toHaveLength(1);
+
+    const fk = await sql<{ conname: string }[]>`
+      SELECT conname FROM pg_constraint
+      WHERE conrelid = 'page_blocks'::regclass AND conname = 'page_blocks_split_from_fk' AND contype = 'f'
+    `;
+    expect(fk).toHaveLength(1);
+  });
+
+  test('changeset and page_revision exist with their composite foreign keys and the immutability trigger', async () => {
+    const tables = await sql<{ tablename: string }[]>`
+      SELECT tablename FROM pg_tables WHERE tablename IN ('changeset', 'page_revision') ORDER BY tablename
+    `;
+    expect(tables.map((r) => r.tablename)).toEqual(['changeset', 'page_revision']);
+
+    const bookFk = await sql<{ conname: string }[]>`
+      SELECT conname FROM pg_constraint
+      WHERE conrelid = 'changeset'::regclass AND conname = 'changeset_book_fk' AND contype = 'f'
+    `;
+    expect(bookFk).toHaveLength(1);
+
+    const openPerAuthorIdx = await sql<{ indexname: string }[]>`
+      SELECT indexname FROM pg_indexes WHERE tablename = 'changeset' AND indexname = 'changeset_open_per_author_idx'
+    `;
+    expect(openPerAuthorIdx).toHaveLength(1);
+
+    const revisionFks = await sql<{ conname: string }[]>`
+      SELECT conname FROM pg_constraint
+      WHERE conrelid = 'page_revision'::regclass AND contype = 'f'
+      ORDER BY conname
+    `;
+    const revisionFkNames = revisionFks.map((r) => r.conname);
+    expect(revisionFkNames).toContain('page_revision_changeset_fk');
+    expect(revisionFkNames).toContain('page_revision_page_fk');
+
+    const trigger = await sql<{ tgname: string }[]>`
+      SELECT tgname FROM pg_trigger
+      WHERE tgrelid = 'page_revision'::regclass AND tgname = 'page_revision_forbid_update_trigger'
+    `;
+    expect(trigger).toHaveLength(1);
+  });
 });
 
 /**
@@ -173,6 +220,52 @@ describe('after migrate: hand-written objects exist', () => {
  * later down has already dropped them — the same dependency order the up
  * migrations establish, in reverse.
  */
+describe('0012_page_revisions_and_changesets down migration', () => {
+  test('reverses cleanly: page_revision, changeset and the immutability trigger are all gone', async () => {
+    const rollback = await provisionTestDatabase();
+    const rollbackSql = postgres(rollback.url, { max: 1 });
+    try {
+      const downSql = await Bun.file(
+        new URL('./down/0012_page_revisions_and_changesets.down.sql', import.meta.url),
+      ).text();
+      await rollbackSql.unsafe(downSql);
+
+      const tables = await rollbackSql<{ tablename: string }[]>`
+        SELECT tablename FROM pg_tables WHERE tablename IN ('page_revision', 'changeset')
+      `;
+      expect(tables).toHaveLength(0);
+
+      const trigger = await rollbackSql<{ tgname: string }[]>`SELECT tgname FROM pg_trigger WHERE tgname = 'page_revision_forbid_update_trigger'`;
+      expect(trigger).toHaveLength(0);
+    } finally {
+      await rollbackSql.end({ timeout: 1 }).catch(() => {});
+      await rollback.drop();
+    }
+  });
+});
+
+describe('0011_block_split_provenance down migration', () => {
+  test('reverses cleanly: split_from and its foreign key are gone', async () => {
+    const rollback = await provisionTestDatabase();
+    const rollbackSql = postgres(rollback.url, { max: 1 });
+    try {
+      const downSql = await Bun.file(
+        new URL('./down/0011_block_split_provenance.down.sql', import.meta.url),
+      ).text();
+      await rollbackSql.unsafe(downSql);
+
+      const columns = await rollbackSql<{ column_name: string }[]>`
+        SELECT column_name FROM information_schema.columns
+        WHERE table_name = 'page_blocks' AND column_name = 'split_from'
+      `;
+      expect(columns).toHaveLength(0);
+    } finally {
+      await rollbackSql.end({ timeout: 1 }).catch(() => {});
+      await rollback.drop();
+    }
+  });
+});
+
 describe('0010_page_locks down migration', () => {
   test('reverses cleanly: page_locks is gone', async () => {
     const rollback = await provisionTestDatabase();
@@ -216,9 +309,25 @@ describe('0008_page_content down migration', () => {
     const rollback = await provisionTestDatabase();
     const rollbackSql = postgres(rollback.url, { max: 1 });
     try {
-      // 0009's and 0010's tables carry foreign keys into page_content —
-      // their down migrations must run first, exactly as a real rollback
-      // would (0010 -> 0009 -> 0008).
+      // 0009's, 0010's, 0011's and 0012's tables/columns all carry foreign
+      // keys into page_content or page_blocks — their down migrations must
+      // run first, exactly as a real rollback would
+      // (0012 -> 0011 -> 0010 -> 0009 -> 0008). This is the exact trap
+      // named in the versioning-and-collaboration tasks: a migration whose
+      // columns reference an earlier migration's table breaks that
+      // earlier migration's isolated down-test until the newer one's down
+      // runs first — only the full suite catches it, a filtered run will
+      // not, because a filtered run never executes this shared ordering.
+      const pageRevisionsDown = await Bun.file(
+        new URL('./down/0012_page_revisions_and_changesets.down.sql', import.meta.url),
+      ).text();
+      await rollbackSql.unsafe(pageRevisionsDown);
+
+      const splitProvenanceDown = await Bun.file(
+        new URL('./down/0011_block_split_provenance.down.sql', import.meta.url),
+      ).text();
+      await rollbackSql.unsafe(splitProvenanceDown);
+
       const pageLocksDown = await Bun.file(new URL('./down/0010_page_locks.down.sql', import.meta.url)).text();
       await rollbackSql.unsafe(pageLocksDown);
 
