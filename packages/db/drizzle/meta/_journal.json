@@ -92,6 +92,13 @@
       "when": 1735689600012,
       "tag": "0012_page_revisions_and_changesets",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1735689600013,
+      "tag": "0013_comments",
+      "breakpoints": true
     }
   ]
 }

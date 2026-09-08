@@ -349,3 +349,31 @@ export const pageRevision = pgTable('page_revision', {
   blockIndex: jsonb('block_index').notNull().default({}),
   changesetId: uuid('changeset_id'),
 });
+
+/**
+ * One table for both thread roots and replies (versioning-and-collaboration
+ * design.md Decision 1; comment-threads/comment-overlay specs). A root row
+ * (`parentId` null) carries the anchor and resolution state; a reply
+ * carries none of its own. The composite FKs into `page_content` and
+ * `page_blocks`, the self-referential `parentId` FK, and the
+ * `comments_root_has_anchor` CHECK are declared only in the migration SQL.
+ */
+export const comments = pgTable('comments', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  workspaceId: uuid('workspace_id')
+    .notNull()
+    .references(() => workspaces.id, { onDelete: 'cascade' }),
+  pageId: uuid('page_id').notNull(),
+  parentId: uuid('parent_id'),
+  authorId: uuid('author_id').references(() => users.id, { onDelete: 'set null' }),
+  body: text('body').notNull(),
+  blockId: text('block_id'),
+  offsetStart: integer('offset_start'),
+  offsetEnd: integer('offset_end'),
+  quote: text('quote'),
+  quoteHash: text('quote_hash'),
+  status: text('status'),
+  resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+  resolvedBy: uuid('resolved_by').references(() => users.id, { onDelete: 'set null' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});

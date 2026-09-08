@@ -211,15 +211,58 @@ describe('after migrate: hand-written objects exist', () => {
     `;
     expect(trigger).toHaveLength(1);
   });
+
+  test('comments exists with its composite foreign keys and the root-has-anchor CHECK', async () => {
+    const tables = await sql<{ tablename: string }[]>`
+      SELECT tablename FROM pg_tables WHERE tablename = 'comments'
+    `;
+    expect(tables).toHaveLength(1);
+
+    const fks = await sql<{ conname: string }[]>`
+      SELECT conname FROM pg_constraint
+      WHERE conrelid = 'comments'::regclass AND contype = 'f'
+      ORDER BY conname
+    `;
+    const fkNames = fks.map((r) => r.conname);
+    expect(fkNames).toContain('comments_page_fk');
+    expect(fkNames).toContain('comments_block_fk');
+    expect(fkNames).toContain('comments_parent_fk');
+
+    const check = await sql<{ conname: string }[]>`
+      SELECT conname FROM pg_constraint
+      WHERE conrelid = 'comments'::regclass AND conname = 'comments_root_has_anchor' AND contype = 'c'
+    `;
+    expect(check).toHaveLength(1);
+  });
 });
 
 /**
- * Rollback order is `0010 -> 0009 -> 0008` (design.md "Migration /
- * Rollout"): `links`/`page_tags`/`page_locks` all carry foreign keys into
- * `page_content`, so 0008's down migration can only run cleanly once every
- * later down has already dropped them — the same dependency order the up
- * migrations establish, in reverse.
+ * Rollback order is `0013 -> 0012 -> ... -> 0008` (design.md "Migration /
+ * Rollout"): `links`/`page_tags`/`page_locks`/`comments` all carry foreign
+ * keys into `page_content` (`comments` also into `page_blocks`), so 0008's
+ * down migration can only run cleanly once every later down has already
+ * dropped them — the same dependency order the up migrations establish, in
+ * reverse.
  */
+describe('0013_comments down migration', () => {
+  test('reverses cleanly: comments is gone', async () => {
+    const rollback = await provisionTestDatabase();
+    const rollbackSql = postgres(rollback.url, { max: 1 });
+    try {
+      const downSql = await Bun.file(new URL('./down/0013_comments.down.sql', import.meta.url)).text();
+      await rollbackSql.unsafe(downSql);
+
+      const tables = await rollbackSql<{ tablename: string }[]>`
+        SELECT tablename FROM pg_tables WHERE tablename = 'comments'
+      `;
+      expect(tables).toHaveLength(0);
+    } finally {
+      await rollbackSql.end({ timeout: 1 }).catch(() => {});
+      await rollback.drop();
+    }
+  });
+});
+
 describe('0012_page_revisions_and_changesets down migration', () => {
   test('reverses cleanly: page_revision, changeset and the immutability trigger are all gone', async () => {
     const rollback = await provisionTestDatabase();
@@ -309,15 +352,18 @@ describe('0008_page_content down migration', () => {
     const rollback = await provisionTestDatabase();
     const rollbackSql = postgres(rollback.url, { max: 1 });
     try {
-      // 0009's, 0010's, 0011's and 0012's tables/columns all carry foreign
-      // keys into page_content or page_blocks — their down migrations must
-      // run first, exactly as a real rollback would
-      // (0012 -> 0011 -> 0010 -> 0009 -> 0008). This is the exact trap
-      // named in the versioning-and-collaboration tasks: a migration whose
-      // columns reference an earlier migration's table breaks that
+      // 0009's, 0010's, 0011's, 0012's and 0013's tables/columns all carry
+      // foreign keys into page_content or page_blocks — their down
+      // migrations must run first, exactly as a real rollback would
+      // (0013 -> 0012 -> 0011 -> 0010 -> 0009 -> 0008). This is the exact
+      // trap named in the versioning-and-collaboration tasks: a migration
+      // whose columns reference an earlier migration's table breaks that
       // earlier migration's isolated down-test until the newer one's down
       // runs first — only the full suite catches it, a filtered run will
       // not, because a filtered run never executes this shared ordering.
+      const commentsDown = await Bun.file(new URL('./down/0013_comments.down.sql', import.meta.url)).text();
+      await rollbackSql.unsafe(commentsDown);
+
       const pageRevisionsDown = await Bun.file(
         new URL('./down/0012_page_revisions_and_changesets.down.sql', import.meta.url),
       ).text();
