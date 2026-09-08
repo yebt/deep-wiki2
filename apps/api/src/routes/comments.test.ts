@@ -41,6 +41,7 @@ interface Fixture {
   readonly readerCookie: string;
   readonly commenterCookie: string;
   readonly commenterUserId: string;
+  readonly commenterEmail: string;
   readonly outsiderCookie: string;
   readonly mentionedReaderUserId: string;
   readonly mentionedReaderEmail: string;
@@ -65,7 +66,8 @@ async function buildFixture(): Promise<Fixture> {
     INSERT INTO users (email, password_hash, display_name) VALUES (${`owner-${crypto.randomUUID()}@example.com`}, 'hash', 'Owner') RETURNING id
   `;
   const reader = await seedUser(`reader-${crypto.randomUUID()}@example.com`);
-  const commenter = await seedUser(`commenter-${crypto.randomUUID()}@example.com`);
+  const commenterEmail = `commenter-${crypto.randomUUID()}@example.com`;
+  const commenter = await seedUser(commenterEmail);
   const mentionedNoReadEmail = `noread-${crypto.randomUUID()}@example.com`;
   const mentionedNoRead = await seedUser(mentionedNoReadEmail);
   // A mentionable recipient who is neither the comment's author nor the
@@ -110,6 +112,7 @@ async function buildFixture(): Promise<Fixture> {
     readerCookie: await cookieFor(reader),
     commenterCookie: await cookieFor(commenter),
     commenterUserId: commenter,
+    commenterEmail,
     outsiderCookie: await cookieFor(outsider),
     mentionedReaderUserId: mentionedReader,
     mentionedReaderEmail,
@@ -319,12 +322,27 @@ describe('POST /pages/:id/comments — anchor minting', () => {
       }),
     });
 
+    // Minting is asserted from storage first, and on its own terms. Every
+    // way of breaking it also trips comments_block_fk and turns the route's
+    // answer into a 500, so a leading `expect(res.status).toBe(201)` would
+    // swallow every distinct failure into one status-code mismatch —
+    // "anchor not minted" and "route crashed" would look identical.
+    const [row] = await sql<{ markdown: string }[]>`SELECT markdown FROM page_content WHERE node_id = ${fixture.pageId}`;
+    const [persistedBlock] = sliceBlocks(parse(row!.markdown), row!.markdown);
+    expect(persistedBlock!.anchorId).not.toBeNull();
+    expect(row!.markdown).toContain(`^${persistedBlock!.anchorId}`);
+
+    // The reconciled block row must name the same anchor the markdown does.
+    const [blockRow] = await sql<{ block_id: string }[]>`
+      SELECT block_id FROM page_blocks WHERE page_id = ${fixture.pageId} AND status = 'active'
+    `;
+    expect(blockRow!.block_id).toBe(persistedBlock!.anchorId);
+
+    // Only now the route's own answer, and the comment it wrote.
     expect(res.status).toBe(201);
     const created = (await res.json()) as { id: string; blockId: string };
+    expect(created.blockId).toBe(persistedBlock!.anchorId);
     expect(created.blockId).not.toBe(derivedBlock!.id);
-
-    const [row] = await sql<{ markdown: string }[]>`SELECT markdown FROM page_content WHERE node_id = ${fixture.pageId}`;
-    expect(row!.markdown).toContain(`^${created.blockId}`);
 
     const [commentRow] = await sql<{ block_id: string }[]>`SELECT block_id FROM comments WHERE id = ${created.id}`;
     expect(commentRow!.block_id).toBe(created.blockId);
@@ -385,9 +403,42 @@ describe('POST /pages/:id/comments — mentions', () => {
 
     expect(res.status).toBe(201);
     expect(mailSender.sent).toHaveLength(0);
-    // No credential/hash/token, and no evidence of the mention's existence,
-    // ever reaches the recording sender either — there is nothing sent at all.
-    expect(mailSender.sent.map((s) => s.to)).not.toContain(fixture.mentionedNoReadEmail);
+  });
+
+  // The `not.toContain` above used to sit immediately after a
+  // `toHaveLength(0)`, where it could never fail on its own. Here it is the
+  // load-bearing assertion: one notification *is* sent, so "the unreadable
+  // recipient is not among the addressees" is a real discrimination.
+  test('mentioning a readable and an unreadable user in one comment notifies only the readable one', async () => {
+    const fixture = await buildFixture();
+    await sql`
+      INSERT INTO page_content (node_id, workspace_id, markdown, content_hash)
+      VALUES (${fixture.pageId}, ${fixture.workspaceId}, 'Some text. ^blockh\n', 'hash')
+    `;
+    await sql`
+      INSERT INTO page_blocks (page_id, workspace_id, block_id, status, content_hash, excerpt)
+      VALUES (${fixture.pageId}, ${fixture.workspaceId}, 'blockh', 'active', 'h', 'excerpt')
+    `;
+    const mailSender = new RecordingMailSender();
+    const app = buildApp(mailSender);
+
+    const res = await app.request(`/pages/${fixture.pageId}/comments`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie: fixture.commenterCookie },
+      body: JSON.stringify({
+        blockId: 'blockh',
+        offsetStart: 0,
+        offsetEnd: 4,
+        quote: 'Some',
+        body: 'hi',
+        mentionedUserIds: [fixture.mentionedNoReadUserId, fixture.mentionedReaderUserId],
+      }),
+    });
+
+    expect(res.status).toBe(201);
+    const recipients = mailSender.sent.map((sent) => sent.to);
+    expect(recipients).toEqual([fixture.mentionedReaderEmail]);
+    expect(recipients).not.toContain(fixture.mentionedNoReadEmail);
   });
 
   test('a mention sends exactly one notification to a user who can read the page', async () => {
@@ -406,17 +457,25 @@ describe('POST /pages/:id/comments — mentions', () => {
     const res = await app.request(`/pages/${fixture.pageId}/comments`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', cookie: fixture.commenterCookie },
+      // A recipient distinct from the comment's own author: mentioning the
+      // author back would let a route that mails the wrong person still
+      // look correct.
       body: JSON.stringify({
         blockId: 'blockd',
         offsetStart: 0,
         offsetEnd: 4,
         quote: 'Some',
         body: 'hi',
-        mentionedUserIds: [fixture.commenterUserId],
+        mentionedUserIds: [fixture.mentionedReaderUserId],
       }),
     });
 
     expect(res.status).toBe(201);
     expect(mailSender.sent).toHaveLength(1);
+    // "Exactly one notification" is only half the claim; "to the mentioned
+    // user" is the other half, and it is the half an attacker cares about.
+    expect(mailSender.sent[0]!.to).toBe(fixture.mentionedReaderEmail);
+    expect(mailSender.sent[0]!.to).not.toBe(fixture.commenterEmail);
+    expect(mailSender.sent[0]!.to).not.toBe(fixture.mentionedNoReadEmail);
   });
 });
