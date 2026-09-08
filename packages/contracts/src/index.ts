@@ -96,3 +96,6 @@ export type {
   CreateCommentResponse,
   SetThreadResolvedRequest,
 } from './comments';
+
+export { PresenceEventSchema } from './presence';
+export type { PresenceEventPayload } from './presence';
