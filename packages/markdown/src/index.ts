@@ -25,8 +25,16 @@ export { sliceBlocks } from './blocks';
 export type { BlockSlice } from './blocks';
 export { chunk } from './chunk';
 export type { Chunk, ChunkOptions } from './chunk';
-export { deriveBlockId, matchBlocks, mintBlockId, MATCH_THRESHOLD } from './match-blocks';
+export {
+  ANCHOR_CONTAINMENT_THRESHOLD,
+  deriveBlockId,
+  matchBlocks,
+  mintBlockId,
+  MATCH_THRESHOLD,
+  trigramContainment,
+} from './match-blocks';
 export type { BlockAssignment, BlockAssignmentStatus, MatchBlocksResult, PersistedBlockRecord } from './match-blocks';
+export { diffBlocks } from './diff-blocks';
 export { CURRENT_PIPELINE_VERSION, render } from './render';
 export { PINNED_OPTIONS, canonicalise, parse, stringify } from './pipeline';
 export type { ParseOptions } from './pipeline';

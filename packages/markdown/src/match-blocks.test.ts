@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { deriveBlockId, MATCH_THRESHOLD, matchBlocks, mintBlockId } from './match-blocks';
+import { deriveBlockId, MATCH_THRESHOLD, matchBlocks, mintBlockId, trigramContainment } from './match-blocks';
 
 // markdown-pipeline: Block Split Assigns The Original ID / Block Merge Keeps
 // One ID And Supersedes / Block Delete Tombstones The ID. design.md "Block
@@ -208,3 +208,46 @@ describe('mintBlockId', () => {
     expect(existing.has(minted)).toBe(false);
   });
 });
+
+// versioning-and-collaboration design.md Decision 1 ("The comment anchor
+// mechanism"): trigramContainment(a, b) = |trigrams(a) ∩ trigrams(b)| /
+// |trigrams(a)| — asymmetric, unlike matchBlocks' own Dice coefficient.
+// Every token here is unique so trigram counts are exact and controllable:
+// a 102-token sequence has exactly 100 distinct trigrams, and a prefix of
+// that same token stream reproduces exactly its first N trigrams with no
+// accidental extra overlap.
+function distinctTokens(count: number): string[] {
+  return Array.from({ length: count }, (_, i) => `word${i}`);
+}
+
+describe('trigramContainment: boundary behaviour at 0.8', () => {
+  const quote = distinctTokens(102).join(' '); // 100 distinct trigrams
+
+  test('0.79 does not clear the threshold', () => {
+    const candidate = distinctTokens(102).slice(0, 81).join(' '); // 79 shared trigrams
+    const score = trigramContainment(quote, candidate);
+
+    expect(score).toBeCloseTo(0.79, 10);
+    expect(score).toBeLessThan(0.8);
+  });
+
+  test('0.80 clears the threshold', () => {
+    const candidate = distinctTokens(102).slice(0, 82).join(' '); // 80 shared trigrams
+    const score = trigramContainment(quote, candidate);
+
+    expect(score).toBeCloseTo(0.8, 10);
+    expect(score).toBeGreaterThanOrEqual(0.8);
+  });
+
+  test('is asymmetric under argument swap', () => {
+    const candidate = distinctTokens(102).slice(0, 82).join(' '); // strict subset of quote's trigrams
+
+    const quoteFirst = trigramContainment(quote, candidate);
+    const candidateFirst = trigramContainment(candidate, quote);
+
+    expect(quoteFirst).toBeCloseTo(0.8, 10);
+    expect(candidateFirst).toBeCloseTo(1, 10); // every one of candidate's trigrams is in quote
+    expect(quoteFirst).not.toBeCloseTo(candidateFirst, 5);
+  });
+});
+

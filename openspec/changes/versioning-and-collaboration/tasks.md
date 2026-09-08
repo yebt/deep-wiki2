@@ -72,17 +72,17 @@ Chain strategy: pending
 
 ## Phase 4: Block Diff Engine (pure, `packages/markdown`)
 
-- [ ] 4.1 RED: `packages/markdown/src/diff-blocks.test.ts` — added/removed/modified/moved classification against hand-built before/after markdown pairs, per design.md Decision 2's classification table.
-- [ ] 4.2 RED (moved-detection, quality-bar flag): a fixture where **nothing moved** must classify every block `unchanged`, not `moved` — write this assertion explicitly rather than relying on the added/removed fixtures to exercise it, since a trivial no-op diff would pass `moved`-handling code that never actually ran.
-- [ ] 4.3 RED (determinism, quality-bar flag): call `diffBlocks(before, after)` twice on the same inputs and assert byte-identical output, specifically on a fixture that triggers a split (mints an id). **This must fail before 4.5** because `matchBlocks()` mints split ids via `crypto.getRandomValues` (`match-blocks.ts:81-89`) and a naive `diffBlocks` that reports minted ids verbatim is nondeterministic across runs.
-- [ ] 4.4 RED: a fully unanchored document (`sliceBlocks` returns records with no `anchorId`) still diffs correctly end to end — this fixture must fail against any implementation that reads `page_revision.block_index` instead of re-parsing.
-- [ ] 4.5 GREEN: `packages/markdown/src/diff-blocks.ts` — `diffBlocks(before, after)`, calling `sliceBlocks(parse(...))` fresh on both sides and `matchBlocks()`, per design.md Decision 2. Discards `mintedIds[].id` entirely and reports `after`'s own `sliceBlocks` id at that slot; keeps only `mintedIds[].splitFrom`.
-- [ ] 4.6 GREEN: add `"@deep-wiki/core": "workspace:*"` to `packages/markdown/package.json`, importing `BlockDiff`/`BlockChange` type-only from `packages/core/src/content/diff.ts`.
-- [ ] 4.7 RED: `packages/markdown/src/match-blocks.test.ts` — `trigramContainment(a, b)` boundary behaviour exactly at 0.8 (0.79 fails, 0.80 passes, asymmetric under argument swap).
-- [ ] 4.8 GREEN: export `trigramContainment()` and `ANCHOR_CONTAINMENT_THRESHOLD = 0.8` from `packages/markdown/src/match-blocks.ts`.
-- [ ] 4.9 RED: the diff engine is called between non-adjacent revisions (revision 1 vs revision 5 content) directly, not composed from intermediate diffs — assert the direct result differs from a naive intermediate composition where they would disagree.
-- [ ] 4.10 Structural check: grep-style assertion (add to `scripts/checks/`) that no file under `packages/markdown/src/diff-blocks.ts` or any caller references `block_index`.
-- [ ] 4.11 REFACTOR: once 4.1–4.9 are green, review `diffBlocks()` for duplicate slot-matching logic against `matchBlocks()` itself and extract any shared classification helper.
+- [x] 4.1 RED: `packages/markdown/src/diff-blocks.test.ts` — added/removed/modified/moved classification against hand-built before/after markdown pairs, per design.md Decision 2's classification table.
+- [x] 4.2 RED (moved-detection, quality-bar flag): a fixture where **nothing moved** must classify every block `unchanged`, not `moved` — write this assertion explicitly rather than relying on the added/removed fixtures to exercise it, since a trivial no-op diff would pass `moved`-handling code that never actually ran.
+- [x] 4.3 RED (determinism, quality-bar flag): call `diffBlocks(before, after)` twice on the same inputs and assert byte-identical output, specifically on a fixture that triggers a split (mints an id). **This must fail before 4.5** because `matchBlocks()` mints split ids via `crypto.getRandomValues` (`match-blocks.ts:81-89`) and a naive `diffBlocks` that reports minted ids verbatim is nondeterministic across runs.
+- [x] 4.4 RED: a fully unanchored document (`sliceBlocks` returns records with no `anchorId`) still diffs correctly end to end — this fixture must fail against any implementation that reads `page_revision.block_index` instead of re-parsing.
+- [x] 4.5 GREEN: `packages/markdown/src/diff-blocks.ts` — `diffBlocks(before, after)`, calling `sliceBlocks(parse(...))` fresh on both sides and `matchBlocks()`, per design.md Decision 2. Discards `mintedIds[].id` entirely and reports `after`'s own `sliceBlocks` id at that slot; keeps only `mintedIds[].splitFrom`.
+- [x] 4.6 GREEN: add `"@deep-wiki/core": "workspace:*"` to `packages/markdown/package.json`, importing `BlockDiff`/`BlockChange` type-only from `packages/core/src/content/diff.ts`.
+- [x] 4.7 RED: `packages/markdown/src/match-blocks.test.ts` — `trigramContainment(a, b)` boundary behaviour exactly at 0.8 (0.79 fails, 0.80 passes, asymmetric under argument swap).
+- [x] 4.8 GREEN: export `trigramContainment()` and `ANCHOR_CONTAINMENT_THRESHOLD = 0.8` from `packages/markdown/src/match-blocks.ts`.
+- [x] 4.9 RED: the diff engine is called between non-adjacent revisions (revision 1 vs revision 5 content) directly, not composed from intermediate diffs — assert the direct result differs from a naive intermediate composition where they would disagree.
+- [x] 4.10 Structural check: grep-style assertion (add to `scripts/checks/`) that no file under `packages/markdown/src/diff-blocks.ts` or any caller references `block_index`.
+- [x] 4.11 REFACTOR: once 4.1–4.9 are green, review `diffBlocks()` for duplicate slot-matching logic against `matchBlocks()` itself and extract any shared classification helper.
 
 ## Phase 5: Save-Time Wiring — Changeset Resolution, Revision Insert
 

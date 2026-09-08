@@ -63,6 +63,40 @@ function trigrams(text: string): Set<string> {
   return set;
 }
 
+/**
+ * Threshold for re-anchoring a comment to a block that no longer matches
+ * exactly (versioning-and-collaboration design.md Decision 1, "The
+ * confidence rule"). Deliberately stricter than `MATCH_THRESHOLD` (0.5):
+ * a wrong block-identity match still yields *a block*, visible in the
+ * block registry's own excerpt; a wrong comment re-anchor re-attaches a
+ * person's words to text they did not write about, which
+ * `docs/UI-CHECKLIST.md:143` forbids outright. Reversal criterion: a
+ * measured orphan rate from real edit traffic, exactly as `MATCH_THRESHOLD`
+ * states its own (see this file's doc comment above).
+ */
+export const ANCHOR_CONTAINMENT_THRESHOLD = 0.8;
+
+/**
+ * `|trigrams(a) ∩ trigrams(b)| / |trigrams(a)|` — asymmetric, unlike
+ * `diceCoefficient`. Dice penalises size asymmetry, so a short quote
+ * inside a long paragraph scores low no matter how intact it is;
+ * containment asks the question actually being asked: is `a` still in
+ * `b`? Exported for comment-anchor reconciliation, which asks exactly
+ * that of a comment's stored `quote` against a candidate block's current
+ * text (design.md Decision 1, "The confidence rule").
+ */
+export function trigramContainment(a: string, b: string): number {
+  const trigramsA = trigrams(a);
+  const trigramsB = trigrams(b);
+  if (trigramsA.size === 0) return 0;
+
+  let intersection = 0;
+  for (const trigram of trigramsA) {
+    if (trigramsB.has(trigram)) intersection++;
+  }
+  return intersection / trigramsA.size;
+}
+
 /** Dice coefficient over two trigram sets: `2 * |A ∩ B| / (|A| + |B|)`. */
 function diceCoefficient(a: Set<string>, b: Set<string>): number {
   if (a.size === 0 && b.size === 0) return 1;
