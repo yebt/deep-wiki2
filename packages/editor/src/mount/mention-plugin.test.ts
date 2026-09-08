@@ -1,6 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 import { moveSelection, reduceMentionState, type MentionCandidate, INACTIVE_MENTION_STATE } from './mention-plugin';
 
+// This file covers the PURE state machine only — filtering, the reducer,
+// selection movement. The document MUTATIONS (each slash command's `run`,
+// `insertMention`, and the single-undo-step guarantee) are exercised
+// against a real EditorState in `mount/insertions.test.ts`.
+
 const CANDIDATES: MentionCandidate[] = [
   { id: '1', type: 'user', label: 'Alice' },
   { id: '2', type: 'user', label: 'Alice B' },

@@ -60,10 +60,19 @@ const nodes: Record<string, NodeSpec> = {
     },
     toDOM: (node) => (node.attrs.ordered ? ['ol', { start: node.attrs.start !== 1 ? node.attrs.start : null }, 0] : ['ul', 0]),
   },
+  // `checked` carries GFM's task-list state (`- [ ]` / `- [x]`); `null`
+  // means "not a task item at all", which is what distinguishes `- item`
+  // from `- [ ] item`. `spread` is the ITEM's own looseness, distinct from
+  // the list's: `mdast-util-to-markdown` joins a list item's children with
+  // a blank line only when the item is spread, so dropping it turns
+  // `- text\n\n  > quote` into `- text\n  > quote` — different bytes for
+  // canonical input. (A paragraph followed by another paragraph survives
+  // either way, which is why the looser `list-loose.md` fixture never
+  // caught this.)
   listItem: {
     content: 'block+',
-    attrs: blockAnchorAttr,
-    toDOM: () => ['li', 0],
+    attrs: { checked: { default: null as boolean | null }, spread: { default: false }, ...blockAnchorAttr },
+    toDOM: (node) => ['li', node.attrs.checked === null ? {} : { 'data-checked': String(node.attrs.checked) }, 0],
   },
   code: {
     content: 'text*',
@@ -142,11 +151,27 @@ const nodes: Record<string, NodeSpec> = {
   // original buffer (design.md "Why raw is a string and not source
   // offsets"). `selectable: true` + `atom: true` + no `contentEditable`
   // (enforced at the view layer, WU-16) — the node itself is opaque.
+  // `carried` holds the original mdast node (position-stripped) for a
+  // carried type whose SPELLING is decided by its neighbours rather than
+  // by its own bytes. Today that is `definition` and only `definition`:
+  // `mdast-util-to-markdown` drops the blank line between two adjacent
+  // `definition` nodes when `tightDefinitions` is pinned on, and that join
+  // rule keys on the node's `type`. Re-emitting a definition as an opaque
+  // `verbatim` node therefore made canonical `[a]: /a\n[b]: /b` come back
+  // as `[a]: /a\n\n[b]: /b` — canonical Markdown that edit mode then
+  // refused, while the NON-canonical spaced spelling round-tripped and was
+  // accepted. `raw` stays authoritative for `html`/`yaml`, where no join
+  // rule inspects the type and the literal bytes are the whole point.
   verbatim: {
     group: 'block',
     atom: true,
     selectable: true,
-    attrs: { raw: { default: '' }, nodeType: { default: '' }, ...blockAnchorAttr },
+    attrs: {
+      raw: { default: '' },
+      nodeType: { default: '' },
+      carried: { default: null as Record<string, unknown> | null },
+      ...blockAnchorAttr,
+    },
     toDOM: (node) => ['div', { class: 'verbatim', contenteditable: 'false' }, node.attrs.raw],
   },
   verbatimInline: {

@@ -15,77 +15,126 @@ import { toMdast } from './to-markdown';
 // md -> ProseMirror doc -> md harness: every fixture passes through
 // `packages/editor`'s schema functions, not only `packages/markdown`'s
 // mdast-level `parse`/`stringify`.
+//
+// **What the case count means.** GATE-2's claim is "markdown is the source
+// of truth and round-tripping must not alter it", so a case only counts
+// towards that claim when it actually compares bytes. Every `describe`
+// below is therefore tagged with what it measures, and the tags are the
+// only honest way to read the total:
+//
+//   [byte identity]  `roundTrip(x) === x` on a fixture that must survive
+//                    the ProseMirror document unchanged.
+//   [byte inequality] `roundTrip(x) !== x` on a fixture edit mode must
+//                    refuse — the refusal is proven by the same byte
+//                    comparison, not merely by `ok: false`.
+//   [invariant]      a property asserted across the whole corpus.
+//   [probe accept]   `probe()` reports the fixture openable. Byte identity
+//                    is what makes it openable, but this describe is about
+//                    the probe's verdict, not about the bytes.
+//   [regression]     a deliberately-broken pipeline must fail the gate.
+//   [corpus shape]   the corpus itself is fully claimed by the cases above.
 const CORPUS_DIR = join(import.meta.dir, '..', '..', 'markdown', 'fixtures');
 
+/**
+ * Buckets whose every fixture is canonical Markdown and MUST come back
+ * byte-identical through the ProseMirror document. `pins/` belongs here
+ * for the same reason `modelled/` does: each `pin-<key>.md` is the
+ * canonical spelling that `PINNED_OPTIONS[<key>]` produces, so a pin that
+ * stops taking effect — or an editor conversion that reconstructs the
+ * construct in some other spelling — changes these bytes.
+ */
+const BYTE_IDENTITY_BUCKETS = ['modelled', 'verbatim', 'pins'] as const;
+/** Buckets whose every fixture is non-canonical and MUST be refused rather than opened-and-normalised. */
+const REFUSED_BUCKETS = ['refused'] as const;
+
 function listFixtures(bucket: string): string[] {
-  return readdirSync(join(CORPUS_DIR, bucket)).filter((name) => name.endsWith('.md'));
+  return readdirSync(join(CORPUS_DIR, bucket)).filter((name) => name.endsWith('.md')).sort();
 }
 
-describe('GATE-2: modelled/ round-trips byte-identical through the PM doc', () => {
-  for (const file of listFixtures('modelled')) {
-    test(file, () => {
-      const original = readFileSync(join(CORPUS_DIR, 'modelled', file), 'utf8');
+function read(bucket: string, file: string): string {
+  return readFileSync(join(CORPUS_DIR, bucket, file), 'utf8');
+}
 
-      expect(roundTrip(original)).toBe(original);
-    });
-  }
-});
-
-describe('GATE-2: verbatim/ round-trips byte-identical and classify() names the carried type', () => {
-  for (const file of listFixtures('verbatim')) {
-    test(file, () => {
-      const original = readFileSync(join(CORPUS_DIR, 'verbatim', file), 'utf8');
-
-      expect(roundTrip(original)).toBe(original);
-    });
-  }
-});
-
-// `non-canonical-tightDefinitions.md` is excluded here on purpose: a
-// `definition` node is carried verbatim (bucket B), so the probe reserialises
-// its exact original bytes regardless of spacing between definitions — the
-// `tightDefinitions` pin only has an effect when mdast-util-to-markdown
-// reconstructs a `definition` from its structured fields, which the editor
-// path never does. It is correctly non-canonical at the mdast/save-path
-// layer (packages/markdown's own corpus.test.ts asserts exactly that); it is
-// simply not one of the constructs edit-mode entry needs to refuse.
-const PROBE_ACCEPTS_DESPITE_NON_CANONICAL = new Set(['non-canonical-tightDefinitions.md']);
-
-describe('GATE-2: refused/ fixtures make the probe refuse, never open-and-drop', () => {
-  for (const file of listFixtures('refused')) {
-    if (PROBE_ACCEPTS_DESPITE_NON_CANONICAL.has(file)) continue;
-
-    test(file, () => {
-      const original = readFileSync(join(CORPUS_DIR, 'refused', file), 'utf8');
-
-      const result = probe(original);
-
-      expect(result.ok).toBe(false);
-    });
-  }
-
-  test('non-canonical-tightDefinitions.md is probe-safe because definitions are verbatim-carried', () => {
-    const original = readFileSync(join(CORPUS_DIR, 'refused', 'non-canonical-tightDefinitions.md'), 'utf8');
-
-    expect(probe(original)).toEqual({ ok: true });
-  });
-});
-
-describe('GATE-2: the probe accepts every modelled/ and verbatim/ fixture', () => {
-  for (const bucket of ['modelled', 'verbatim']) {
+for (const bucket of BYTE_IDENTITY_BUCKETS) {
+  describe(`GATE-2 [byte identity]: ${bucket}/ round-trips unchanged through the PM doc`, () => {
     for (const file of listFixtures(bucket)) {
       test(`${bucket}/${file}`, () => {
-        const original = readFileSync(join(CORPUS_DIR, bucket, file), 'utf8');
+        const original = read(bucket, file);
 
-        expect(probe(original)).toEqual({ ok: true });
+        expect(roundTrip(original)).toBe(original);
+      });
+    }
+  });
+}
+
+for (const bucket of REFUSED_BUCKETS) {
+  describe(`GATE-2 [byte inequality]: ${bucket}/ is refused because its bytes change, not merely rejected`, () => {
+    for (const file of listFixtures(bucket)) {
+      test(`${bucket}/${file}`, () => {
+        const original = read(bucket, file);
+
+        // The refusal must be provable by the same byte comparison the
+        // [byte identity] cases make — otherwise a fixture could "pass"
+        // this describe by throwing for an unrelated reason.
+        expect(roundTrip(original)).not.toBe(original);
+        expect(probe(original)).toMatchObject({ ok: false, reason: 'not_byte_identical' });
+      });
+    }
+  });
+}
+
+describe('GATE-2 [invariant]: edit mode never opens a document the save path would rewrite', () => {
+  // `probe()` gates entry into edit mode; `canonicalise()` is what
+  // `savePage()` writes back. If the probe ever accepts a document that
+  // canonicalisation would change, opening and saving it without touching
+  // a character rewrites the user's file — the exact failure
+  // markdown-round-trip's "Unrepresentable Content Fails Closed" forbids.
+  for (const bucket of [...BYTE_IDENTITY_BUCKETS, ...REFUSED_BUCKETS]) {
+    for (const file of listFixtures(bucket)) {
+      test(`${bucket}/${file}`, () => {
+        const original = read(bucket, file);
+        const openable = probe(original).ok;
+        const alreadyCanonical = canonicalise(original) === original;
+
+        // Asserted as the forbidden COMBINATION rather than as a
+        // conditional `expect`, so every case in this describe really runs
+        // an assertion instead of quietly passing on a false branch.
+        expect(openable && !alreadyCanonical).toBe(false);
       });
     }
   }
 });
 
-describe('GATE-2: a schema-only defect is caught even when the mdast pipeline alone would pass', () => {
+describe('GATE-2 [probe accept]: every byte-identity fixture is openable in edit mode', () => {
+  for (const bucket of BYTE_IDENTITY_BUCKETS) {
+    for (const file of listFixtures(bucket)) {
+      test(`${bucket}/${file}`, () => {
+        expect(probe(read(bucket, file))).toEqual({ ok: true });
+      });
+    }
+  }
+});
+
+describe('GATE-2 [corpus shape]: no fixture bucket escapes the gate', () => {
+  test('every fixture directory is claimed by either the byte-identity set or the refused set', () => {
+    const buckets = readdirSync(CORPUS_DIR, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && !entry.name.startsWith('__'))
+      .map((entry) => entry.name)
+      .sort();
+
+    expect(buckets).toEqual([...BYTE_IDENTITY_BUCKETS, ...REFUSED_BUCKETS].sort());
+  });
+
+  test('every claimed bucket is non-empty, so an emptied bucket cannot silently pass as covered', () => {
+    for (const bucket of [...BYTE_IDENTITY_BUCKETS, ...REFUSED_BUCKETS]) {
+      expect(listFixtures(bucket).length).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe('GATE-2 [regression]: a schema-only defect is caught even when the mdast pipeline alone would pass', () => {
   test('removing wikiLink from the schema fails the round trip on a wiki-link fixture, though canonicalise() alone accepts it', () => {
-    const markdown = readFileSync(join(CORPUS_DIR, 'modelled', 'wiki-link.md'), 'utf8');
+    const markdown = read('modelled', 'wiki-link.md');
 
     // The mdast-only pipeline (packages/markdown alone) has no opinion on
     // ProseMirror schema membership — it passes.
@@ -101,9 +150,9 @@ describe('GATE-2: a schema-only defect is caught even when the mdast pipeline al
   });
 });
 
-describe('GATE-2: pin-removal regression at the PM level', () => {
+describe('GATE-2 [regression]: pin removal is caught at the PM level', () => {
   test('removing the bullet pin fails pin-bullet.md through the full editor round trip, not only the mdast-level test', () => {
-    const markdown = readFileSync(join(CORPUS_DIR, 'pins', 'pin-bullet.md'), 'utf8');
+    const markdown = read('pins', 'pin-bullet.md');
 
     // The full editor pipeline accepts the fixture with the pin intact.
     expect(roundTrip(markdown)).toBe(markdown);

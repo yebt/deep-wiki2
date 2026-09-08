@@ -160,7 +160,8 @@ class ToMarkdownConverter {
         node.forEach((child) => children.push(this.convertBlock(child) as BlockContent));
         return {
           type: 'listItem',
-          spread: false,
+          checked: node.attrs.checked,
+          spread: node.attrs.spread,
           children: withBlockAnchor(children, blockAnchor),
         } as unknown as DefinitionContent;
       }
@@ -195,8 +196,19 @@ class ToMarkdownConverter {
           children: withBlockAnchor(children, blockAnchor),
         } as unknown as BlockContent;
       }
-      case 'verbatim':
+      case 'verbatim': {
+        // A join-sensitive carried type (today: `definition`) is re-emitted
+        // as its own mdast node so `mdast-util-to-markdown`'s type-keyed
+        // join rules — `tightDefinitions` above all — still see it. Every
+        // other carried type goes back as its literal bytes. See the
+        // `verbatim` node's comment in schema.ts.
+        // Cloned, not handed out directly: `toMdast()` is exported, and a
+        // caller mutating the tree must not reach back into the PM node's
+        // attributes.
+        const carried = node.attrs.carried as BlockContent | null;
+        if (carried) return structuredClone(carried);
         return { type: 'verbatim', raw: node.attrs.raw } as unknown as BlockContent;
+      }
       default:
         throw new Error(`toMarkdown: unsupported block node type "${node.type.name}"`);
     }

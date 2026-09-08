@@ -1,6 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 import { filterSlashCommands, reduceSlashState, SLASH_COMMANDS, INACTIVE_SLASH_STATE } from './slash-plugin';
 
+// This file covers the PURE state machine only — filtering, the reducer,
+// selection movement. The document MUTATIONS (each slash command's `run`,
+// `insertMention`, and the single-undo-step guarantee) are exercised
+// against a real EditorState in `mount/insertions.test.ts`.
 // document-editor: Mention And Slash Menus Are Keyboard-First; Empty And
 // No-Results States (the slash-menu half — mention-plugin.test.ts covers
 // the shared reducer shape for @).

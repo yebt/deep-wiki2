@@ -52,6 +52,32 @@ function sourceSliceOf(
   return start !== undefined && end !== undefined ? source.slice(start, end) : '';
 }
 
+/**
+ * mdast types whose canonical spelling is decided by a `join` rule keyed on
+ * the node's own `type` rather than by its literal bytes, so re-emitting
+ * them as an opaque `verbatim` node changes the output. `definition` is the
+ * only member: `tightDefinitions` (a PINNED_OPTIONS key) removes the blank
+ * line between two adjacent `definition` nodes, and that rule cannot see a
+ * `verbatim` node. See the `verbatim` node's comment in schema.ts.
+ */
+const JOIN_SENSITIVE_VERBATIM_TYPES = new Set(['definition']);
+
+/** A structured-clone of `node` with every `position` field removed, so it can live in a ProseMirror attribute (which must be plain, comparable data). */
+function withoutPosition<T>(node: T): T {
+  const clone = structuredClone(node) as unknown;
+  const strip = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      value.forEach(strip);
+      return;
+    }
+    if (!value || typeof value !== 'object') return;
+    delete (value as { position?: unknown }).position;
+    Object.values(value).forEach(strip);
+  };
+  strip(clone);
+  return clone as T;
+}
+
 /** Splits a trailing `blockAnchor` mdast node off a block's own children, returning the anchor id (or `null`) and the remaining content. */
 function splitOffBlockAnchor<T extends BlockContent | DefinitionContent | PhrasingContent>(
   children: T[],
@@ -165,7 +191,7 @@ class FromMarkdownConverter {
         const { content, blockAnchor } = splitOffBlockAnchor(node.children);
         return s.node(
           'listItem',
-          { blockAnchor },
+          { checked: node.checked ?? null, spread: node.spread ?? false, blockAnchor },
           content.map((child) => this.convertBlock(child)),
         );
       }
@@ -206,7 +232,12 @@ class FromMarkdownConverter {
       }
       default:
         if (VERBATIM_BLOCK_TYPES.has(node.type)) {
-          return s.node('verbatim', { raw: sourceSliceOf(node, this.source), nodeType: node.type, blockAnchor: null });
+          return s.node('verbatim', {
+            raw: sourceSliceOf(node, this.source),
+            nodeType: node.type,
+            carried: JOIN_SENSITIVE_VERBATIM_TYPES.has(node.type) ? withoutPosition(node) : null,
+            blockAnchor: null,
+          });
         }
         throw new UnsupportedConstructError(node.type, node.position?.start.line, 'block');
     }

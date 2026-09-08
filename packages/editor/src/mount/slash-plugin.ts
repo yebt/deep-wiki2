@@ -7,7 +7,7 @@
  */
 import { setBlockType, wrapIn } from 'prosemirror-commands';
 import type { NodeType } from 'prosemirror-model';
-import { type EditorState, Plugin, PluginKey, type Transaction } from 'prosemirror-state';
+import { EditorState, Plugin, PluginKey, Selection, type Transaction } from 'prosemirror-state';
 import { wrapInList } from 'prosemirror-schema-list';
 import { schema } from '../schema';
 import type { SlashCommandSummary, SlashState } from '../types';
@@ -57,6 +57,46 @@ export const SLASH_COMMANDS: readonly SlashCommand[] = [
     },
   },
 ];
+
+/**
+ * Builds the ONE transaction that confirming a slash command produces:
+ * the trigger text (`/query`) removed AND the command applied, in a
+ * single undoable step (document-editor: "Mention And Slash Insertions
+ * Undo As One Step").
+ *
+ * It has to be one transaction, not two adjacent ones. The earlier
+ * two-dispatch form relied on `prosemirror-history` grouping adjacent
+ * transactions inside its 500ms window, but grouping ALSO requires the
+ * second transaction's changed range to be adjacent to the first's
+ * (`isAdjacentTo`), and a block transform is not: deleting `/quote`
+ * leaves a changed range at the caret, while `wrapIn`/`setBlockType`
+ * change the ranges at the block's two boundaries. History opened a new
+ * group, and undo took two presses — restoring the paragraph but leaving
+ * the `/quote` text deleted. Verified by
+ * `mount/insertions.test.ts`.
+ *
+ * `setBlockType`/`wrapIn`/`wrapInList` are ProseMirror `Command`s: each
+ * builds its own transaction from the state it is handed and cannot
+ * append to one already in progress. So the command runs against a
+ * plugin-free scratch state positioned on the post-delete document, and
+ * its steps are replayed onto `tr` — they are already expressed in
+ * exactly that document's coordinates, so no mapping is needed.
+ */
+export function confirmSlashCommand(
+  state: EditorState,
+  command: SlashCommand,
+  range: { readonly from: number; readonly to: number },
+): Transaction {
+  const tr = state.tr.delete(range.from, range.to).setMeta(slashPluginKey, { type: 'dismiss' } satisfies SlashAction);
+
+  const scratch = EditorState.create({ schema: state.schema, doc: tr.doc, selection: tr.selection, plugins: [] });
+  command.run(scratch, (commandTr) => {
+    for (const step of commandTr.steps) tr.step(step);
+    if (commandTr.selectionSet) tr.setSelection(Selection.fromJSON(tr.doc, commandTr.selection.toJSON()));
+  });
+
+  return tr;
+}
 
 export function filterSlashCommands(query: string): readonly SlashCommand[] {
   if (!query) return SLASH_COMMANDS;
@@ -156,18 +196,7 @@ export function createSlashPlugin(options: SlashPluginOptions = {}): Plugin<Slas
           const command = SLASH_COMMANDS.find((candidate) => candidate.id === summary.id);
           if (!command) return true;
 
-          // Two dispatches, not one transaction: `setBlockType`/`wrapIn`/
-          // `wrapInList` are Commands that always build their own
-          // transaction from the state they are given, so they cannot
-          // append to an in-progress one. `prosemirror-history` groups
-          // adjacent transactions (default 500ms window, no intervening
-          // selection-only change) into a single undo step, and both
-          // dispatches below happen synchronously in this one handler —
-          // undo still removes the whole insertion as one step
-          // (document-editor: "Mention And Slash Insertions Undo As One
-          // Step").
-          view.dispatch(view.state.tr.delete(state.from, state.to).setMeta(slashPluginKey, { type: 'dismiss' } satisfies SlashAction));
-          command.run(view.state, view.dispatch);
+          view.dispatch(confirmSlashCommand(view.state, command, { from: state.from, to: state.to }));
           return true;
         }
         return false;
