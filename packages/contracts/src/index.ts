@@ -99,3 +99,6 @@ export type {
 
 export { PresenceEventSchema } from './presence';
 export type { PresenceEventPayload } from './presence';
+
+export { PageHistoryResponseSchema, RevisionSummarySchema } from './revisions';
+export type { PageHistoryResponse, RevisionSummaryPayload } from './revisions';

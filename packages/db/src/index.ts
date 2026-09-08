@@ -52,6 +52,10 @@ export { backfillOneRow, backfillRender } from './content/backfill-render';
 export type { BackfillOneRowInput, BackfillOneRowOutcome, BackfillRenderOptions, BackfillRenderResult } from './content/backfill-render';
 export { resolveBookId, resolveChangeset } from './changesets/resolve-changeset';
 export type { ResolveBookIdInput, ResolveChangesetInput } from './changesets/resolve-changeset';
+export { listChangedPagesSince } from './changesets/book-diff';
+export type { ChangedPageSummary, ListChangedPagesSinceInput } from './changesets/book-diff';
+export { getRevisionsByIds, listPageRevisions } from './revisions/queries';
+export type { GetRevisionsByIdsInput, ListPageRevisionsInput, RevisionContent, RevisionSummary } from './revisions/queries';
 export { createReply, createRootComment, listCommentIndicators, setThreadResolved } from './comments/queries';
 export type {
   CommentIndicator,
