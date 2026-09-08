@@ -27,11 +27,16 @@ export function createLinkRoutes(deps: LinkRouteDeps): Hono<{ Variables: Session
     const targetId = c.req.param('id');
     const session = c.get('session');
 
+    // Absence and denial-of-read answer with the same response from the
+    // same call site: a caller with no grant cannot use this endpoint to
+    // learn that the target page exists. Same rule as the comment routes,
+    // and the singular analogue of `readableResourceIds` dropping an
+    // unreadable id rather than reporting it as denied.
     const [target] = await deps.sql<{ workspace_id: string }[]>`SELECT workspace_id FROM nodes WHERE id = ${targetId}`;
-    if (!target) return c.json(ErrorResponseSchema.parse({ error: 'not found' }), 404);
-
-    const authorized = await can(deps.sql, { subjectType: 'user', subjectId: session.userId, resourceId: targetId, action: 'read' });
-    if (!authorized) return c.json(ErrorResponseSchema.parse({ error: 'forbidden' }), 403);
+    const authorized =
+      target !== undefined &&
+      (await can(deps.sql, { subjectType: 'user', subjectId: session.userId, resourceId: targetId, action: 'read' }));
+    if (!target || !authorized) return c.json(ErrorResponseSchema.parse({ error: 'not found' }), 404);
 
     const candidates = await deps.sql<{ source_page_id: string }[]>`
       SELECT DISTINCT source_page_id FROM links

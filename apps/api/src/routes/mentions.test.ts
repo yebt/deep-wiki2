@@ -142,6 +142,34 @@ describe('GET /mentions/subjects', () => {
   });
 });
 
+// The check endpoint answers about a page. A caller who cannot read that
+// page must not learn whether it exists: absence and denial-of-read are the
+// same response, as they are on the comment and backlink routes.
+describe('GET /pages/:id/mentions/:userId/check — page-existence probing', () => {
+  test('a caller with no read grant gets the same answer as for a page that does not exist', async () => {
+    const owner = await insertUser('owner-probe');
+    const [ws] = await sql<{ id: string }[]>`INSERT INTO workspaces (owner_id, name, slug) VALUES (${owner}, 'WSP', ${`wsp-${crypto.randomUUID()}`}) RETURNING id`;
+    const root = await insertNode(ws!.id, null, 'workspace', 'rootp', 'Root');
+    const page = await insertNode(ws!.id, root, 'page', 'pagep', 'Secret Page');
+    const outsider = await insertUser('outsider-probe');
+    const mentioned = await insertUser('mentioned-probe');
+    const cookie = await cookieFor(outsider);
+    const MISSING_PAGE_ID = '00000000-0000-4000-8000-0000000000fc';
+
+    const app = buildApp();
+    const denied = await app.request(`/pages/${page}/mentions/${mentioned}/check`, { headers: { cookie } });
+    const missing = await app.request(`/pages/${MISSING_PAGE_ID}/mentions/${mentioned}/check`, { headers: { cookie } });
+
+    const deniedBody = await denied.text();
+    const missingBody = await missing.text();
+
+    expect(denied.status).toBe(missing.status);
+    expect(deniedBody).toBe(missingBody);
+    expect(denied.status).toBe(404);
+    expectNoDisclosure(deniedBody, { id: page, slug: 'pagep', title: 'Secret Page' });
+  });
+});
+
 // document-editor: Mentioning A User Does Not Silently Grant Them Access, both scenarios.
 describe('GET /pages/:id/mentions/:userId/check', () => {
   test('mentioning a user with no read access surfaces the mismatch', async () => {

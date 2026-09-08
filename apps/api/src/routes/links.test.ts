@@ -102,16 +102,28 @@ describe('GET /pages/:id/backlinks', () => {
     expect(body.pages[0]!.id).toBe(visibleSource);
   });
 
-  test('the requester must be able to read the target page itself', async () => {
+  // The requester must be able to read the target page itself — and being
+  // told so must not itself disclose that the page exists. Absence and
+  // denial-of-read answer identically, exactly as the comment routes do.
+  test('an unreadable target answers byte-identically to a target that does not exist', async () => {
     const owner = await insertUser('owner3');
     const [ws] = await sql<{ id: string }[]>`INSERT INTO workspaces (owner_id, name, slug) VALUES (${owner}, 'WS3', ${`ws3-${crypto.randomUUID()}`}) RETURNING id`;
     const root = await insertNode(ws!.id, null, 'workspace', 'root3', 'Root');
     const target = await insertNode(ws!.id, root, 'page', 'target3', 'Target3');
     const requester = await insertUser('requester3');
+    const cookie = await cookieFor(requester);
+    const MISSING_PAGE_ID = '00000000-0000-4000-8000-0000000000fd';
 
     const app = buildApp();
-    const res = await app.request(`/pages/${target}/backlinks`, { headers: { cookie: await cookieFor(requester) } });
+    const denied = await app.request(`/pages/${target}/backlinks`, { headers: { cookie } });
+    const missing = await app.request(`/pages/${MISSING_PAGE_ID}/backlinks`, { headers: { cookie } });
 
-    expect(res.status).toBe(403);
+    const deniedBody = await denied.text();
+    const missingBody = await missing.text();
+
+    expect(denied.status).toBe(missing.status);
+    expect(deniedBody).toBe(missingBody);
+    expect(denied.status).toBe(404);
+    expectNoDisclosure(deniedBody, { id: target, slug: 'target3', title: 'Target3' });
   });
 });

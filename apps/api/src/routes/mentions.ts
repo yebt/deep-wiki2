@@ -84,9 +84,17 @@ export function createMentionRoutes(deps: MentionRouteDeps): Hono<{ Variables: S
   app.get('/pages/:id/mentions/:userId/check', auth, async (c) => {
     const pageId = c.req.param('id');
     const mentionedUserId = c.req.param('userId');
+    const session = c.get('session');
 
+    // The caller must hold read on the page before this endpoint answers
+    // anything about it — otherwise `200 {canRead}` versus `404` is itself
+    // a page-existence oracle for a caller with no grant. Absence and
+    // denial-of-read share one response, as on the comment routes.
     const [node] = await deps.sql<{ workspace_id: string }[]>`SELECT workspace_id FROM nodes WHERE id = ${pageId}`;
-    if (!node) return c.json(ErrorResponseSchema.parse({ error: 'not found' }), 404);
+    const callerCanRead =
+      node !== undefined &&
+      (await can(deps.sql, { subjectType: 'user', subjectId: session.userId, resourceId: pageId, action: 'read' }));
+    if (!node || !callerCanRead) return c.json(ErrorResponseSchema.parse({ error: 'not found' }), 404);
 
     const canRead = await can(deps.sql, { subjectType: 'user', subjectId: mentionedUserId, resourceId: pageId, action: 'read' });
     return c.json({ canRead });
