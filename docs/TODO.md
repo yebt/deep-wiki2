@@ -415,6 +415,23 @@ makes conventions portable across projects.
 
 Discoveries and constraints. Newest first.
 
+### 2026-09-08 — One unreproduced api-suite failure, recorded rather than closed
+
+While closing the comment-route mutation audit, a single combined run reported the
+`@deep-wiki/api` suite at `105 pass, 1 fail`. The failing test's name was not captured. It has
+not recurred in **eleven** subsequent full runs — eight by the agent that saw it, three more
+afterwards, all exit 0 at 1340 tests.
+
+The leading hypothesis is container or port contention in the disposable-Postgres provisioning
+(`packages/db/testing/provision.ts`), which `packages/db/testing/worktree.ts` already derives
+per worktree precisely because `podman-compose` proved unsafe under concurrent invocation
+against one compose project. **That hypothesis is unproven.**
+
+**Impact:** recorded here because an intermittent failure is worse than a consistent one — a
+consistent failure gets fixed, an intermittent one teaches a team to re-run. If it returns,
+capture the test name and the provisioning log before doing anything else; a second sighting
+with a name is worth more than any amount of speculation now.
+
 ### 2026-09-08 — Looking a page up before calling `can()` turns every route into an existence oracle
 
 A mutation audit of `apps/api/src/routes/comments.ts` found the indicators endpoint answering
