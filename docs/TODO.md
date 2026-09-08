@@ -415,6 +415,54 @@ makes conventions portable across projects.
 
 Discoveries and constraints. Newest first.
 
+### 2026-09-08 — A geometry assertion outlived the DOM it named, and reported a layout defect that was not there
+
+`e2e/auth-layout.spec.ts`'s "the sign-in block is centred in the space between header and
+footer" failed at `436`, against a tolerance of `2`, on all four auth screens. Read as written
+it said the block was top-aligned with the whole of the free space dumped underneath it, and it
+pointed straight at `AppShell` — whose own doc comment names `flex min-h-0 flex-1 flex-col` on
+`UMain` as the thing `my-auto` depends on, while the template states no class at all.
+
+It was not the layout. Measured on the running app at 1280x900: `UContainer`'s resolved margins
+were **97.5px top and 97.5px bottom**, and the block ran 217.5 → 689.5 inside a `main` of 56 →
+851 — `161.5px` of space above it and `161.5px` below. Centred to the pixel, in both themes. The
+class the comment names *is* applied, centrally, as `main: { base: 'flex min-h-0 flex-1
+flex-col' }` in `app.config.ts` — the template is deliberately bare because the override is only
+correct inside that column, and `tv`'s `extend` merge drops `UMain`'s own
+`min-h-[calc(100vh-var(--ui-header-height))]` on the way through. The rendered `<main>` carries
+exactly the four classes and nothing else.
+
+Cause: the test named the block as `document.querySelector('main h1').parentElement`, with the
+comment "the heading and the card are one block". That was true when it was written — the `h1`
+sat directly inside the column `div` that also held the card. Extracting `PageHeading` (e5a4a50)
+wrapped the `h1` in `div.mb-8.max-w-measure`, after which `parentElement` was the heading alone.
+The assertion then compared the gap above the block with the gap below the *heading*, and the
+difference was the card's height plus the 32px under it — **404 + 32 = 436**, the number
+reported.
+
+The test now walks *up* from the heading to `main`'s grandchild, so a wrapper introduced between
+the two cannot narrow it again, and asserts `blockHeight > headingHeight` first — the guard whose
+absence let a measurement silently stop measuring what it names. Mutation-checked both ways:
+dropping `center` from `AuthShell` reds it at `195`, and the corrected selector greens against
+the unchanged shell.
+
+**Impact:** this is the mirror image of the family recorded above (the pgvector `CHECK` test, the
+block-merge fixture, the wiki-link non-disclosure test, the self-writing golden) — **a test that
+failed for the wrong reason**. The two are the same defect: a test whose result does not depend
+on the behaviour it claims to protect. The red direction is the more expensive one, because a red
+test is believed. The rule that catches it is the same one — break the thing on purpose and check
+the *reason* — plus its corollary for a failing test: **before fixing the code a red test accuses,
+reproduce its measurement independently.** Ten minutes of `getBoundingClientRect()` in the running
+app separated "the auth screens are broken" from "the ruler moved".
+
+Companion: `AppShell.test.ts` asserted `my-auto` and passed while the e2e was red, because
+happy-dom has no layout engine and the class is not the effect. The class assertion is kept and
+its limit is now stated in the file, pointing at the e2e as the recorded owner of the guarantee;
+a second test holds the other half of the mechanism — that `main` is the flex column giving
+`my-auto` free space, and that `UMain`'s viewport-minus-header base is gone rather than merely
+accompanied. That half was asserted nowhere, in either file, and is where a reader looking for a
+broken centring goes first.
+
 ### 2026-09-08 — One unreproduced api-suite failure, recorded rather than closed
 
 While closing the comment-route mutation audit, a single combined run reported the

@@ -93,6 +93,22 @@ describe('AppShell', () => {
       expect(main.contains(columnOf(component))).toBe(true);
     });
 
+    /**
+     * These two assert a **class**, not the effect it stands for, and the
+     * distance between the two is real: `my-auto` centres nothing on its
+     * own. An auto margin absorbs free space only inside a flex container
+     * that has some, so a screen can carry every class this file names and
+     * still render top-aligned. The test below holds the other half of the
+     * mechanism; neither is the effect.
+     *
+     * **The effect is owned by `e2e/auth-layout.spec.ts` — "the sign-in
+     * block is centred in the space between header and footer".** That is
+     * the only test in this repository that can fail when the centring is
+     * broken, because it measures the rendered box in a real browser.
+     * happy-dom has no layout engine: every `getBoundingClientRect()` here
+     * returns zeroes, so no assertion in this file can be strengthened into
+     * proof of position. Do not read a green run here as one.
+     */
     test('`center` absorbs the leftover vertical space, and is off unless asked for', async () => {
       const centred = await mountShell({ center: true });
       const topAligned = await mountShell();
@@ -102,6 +118,28 @@ describe('AppShell', () => {
       // top-aligned and fully reachable.
       expect(columnOf(centred).parentElement!.className).toContain('my-auto');
       expect(columnOf(topAligned).parentElement!.className).not.toContain('my-auto');
+    });
+
+    test('the main region is the flex column that gives `my-auto` free space to absorb', async () => {
+      const component = await mountShell({ center: true });
+      const main = component.get('main').element;
+
+      // The half nothing asserted until now, and the half a reader looking
+      // for a broken centring reaches for first: `my-auto` above is inert
+      // unless `main` is a flex column that actually takes the height the
+      // header and footer leave. `AppShell` states no class on `UMain` —
+      // the base is replaced centrally in `app.config.ts`, because it is
+      // only correct inside this column — so the two live in different
+      // files and the seam between them is exactly what this holds.
+      expect(main.className).toContain('flex');
+      expect(main.className).toContain('flex-col');
+      expect(main.className).toContain('flex-1');
+      expect(main.className).toContain('min-h-0');
+      // And `UMain`'s own base must be *gone*, not merely accompanied:
+      // `min-h-[calc(100vh-var(--ui-header-height))]` is viewport minus the
+      // header with no allowance for a footer, which is the 49px of
+      // permanent scroll the 2026-09-04 review found on all four screens.
+      expect(main.className).not.toContain('min-h-[calc(');
     });
   });
 

@@ -88,16 +88,41 @@ test.describe('1280x900', () => {
     await goto(page, '/login');
 
     const region = await page.evaluate(() => {
-      const main = document.querySelector('main')!.getBoundingClientRect();
-      const heading = document.querySelector('main h1')!.getBoundingClientRect();
-      // The heading and the card are one block; measure from the heading's
-      // top to the card's bottom.
-      const card = document.querySelector('main h1')!.parentElement!.getBoundingClientRect();
+      const main = document.querySelector('main')!;
+      const heading = main.querySelector('h1')!;
+
+      // The block is the shell's content column — the one element holding
+      // both the heading and the card. It is found by walking *up* from
+      // the heading to `main`'s grandchild, rather than by naming the
+      // heading's parent: on 2026-09-04 those were the same element, and
+      // extracting `PageHeading` later put a wrapper between them. After
+      // that, `h1.parentElement` was the heading alone, so the symmetry
+      // check below compared the space above the block with the space
+      // below the *heading* and reported 436px — the card's height plus
+      // the 32px under it — on a screen measured centred to the pixel.
+      // Anchoring on `main` is the part that cannot drift; whatever the
+      // screen nests inside the column is free to change.
+      let block: HTMLElement = heading;
+      while (block.parentElement && block.parentElement.parentElement !== main) {
+        block = block.parentElement;
+      }
+
+      const mainBox = main.getBoundingClientRect();
+      const headingBox = heading.getBoundingClientRect();
+      const blockBox = block.getBoundingClientRect();
       return {
-        gapAbove: heading.top - main.top,
-        gapBelow: main.bottom - card.bottom,
+        gapAbove: headingBox.top - mainBox.top,
+        gapBelow: mainBox.bottom - blockBox.bottom,
+        headingHeight: headingBox.height,
+        blockHeight: blockBox.height,
       };
     });
+
+    // The block is the heading *and* the card, so it is taller than the
+    // heading on its own. This is the guard the previous version lacked:
+    // without it the measurement can silently narrow back to the heading,
+    // and the assertion below stops being about centring at all.
+    expect(region.blockHeight).toBeGreaterThan(region.headingHeight);
 
     // Symmetric to within a pixel of rounding — not top-aligned with the
     // whole of the free space dumped underneath it.
