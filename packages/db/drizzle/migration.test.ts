@@ -234,16 +234,53 @@ describe('after migrate: hand-written objects exist', () => {
     `;
     expect(check).toHaveLength(1);
   });
+
+  // editing-presence spec: "Presence Table Tenant Isolation By Composite
+  // Foreign Key" — closed here in its strongest form, a view has no rows
+  // to be cross-tenant, and it selects straight from page_locks (which
+  // already carries `page_locks_page_fk`).
+  test('presence view exists and selects from page_locks', async () => {
+    const views = await sql<{ table_name: string }[]>`
+      SELECT table_name FROM information_schema.views WHERE table_name = 'presence'
+    `;
+    expect(views).toHaveLength(1);
+
+    const definition = await sql<{ definition: string }[]>`
+      SELECT pg_get_viewdef('presence'::regclass, true) AS definition
+    `;
+    expect(definition[0]!.definition).toContain('page_locks');
+  });
 });
 
 /**
- * Rollback order is `0013 -> 0012 -> ... -> 0008` (design.md "Migration /
+ * Rollback order is `0014 -> 0013 -> ... -> 0008` (design.md "Migration /
  * Rollout"): `links`/`page_tags`/`page_locks`/`comments` all carry foreign
- * keys into `page_content` (`comments` also into `page_blocks`), so 0008's
- * down migration can only run cleanly once every later down has already
- * dropped them — the same dependency order the up migrations establish, in
- * reverse.
+ * keys into `page_content` (`comments` also into `page_blocks`), and the
+ * `presence` view selects from `page_locks` — so 0010's down migration
+ * (dropping `page_locks`) can only run cleanly once 0014's down has
+ * already dropped the view, and 0008's down migration can only run
+ * cleanly once every later down has already dropped what depends on it —
+ * the same dependency order the up migrations establish, in reverse.
  */
+describe('0014_presence_view down migration', () => {
+  test('reverses cleanly: the presence view is gone', async () => {
+    const rollback = await provisionTestDatabase();
+    const rollbackSql = postgres(rollback.url, { max: 1 });
+    try {
+      const downSql = await Bun.file(new URL('./down/0014_presence_view.down.sql', import.meta.url)).text();
+      await rollbackSql.unsafe(downSql);
+
+      const views = await rollbackSql<{ table_name: string }[]>`
+        SELECT table_name FROM information_schema.views WHERE table_name = 'presence'
+      `;
+      expect(views).toHaveLength(0);
+    } finally {
+      await rollbackSql.end({ timeout: 1 }).catch(() => {});
+      await rollback.drop();
+    }
+  });
+});
+
 describe('0013_comments down migration', () => {
   test('reverses cleanly: comments is gone', async () => {
     const rollback = await provisionTestDatabase();
@@ -314,6 +351,13 @@ describe('0010_page_locks down migration', () => {
     const rollback = await provisionTestDatabase();
     const rollbackSql = postgres(rollback.url, { max: 1 });
     try {
+      // 0014's presence view selects straight from page_locks — its down
+      // must run first, the same rollback-order trap 0008's test already
+      // documents: a filtered run of just this describe block would have
+      // passed before 0014 existed and silently breaks once it does.
+      const presenceViewDown = await Bun.file(new URL('./down/0014_presence_view.down.sql', import.meta.url)).text();
+      await rollbackSql.unsafe(presenceViewDown);
+
       const downSql = await Bun.file(new URL('./down/0010_page_locks.down.sql', import.meta.url)).text();
       await rollbackSql.unsafe(downSql);
 
@@ -352,15 +396,20 @@ describe('0008_page_content down migration', () => {
     const rollback = await provisionTestDatabase();
     const rollbackSql = postgres(rollback.url, { max: 1 });
     try {
-      // 0009's, 0010's, 0011's, 0012's and 0013's tables/columns all carry
-      // foreign keys into page_content or page_blocks — their down
-      // migrations must run first, exactly as a real rollback would
-      // (0013 -> 0012 -> 0011 -> 0010 -> 0009 -> 0008). This is the exact
-      // trap named in the versioning-and-collaboration tasks: a migration
-      // whose columns reference an earlier migration's table breaks that
-      // earlier migration's isolated down-test until the newer one's down
-      // runs first — only the full suite catches it, a filtered run will
-      // not, because a filtered run never executes this shared ordering.
+      // 0009's, 0010's, 0011's, 0012's, 0013's and 0014's tables/columns/
+      // views all carry foreign keys into page_content or page_blocks, or
+      // (0014's presence view) select straight from page_locks — their
+      // down migrations must run first, exactly as a real rollback would
+      // (0014 -> 0013 -> 0012 -> 0011 -> 0010 -> 0009 -> 0008). This is
+      // the exact trap named in the versioning-and-collaboration tasks: a
+      // migration whose columns reference an earlier migration's table
+      // breaks that earlier migration's isolated down-test until the
+      // newer one's down runs first — only the full suite catches it, a
+      // filtered run will not, because a filtered run never executes this
+      // shared ordering.
+      const presenceViewDown = await Bun.file(new URL('./down/0014_presence_view.down.sql', import.meta.url)).text();
+      await rollbackSql.unsafe(presenceViewDown);
+
       const commentsDown = await Bun.file(new URL('./down/0013_comments.down.sql', import.meta.url)).text();
       await rollbackSql.unsafe(commentsDown);
 

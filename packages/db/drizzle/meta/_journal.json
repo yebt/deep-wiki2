@@ -99,6 +99,13 @@
       "when": 1735689600013,
       "tag": "0013_comments",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1735689600014,
+      "tag": "0014_presence_view",
+      "breakpoints": true
     }
   ]
 }
