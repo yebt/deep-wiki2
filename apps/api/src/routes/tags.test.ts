@@ -61,7 +61,7 @@ describe('GET /tags/:name/pages', () => {
 
     expect(res.status).toBe(200);
     const body: unknown = await res.json();
-    expectNoDisclosure(body, { id: hiddenPage, slug: 'hidden', title: 'Confidential Project Notes' });
+    expectNoDisclosure(body, { id: hiddenPage, slug: 'hidden', title: 'Confidential Project Notes' }, res.headers);
     expect((body as { pages: unknown[] }).pages).toEqual([]);
   });
 

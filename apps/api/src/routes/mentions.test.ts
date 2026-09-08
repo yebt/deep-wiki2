@@ -62,7 +62,7 @@ describe('GET /mentions/pages', () => {
 
     expect(res.status).toBe(200);
     const body: unknown = await res.json();
-    expectNoDisclosure(body, { id: hiddenPage, slug: 'hidden', title: 'Secret Roadmap' });
+    expectNoDisclosure(body, { id: hiddenPage, slug: 'hidden', title: 'Secret Roadmap' }, res.headers);
     expect((body as { pages: unknown[] }).pages).toEqual([]);
   });
 
@@ -111,7 +111,7 @@ describe('GET /mentions/subjects', () => {
 
     expect(res.status).toBe(200);
     const body: unknown = await res.json();
-    expectNoDisclosure(body, { id: noAccessCandidate });
+    expectNoDisclosure(body, { id: noAccessCandidate }, res.headers);
     expect((body as { subjects: unknown[] }).subjects).toEqual([]);
   });
 
@@ -166,7 +166,7 @@ describe('GET /pages/:id/mentions/:userId/check — page-existence probing', () 
     expect(denied.status).toBe(missing.status);
     expect(deniedBody).toBe(missingBody);
     expect(denied.status).toBe(404);
-    expectNoDisclosure(deniedBody, { id: page, slug: 'pagep', title: 'Secret Page' });
+    expectNoDisclosure(deniedBody, { id: page, slug: 'pagep', title: 'Secret Page' }, denied.headers);
   });
 });
 

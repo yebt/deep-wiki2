@@ -152,9 +152,9 @@ describe('GET /pages/:id/comments/indicators — non-disclosure', () => {
     const bodyText = await res.text();
     const body = JSON.parse(bodyText) as unknown;
     expect(body).toEqual({ indicators: [] });
-    expectNoDisclosure(body, { id: comment!.id });
-    expect(bodyText).not.toContain('blocka');
-    expect(bodyText).not.toContain('a secret comment body');
+    // Body *and* headers: the block id and the comment's text must not
+    // reach this subject through either channel.
+    expectNoDisclosure(body, { id: comment!.id, values: ['blocka', 'a secret comment body'] }, res.headers);
   });
 
   test('a subject with comment receives real indicators', async () => {
@@ -214,7 +214,7 @@ describe('page-existence probing — absence and denial answer identically', () 
     // Pinned so a future change cannot make them identically *disclosing*.
     expect(missing.status).toBe(404);
     expect(denied.status).toBe(404);
-    expectNoDisclosure(deniedBody, { id: fixture.pageId });
+    expectNoDisclosure(deniedBody, { id: fixture.pageId }, denied.headers);
   });
 
   test('POST a comment: a nonexistent page and an unreadable page are byte-identical', async () => {

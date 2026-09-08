@@ -71,7 +71,7 @@ describe('GET /pages/:id/backlinks', () => {
 
     expect(res.status).toBe(200);
     const body: unknown = await res.json();
-    expectNoDisclosure(body, { id: hiddenSource, slug: 'hidden-source', title: 'Confidential Source' });
+    expectNoDisclosure(body, { id: hiddenSource, slug: 'hidden-source', title: 'Confidential Source' }, res.headers);
     expect((body as { total: number }).total).toBe(0);
   });
 
@@ -124,6 +124,6 @@ describe('GET /pages/:id/backlinks', () => {
     expect(denied.status).toBe(missing.status);
     expect(deniedBody).toBe(missingBody);
     expect(denied.status).toBe(404);
-    expectNoDisclosure(deniedBody, { id: target, slug: 'target3', title: 'Target3' });
+    expectNoDisclosure(deniedBody, { id: target, slug: 'target3', title: 'Target3' }, denied.headers);
   });
 });
