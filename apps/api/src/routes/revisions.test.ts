@@ -96,11 +96,14 @@ describe('GET /pages/:id/history', () => {
     const res = await app.request(`/pages/${fixture.pageId}/history`, { headers: { cookie: fixture.readerCookie } });
 
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { revisions: { id: string; createdAt: string }[] };
+    const body = (await res.json()) as { revisions: { id: string; authorDisplayName: string | null; createdAt: string }[] };
     expect(body.revisions).toHaveLength(2);
     const first_ = new Date(body.revisions[0]!.createdAt).getTime();
     const second_ = new Date(body.revisions[1]!.createdAt).getTime();
     expect(first_).toBeGreaterThanOrEqual(second_);
+    // The history screen renders "who changed it" from a name, not a raw
+    // id — the route must carry it, not just `authorId`.
+    expect(body.revisions[0]!.authorDisplayName).toBe('Owner');
   });
 
   test('a subject with no read grant receives the same 404 as a nonexistent page', async () => {

@@ -72,6 +72,26 @@ describe('listPageRevisions', () => {
 
     expect(revisions).toHaveLength(0);
   });
+
+  test('carries the author\'s display name, not just their id, for the history screen to render "who"', async () => {
+    const { workspaceId, pageId, authorId } = await seedPage();
+    await savePage(sql, { nodeId: pageId, workspaceId, markdown: '# One\n', expectedContentHash: null, updatedBy: authorId });
+
+    const [revision] = await listPageRevisions(sql, { pageId, workspaceId });
+
+    expect(revision?.authorId).toBe(authorId);
+    expect(revision?.authorDisplayName).toBe('Owner');
+  });
+
+  test('a save with no author has a null display name, not a crash or an empty-string join artefact', async () => {
+    const { workspaceId, pageId } = await seedPage();
+    await savePage(sql, { nodeId: pageId, workspaceId, markdown: '# One\n', expectedContentHash: null });
+
+    const [revision] = await listPageRevisions(sql, { pageId, workspaceId });
+
+    expect(revision?.authorId).toBeNull();
+    expect(revision?.authorDisplayName).toBeNull();
+  });
 });
 
 describe('getRevisionsByIds', () => {

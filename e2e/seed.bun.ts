@@ -128,6 +128,41 @@ async function seedFixtures(sql: postgres.Sql) {
     absoluteTimeoutDays: 30,
   });
 
+  // e2e/history.spec.ts (revision-history spec: "Page History Query
+  // Returns Revisions Newest First"): a page saved twice, so the reader
+  // sees two revisions authored by "E2E Owner", newest first.
+  const [historyPage] = await sql<{ id: string }[]>`
+    INSERT INTO nodes (workspace_id, parent_id, type, path, position, slug, title)
+    VALUES (${ws!.id}, ${root!.id}, 'page', '', 2, ${`e2e-history-${randomUUID()}`}, 'E2E History Page')
+    RETURNING id
+  `;
+  const historyFirstSave = await savePage(sql, {
+    nodeId: historyPage!.id,
+    workspaceId: ws!.id,
+    markdown: '## First version\n\nThe page as it was first saved.\n',
+    expectedContentHash: null,
+    updatedBy: owner!.id,
+  });
+  await savePage(sql, {
+    nodeId: historyPage!.id,
+    workspaceId: ws!.id,
+    markdown: '## Second version\n\nThe page after one edit.\n',
+    expectedContentHash: historyFirstSave.contentHash,
+    updatedBy: owner!.id,
+  });
+  await insertGrants(sql, ws!.id, 'user', readerUser!.id, [{ resourceId: historyPage!.id, action: 'read', effect: 'allow' }]);
+
+  // A page node that exists and is readable but has never been saved —
+  // reachable because `savePage()` is the only writer of `page_content`
+  // and `page_revision`, so a bare node has zero of both. The screen's
+  // real "empty" state, not a hypothetical.
+  const [emptyHistoryPage] = await sql<{ id: string }[]>`
+    INSERT INTO nodes (workspace_id, parent_id, type, path, position, slug, title)
+    VALUES (${ws!.id}, ${root!.id}, 'page', '', 3, ${`e2e-empty-history-${randomUUID()}`}, 'E2E Empty History Page')
+    RETURNING id
+  `;
+  await insertGrants(sql, ws!.id, 'user', readerUser!.id, [{ resourceId: emptyHistoryPage!.id, action: 'read', effect: 'allow' }]);
+
   return {
     signinEmail,
     signinInvitationToken,
@@ -137,6 +172,8 @@ async function seedFixtures(sql: postgres.Sql) {
     resetEmail,
     resetToken,
     readPageId: readPage!.id,
+    historyPageId: historyPage!.id,
+    emptyHistoryPageId: emptyHistoryPage!.id,
     readerSessionToken,
     outsiderSessionToken,
   };

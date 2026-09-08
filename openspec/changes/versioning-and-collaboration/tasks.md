@@ -157,7 +157,7 @@ Chain strategy: pending
 
 *`docs/UI-CHECKLIST.md` §1: no screen is done until the owner reviews it, and work does not continue on top of an unreviewed screen. Each surface below gets its own gate — they are not batched.*
 
-- [ ] 10.1 Build page history screen (revision list) per `UI-CHECKLIST.md` §2–§6; write and pass its happy-path e2e (§7).
+- [x] 10.1 Build page history screen (revision list) per `UI-CHECKLIST.md` §2–§6; write and pass its happy-path e2e (§7).
 - [ ] 10.2 **STOP — owner review gate 1/6: page history.** Do not start 10.3 until the owner has reviewed and passed this screen against `UI-CHECKLIST.md` and `DESIGN-SYSTEM.md`.
 - [ ] 10.3 Build page-level diff view (added/removed/**modified**/**moved** distinctly treated, §4.7); write and pass its happy-path and permission-denied e2e.
 - [ ] 10.4 **STOP — owner review gate 2/6: page diff view.**

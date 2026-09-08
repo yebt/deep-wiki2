@@ -9,6 +9,8 @@ import { z } from 'zod';
 export const RevisionSummarySchema = z.object({
   id: z.string(),
   authorId: z.string().nullable(),
+  /** `users.display_name` at read time — the field the history screen renders "who changed it" from. `null` when the revision has no author. */
+  authorDisplayName: z.string().nullable(),
   createdAt: z.string(),
   changesetId: z.string().nullable(),
 });

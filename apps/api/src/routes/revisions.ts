@@ -45,6 +45,7 @@ export function createRevisionRoutes(deps: RevisionRouteDeps): Hono<{ Variables:
         revisions: revisions.map((revision) => ({
           id: revision.id,
           authorId: revision.authorId,
+          authorDisplayName: revision.authorDisplayName,
           createdAt: revision.createdAt.toISOString(),
           changesetId: revision.changesetId,
         })),
