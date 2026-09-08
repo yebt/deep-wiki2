@@ -415,6 +415,28 @@ makes conventions portable across projects.
 
 Discoveries and constraints. Newest first.
 
+### 2026-09-08 — `verify` now needs more memory than the machine had, and was killed
+
+A single end-to-end `bun run verify` was killed by the operating system under memory pressure.
+It was not a test failure: it completed the ten structural checks, `lint`, `typecheck` and the
+full unit suite (1409 tests, zero failures) before dying, and a separate `bun run e2e` run
+passed 30/30 the same day.
+
+The cause is what `verify` now contains. Wiring the e2e suite into it — the right fix for a
+suite that no committed command reached — stacked Playwright's browser, a Nuxt production
+build and the disposable Postgres containers on top of a run that already provisions a database
+for `packages/db`. Peak memory is now the sum of all of it.
+
+**Impact:** a gate that cannot finish is a gate people stop running, which is the same failure
+as a gate everyone routes around. Two directions worth weighing before the next milestone tag:
+run the e2e stage in a separate process rather than the same one, or accept that `verify` is a
+two-command ritual and say so in `CLAUDE.md` rather than leaving the owner to discover it as a
+kill. The parts are individually cheap; only their sum is not.
+
+**Not yet decided.** Recorded now because the failure mode is environmental and will not
+reproduce on a larger machine, which is exactly how a gate quietly becomes optional for whoever
+has the smaller one.
+
 ### 2026-09-08 — A geometry assertion outlived the DOM it named, and reported a layout defect that was not there
 
 `e2e/auth-layout.spec.ts`'s "the sign-in block is centred in the space between header and
