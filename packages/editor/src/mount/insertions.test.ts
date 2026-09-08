@@ -4,7 +4,7 @@ import { EditorState, TextSelection, type Transaction } from 'prosemirror-state'
 import { schema } from '../schema';
 import { toMarkdown } from '../to-markdown';
 import { createMentionPlugin, insertMention, type MentionCandidate } from './mention-plugin';
-import { createSlashPlugin, SLASH_COMMANDS, slashPluginKey, type SlashCommand } from './slash-plugin';
+import { confirmSlashCommand, createSlashPlugin, SLASH_COMMANDS, slashPluginKey, type SlashCommand } from './slash-plugin';
 
 /**
  * The three mutations `packages/editor` actually performs on the document
@@ -52,6 +52,30 @@ function paragraphState(text: string, plugins: readonly unknown[] = []): EditorS
     schema,
     doc,
     selection: TextSelection.create(doc, text.length + 1),
+    plugins: plugins as never,
+  });
+}
+
+/**
+ * A one-cell table with the cursor at the end of `text` inside the cell.
+ * `tableCell` is `inline*` (schema.ts), so it can hold no block at all —
+ * the one reachable place in this schema where every slash command is
+ * inapplicable, and `trigger.ts`'s `isInsideCodeBlock` does not keep the
+ * menu out of it.
+ */
+function tableCellState(text: string, plugins: readonly unknown[] = []): EditorState {
+  const doc = schema.node('doc', null, [
+    schema.node('table', { blockAnchor: null }, [
+      schema.node('tableRow', null, [
+        schema.node('tableCell', { align: null }, text ? schema.text(text) : undefined),
+      ]),
+    ]),
+  ]);
+  // doc > table(1) > tableRow(2) > tableCell(3): the cell's text starts at 3.
+  return EditorState.create({
+    schema,
+    doc,
+    selection: TextSelection.create(doc, text.length + 3),
     plugins: plugins as never,
   });
 }
@@ -128,6 +152,74 @@ describe('SLASH_COMMANDS: every command runs and produces the construct it promi
 
     expect(next.doc.content.content.some((node) => node.type.name === 'thematicBreak')).toBe(true);
     expect(toMarkdown(next.doc)).toBe('***\n');
+  });
+});
+
+// document-editor: a command that cannot run at the caret must never
+// consume what the user typed. `tableCell` is `inline*`, so all eight
+// commands are inapplicable there — and the menu opened there anyway,
+// deleted the trigger text, transformed nothing, and swallowed the key.
+describe('a slash command that cannot apply consumes nothing', () => {
+  for (const command of SLASH_COMMANDS) {
+    test(`${command.id} confirmed inside a table cell leaves the document exactly as it was`, () => {
+      const state = tableCellState('/x');
+      const before = state.doc.toJSON();
+
+      const tr = confirmSlashCommand(state, command, { from: 3, to: 5 });
+      const next = tr ? state.apply(tr) : state;
+
+      expect(next.doc.textContent).toBe('/x');
+      expect(next.doc.toJSON()).toEqual(before);
+    });
+  }
+
+  test('every command reports inapplicability when run without a dispatch, as a ProseMirror Command must', () => {
+    const state = tableCellState('/x');
+    expect(SLASH_COMMANDS.filter((command) => command.run(state)).map((c) => c.id)).toEqual([]);
+  });
+
+  test('divider does not escape the table it cannot be placed in', () => {
+    // `replaceSelectionWith` escalates depth to fit the slice, so an
+    // unchecked divider dropped a thematicBreak AFTER the whole table.
+    const state = tableCellState('/x');
+    const tr = confirmSlashCommand(state, commandById('divider'), { from: 3, to: 5 });
+    const next = tr ? state.apply(tr) : state;
+
+    expect(next.doc.childCount).toBe(1);
+    expect(next.doc.firstChild!.type.name).toBe('table');
+    expect(toMarkdown(next.doc)).toBe(toMarkdown(state.doc));
+  });
+
+  test('the menu offers nothing inside a table cell — an offer it cannot honour is not an offer', () => {
+    const plugin = createSlashPlugin();
+    const view = fakeView(tableCellState('/', [plugin]));
+    view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, 4)));
+
+    const slash = slashPluginKey.getState(view.state)!;
+    expect(slash.active).toBe(true);
+    expect(slash.commands).toEqual([]);
+  });
+
+  test('Enter inside a table cell changes nothing at all', () => {
+    const plugin = createSlashPlugin();
+    const view = fakeView(tableCellState('/quote', [plugin]));
+    view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, 9)));
+    expect(slashPluginKey.getState(view.state)!.active).toBe(true);
+    const before = view.state.doc.toJSON();
+
+    expect(press(view, 'Enter', plugin)).toBe(true);
+
+    expect(view.state.doc.toJSON()).toEqual(before);
+  });
+
+  test('a paragraph still offers all eight, so the filter narrows nothing it should not', () => {
+    const plugin = createSlashPlugin();
+    const view = fakeView(paragraphState('/', [plugin]));
+    view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, 2)));
+
+    expect(slashPluginKey.getState(view.state)!.commands.map((c) => c.id)).toEqual(
+      SLASH_COMMANDS.map((c) => c.id),
+    );
   });
 });
 

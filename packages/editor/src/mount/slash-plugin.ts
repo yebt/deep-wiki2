@@ -25,7 +25,35 @@ export type { SlashCommandSummary, SlashState };
  * id from `SLASH_COMMANDS` at confirm time.
  */
 export interface SlashCommand extends SlashCommandSummary {
-  readonly run: (state: EditorState, dispatch: (tr: Transaction) => void) => boolean;
+  /**
+   * A ProseMirror `Command`, with its contract intact: `dispatch` is
+   * OPTIONAL, and calling `run(state)` with none is a dry run that
+   * answers "could this apply here?" without touching the document.
+   * `false` means it cannot, and — this is the part that was missing —
+   * `false` also means it did not call `dispatch`.
+   */
+  readonly run: (state: EditorState, dispatch?: (tr: Transaction) => void) => boolean;
+}
+
+/**
+ * True when `type` can be placed at the caret WITHOUT ProseMirror moving
+ * it somewhere else.
+ *
+ * `Transform.replaceRange` (which is what `replaceSelectionWith` reaches)
+ * escalates depth until the slice fits, so an unchecked insertion inside a
+ * `tableCell` — `inline*`, so it can hold no block at all — does not fail.
+ * It walks out of the whole table and drops the node after it, leaving the
+ * user's text where it was and a horizontal rule somewhere they never put
+ * the caret. Only the caret's own container is asked here, never its
+ * ancestors: that is precisely the difference from
+ * prosemirror-example-setup's `canInsert`, which walks up and would call
+ * the escalated placement legal.
+ */
+function canInsertAtCaret(state: EditorState, type: NodeType): boolean {
+  const { $from } = state.selection;
+  const depth = Math.max($from.depth - 1, 0);
+  const index = $from.index(depth);
+  return $from.node(depth).canReplaceWith(index, index, type);
 }
 
 function typeOf(name: string): NodeType {
@@ -52,7 +80,9 @@ export const SLASH_COMMANDS: readonly SlashCommand[] = [
     label: 'Divider',
     description: 'A horizontal rule',
     run: (s, d) => {
-      d(s.tr.replaceSelectionWith(typeOf('thematicBreak').create()));
+      const type = typeOf('thematicBreak');
+      if (!canInsertAtCaret(s, type)) return false;
+      d?.(s.tr.replaceSelectionWith(type.create()));
       return true;
     },
   },
@@ -81,27 +111,65 @@ export const SLASH_COMMANDS: readonly SlashCommand[] = [
  * plugin-free scratch state positioned on the post-delete document, and
  * its steps are replayed onto `tr` — they are already expressed in
  * exactly that document's coordinates, so no mapping is needed.
+ *
+ * Returns `null` when the command cannot apply at this selection, and the
+ * caller must then dispatch nothing of this transaction. A `Command`
+ * reports that by returning `false` *without* calling `dispatch`, and
+ * discarding that return value is how `/quote` in a `tableCell` (which is
+ * `inline*` and can host no block) deleted the six characters the user had
+ * typed, transformed nothing, and reported the key as handled. The menu
+ * no longer offers a command that cannot run here (`filterSlashCommands`),
+ * so this is the second lock on the same door rather than the only one:
+ * the applicability the menu computes is measured against the live
+ * document, and this one against the post-delete document the command
+ * will actually see.
  */
 export function confirmSlashCommand(
   state: EditorState,
   command: SlashCommand,
   range: { readonly from: number; readonly to: number },
-): Transaction {
+): Transaction | null {
   const tr = state.tr.delete(range.from, range.to).setMeta(slashPluginKey, { type: 'dismiss' } satisfies SlashAction);
 
   const scratch = EditorState.create({ schema: state.schema, doc: tr.doc, selection: tr.selection, plugins: [] });
-  command.run(scratch, (commandTr) => {
+  let dispatched = false;
+  const applied = command.run(scratch, (commandTr) => {
+    dispatched = true;
     for (const step of commandTr.steps) tr.step(step);
     if (commandTr.selectionSet) tr.setSelection(Selection.fromJSON(tr.doc, commandTr.selection.toJSON()));
   });
 
-  return tr;
+  // `applied` is the command's own verdict; `dispatched` is what actually
+  // reached `tr`. Both are required, so a command that returns `true` and
+  // dispatches nothing cannot smuggle a bare deletion through either.
+  return applied && dispatched ? tr : null;
 }
 
-export function filterSlashCommands(query: string): readonly SlashCommand[] {
-  if (!query) return SLASH_COMMANDS;
+/**
+ * The ids of the commands that can run at `state`'s selection, measured by
+ * dry-running each one. Evaluated against the live document rather than
+ * the post-delete one `confirmSlashCommand` builds: removing inline text
+ * from a text block changes no block structure, so the two agree for every
+ * command here — and where they could ever disagree, `confirmSlashCommand`
+ * is the authority and refuses.
+ */
+export function applicableSlashCommandIds(state: EditorState): readonly string[] {
+  return SLASH_COMMANDS.filter((command) => command.run(state)).map((command) => command.id);
+}
+
+/**
+ * `applicable` is the id list from `applicableSlashCommandIds`. Omitting it
+ * filters by query alone (the pure, state-free form the reducer's own
+ * tests use); passing it is what keeps the menu from offering a block
+ * transform that cannot run where the caret is — a command listed there
+ * and then refused is worse than one that was never listed, because the
+ * refusal has no place to explain itself.
+ */
+export function filterSlashCommands(query: string, applicable?: readonly string[]): readonly SlashCommand[] {
+  const runnable = applicable ? SLASH_COMMANDS.filter((command) => applicable.includes(command.id)) : SLASH_COMMANDS;
+  if (!query) return runnable;
   const needle = query.toLowerCase();
-  return SLASH_COMMANDS.filter((command) => command.label.toLowerCase().includes(needle));
+  return runnable.filter((command) => command.label.toLowerCase().includes(needle));
 }
 
 function toSummary(command: SlashCommand): SlashCommandSummary {
@@ -111,7 +179,14 @@ function toSummary(command: SlashCommand): SlashCommandSummary {
 export const INACTIVE_SLASH_STATE: SlashState = { active: false, from: 0, to: 0, query: '', commands: [], selectedIndex: 0 };
 
 export type SlashAction =
-  | { readonly type: 'trigger'; readonly from: number; readonly to: number; readonly query: string }
+  | {
+      readonly type: 'trigger';
+      readonly from: number;
+      readonly to: number;
+      readonly query: string;
+      /** Ids from `applicableSlashCommandIds`; omitted means "filter by query only". */
+      readonly applicable?: readonly string[];
+    }
   | { readonly type: 'moveSelection'; readonly delta: number }
   | { readonly type: 'noTrigger' }
   | { readonly type: 'dismiss' };
@@ -124,7 +199,7 @@ export function reduceSlashState(state: SlashState, action: SlashAction): SlashS
         from: action.from,
         to: action.to,
         query: action.query,
-        commands: filterSlashCommands(action.query).map(toSummary),
+        commands: filterSlashCommands(action.query, action.applicable).map(toSummary),
         selectedIndex: 0,
       };
     case 'moveSelection':
@@ -167,7 +242,13 @@ export function createSlashPlugin(options: SlashPluginOptions = {}): Plugin<Slas
         : (() => {
             const match = matchTrigger(textBeforeCursor(newState), '/');
             return match
-              ? { type: 'trigger', from: newState.selection.from - match.query.length - 1, to: newState.selection.from, query: match.query }
+              ? {
+                  type: 'trigger',
+                  from: newState.selection.from - match.query.length - 1,
+                  to: newState.selection.from,
+                  query: match.query,
+                  applicable: applicableSlashCommandIds(newState),
+                }
               : { type: 'noTrigger' };
           })();
 
@@ -196,7 +277,10 @@ export function createSlashPlugin(options: SlashPluginOptions = {}): Plugin<Slas
           const command = SLASH_COMMANDS.find((candidate) => candidate.id === summary.id);
           if (!command) return true;
 
-          view.dispatch(confirmSlashCommand(view.state, command, { from: state.from, to: state.to }));
+          // A `null` here means the command refused: dismiss the menu and
+          // leave every character the user typed exactly where it is.
+          const tr = confirmSlashCommand(view.state, command, { from: state.from, to: state.to });
+          view.dispatch(tr ?? view.state.tr.setMeta(slashPluginKey, { type: 'dismiss' } satisfies SlashAction));
           return true;
         }
         return false;
