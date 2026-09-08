@@ -6,9 +6,20 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { createSession, savePage } from '@deep-wiki/db';
 import { provisionTestDatabase, type ProvisionedTestDatabase } from '@deep-wiki/db/testing/provision';
+import type { PresenceBroadcaster, PresenceEvent } from '@deep-wiki/core';
 import postgres from 'postgres';
 import { SESSION_COOKIE_NAME } from '../middleware/session';
 import { createPageRoutes } from './pages';
+
+class RecordingBroadcaster implements PresenceBroadcaster {
+  readonly published: PresenceEvent[] = [];
+  publish(event: PresenceEvent): void {
+    this.published.push(event);
+  }
+  subscribe(): () => void {
+    return () => {};
+  }
+}
 
 let db: ProvisionedTestDatabase;
 let sql: postgres.Sql;
@@ -292,6 +303,23 @@ describe('PATCH /pages/:id/lock', () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as { status: string };
     expect(body.status).toBe('ok');
+  });
+
+  // editing-presence spec: "A Lock Heartbeat Always Refreshes Presence" —
+  // this route's heartbeat is the sole write path presence has.
+  test('a successful heartbeat publishes a presence event through the wired broadcaster', async () => {
+    const fixture = await buildFixture();
+    await savePage(sql, { nodeId: fixture.pageId, workspaceId: fixture.workspaceId, markdown: '# Hello\n', expectedContentHash: null });
+    const broadcaster = new RecordingBroadcaster();
+    const app = createPageRoutes({ sql, sessionIdleTimeoutMinutes: 30, pageLockTtlSeconds: 120, changesetWindowMinutes: 30, broadcaster });
+    await app.request(`/pages/${fixture.pageId}/edit-session`, { headers: { cookie: fixture.writerCookie } });
+
+    const res = await app.request(`/pages/${fixture.pageId}/lock`, { method: 'PATCH', headers: { cookie: fixture.writerCookie } });
+
+    expect(res.status).toBe(200);
+    expect(broadcaster.published).toHaveLength(1);
+    expect(broadcaster.published[0]?.pageId).toBe(fixture.pageId);
+    expect(broadcaster.published[0]?.workspaceId).toBe(fixture.workspaceId);
   });
 
   test('a heartbeat from a displaced holder reports lost', async () => {

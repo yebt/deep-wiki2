@@ -16,6 +16,7 @@ import {
   takeOverLock,
 } from '@deep-wiki/db';
 import { probe } from '@deep-wiki/editor';
+import type { PresenceBroadcaster } from '@deep-wiki/core';
 import { ErrorResponseSchema, SavePageRequestSchema } from '@deep-wiki/contracts';
 import { Hono } from 'hono';
 import type postgres from 'postgres';
@@ -27,6 +28,8 @@ export interface PageRouteDeps {
   readonly pageLockTtlSeconds: number;
   /** `CHANGESET_WINDOW_MINUTES`, threaded from `loadConfig()` exactly as `pageLockTtlSeconds` is. */
   readonly changesetWindowMinutes: number;
+  /** Threaded straight into `heartbeatLock()` — presence's only write path (editing-presence spec). Optional so callers that do not care about presence keep working. */
+  readonly broadcaster?: PresenceBroadcaster;
 }
 
 async function readJsonBody(request: Request): Promise<Record<string, unknown>> {
@@ -165,7 +168,12 @@ export function createPageRoutes(deps: PageRouteDeps): Hono<{ Variables: Session
     const authorized = await can(deps.sql, { subjectType: 'user', subjectId: session.userId, resourceId: nodeId, action: 'write' });
     if (!authorized) return c.json(ErrorResponseSchema.parse({ error: 'forbidden' }), 403);
 
-    const status = await heartbeatLock(deps.sql, { nodeId, workspaceId: node.workspace_id, userId: session.userId });
+    const status = await heartbeatLock(deps.sql, {
+      nodeId,
+      workspaceId: node.workspace_id,
+      userId: session.userId,
+      broadcaster: deps.broadcaster,
+    });
     return c.json({ status });
   });
 

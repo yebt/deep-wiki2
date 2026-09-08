@@ -4,7 +4,14 @@
  * without presence"). No expiry column and no sweeper job — a lock is held
  * iff `heartbeat_at > now() - ttl`, which every function here computes at
  * call time. A read never writes: `readLockStatus` issues no `UPDATE`.
+ *
+ * `heartbeatLock`'s success path is also the ONLY place in this codebase
+ * that publishes a `PresenceBroadcaster` event (editing-presence spec:
+ * "Presence Has No Write Path Independent Of The Lock Heartbeat" —
+ * enforced structurally by `apps/api/src/presence/single-writer.test.ts`).
+ * Presence has no write path of its own to have wired anywhere else.
  */
+import type { PresenceBroadcaster } from '@deep-wiki/core';
 import type postgres from 'postgres';
 
 type SqlExecutor = postgres.Sql | postgres.TransactionSql;
@@ -67,22 +74,41 @@ export interface HeartbeatLockInput {
   readonly nodeId: string;
   readonly workspaceId: string;
   readonly userId: string;
+  /** Optional so every existing caller keeps working unchanged; production wiring always supplies it. */
+  readonly broadcaster?: PresenceBroadcaster;
 }
 
 export type HeartbeatLockResult = 'ok' | 'lost';
 
+interface HeartbeatRow {
+  node_id: string;
+  acquired_at: Date;
+}
+
 /**
  * Extends the window for the caller's own held lock. Matches on
  * `holder_user_id`, so a caller displaced by a takeover gets `'lost'`
- * rather than silently reviving a lock that is no longer theirs.
+ * rather than silently reviving a lock that is no longer theirs — and,
+ * critically, never publishes for a heartbeat that lost the race: a
+ * displaced holder's heartbeat MUST NOT resurrect stale presence for
+ * itself.
  */
 export async function heartbeatLock(sql: SqlExecutor, input: HeartbeatLockInput): Promise<HeartbeatLockResult> {
-  const rows = await sql`
+  const rows = await sql<HeartbeatRow[]>`
     UPDATE page_locks SET heartbeat_at = now()
      WHERE node_id = ${input.nodeId} AND workspace_id = ${input.workspaceId} AND holder_user_id = ${input.userId}
-    RETURNING node_id
+    RETURNING node_id, acquired_at
   `;
-  return rows.length === 1 ? 'ok' : 'lost';
+  if (rows.length !== 1) return 'lost';
+
+  input.broadcaster?.publish({
+    workspaceId: input.workspaceId,
+    pageId: input.nodeId,
+    userId: input.userId,
+    since: rows[0]!.acquired_at.toISOString(),
+  });
+
+  return 'ok';
 }
 
 export interface TakeOverLockInput {

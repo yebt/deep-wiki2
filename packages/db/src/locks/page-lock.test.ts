@@ -1,7 +1,18 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import type { PresenceBroadcaster, PresenceEvent } from '@deep-wiki/core';
 import postgres from 'postgres';
 import { provisionTestDatabase, type ProvisionedTestDatabase } from '../../testing/provision';
 import { acquireLock, heartbeatLock, readLockStatus, takeOverLock } from './page-lock';
+
+class RecordingBroadcaster implements PresenceBroadcaster {
+  readonly published: PresenceEvent[] = [];
+  publish(event: PresenceEvent): void {
+    this.published.push(event);
+  }
+  subscribe(): () => void {
+    return () => {};
+  }
+}
 
 let db: ProvisionedTestDatabase;
 let sql: postgres.Sql;
@@ -133,6 +144,47 @@ describe('heartbeatLock', () => {
     const result = await heartbeatLock(sql, { nodeId, workspaceId, userId: userA });
 
     expect(result).toBe('lost');
+  });
+
+  // editing-presence spec: "Presence Has No Write Path Independent Of The
+  // Lock Heartbeat" — every presence refresh originates from this exact
+  // request, in the same operation as the heartbeat itself.
+  test('a successful heartbeat publishes a presence event in the same operation', async () => {
+    const { workspaceId, nodeId, userA } = await seedPageWithContent();
+    const lock = await acquireLock(sql, { nodeId, workspaceId, userId: userA, ttlSeconds: TTL_SECONDS });
+    const broadcaster = new RecordingBroadcaster();
+
+    const result = await heartbeatLock(sql, { nodeId, workspaceId, userId: userA, broadcaster });
+
+    expect(result).toBe('ok');
+    expect(broadcaster.published).toHaveLength(1);
+    expect(broadcaster.published[0]).toEqual({
+      workspaceId,
+      pageId: nodeId,
+      userId: userA,
+      since: lock.acquiredAt.toISOString(),
+    });
+  });
+
+  test('a heartbeat that loses the lock (displaced by a takeover) never publishes', async () => {
+    const { workspaceId, nodeId, userA, userB } = await seedPageWithContent();
+    await acquireLock(sql, { nodeId, workspaceId, userId: userA, ttlSeconds: TTL_SECONDS });
+    await takeOverLock(sql, { nodeId, workspaceId, userId: userB });
+    const broadcaster = new RecordingBroadcaster();
+
+    const result = await heartbeatLock(sql, { nodeId, workspaceId, userId: userA, broadcaster });
+
+    expect(result).toBe('lost');
+    expect(broadcaster.published).toHaveLength(0);
+  });
+
+  test('omitting the broadcaster is safe — heartbeating still succeeds with no publish attempted', async () => {
+    const { workspaceId, nodeId, userA } = await seedPageWithContent();
+    await acquireLock(sql, { nodeId, workspaceId, userId: userA, ttlSeconds: TTL_SECONDS });
+
+    const result = await heartbeatLock(sql, { nodeId, workspaceId, userId: userA });
+
+    expect(result).toBe('ok');
   });
 });
 
