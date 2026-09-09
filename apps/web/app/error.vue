@@ -47,6 +47,28 @@
  * replaces a server-side `message` with a generic string, but in
  * development it is the raw throw, and a screen that prints one and not
  * the other is a screen nobody has reviewed in the state users get.
+ *
+ * ## Why the screen never says whether you are signed in
+ *
+ * Rewritten 2026-09-08. The owner reached this screen from `/workspaces/`
+ * while signed in and was offered "Go to sign-in", and nothing else. That
+ * is worse than an unhelpful action: it is an assertion about the visitor
+ * that was false, on a screen whose whole job is to be trustworthy about
+ * what just happened.
+ *
+ * The screen cannot fix that by guessing better. The session cookie is
+ * `httpOnly` (`apps/api/src/middleware/session.ts`), so the browser cannot
+ * read it; there is no session or `/me` endpoint on the API to ask; and
+ * this screen has to render when the server is the thing that failed, so
+ * making it depend on a network round trip would break the branch that
+ * needs it most.
+ *
+ * So it stops making the claim. It names a **destination**, never a state.
+ * Every destination this product has needs a session — there are no public
+ * pages (`invitation_only` registration, docs/SPECS.md §14) — so sign-in
+ * stays on the screen as the second door, and is never the only one. A
+ * visitor who is signed in takes the first; a visitor who is not takes the
+ * second; neither is told which they are.
  */
 import type { NuxtError } from '#app';
 
@@ -61,6 +83,10 @@ const isNotFound = computed(() => statusCode.value === 404);
  * carries the failed route, which is the one thing about this failure that
  * came from the user rather than from the server — so it is the one thing
  * the screen can use without disclosing anything it was told.
+ *
+ * It is also the first thing a person checks, which is why it is now set
+ * as its own block rather than run into the sentence around it: a typo in
+ * a 60-character URL is not findable in prose.
  */
 const route = useRoute();
 const path = computed(() => route.fullPath);
@@ -68,25 +94,35 @@ const path = computed(() => route.fullPath);
 /**
  * The next action, derived from that address alone.
  *
- * §3 requires a real next action and forbids a dead end; the brief for
- * this screen adds that "go home" is not one, and the brand mark in the
- * header is already the way home. So: a mistyped or stale link *inside* a
- * workspace can still deliver the user to that workspace's tree, and a
- * broken sub-route of a page can still deliver them to the page. Both ids
- * come out of the URL the user typed — the screen learns nothing from the
- * server and therefore cannot leak anything, and neither link claims the
- * destination exists; it is an offer to try, and if it does not resolve
- * the user lands back here.
+ * §3 requires a real next action, forbids a dead end, and forbids "go
+ * home" as the only offer when the address itself says where the user was
+ * trying to go. So the screen reads the address for the most specific
+ * place it names, and offers that:
  *
- * With no such context there is genuinely one route to content in this
- * product: it has no public pages (`invitation_only` registration,
- * docs/SPECS.md §14), so an unrecognised address followed from outside is
- * most often a signed-out session. Sign-in is then the honest action.
+ *   /workspaces/<id>/…  that workspace's tree
+ *   /pages/<id>/…       that page
+ *   anything else       the list of workspaces, which is where every
+ *                       signed-in subject's content starts
+ *
+ * Every id above comes out of the URL the user typed — the screen learns
+ * nothing from the server and therefore cannot leak anything — and none of
+ * the links claims its destination exists. It is an offer to try; if it
+ * does not resolve, the user lands back here.
+ *
+ * The third case is the one that was wrong. `/workspaces/` names a real
+ * part of the product and no particular workspace, and it used to fall
+ * past both patterns into sign-in.
  */
 const UUID = '[0-9a-fA-F-]{36}';
 
-const recovery = computed(() => {
-  const workspace = route.path.match(new RegExp(`^/workspaces/(${UUID})(?:/|$)`));
+interface Recovery {
+  readonly to: string;
+  readonly label: string;
+  readonly icon: string;
+}
+
+const recovery = computed<Recovery>(() => {
+  const workspace = new RegExp(`^/workspaces/(${UUID})(?:/|$)`).exec(route.path);
   if (workspace) {
     return {
       to: `/workspaces/${workspace[1]}/tree`,
@@ -95,12 +131,12 @@ const recovery = computed(() => {
     };
   }
 
-  const page = route.path.match(new RegExp(`^/pages/(${UUID})(?:/|$)`));
+  const page = new RegExp(`^/pages/(${UUID})(?:/|$)`).exec(route.path);
   if (page) {
     return { to: `/pages/${page[1]}`, label: 'Open this page', icon: 'i-lucide-file-text' };
   }
 
-  return { to: '/login', label: 'Go to sign-in', icon: 'i-lucide-log-in' };
+  return { to: '/workspaces', label: 'Your workspaces', icon: 'i-lucide-library-big' };
 });
 
 /**
@@ -124,7 +160,16 @@ useSeoMeta({
 
 <template>
   <UApp>
-    <AppShell>
+    <!-- `center` is the shell's `my-auto` on docs/DESIGN-SYSTEM.md §2.4's
+         `measure` column, the same column read and edit mode stand in. A
+         screen whose entire content is one card reads as an unfinished
+         fallback while that card is pinned to the top of a tall empty
+         viewport; the auth screens — the nearest existing screens with
+         this exact shape — already centre, and checklist §4.1 asks a
+         screen to match the nearest one rather than choose again.
+         `my-auto` absorbs only *positive* free space, so a card taller
+         than the region stays top-aligned and fully reachable. -->
+    <AppShell center>
       <!-- `PageNotice` at `level="1"` — this notice *is* the screen's
            content, so it owns the page's only `<h1>`, and §4.4 requires
            that `<h1>` to keep one type role across every state a screen
@@ -137,13 +182,32 @@ useSeoMeta({
         icon="i-lucide-compass"
         heading="This link doesn't lead anywhere"
       >
-        <span class="font-mono break-all">{{ path }}</span> isn't something you can open. It may
-        have been moved or deleted, or it may be somewhere you don't have access to — deep-wiki
-        deliberately doesn't say which, so that a page you can't see is indistinguishable from one
-        that was never there.
+        deep-wiki has nothing at this address.
+        <!-- The evidence, set as its own block rather than run into the
+             sentence around it. `bg-default` is the recessed rung: §9.4
+             rules that an inset inside a Filled card steps *down*, because
+             the card is already `bg-emphasized` and §1.4 forbids a sixth
+             surface level. It therefore carries its own `text-default` and
+             is legible on the neutral card and on the `error-container`
+             one without a second treatment. 12px is one rung inside the
+             card's 16px — §3.3's "don't mix radii" is about a nested shape
+             being *rounder* than what holds it — and `body-medium` mono is
+             §2.3's code role. -->
+        <code class="my-4 block rounded-md bg-default px-3 py-2 font-mono text-body-medium text-default break-all">{{ path }}</code>
+        It may have been moved or deleted, or it may be somewhere you don't have access to —
+        deep-wiki deliberately doesn't say which, so that a page you can't see is
+        indistinguishable from one that was never there.
         <template #actions>
           <UButton :icon="recovery.icon" variant="solid" color="primary" @click="goTo(recovery.to)">
             {{ recovery.label }}
+          </UButton>
+          <!-- The second door, and deliberately the quieter one: M3's Text
+               button (§9.1 — `ghost`), so §2's one-primary-action rule
+               holds while the screen stops asserting which of the two the
+               visitor needs. See "Why the screen never says whether you
+               are signed in" above. -->
+          <UButton icon="i-lucide-log-in" variant="ghost" color="neutral" @click="goTo('/login')">
+            Sign in
           </UButton>
         </template>
       </PageNotice>
@@ -157,31 +221,35 @@ useSeoMeta({
       >
         The server couldn't finish this request. Nothing you did caused it, and nothing you had
         open has been lost — the address is fine, so trying again often works. If it keeps
-        happening, tell whoever runs this instance and quote the reference below.
-        <!-- One action, and it is the one that can actually help: §2 allows
+        happening, tell whoever runs this instance and quote this:
+        <!-- The reference a user quotes when reporting it, in the same
+             inset the 404 gives the address, and *inside* the notice
+             rather than floating under it: a reference belongs to the
+             message it refers to, and a stray line below a card is the
+             shape of an afterthought. §3 forbids a bare status code *as
+             the message*; it does not forbid one beside a message that
+             already said what happened in the user's terms, and a report
+             with no reference in it is a report nobody can act on.
+             Withheld on the 404, where the code is not a diagnosis and the
+             screen has nothing server-side to disclose. -->
+        <code class="mt-4 block rounded-md bg-default px-3 py-2 font-mono text-body-medium text-default">Reference: HTTP {{ statusCode }}</code>
+        <!-- One action, and it is the one that can actually help. §2 allows
              exactly one primary action, and a second exit rendered beside
              it at the same weight — measured 2026-09-07, `outline error`
              and `subtle error` are barely separable on the
              `error-container` ground — reads as a choice where there is
-             none. `outline` + `color="error"` is what the read screen's
-             own network-error retry already uses; the nearest existing
-             screen sets the treatment (checklist §4.1). -->
+             none. Unlike the 404, this branch is not ambiguous about what
+             the user needs: the address was right and the server was not,
+             so leaving for somewhere else is not a recovery, it is giving
+             up on what they asked for. `outline` + `color="error"` is what
+             the read screen's own network-error retry already uses; the
+             nearest existing screen sets the treatment (§4.1). -->
         <template #actions>
           <UButton icon="i-lucide-refresh-cw" variant="outline" color="error" @click="retry">
             Try again
           </UButton>
         </template>
       </PageNotice>
-
-      <!-- The reference a user quotes when reporting it. §3 forbids a bare
-           status code *as the message*; it does not forbid one beside a
-           message that already said what happened in the user's terms, and
-           a report with no reference in it is a report nobody can act on.
-           Withheld on the 404, where the code is not a diagnosis and the
-           screen has nothing server-side to disclose. -->
-      <p v-if="!isNotFound" class="text-body-small text-muted mt-6">
-        Reference: HTTP {{ statusCode }}
-      </p>
     </AppShell>
   </UApp>
 </template>
