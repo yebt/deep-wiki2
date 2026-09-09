@@ -415,6 +415,78 @@ makes conventions portable across projects.
 
 Discoveries and constraints. Newest first.
 
+### 2026-09-09 — `LEGAL_PARENT_TYPES` existed twice before it existed once
+
+The table that says a book's parent is a shelf — `Workspace -> Shelf -> Book -> {Chapter ->
+Page, Page}`, `docs/SPECS.md` §3.1 — was declared in full in **two** files:
+`packages/db/src/nodes/move.ts` and `packages/db/src/nodes/reorder.ts`. Character-identical,
+each with its own `type NodeType` union beside it, and `reorder.ts`'s copy even carried the
+comment "kept identical to move.ts's table" — a promise with nothing checking it. This is
+this repository's own named recurring defect (*the same fact in two places with nothing
+comparing them*), and it was about to become four copies at once: node creation needs the
+same table, and the tree screen needs its inverse to offer "what can I create here?".
+
+**Impact.** The table moved to `packages/core/src/nodes/hierarchy.ts` — the only package
+every consumer can already reach (`db` and `contracts` both depend on it, `web` reaches it
+through `contracts`, and `core` imports nothing). `move.ts`, `reorder.ts` and the new
+`create.ts` all go through one `assertLegalParent()`; `apps/web`'s create menu is built from
+`legalChildTypes()`, which is the same table read the other way round rather than a list.
+`packages/db/src/nodes/single-source.test.ts` is the guard: it scans every module under
+`nodes/` for another `LEGAL_PARENT_TYPES = {` or another `NodeType` union and names the
+offending file, and it compares the object the writers actually call by **identity** against
+core's export — because a textual scan proves nothing about what runs, and an identity check
+proves nothing about what the next person types.
+
+### 2026-09-09 — Node deletion is not a missing feature, it is three unanswered questions
+
+Creation, rename and reorder now exist; **deletion deliberately does not**. It cannot be
+built from what the schema and specs currently say, because three product decisions are
+owed and none of them has a default that is obviously right:
+
+1. **Children.** `nodes_parent_fk` is `ON DELETE CASCADE`, so deleting a shelf silently
+   deletes every book, chapter and page under it — the whole subtree, with no undo, from a
+   tree row. Either that cascade is the product decision (and the UI owes a confirmation
+   naming the count, not a toast), or deletion must refuse a non-empty node, or it must
+   re-parent the children somewhere. The database currently answers "cascade" by accident
+   rather than by choice.
+2. **Revisions and comments.** `page_revision` rows are immutable by trigger and are the
+   product's history; `comments` carry threads other people wrote. Both hang off
+   `page_content`, which cascades from the node. Deleting a page therefore destroys other
+   users' comments and the entire audit trail of a document — which is the opposite of what
+   a wiki is for. A soft delete (a `deleted_at` column, filtered out of the tree and the
+   RAG surface) preserves both and is probably the answer, but it is a schema change and a
+   permissions question, not an afternoon.
+3. **What a deleted node discloses.** Absence and denial are deliberately indistinguishable
+   across this API. A hard delete makes a previously-readable id start answering 404, which
+   is fine; a soft delete makes it answer 404 while the row still exists, which the tree,
+   the backlinks, the mentions and the MCP surface must all agree about.
+
+**Impact.** Nothing is shipped for deletion, and the tree screen's pre-build contract records
+it as an explicit non-goal rather than an omission. Guessing any of the three would be worse
+than not having the feature: the wrong answer to (2) destroys data that cannot be recovered.
+
+### 2026-09-09 — Refusing a duplicate sibling name tells a writer that *something* holds it
+
+`nodes_parent_slug_unique (parent_id, slug)` means two siblings cannot share a slug. Creation
+and rename therefore have to answer for a name that is taken, and there were two candidates:
+uniquify silently (`overview` → `overview-2`) or refuse and say so. They refuse
+(`DuplicateSiblingSlugError` → HTTP 409, the message quoting the name the user typed),
+because a wiki that stores a different name than the one typed, without saying so, produces a
+tree with two rows reading "Overview" and a URL nobody predicted.
+
+The cost is a bounded disclosure. A caller with `write` on a parent but an explicit `deny` on
+one of its children learns that *some* sibling already holds that slug — they cannot see
+which, or what it is called beyond the name they themselves typed. It is unavoidable while
+the constraint exists (the INSERT would fail either way, and a silent uniquify would leak the
+same fact through the suffix it chose), and it is strictly narrower than the parent-level
+non-disclosure this API does guarantee: creating under a parent the caller cannot read is
+byte-identical to creating under one that does not exist, asserted through
+`apps/api/testing/expect-no-disclosure.ts` with the headers scanned as well as the body.
+
+**Impact.** Recorded rather than hidden. If per-child read denial under a writable parent ever
+becomes a case the product cares about, the fix is a soft-uniquify *for that case only* — and
+that is two behaviours for one fact, so it needs a decision, not a patch.
+
 ### 2026-09-09 — Ten copies of one type guard, in four spellings, four of them wrong
 
 Four screens — the workspace list, the page tree, the edit session and the save path — sat on
