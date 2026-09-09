@@ -25,11 +25,24 @@ describe('RevisionSummarySchema', () => {
     });
 
     expect(result.success).toBe(false);
+    if (result.success) return;
+
+    // The name of this test claims one specific field; without this, a
+    // schema that refused the body for any other reason would satisfy it.
+    expect(result.error.issues.map((issue) => issue.path)).toEqual([['authorDisplayName']]);
   });
 });
 
 describe('PageHistoryResponseSchema', () => {
-  test('parses a newest-first revision list', () => {
+  // Renamed 2026-09-09: this was called "parses a newest-first revision
+  // list" and asserted that the first element of a fixture written
+  // newest-first is the newest — the fixture's own order, read back. The
+  // schema is a `z.array`, and makes no ordering promise whatsoever;
+  // "Page History Query Returns Revisions Newest First" is the *query's*
+  // guarantee and is tested where the ORDER BY lives, in packages/db. What
+  // this schema does guarantee is that it hands the list back in the order
+  // it received it, rather than reordering or deduplicating.
+  test('parses a revision list, handing it back in the order it arrived', () => {
     const parsed = PageHistoryResponseSchema.parse({
       revisions: [
         { id: 'rev-2', authorId: 'user-1', authorDisplayName: 'Owner', createdAt: '2026-01-02T00:00:00.000Z', changesetId: 'cs-1' },
@@ -37,13 +50,27 @@ describe('PageHistoryResponseSchema', () => {
       ],
     });
 
-    expect(parsed.revisions).toHaveLength(2);
-    expect(parsed.revisions[0]?.id).toBe('rev-2');
+    expect(parsed.revisions.map((revision) => revision.id)).toEqual(['rev-2', 'rev-1']);
+    expect(parsed.revisions[0]).toEqual({
+      id: 'rev-2',
+      authorId: 'user-1',
+      authorDisplayName: 'Owner',
+      createdAt: '2026-01-02T00:00:00.000Z',
+      changesetId: 'cs-1',
+    });
   });
 
-  test('rejects a revision missing a required field', () => {
+  test('rejects a revision missing required fields, naming each one and its position', () => {
     const result = PageHistoryResponseSchema.safeParse({ revisions: [{ id: 'rev-1' }] });
 
     expect(result.success).toBe(false);
+    if (result.success) return;
+
+    expect(result.error.issues.map((issue) => issue.path)).toEqual([
+      ['revisions', 0, 'authorId'],
+      ['revisions', 0, 'authorDisplayName'],
+      ['revisions', 0, 'createdAt'],
+      ['revisions', 0, 'changesetId'],
+    ]);
   });
 });

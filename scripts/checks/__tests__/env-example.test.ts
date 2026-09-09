@@ -27,13 +27,16 @@ describe('checkEnvExample', () => {
     expect(result.errors.some((e) => e.includes('DATABASE_URL'))).toBe(true);
   });
 
-  test('fails when the template file does not exist', () => {
-    const result = checkEnvExample(
-      join(FIXTURES_DIR, 'env-example-does-not-exist', 'template.env'),
-      REQUIRED_KEYS,
-    );
+  // `ok === false` alone does not distinguish an absent template from a
+  // present one that drifted — the case directly above returns `false` too.
+  // The distinction matters to whoever reads the failure: one is a missing
+  // file, the other a missing line.
+  test('fails when the template file does not exist, and says so rather than reporting drift', () => {
+    const templatePath = join(FIXTURES_DIR, 'env-example-does-not-exist', 'template.env');
+    const result = checkEnvExample(templatePath, REQUIRED_KEYS);
 
     expect(result.ok).toBe(false);
+    expect(result.errors).toEqual([`${templatePath} does not exist`]);
   });
 });
 

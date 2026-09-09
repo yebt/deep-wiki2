@@ -25,17 +25,38 @@ describe('node contracts', () => {
     expect([...NodeTypeSchema.options]).toEqual([...NODE_TYPES]);
   });
 
+  /**
+   * Each refusal below names a different rule, so each is read back by the
+   * field and the rule that produced it. `success === false` alone would be
+   * satisfied by a schema that refused every one of these bodies for the
+   * same, or for no particular, reason.
+   */
+  function refusalsFor(input: unknown): { path: readonly (string | number)[]; code: string }[] {
+    const result = CreateNodeRequestSchema.safeParse(input);
+
+    expect(result.success).toBe(false);
+    if (result.success) return [];
+
+    return result.error.issues.map((issue) => ({ path: [...issue.path], code: issue.code }));
+  }
+
   test('a create request needs a parent, a type and a non-empty title', () => {
     const parsed = CreateNodeRequestSchema.safeParse({ parentId: 'n1', type: 'page', title: '  Setup  ' });
     expect(parsed.success).toBe(true);
     expect(parsed.success && parsed.data.title).toBe('Setup');
 
-    expect(CreateNodeRequestSchema.safeParse({ parentId: 'n1', type: 'page', title: '   ' }).success).toBe(false);
-    expect(CreateNodeRequestSchema.safeParse({ parentId: '', type: 'page', title: 'x' }).success).toBe(false);
-    expect(CreateNodeRequestSchema.safeParse({ parentId: 'n1', type: 'folder', title: 'x' }).success).toBe(false);
-    expect(
-      CreateNodeRequestSchema.safeParse({ parentId: 'n1', type: 'page', title: 'a'.repeat(NODE_TITLE_MAX_LENGTH + 1) }).success,
-    ).toBe(false);
+    expect(refusalsFor({ parentId: 'n1', type: 'page', title: '   ' })).toEqual([
+      { path: ['title'], code: 'too_small' },
+    ]);
+    expect(refusalsFor({ parentId: '', type: 'page', title: 'x' })).toEqual([
+      { path: ['parentId'], code: 'too_small' },
+    ]);
+    expect(refusalsFor({ parentId: 'n1', type: 'folder', title: 'x' })).toEqual([
+      { path: ['type'], code: 'invalid_enum_value' },
+    ]);
+    expect(refusalsFor({ parentId: 'n1', type: 'page', title: 'a'.repeat(NODE_TITLE_MAX_LENGTH + 1) })).toEqual([
+      { path: ['title'], code: 'too_big' },
+    ]);
   });
 
   /**
@@ -49,9 +70,15 @@ describe('node contracts', () => {
     expect(LEGAL_PARENT_TYPES.workspace).toEqual([]);
   });
 
-  test('a rename request carries only the new title', () => {
-    expect(RenameNodeRequestSchema.safeParse({ title: 'Renamed' }).success).toBe(true);
-    expect(RenameNodeRequestSchema.safeParse({ title: '' }).success).toBe(false);
+  test('a rename request carries only the new title, trimmed, and refuses an empty one', () => {
+    expect(RenameNodeRequestSchema.parse({ title: '  Renamed  ', id: 'n2' })).toEqual({ title: 'Renamed' });
+
+    const result = RenameNodeRequestSchema.safeParse({ title: '' });
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+
+    expect(result.error.issues.map((issue) => issue.path)).toEqual([['title']]);
   });
 
   test('the create response carries what the client needs to render the new row', () => {

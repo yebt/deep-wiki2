@@ -12,6 +12,9 @@ describe('WorkspaceSummarySchema', () => {
     const result = WorkspaceSummarySchema.safeParse({ name: 'Handbook', slug: 'handbook' });
 
     expect(result.success).toBe(false);
+    if (result.success) return;
+
+    expect(result.error.issues.map((issue) => issue.path)).toEqual([['id']]);
   });
 });
 

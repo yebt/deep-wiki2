@@ -1393,6 +1393,31 @@ The general lesson is worth keeping: running spec and design in parallel is chea
 surfaces contradictions in the source documents that a sequential run would have inherited
 silently, because the second phase would simply have followed the first.
 
+### 2026-09-09 — Schema-versus-`env.example` agreement is a `bun run check` rule, not a `bun test` one
+
+`scripts/checks/env-example.ts` compares `Object.keys(envSchema.shape)` against the template, and
+checks that every `.default()` agrees with the value the template assigns, only under
+`import.meta.main` — so it runs from `bun run check` and the pre-commit hook, and never from
+`bun test`. That is deliberate and follows `CLAUDE.md`: the drift rule is a structural guard
+rail, and the exported `checkEnvExample()` that the unit tests exercise takes its inputs as
+arguments precisely so the tests do not depend on the repository's own template. Worth knowing
+when reading a green `bun test` run: it says nothing about `env.example`.
+
+Its own test for a missing template asserted only `ok === false`, which a present-but-drifted
+fixture satisfies identically; it now asserts the exact error, so "no such file" and "no such
+line" cannot be confused. (Tightened 2026-09-09.)
+
+### 2026-09-09 — `PAGE_LOCK_HEARTBEAT_SECONDS` may be set at or above `PAGE_LOCK_TTL_SECONDS`
+
+Noted while bounding the numeric env variables, not fixed. Both are independently validated as
+positive integers and nothing relates them, but the design (content-and-editor design.md, "The
+soft lock, coherent without presence") depends on the client heartbeating *well inside* the TTL:
+with `PAGE_LOCK_HEARTBEAT_SECONDS >= PAGE_LOCK_TTL_SECONDS` an active editor's lock lapses under
+them and another user can take the page. This is a cross-field rule, so it belongs in
+`refineEnv()` alongside the mail and blob-store conditions rather than on `envSchema` — the
+module comment explains why. Left out of the audit's scope deliberately; it is a behaviour
+change, not a test fix.
+
 ### 2026-09-03 — The appliance question is answered: Postgres, door left ajar
 
 `docs/TODO.md` carried an Open Question — whether "download one binary, run it, no Postgres"
@@ -1580,6 +1605,42 @@ Cause: the actual root cause, not the first suspicion.
 Fix: what changed, with the commit or PR reference.
 Impact: what else this touches, or "contained".
 ```
+
+### 2026-09-09 — `SMTP_SECURE=false` in env.example arrived as `true`
+
+Symptom: not observed in use — found by a test-quality audit of `packages/contracts`, which
+noticed the schema could not disagree with the template.
+Cause: `packages/contracts/src/env.ts` declared `SMTP_SECURE: z.coerce.boolean()`.
+`z.coerce.boolean()` is `Boolean(value)`, not a parser: every non-empty string is `true`, so
+the `SMTP_SECURE=false` line `env.example` ships coerced to `true`, and `apps/api/src/index.ts`
+passed it straight into `SmtpMailSender`'s `secure`. A fresh clone therefore opened SMTP with
+TLS against the compose stack's Mailpit, which does not speak it. `e2e/global-setup.ts` sets
+`SMTP_SECURE: 'false'` and was reading `true` for the same reason.
+Fix: `envBoolean()` in `packages/contracts/src/env.ts`. `true`/`1` are true, `false`/`0` are
+false, an empty assignment is false, case and surrounding whitespace are ignored, and anything
+else is **refused** — silently truthy is what caused this, so an unrecognised word now fails at
+boot naming the accepted ones. Built on `z.enum` deliberately, so the failure is a real
+`invalid_enum_value` issue: that is the one zod code `describeZodIssue()` re-words into "must be
+one of: …" without echoing what was typed, which matters because these variables carry
+credentials.
+Impact: `SMTP_SECURE` was the only `z.coerce.boolean()` in the repository — checked; `comments.ts`
+and `diff.ts` use plain `z.boolean()` on JSON bodies, where the value really is a boolean and no
+coercion happens. `apps/api` already typed the field `boolean | undefined`, so nothing there
+changed. An operator who had written `SMTP_SECURE=yes` or `on` now gets a boot failure instead of
+silent TLS; that is the intended trade.
+
+### 2026-09-09 — `PORT=70000` parsed
+
+Symptom: not observed — found by the same audit.
+Cause: `PORT` and `SMTP_PORT` were `z.coerce.number().int().positive()` with no upper bound. A
+port is a 16-bit unsigned integer; anything above 65535 was accepted by the schema and failed
+later, from the socket, as something else entirely.
+Fix: `.max(65535)` on both, and tests naming the variable and the limit.
+Impact: contained. The other numeric variables — the session/token TTLs, the page-lock window,
+`CHANGESET_WINDOW_MINUTES` — were checked and deliberately left unbounded: a duration has no
+protocol maximum, and inventing one would be a guess rather than a rule. `env.example`'s
+"keep this at 1024 or above" note is likewise left as advice, not a schema rule: it is true of
+rootless podman, not of every deployment.
 
 ### 2026-09-09 — A dev machine could connect to another project's Postgres and read it as a deep-wiki bug
 

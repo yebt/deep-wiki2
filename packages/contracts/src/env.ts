@@ -2,6 +2,43 @@ import { err, ok, type Result } from '@deep-wiki/core';
 import { z } from 'zod';
 
 /**
+ * The words a `.env` writes a boolean with. `z.coerce.boolean()` is
+ * `Boolean(value)`, which reads every non-empty string as `true` — so
+ * `SMTP_SECURE=false`, the line `env.example` ships, opened SMTP with TLS
+ * against a local Mailpit that does not speak it. A boolean in a `.env` is
+ * a word, and only these words are a boolean.
+ */
+const TRUE_WORDS = ['true', '1'] as const;
+const FALSE_WORDS = ['false', '0'] as const;
+
+/**
+ * Anything outside those words is refused rather than guessed at. Silently
+ * truthy is exactly what caused the defect above: an operator who writes
+ * `SMTP_SECURE=off` should be told the word is not one this reads, at boot,
+ * not discover it from a TLS handshake. An empty assignment is the one
+ * exception — `SMTP_SECURE=` is an operator declining the option, and reads
+ * as `false`, matching the blank `SMTP_USER=`/`SMTP_PASSWORD=` lines beside
+ * it in `env.example`.
+ *
+ * Deliberately NOT a `z.boolean()` field with a `z.coerce`: the parse must
+ * fail with a real `invalid_enum_value` issue, because that is the one zod
+ * issue `describeZodIssue()` re-words into "must be one of: ..." without
+ * ever echoing what was typed.
+ */
+function envBoolean() {
+  return z
+    .preprocess((raw) => {
+      if (typeof raw !== 'string') return raw;
+      const word = raw.trim().toLowerCase();
+      return word === '' ? 'false' : word;
+    }, z.enum([...TRUE_WORDS, ...FALSE_WORDS]))
+    .transform((word): boolean => (TRUE_WORDS as readonly string[]).includes(word));
+}
+
+/** The highest TCP/UDP port number: a port is a 16-bit unsigned integer. */
+const MAX_PORT = 65535;
+
+/**
  * Single source of truth for server-side environment variables. Every
  * variable declared here MUST also appear in the repository root's
  * `env.example` (enforced by `scripts/checks/env-example.ts`), which is
@@ -17,7 +54,7 @@ import { z } from 'zod';
  */
 export const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
-  PORT: z.coerce.number().int().positive(),
+  PORT: z.coerce.number().int().positive().max(MAX_PORT),
   DATABASE_URL: z.string().url(),
 
   // Public base URL, used to build links embedded in email (invitations,
@@ -64,8 +101,8 @@ export const envSchema = z.object({
   // ships non-secret local Mailpit defaults (host/port only; Mailpit needs
   // no auth), so a fresh clone still boots with zero configuration.
   SMTP_HOST: z.string().optional(),
-  SMTP_PORT: z.coerce.number().int().positive().optional(),
-  SMTP_SECURE: z.coerce.boolean().optional(),
+  SMTP_PORT: z.coerce.number().int().positive().max(MAX_PORT).optional(),
+  SMTP_SECURE: envBoolean().optional(),
   SMTP_USER: z.string().optional(),
   SMTP_PASSWORD: z.string().optional(),
   MAIL_FROM: z.string().optional(),

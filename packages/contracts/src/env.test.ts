@@ -102,6 +102,90 @@ describe('parseEnv', () => {
   });
 });
 
+/**
+ * `z.coerce.boolean()` is `Boolean(value)`, so every non-empty string —
+ * `"false"` and `"0"` first among them — coerces to `true`. `env.example`
+ * ships `SMTP_SECURE=false`, so under that coercion a fresh clone opened
+ * SMTP with TLS against a local Mailpit that does not speak it. A .env
+ * writes a boolean as a word; this is the reading of that word.
+ */
+describe('SMTP_SECURE reads the boolean a .env actually writes', () => {
+  function secureFor(value: string | undefined): boolean | undefined {
+    const result = parseEnv(validRawEnv({ SMTP_SECURE: value }));
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.error.map((issue) => issue.message).join('\n'));
+
+    return result.value.SMTP_SECURE;
+  }
+
+  test('"false" is false — the value env.example ships', () => {
+    expect(secureFor('false')).toBe(false);
+  });
+
+  test('"0" is false, and so is an empty assignment', () => {
+    expect(secureFor('0')).toBe(false);
+    expect(secureFor('')).toBe(false);
+  });
+
+  test('"true" and "1" are true', () => {
+    expect(secureFor('true')).toBe(true);
+    expect(secureFor('1')).toBe(true);
+  });
+
+  test('case and surrounding space do not change the answer', () => {
+    expect(secureFor(' FALSE ')).toBe(false);
+    expect(secureFor('True')).toBe(true);
+  });
+
+  test('an unset SMTP_SECURE stays undefined rather than becoming a silent false', () => {
+    expect(secureFor(undefined)).toBeUndefined();
+  });
+
+  test('an unrecognised word is refused and the accepted words are named — never read as true', () => {
+    const result = parseEnv(validRawEnv({ SMTP_SECURE: 'sometimes' }));
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+
+    const message = result.error.find((issue) => issue.variable === 'SMTP_SECURE')?.message ?? '';
+    expect(message).toContain('true');
+    expect(message).toContain('false');
+    expect(message).not.toContain('sometimes');
+  });
+});
+
+/**
+ * A port is a 16-bit number. Without an upper bound `PORT=70000` parses
+ * happily and the failure surfaces later, from the socket, as something
+ * else entirely.
+ */
+describe('the port variables are bounded by the highest TCP port', () => {
+  test('PORT accepts 65535 and refuses 65536, naming the limit', () => {
+    expect(parseEnv(validRawEnv({ PORT: '65535' })).ok).toBe(true);
+
+    const result = parseEnv(validRawEnv({ PORT: '65536' }));
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+
+    const message = result.error.find((issue) => issue.variable === 'PORT')?.message ?? '';
+    expect(message).toContain('65535');
+  });
+
+  test('SMTP_PORT is bounded the same way', () => {
+    expect(parseEnv(validRawEnv({ SMTP_PORT: '65535' })).ok).toBe(true);
+
+    const result = parseEnv(validRawEnv({ SMTP_PORT: '65536' }));
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+
+    const message = result.error.find((issue) => issue.variable === 'SMTP_PORT')?.message ?? '';
+    expect(message).toContain('65535');
+  });
+});
+
 describe('envSchema stays a plain ZodObject', () => {
   test('Object.keys(envSchema.shape) keeps working (env-example.ts drift check reads it directly)', () => {
     // A `.superRefine()`/`.refine()` wrapper turns a ZodObject into a
@@ -138,7 +222,19 @@ describe('refineEnv', () => {
     }
   });
 
-  test('accepts BLOB_STORE_DRIVER=s3 with all four S3 variables present', () => {
+  // BLOB_STORE_FS_ROOT is cleared deliberately. With `validRawEnv()`'s value
+  // left in place this fixture satisfies the filesystem branch as well, so
+  // the test says nothing about an s3 deployment that never configures a
+  // filesystem root at all — which is every s3 deployment. Dropping
+  // refineEnv()'s driver check and requiring the root unconditionally used
+  // to leave this green.
+  //
+  // What it does NOT pin, and cannot: the `else` in refineEnv()'s
+  // `else if (BLOB_STORE_DRIVER === 'filesystem')`. BLOB_STORE_DRIVER is a
+  // two-value enum, so that branch and the `s3` one above it are mutually
+  // exclusive for every possible input and the `else` is redundant by
+  // construction. No fixture can tell the two spellings apart.
+  test('accepts BLOB_STORE_DRIVER=s3 with all four S3 variables present and no filesystem root', () => {
     const parsed = envSchema.parse(
       validRawEnv({
         BLOB_STORE_DRIVER: 's3',
@@ -146,11 +242,12 @@ describe('refineEnv', () => {
         BLOB_STORE_S3_BUCKET: 'deep-wiki',
         BLOB_STORE_S3_ACCESS_KEY_ID: 'minioadmin',
         BLOB_STORE_S3_SECRET_ACCESS_KEY: 'minioadmin',
+        BLOB_STORE_FS_ROOT: undefined,
       }),
     );
-    const result = refineEnv(parsed);
 
-    expect(result.ok).toBe(true);
+    expect(parsed.BLOB_STORE_FS_ROOT).toBeUndefined();
+    expect(refineEnv(parsed).ok).toBe(true);
   });
 
   test('rejects a missing SMTP host, naming the variable', () => {
@@ -161,6 +258,32 @@ describe('refineEnv', () => {
     if (!result.ok) {
       expect(result.error.some((issue) => issue.variable === 'SMTP_HOST')).toBe(true);
     }
+  });
+
+  // Deleting refineEnv()'s MAIL_FROM branch used to leave the whole suite
+  // green: nothing anywhere asserted that the address mail is sent *from*
+  // is required at all.
+  test('rejects a missing MAIL_FROM, naming the variable and why mail cannot be switched off', () => {
+    const parsed = envSchema.parse(validRawEnv({ MAIL_FROM: undefined }));
+    const result = refineEnv(parsed);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+
+    const message = result.error.find((issue) => issue.variable === 'MAIL_FROM')?.message ?? '';
+    expect(message).toContain('is not set');
+    expect(message).toContain('MailSender');
+  });
+
+  test('an empty MAIL_FROM is refused too — a blank From address is not a configured one', () => {
+    const parsed = envSchema.parse(validRawEnv({ MAIL_FROM: '' }));
+    const result = refineEnv(parsed);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+
+    const message = result.error.find((issue) => issue.variable === 'MAIL_FROM')?.message ?? '';
+    expect(message).toContain('no value');
   });
 
   test('rejects a missing BLOB_STORE_FS_ROOT when the filesystem driver is selected, naming the variable', () => {
@@ -274,11 +397,17 @@ describe('parseEnv names the shape of the problem, not the symptom', () => {
     expect(message).not.toContain('minio');
   });
 
-  test('a still-valid numeric bound keeps zod’s own accurate complaint', () => {
+  // Every message this module renders starts with the variable name, so
+  // naming PORT proves nothing about *which* branch produced it. The
+  // discriminating fact is that zod's own bound text survives — a
+  // too_small issue is passed through verbatim rather than re-worded into
+  // the value-free fallback the unrecognised codes get.
+  test('a still-valid numeric bound keeps zod’s own accurate complaint, not the generic fallback', () => {
     const message = messageFor(validRawEnv({ PORT: '-1' }), 'PORT');
 
     expect(message).toContain('PORT');
-    expect(message.length).toBeGreaterThan(0);
+    expect(message).toContain('greater than 0');
+    expect(message).not.toContain('has a value its schema rejects');
   });
 
   // The mirror of database-url.test.ts's "never echoes the url, because it
