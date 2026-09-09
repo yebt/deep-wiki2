@@ -1,0 +1,9 @@
+[
+  {
+    "blockIds": [
+      "d:c89c800bc0fb#0"
+    ],
+    "text": "Some text with <span class=\"hl\">inline HTML</span> in it.",
+    "ordinal": 0
+  }
+]

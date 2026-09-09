@@ -67,6 +67,20 @@ jobs:
       - name: test
         run: bun run test
 
+      # GATE-2 (markdown-round-trip capability; ci-pipeline: "GATE-2 Is A
+      # Named, Independently Identifiable Gate" / "GATE-2 Precedes Editor UI
+      # Delivery", design.md WU-7/WU-18). WU-7's byte-identity suite already
+      # runs as part of the "test" step above through the workspace-wide
+      # filter, but is named and run explicitly again here, separate from
+      # that generic pass/fail signal, so a GATE-2 regression is
+      # identifiable as GATE-2 specifically. Ordered before the build step
+      # below — which is where a change wiring Milkdown into a screen would
+      # actually surface — so a red GATE-2 fails the run here, citing
+      # gate-2-round-trip, rather than later as an undifferentiated build
+      # failure.
+      - name: gate-2-round-trip
+        run: bun test packages/editor/src/round-trip.test.ts
+
       # Exercises all three apps, not only the two front-ends (docs/TODO.md
       # Phase 0). apps/landing and apps/web have real build scripts; apps/api
       # deliberately has none (task 7.4 — Hono-on-Bun runs TS directly with
@@ -78,6 +92,16 @@ jobs:
           bun run -F @deep-wiki/landing build
           bun run -F @deep-wiki/web build
           bun run -F @deep-wiki/api typecheck
+
+      # Layer 3 of "Read mode never reaches the ProseMirror bundle"
+      # (design.md; document-modes: "ProseMirror Bundle Isolation Is
+      # Verified By Build Output"). Must run AFTER the build step above —
+      # it reads that build's actual output — and is named separately so a
+      # failure here identifies exactly this gate, not a lint or test
+      # failure (design D10, same reasoning as the single-job/named-steps
+      # layout this workflow already uses).
+      - name: bundle isolation (build output)
+        run: bun run scripts/checks/bundle-isolation-build.ts apps/web
 
   e2e:
     name: e2e

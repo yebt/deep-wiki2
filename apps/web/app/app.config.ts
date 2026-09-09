@@ -358,19 +358,22 @@ export default defineAppConfig({
     },
 
     // `UMain`'s own base is `min-h-[calc(100vh-var(--ui-header-height))]`
-    // — the viewport minus the *header*, with no allowance for a footer.
-    // Any page pairing it with `UFooter` therefore overflows by exactly
-    // the footer's height: 49px at 1280x900, on content that fits several
-    // times over. That was found on the auth screens on 2026-09-04 and
-    // fixed inside `AuthShell`, which left `/` — the one screen that did
-    // not use the shell — still scrolling, and would have left the next
-    // screen scrolling too.
+    // — viewport minus the header, with no allowance for a `UFooter`
+    // below it. Any screen pairing the two overflows by exactly the
+    // footer's height — 49px at 1280x900, on content that fits several
+    // times over — and carries permanent vertical scroll. This is the
+    // defect `AuthShell` first patched per-instance (docs/UI-CHECKLIST.md
+    // review log, 2026-09-04), which left `/` — the one screen that did
+    // not use the shell — still scrolling. Fixed here, centrally, so
+    // `AppShell` and every screen built on it never have to restate it:
+    // `flex-1` takes whatever space is actually left instead of a
+    // calculation that does not know the footer exists, and `min-h-0`
+    // lets that flex child shrink and scroll its own content instead of
+    // forcing the whole column taller than the viewport.
     //
-    // Stated centrally instead: the remaining space, not a calculation
-    // that has to know either chrome's height. It is correct only inside
-    // `AppShell`'s `min-h-svh` column, which is why that column is
-    // likewise stated once and every route renders inside it
-    // (docs/UI-CHECKLIST.md §6).
+    // It is correct only inside `AppShell`'s `min-h-svh` column, which is
+    // why that column is likewise stated once and every route renders
+    // inside it (docs/UI-CHECKLIST.md §6).
     main: {
       base: 'flex min-h-0 flex-1 flex-col',
     },

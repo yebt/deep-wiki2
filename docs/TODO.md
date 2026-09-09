@@ -33,13 +33,13 @@ This file has three working sections plus a parking lot.
 
 ## Status
 
-_Last updated 2026-09-04 — HEAD `60521d8`, 63 commits._
+_Last updated 2026-09-07._
 
 | Phase | State |
 | --- | --- |
 | 0 — Foundations | Complete and archived (`openspec/changes/archive/2026-09-03-bootstrap-monorepo-foundations/`) |
 | 1 — Tenancy and permissions | SDD change complete — 85/85 tasks, all 18 work units. GATE-1 satisfied. Owner-reviewed and approved (`docs/UI-CHECKLIST.md` Review Log). One broader roadmap item stays open past this change: Super Root plan-authoring admin route (see the unticked bullet below) |
-| 2 — Content and editor | Not started |
+| 2 — Content and editor | SDD change complete — 93/93 tasks, all 19 work units (`openspec/changes/content-and-editor/`). GATE-2 satisfied. One roadmap bullet stays partially shipped past this change: `/` slash commands cover heading/list/quote/code-block/divider only, not table/diagram-fence/callout/link-to-page (see the unticked bullet above) |
 | 3–9 | Not started |
 
 `openspec/changes/tenancy-and-permissions/` is ready to archive; see that change's
@@ -69,13 +69,18 @@ These are hard gates. Work that depends on them does not start until they are gr
 > fixture corpus, running in CI, before Milkdown is wired into a user-facing screen.
 > Markdown is the source of truth; a lossy serializer silently corrupts user documents.
 >
-> **Status: UNSTARTED.** `packages/editor/src/round-trip.ts` today is
-> `stringify(parse(markdown))` — markdown to mdast and back through `packages/markdown`
-> on both legs, proving the `remark-stringify` pin holds (see the Findings entry) but
-> nothing about a ProseMirror schema, which does not exist yet. Its 7-fixture corpus
-> contains none of the classes that would make the guarantee meaningful (nested lists,
-> tables, code fences, footnotes, HTML blocks, hard breaks, entities, mixed emphasis).
-> Only the serialiser half of this gate exists.
+> **Status: SATISFIED (2026-09-07).** `packages/editor/src/round-trip.ts` runs the
+> real `markdown -> ProseMirror doc -> markdown` path (`from-markdown.ts`/`to-markdown.ts`
+> against the actual schema, not only `packages/markdown`'s mdast-level `parse`/
+> `stringify`). The corpus grew to the classes the gate exists to cover — nested lists,
+> tables, code fences with and without a language hint, footnotes, hard breaks, entities
+> and escapes, mixed emphasis, wiki-links, tags, the block-anchor syntax, diagram fences,
+> raw HTML — split across `modelled/`/`verbatim/`/`refused/`; 69 fixture-driven tests
+> green (`packages/editor/src/round-trip.test.ts`). The suite runs as a named,
+> independently identifiable step (`gate-2-round-trip`) in `.github/workflows/ci.yml`
+> and in `bun run verify` (WU-18). This repository has no git remote, so that workflow
+> file itself never executes — enforcement today is local: `bun run check` at every
+> commit, `bun run verify` before tagging.
 
 > **GATE-3 — `workspace_id` filtered inside every vector query.**
 > Tenant isolation in retrieval is a security boundary, not a convenience. The filter
@@ -207,39 +212,41 @@ lives or dies; it is deliberately front-loaded.
 
 The markdown pipeline and the two document modes.
 
-- [ ] Add page content storage to the schema. After Phase 1, `packages/db/src/schema.ts`
-      holds 11 tables and every one of them is tenancy or auth (`plans`, `users`,
-      `workspaces`, `nodes`, `cells`, `cell_members`, `permissions`, `sessions`,
-      `password_resets`, `instance_settings`, `invitations`) — there is no column
-      anywhere that stores a page's markdown. This must land before the editor can
-      persist anything; see the Findings entry below.
-- [ ] Build `packages/markdown` as the single unified/remark pipeline, imported by the
+- [x] Add page content storage to the schema. `page_content` (WU-8): canonical
+      markdown, cached `rendered_html`, `block_index`, `content_hash`, `pipeline_version`.
+- [x] Build `packages/markdown` as the single unified/remark pipeline, imported by the
       editor, the API and the future indexer. No second parser anywhere in the codebase.
-- [ ] Implement stable block IDs: every block-level node (paragraph, heading, list item,
+- [x] Implement stable block IDs: every block-level node (paragraph, heading, list item,
       code fence, table) carries a persistent identifier that survives edits above it.
-- [ ] Implement wiki-link parsing and a normalised link representation.
-- [ ] Implement tag parsing.
-- [ ] Implement the chunking function used later by RAG, keyed on block IDs so retrieval
+- [x] Implement wiki-link parsing and a normalised link representation.
+- [x] Implement tag parsing.
+- [x] Implement the chunking function used later by RAG, keyed on block IDs so retrieval
       citations resolve back to a real anchor in the document.
-- [ ] Build the markdown -> ProseMirror doc parser and the ProseMirror doc -> markdown
+- [x] Build the markdown -> ProseMirror doc parser and the ProseMirror doc -> markdown
       serializer in `packages/editor`.
-- [ ] **GATE-2**: assemble the fixture corpus (nested lists, tables, code fences with
+- [x] **GATE-2**: assemble the fixture corpus (nested lists, tables, code fences with
       language hints, mixed emphasis, footnotes, wiki-links, tags, diagram fences, HTML
-      passthrough) and assert byte-identical round-trips in CI.
-- [ ] Implement Read mode: markdown rendered to HTML at save time, cached, served without
+      passthrough) and assert byte-identical round-trips in CI. Named CI step
+      `gate-2-round-trip` (WU-18); this repository has no remote, so the workflow file
+      itself never executes — enforcement is local (`bun run check` per commit,
+      `bun run verify` before tagging).
+- [x] Implement Read mode: markdown rendered to HTML at save time, cached, served without
       booting ProseMirror. This is the default mode and carries the majority of traffic.
-- [ ] Implement Edit mode with a soft lock: acquire on entry, heartbeat while open,
+- [x] Implement Edit mode with a soft lock: acquire on entry, heartbeat while open,
       expire on silence. Offer "take over" and "open read-only" rather than a hard block.
-- [ ] Implement `@` mentions in the editor (users and cells), resolving against the
+- [x] Implement `@` mentions in the editor (users and cells), resolving against the
       permission model so a user cannot mention someone into a document they cannot see.
 - [ ] Implement `/` slash commands in the editor (insert heading, table, diagram fence,
-      callout, link to page).
-- [ ] Derive and store the `links` table on every save; replace rows rather than patching.
+      callout, link to page). Partially shipped (WU-16): heading levels 1–3, bulleted and
+      numbered lists, quote, code block, divider. Table, diagram fence, callout, and
+      link-to-page insertion are not implemented — left unticked rather than claiming the
+      full bullet.
+- [x] Derive and store the `links` table on every save; replace rows rather than patching.
       The graph is a projection of content and is never user-editable directly.
-- [ ] Implement backlinks as an index lookup over the derived `links` table.
-- [ ] Implement tag listing and tag-filtered navigation.
-- [ ] Implement the navigation tree UI over `nodes` (shelves, books, chapters, pages) with
-      drag reordering writing back to `position`.
+- [x] Implement backlinks as an index lookup over the derived `links` table.
+- [x] Implement tag listing and tag-filtered navigation.
+- [x] Implement the navigation tree UI over `nodes` (shelves, books, chapters, pages) with
+      drag reordering writing back to `position` (WU-17).
 
 ### Phase 3 — Versioning, diffs, comments and presence
 
@@ -407,6 +414,339 @@ makes conventions portable across projects.
 ## Findings
 
 Discoveries and constraints. Newest first.
+
+### 2026-09-08 — `APP_URL` had nothing to be checked against, and shipped naming the e2e harness's port
+
+The session was lost on every login and nothing caught it. `apps/api` installs
+`cors({ origin: APP_URL, credentials: true })`, and a cross-origin response only carries its
+`Set-Cookie` into the browser when the API named that **exact** origin. So a wrong `APP_URL`
+does not fail: login returns 200, the browser discards the cookie, the next request is
+anonymous, and the user is returned to sign-in — with no error on either side.
+
+Two separate things were wrong, and the second is the one that matters.
+
+`env.example` shipped `APP_URL=http://localhost:4173` while `nuxt dev` listened on Nuxt's
+default 3000. 4173 is Vite's preview port, and it is also `MAIN_CHECKOUT_PORTS.web` in
+`packages/db/testing/worktree.ts` — the **e2e harness's** web port for the main checkout. It
+had never been the dev server's. It appeared to work only because `docs/RUNNING.md` on `main`
+told the reader to type `--port 4173` by hand, so the value was correct exactly as long as
+someone remembered a flag. This worktree's `.env` had gone one step further and carried
+`APP_URL=http://localhost:13150`, which is *this worktree's* derived e2e web port.
+
+The deeper fault: `scripts/checks/env-consistency.ts` tied `POSTGRES_HOST_PORT`↔`DATABASE_URL`,
+`MAILPIT_SMTP_HOST_PORT`↔`SMTP_PORT` and `PORT`↔`NUXT_PUBLIC_API_BASE_URL`, and deliberately
+did *not* tie `APP_URL` to `PORT` — correctly, because `APP_URL` is the web origin and not the
+API's. But it was then tied to **nothing**. The variable most able to fail silently was the one
+variable with no counterpart in the check.
+
+**Impact:** `apps/web/nuxt.config.ts` now declares `devServer.port`, which makes the web port a
+fact in the repository instead of a flag in a shell history, and gives `APP_URL` something to
+be checked against. `env-consistency.ts` reads that number straight out of the config file's
+text (never executing it) and requires `APP_URL` to name the same port, with a message that
+states the symptom — "you will be returned to sign-in" — rather than only the mismatch. It also
+requires the declared web port to differ from `PORT`: Nuxt's default was 3000 and so is the
+API's, so whichever process started second was silently moved by the dev server's own port
+fallback, and `APP_URL` then named whichever one lost. The web port is now 3001, which is the
+value that fallback was already producing.
+
+The check now reads `env.example` **as well as** `.env`, and always: the template is committed,
+every developer copies it, and the shipped default is where this bug came from — so a clone with
+no `.env` at all must still be able to fail. It stays out of `bun run check` and the pre-commit
+hook for the reason it always did: `.env` is local developer state.
+
+Two things this does not fix. `APP_URL` and `devServer.port` are still the same fact written
+twice — the check compares them rather than deriving one from the other, which is the same
+shape of debt the `DATABASE_URL` pair carries. And an `APP_URL` naming no port at all (a
+deployed `https://wiki.example.com`) is deliberately out of scope, because a reverse proxy in
+front of both apps is a legitimate arrangement the check cannot second-guess.
+
+### 2026-09-08 — The error screen asserted the visitor was signed out, and could not have known
+
+The owner reached `apps/web/app/error.vue` from `/workspaces/` while signed in and was offered
+"Go to sign-in", and nothing else. The recovery action read the address for a workspace or page
+id, found neither, and fell through to sign-in as its default.
+
+That is worse than an unhelpful action. It is a claim about the visitor that was false, on the
+one screen whose whole job is to be trustworthy about what just happened.
+
+It cannot be fixed by guessing better. The session cookie is `httpOnly`
+(`apps/api/src/middleware/session.ts`), so the browser cannot read it; the API has no session
+or `/me` endpoint to ask; and this screen must render when the server itself is what failed, so
+making it depend on a network round trip would break the branch that needs it most.
+
+**Impact:** the screen now names a **destination** and never a state. `/workspaces/…` with no
+valid id — the address the owner actually landed on — offers the workspaces list rather than
+falling past both patterns into sign-in. Sign-in stays on the screen, as a demoted second door
+that is never the only one, because every destination in this product needs a session and the
+screen genuinely cannot tell which of the two doors this visitor needs. A test asserts that
+sign-in is never the sole exit and never the first.
+
+Unchanged, and asserted by the two tests that already held them: the 404 branch is still
+selected by status code alone, and no field of the error object reaches the DOM, so a denied
+resource and a missing one remain byte-identical.
+
+### 2026-09-08 — `verify` now needs more memory than the machine had, and was killed
+
+A single end-to-end `bun run verify` was killed by the operating system under memory pressure.
+It was not a test failure: it completed the ten structural checks, `lint`, `typecheck` and the
+full unit suite (1409 tests, zero failures) before dying, and a separate `bun run e2e` run
+passed 30/30 the same day.
+
+The cause is what `verify` now contains. Wiring the e2e suite into it — the right fix for a
+suite that no committed command reached — stacked Playwright's browser, a Nuxt production
+build and the disposable Postgres containers on top of a run that already provisions a database
+for `packages/db`. Peak memory is now the sum of all of it.
+
+**Impact:** a gate that cannot finish is a gate people stop running, which is the same failure
+as a gate everyone routes around. Two directions worth weighing before the next milestone tag:
+run the e2e stage in a separate process rather than the same one, or accept that `verify` is a
+two-command ritual and say so in `CLAUDE.md` rather than leaving the owner to discover it as a
+kill. The parts are individually cheap; only their sum is not.
+
+**Not yet decided.** Recorded now because the failure mode is environmental and will not
+reproduce on a larger machine, which is exactly how a gate quietly becomes optional for whoever
+has the smaller one.
+
+### 2026-09-08 — A geometry assertion outlived the DOM it named, and reported a layout defect that was not there
+
+`e2e/auth-layout.spec.ts`'s "the sign-in block is centred in the space between header and
+footer" failed at `436`, against a tolerance of `2`, on all four auth screens. Read as written
+it said the block was top-aligned with the whole of the free space dumped underneath it, and it
+pointed straight at `AppShell` — whose own doc comment names `flex min-h-0 flex-1 flex-col` on
+`UMain` as the thing `my-auto` depends on, while the template states no class at all.
+
+It was not the layout. Measured on the running app at 1280x900: `UContainer`'s resolved margins
+were **97.5px top and 97.5px bottom**, and the block ran 217.5 → 689.5 inside a `main` of 56 →
+851 — `161.5px` of space above it and `161.5px` below. Centred to the pixel, in both themes. The
+class the comment names *is* applied, centrally, as `main: { base: 'flex min-h-0 flex-1
+flex-col' }` in `app.config.ts` — the template is deliberately bare because the override is only
+correct inside that column, and `tv`'s `extend` merge drops `UMain`'s own
+`min-h-[calc(100vh-var(--ui-header-height))]` on the way through. The rendered `<main>` carries
+exactly the four classes and nothing else.
+
+Cause: the test named the block as `document.querySelector('main h1').parentElement`, with the
+comment "the heading and the card are one block". That was true when it was written — the `h1`
+sat directly inside the column `div` that also held the card. Extracting `PageHeading` (e5a4a50)
+wrapped the `h1` in `div.mb-8.max-w-measure`, after which `parentElement` was the heading alone.
+The assertion then compared the gap above the block with the gap below the *heading*, and the
+difference was the card's height plus the 32px under it — **404 + 32 = 436**, the number
+reported.
+
+The test now walks *up* from the heading to `main`'s grandchild, so a wrapper introduced between
+the two cannot narrow it again, and asserts `blockHeight > headingHeight` first — the guard whose
+absence let a measurement silently stop measuring what it names. Mutation-checked both ways:
+dropping `center` from `AuthShell` reds it at `195`, and the corrected selector greens against
+the unchanged shell.
+
+**Impact:** this is the mirror image of the family recorded above (the pgvector `CHECK` test, the
+block-merge fixture, the wiki-link non-disclosure test, the self-writing golden) — **a test that
+failed for the wrong reason**. The two are the same defect: a test whose result does not depend
+on the behaviour it claims to protect. The red direction is the more expensive one, because a red
+test is believed. The rule that catches it is the same one — break the thing on purpose and check
+the *reason* — plus its corollary for a failing test: **before fixing the code a red test accuses,
+reproduce its measurement independently.** Ten minutes of `getBoundingClientRect()` in the running
+app separated "the auth screens are broken" from "the ruler moved".
+
+Companion: `AppShell.test.ts` asserted `my-auto` and passed while the e2e was red, because
+happy-dom has no layout engine and the class is not the effect. The class assertion is kept and
+its limit is now stated in the file, pointing at the e2e as the recorded owner of the guarantee;
+a second test holds the other half of the mechanism — that `main` is the flex column giving
+`my-auto` free space, and that `UMain`'s viewport-minus-header base is gone rather than merely
+accompanied. That half was asserted nowhere, in either file, and is where a reader looking for a
+broken centring goes first.
+
+### 2026-09-08 — One unreproduced api-suite failure, recorded rather than closed
+
+While closing the comment-route mutation audit, a single combined run reported the
+`@deep-wiki/api` suite at `105 pass, 1 fail`. The failing test's name was not captured. It has
+not recurred in **eleven** subsequent full runs — eight by the agent that saw it, three more
+afterwards, all exit 0 at 1340 tests.
+
+The leading hypothesis is container or port contention in the disposable-Postgres provisioning
+(`packages/db/testing/provision.ts`), which `packages/db/testing/worktree.ts` already derives
+per worktree precisely because `podman-compose` proved unsafe under concurrent invocation
+against one compose project. **That hypothesis is unproven.**
+
+**Impact:** recorded here because an intermittent failure is worse than a consistent one — a
+consistent failure gets fixed, an intermittent one teaches a team to re-run. If it returns,
+capture the test name and the provisioning log before doing anything else; a second sighting
+with a name is worth more than any amount of speculation now.
+
+### 2026-09-08 — Looking a page up before calling `can()` turns every route into an existence oracle
+
+A mutation audit of `apps/api/src/routes/comments.ts` found the indicators endpoint answering
+**404** for a page that does not exist and **403** for a page the caller may not read. A caller with
+no grant could therefore probe for page existence — the exact class the password-reset response and
+wiki-link rendering already close. The shape is structural, not local: every route in this app looks
+the node up first and consults `can()` second, so the same oracle existed in `POST /pages/:id/comments`,
+`PATCH /comments/:threadId/resolved`, `GET /pages/:id/backlinks`, and — in the `200`/`404` form rather
+than the `403`/`404` one — `GET /pages/:id/mentions/:userId/check`, which never consulted the caller's
+own grant at all.
+
+The rule now applied to those five: **`read` is the first gate, and absence and denial-of-read return
+the same response from the same call site.** Denial of a *stronger* action (`comment` on a page the
+caller can already read) still answers `403`, because that caller can see the page and learns nothing.
+This is the singular analogue of what `can-many.ts`/`readable.ts` already do for sets, where an
+unreadable id is dropped from the result rather than reported as denied.
+
+**Deliberately not changed:** `apps/api/src/routes/pages.ts` has the same shape, and
+`docs/UI-CHECKLIST.md` records it as a reviewed decision — a direct URL request gets a real `403`,
+and the not-found screen is built to render `403` and `404` byte-identically so the ambiguity is the
+*client's* to choose. `PATCH /nodes/:id/position` (tree.ts) still answers `403` to a subject with no
+read; it is a node-position mutation rather than an answer about a page, and it is left as a recorded
+follow-up rather than changed under a comment-route audit.
+
+**Impact:** "look the row up, then authorise it" reads as the obvious order and is wrong by default
+whenever the row's *existence* is itself privileged. Any new route that takes an id in its path
+should be written with the read gate first.
+
+### 2026-09-08 — Five tests that could not fail: the audit's own findings
+
+The same audit applied 15 mutations across `resolve-changeset.ts` and `comments.ts`; five stayed
+green. Each one is a different way for a test to pass without depending on the behaviour it names:
+
+- **A parameter nobody varied.** Every `resolveChangeset` case used `windowMinutes: 30` with an
+  activity either seconds or an hour old, so hardcoding a 1-minute window passed. Two cases against
+  the *same* 45-minute-old activity — joining at 60, retiring at 30 — is what makes the parameter
+  load-bearing.
+- **A fixture too shallow for the code path.** The only `resolveBookId` fixture parented its page
+  directly under the book, so a one-hop parent lookup passed and the recursive CTE was never
+  exercised. Related: `LIMIT 1` over a recursive CTE has no inherent order, so "the nearest book
+  wins" was true only by Postgres's incidental `UNION ALL` evaluation; it now says `ORDER BY depth`.
+- **A scope that only one fixture could ever exercise.** One book in one workspace cannot detect an
+  implementation that joins by `author_id` alone. Worth noting: the two `workspace_id` filters in the
+  ancestor walk are each individually sufficient, so removing *either* alone is undetectable —
+  only removing both is observable. That is defence in depth, not redundancy to delete.
+- **An assertion weaker than the docstring.** `expect(closed.closed_at).not.toBeNull()` passes for
+  `now()`, though retirement is specified to stamp the last activity. Assert against the value the
+  test itself wrote.
+- **Concurrency asserted in a comment.** Two saves slept the same amount and were started with
+  `Promise.all`, but every assertion would have held had they run sequentially. The overlap is now
+  asserted: each transaction records `clock_timestamp()` either side of its own call and the two
+  intervals must intersect.
+- **A recipient nobody named.** The mention tests counted notifications without asserting `to`, so
+  sending one to `attacker@example.invalid` stayed green — and the "readable recipient" fixture
+  mentioned the comment's own author, which a route mailing the wrong person also satisfies.
+- **An assertion that could not fail independently.** `expect(sent.map(s => s.to)).not.toContain(x)`
+  sat immediately after `expect(sent).toHaveLength(0)`. It is now the load-bearing half of a
+  mixed-recipient case where one notification really is sent.
+- **A status line that swallowed every distinct failure.** Every way of breaking anchor minting also
+  trips `comments_block_fk` and returns 500, so the test died on `expect(res.status).toBe(201)` and
+  could not tell "anchor not minted" from "route crashed". Storage is now read first.
+
+**Impact:** all of these are the family already recorded here — *tests that pass for the wrong
+reason*. The counter-practice is unchanged and still the only thing that catches them: break the
+behaviour on purpose and watch the test go red **for an assertion reason**.
+
+### 2026-09-08 — A non-disclosure helper that reads only the body leaves the headers open
+
+`apps/api/testing/expect-no-disclosure.ts` scanned `JSON.stringify(body)` and nothing else, so a
+route that put a hidden id — or a comment count — in a response header passed every non-disclosure
+test in the repository. Headers are now scanned too, **names as well as values** (`x-page-<id>: 1`
+leaks as surely as `x-node-id: <id>`), and `HiddenNode` takes a `values` list for anything that is
+not an id, slug or title.
+
+The `headers` argument is **required**, not optional: an optional channel is one a call site can
+silently skip, which is the same defect class as the leak the helper exists to catch. All five
+existing call sites were updated and none of them broke — nothing in this app sets a response header
+carrying node data today.
+
+### 2026-09-07 — A green GATE-2 was measuring a third of what its number claimed
+
+GATE-2 reported "69/69 byte-identical round trips". It called `roundTrip()` at three call sites:
+22 `modelled/` + 5 `verbatim/` + 1 pin regression = **28** byte comparisons. The other 41 cases were
+probe accept/refuse assertions and two meta-tests — real tests, but not byte-identity tests. The
+count was published in the verify report and the archive report and repeated downstream, including
+by me to the project owner.
+
+What the missing coverage was hiding, found the moment the assertions were added:
+
+- **`listItem` dropped `checked` and `spread`.** `- [ ] todo` came back from the editor as `- todo`;
+  GFM task lists silently lost their checkbox, and a multi-block list item lost its second block.
+  No fixture contained a task list, so the gate stayed green over a live data-loss path.
+- **The canonical verdict was inverted for definitions.** `[a]: /a\n[b]: /b` (canonical) was refused
+  by the probe while the spaced, non-canonical form was accepted. `definition` travelled as an
+  opaque node and `mdast-util-to-markdown`'s join rule keys on `node.type`. A committed comment
+  asserted the opposite behaviour and was simply false.
+- **"Insertions undo as one step" was defended by a comment, not a test.** `grep undo` across every
+  `.test.ts` returned zero. The first undo restored the paragraph and left the `/quote` trigger
+  deleted — two steps. `prosemirror-history` groups adjacent transactions only when `isAdjacentTo`
+  also holds, and a block transform changes ranges at the block's boundaries, not at the caret.
+
+**Impact:** a test-count is not a coverage measure, and a gate that reports one invites the
+substitution. GATE-2 now tags every `describe` with what it measures — `[byte identity]`,
+`[byte inequality]`, `[invariant]`, `[probe accept]`, `[corpus shape]`, `[regression]` — so the
+number cannot be read as something it is not. Byte comparisons went 28/69 → 58/162, and a new
+corpus-wide invariant states the thing the buckets only implied: **if the probe accepts a document,
+canonicalising it must not change it.** Edit mode must never open what the save path would rewrite.
+
+### 2026-09-07 — The coverage gate measured workspace members, so one assertion covered an app
+
+`test-coverage.ts` required each workspace *member* to hold at least one test file with at least one
+`expect(`. A single assertion anywhere in `apps/web` satisfied the gate for the entire application.
+That is how `EditorSurface.vue` — carrying three spec requirements, including the menu repositioning
+and the `aria-activedescendant` wiring — shipped with no test of any kind while `bun run check`
+stayed green, along with every other component in the app.
+
+The gate now measures **per source file**. A file is covered when a test imports it, imports one of
+its exported bindings *by name* through a pure barrel or a workspace entry, or has a named sibling
+test. A wildcard `import * as` credits the barrel and nothing behind it: a barrel is transparent,
+never absorbent, and crediting everything it re-exports is the member-level hole in file-level
+clothing.
+
+Exemptions are mechanical rather than by name — a file is exempt when it **erases to nothing at
+runtime**, measured with `Bun.Transpiler().transformSync(code).trim().length === 0`. A `types.ts`
+earns the exemption by containing no runtime code and loses it the moment someone adds a `const`.
+Two anti-decay rules keep it honest: a test with zero assertions is an error in its own right and
+credits nothing, and an `ALLOW_LIST` entry that names a missing or now-covered file is also an
+error, so the list can only shrink without a deliberate edit.
+
+**Impact:** this is the fourth structural check in this repository found to have a hole — after
+`core-purity` (missed devDependencies), `single-parser` (missed a second pipeline inside an allowed
+package) and `routes-mounted` (accepts a bare textual mention). The pattern is stable enough to
+state as a rule: **when you write a gate, the acceptance criterion is not that it passes — it is
+that you watched it fail against real uncovered code and it named the right files.** This one was
+proven against a clean `git archive HEAD` export, where it exited 1 naming seven files with no false
+positives.
+
+Its honest ceiling is documented in the file: it is static, so it proves a test *names* a file, not
+that it exercises a line. Real instrumentation cannot live in `bun run check`, which runs in the
+commit hook and must not require the Postgres half the suite provisions.
+
+### 2026-09-07 — A golden test that writes its own expectation cannot fail the first time
+
+`chunk-golden.test.ts` auto-wrote a golden JSON file whenever one was missing. The point of a golden
+is that a human read it once and committed it; a self-writing golden converts "the output changed"
+into "the output is whatever the code just produced". Six new fixtures had just been added, so the
+next ordinary run would have manufactured six expectations nobody reviewed.
+
+The write gate now lives inside `golden.ts` rather than at the call site, so "the ordinary run never
+writes a golden" is a property of the module instead of a convention every caller must remember.
+Regeneration is a deliberate act: `bun run -F @deep-wiki/markdown goldens:update`. Stale goldens —
+one outliving the fixture that produced it — were undetectable in the other direction and now fail a
+named test.
+
+**Impact:** this is the same family as the pgvector `CHECK` test, the block-merge fixture and the
+wiki-link non-disclosure test — **tests that passed for the wrong reason**. The common shape is a
+test whose green state does not depend on the behaviour it claims to protect. The counter-practice
+that keeps catching these is cheap and non-negotiable: **break the thing on purpose and watch the
+test go red for an assertion reason.** Every test added in this batch was mutation-checked that way.
+
+### 2026-09-07 — A markdown option pin splits into efficacious and defensive, and only one kind is testable by removal
+
+`PINNED_OPTIONS` freezes 11 `remark-stringify` options so canonical serialisation cannot drift. The
+spec says "removing a pin fails a named fixture", and the obvious reading — delete the key, watch
+bytes change — only works for **5** of them (`bullet`, `emphasis`, `resourceLink`, `strong`,
+`tightDefinitions`), whose pinned value differs from the library's default. The other **6**
+(`bulletOrdered`, `fence`, `fences`, `listItemIndent`, `rule`, `setext`) pin a value that *is*
+remark's default, so removal is a byte no-op no matter what the fixture contains. They are defensive
+pins: they exist so a future library default change cannot silently rewrite the corpus.
+
+**Impact:** the protection a defensive pin needs is an assertion on its **presence and value**, not
+on its effect. All 11 keys now carry three named tests each, plus a parity test so a new pin without
+a case fails. Group membership is machine-checked via `PIN_CASES.differsWhenRemoved` rather than
+maintained as a third hand-written list — the repository's standing rule against writing the same
+fact twice and trusting a comment.
 
 ### 2026-09-06 — Route modules shipped unreachable, twice
 
@@ -1066,12 +1406,240 @@ Fix: `packages/db/src/auth/instance-settings.ts` now reverts only when the curre
 is `open`; an explicit `closed` (or `invitation_only`) passes through unchanged.
 Impact: contained to `getInstanceSettings`.
 
+### 2026-09-06 — Block-match threshold τ = 0.5 is a judgement, not a measurement
+
+`packages/markdown/src/match-blocks.ts`'s `MATCH_THRESHOLD` decides whether a
+persisted block ID (design.md §"Block identity", docs/SPECS.md §3.3) follows a
+split or merged block, or is tombstoned instead. Below τ, an ID is never
+reassigned onto content the matcher is not confident is recognisably the same
+text.
+
+**The bias:** an orphaned anchor is preferred over a misattributed one. A
+comment or citation silently landing on the wrong block is worse than one that
+visibly breaks, because the orphan is detectable (its excerpt is retained,
+UI-CHECKLIST §4.7) and the misattribution is not.
+
+**The reversal criterion:** τ = 0.5 is deliberately conservative and has no
+measurement behind it yet. It should move only when a measured mis-assignment
+rate at this threshold, taken from real edit traffic once Phase 3's comments
+ship, shows it is costing more orphans than the misattributions it is
+preventing. Until then this is a one-constant change, not a mechanism change
+(design.md D8).
+
+Impact: `packages/markdown/src/match-blocks.ts` only; `packages/db`'s save
+transaction (a later phase) calls `matchBlocks` but does not itself decide τ.
+
+### 2026-09-06 — `render()` does not yet hyperlink wiki-links, which is why non-disclosure holds today "for free"
+
+`packages/markdown/src/render.ts` runs an unextended `remark-parse` pipeline
+(WU-5's own deferred gap): a `[[Target]]` wiki-link is not a custom node to
+this pipeline, so it renders as literal bracketed text, never as an `<a>`.
+knowledge-graph's "Unresolved-Link Rendering Does Not Disclose Existence"
+(a resolved and an unresolved wiki-link must render identically) is
+therefore satisfied today by construction — `render()` has no channel to
+receive a link's resolution status at all, since that status lives only in
+`packages/db`, resolved per save against the workspace's pages.
+
+**The real gap this masks.** `page_content.rendered_html` is cached once
+per save and served to every viewer identically (page-content spec: Read
+Mode Serves Pre-Rendered HTML Without Reparsing). Once `render()` is
+extended to actually hyperlink a *resolved* wiki-link, that cached HTML
+cannot safely bake in "resolved -> `<a href>`" at save time: a viewer who
+cannot read the target must still see it exactly as unresolved, but
+permissions are per-viewer and the cache is per-page. Closing this
+properly needs one of: (a) a per-request rewrite pass over the cached HTML
+that re-checks each embedded link's target against the current viewer via
+`canManyResources` before serving, or (b) rendering every wiki-link as an
+inert placeholder resolved client-side through the same non-disclosing
+endpoint mention/backlink autocomplete already use. Whichever is chosen
+must preserve the identical-treatment property this Finding currently gets
+for free — it will not survive naively wiring in `<a href="/pages/{id}">` at
+save time.
+
+Impact: `packages/markdown/src/render.ts` (wiki-link hyperlinking, not yet
+implemented); `apps/api/src/routes/pages.ts`'s read route, whichever
+approach above is chosen, once this is picked up.
+
+### 2026-09-06 — Bundle-isolation's three layers do not all run in the same place yet
+
+design.md "Read mode never reaches the ProseMirror bundle" names three
+enforcement layers. Stated plainly, since the gap does not close itself:
+
+- **Layer 1** (the `packages/editor` export-map split) is static
+  `package.json`/`src/index.ts` shape, not something that "runs" at all.
+- **Layer 2** (`scripts/checks/bundle-isolation.ts`, the specifier check)
+  runs today, inside `bun run check` — and therefore inside `bun run test`'s
+  sibling and any CI workflow that calls either.
+- **Layer 3** (the build-manifest test asserting the read route's chunk
+  closure) needs real `nuxt build` output to inspect and cannot run inside
+  `bun run test`. It lands in WU-15 as `bun run check:bundle` after a local
+  build, and as a dedicated CI step placed after the build step. This
+  repository has no remote, so "in CI" today describes a workflow file
+  nothing executes — the actually-enforcing run is the local one.
+
+Also fixed in this pass, not merely recorded: layer 2's own denylist could
+not be `prosemirror-*` read literally, because the `"."` export's real
+ProseMirror schema needs `prosemirror-model` — design D21 scopes the
+denylist to exclude that one package while keeping every ProseMirror
+view/editing package (and Milkdown, and TipTap) forbidden.
+
+Impact: `scripts/checks/bundle-isolation.ts` (exists, enforced locally
+today); `apps/web`'s build-output test and its CI step (WU-15, not yet
+created); `.github/workflows/ci.yml` (WU-18 adds GATE-2 as a named step
+under this same "no remote executes it yet" constraint).
+
+### 2026-09-07 — `pipeline_version` couples render and chunk versions as an accepted cost
+
+`page_content.pipeline_version` (design.md, `page_content` schema; D11) is
+one integer covering both the render pipeline and the chunk-boundary
+policy. Bumping it means "rerender and, from Phase 5 onward, reindex" — a
+render-only change therefore forces an unneeded reindex, which is accepted
+as cheaper than two independently-tracked versions that can silently
+disagree and leave a citation resolving to nothing.
+
+**What a two-column split would take**, if a measured reindex cost from
+real Phase 5 traffic later shows the coupling is expensive (design.md D11's
+own reversal criterion): a migration adding the second column backfilled
+from the current `pipeline_version`; splitting the "bump on pipeline
+change" call site so a render-only change stops touching the
+chunk-boundary version; and Phase 5's reindex job keying off its own column
+instead of the shared one.
+
+**Cross-references, not restated here** (recorded in full where task 3.6
+and task 14.5 landed them, to avoid duplicating a Finding): the block-match
+threshold `τ = 0.5` is a judgement, not a measurement — see "2026-09-06 —
+Block-match threshold τ = 0.5 is a judgement, not a measurement," above.
+The bundle-isolation CI gap — layer 2 runs today inside `bun run check`,
+layer 3 needs a CI step this repository's remote-less state cannot
+execute — see "2026-09-06 — Bundle-isolation's three layers do not all run
+in the same place yet," above.
+
+Impact: `packages/db/src/schema.ts` (`pipeline_version`, unchanged by this
+entry — documentation only); no code change.
+
+### 2026-09-07 — A slash command that could not apply still ate the user's typed text
+
+Symptom: type `/quote` inside a table cell, press Enter — the six characters
+disappear, no blockquote appears, and the keypress is reported as handled so
+nothing else runs either.
+
+Cause: `confirmSlashCommand` discarded `command.run`'s boolean. A ProseMirror
+`Command` returns `false` *without calling dispatch* when it cannot apply, but
+the transaction had already been built with the trigger-text `delete` in it,
+and the sole call site dispatched it unconditionally. Reachable because
+`schema.ts` gives `tableCell` the content `inline*`, so it can host no block at
+all and `wrapIn`/`setBlockType`/`wrapInList` all refuse there — while
+`trigger.ts`'s `isInsideCodeBlock` is the only content-context guard on trigger
+activation and does not exclude inline-only containers.
+
+A second defect of the same shape sat beside it: the `divider` command called
+`dispatch` unconditionally after `replaceSelectionWith` and always reported
+success. `Transform.replaceRange` escalates depth until the slice fits, so
+inside a table cell it did not no-op — it walked out of the whole table and
+appended the horizontal rule *after* it, leaving `/divider` sitting in the cell.
+
+Fix: `SlashCommand.run` now takes an OPTIONAL dispatch, which is the real
+ProseMirror `Command` contract and makes `run(state)` a dry run;
+`confirmSlashCommand` returns `Transaction | null` and returns `null` unless the
+command both reported success and actually dispatched; `divider` checks
+`canInsertAtCaret` (the caret's own container only, unlike
+prosemirror-example-setup's `canInsert`, which walks up ancestors and would call
+the escalated placement legal); and the menu no longer *offers* a command that
+cannot run where the caret is (`applicableSlashCommandIds` +
+`filterSlashCommands(query, applicable)`), so a table cell shows the existing
+no-results state instead of eight dead entries.
+
+Impact: `confirmSlashCommand`'s return type is a public API change within
+`packages/editor` (exported through `src/mount/index.ts`); its only call site is
+the plugin's own `handleKeyDown`. `packages/editor/src/mount/insertions.test.ts`
+now exercises all eight commands in an inapplicable context — it previously
+tested them only against a bare single-paragraph document, which is exactly why
+this shipped.
+
+### 2026-09-07 — The coverage gate credited type-only imports and commented-out assertions
+
+Symptom: none observed — found by adversarial review of the commit that
+introduced per-file coverage. A file full of untested runtime logic passed
+`bun run check` as soon as any test imported one of its exported *types*, or as
+soon as a test file carried a commented-out `expect(`.
+
+Cause: three independent holes in `scripts/checks/test-coverage.ts`.
+`NAMED_IMPORT` matched `import type { X } from` exactly as it matched a value
+import, and `BARE_FROM` credited the specifier of *any* `from '…'` besides —
+so a type-only statement earned E1 credit even with no names taken from it. A
+type-only import erases at compile time and cannot exercise a line; crediting it
+is the mirror image of the hole `core-purity.ts` already documents, where
+`Bun.Transpiler().scanImports()` elides exactly these and a raw scan had to be
+added to see them. Separately, `hasAssertion` ran its regex over the raw bytes,
+so `// TODO: expect(bar(1)).toBe(2)` both certified a module and hid the
+placeholder test carrying it from the assertion-free rule — the gate broke its
+own invariant twice in one line, while `stripComments()` sat unused two
+functions above it. Finally `CONFIG_FILE_PATTERN` matched on the basename alone,
+so a hypothetical `packages/core/src/retry.config.ts` holding real logic was
+exempt, in a file whose header promises exemptions are mechanical rather than by
+name.
+
+Fix: one `blankNonCode` scanner now answers "which bytes of this file are code"
+once — comments always, string and template contents on request, with regex
+literals recognised so `/["']/` neither opens a string nor eats a line —
+and `stripComments`/`stripCommentsAndStrings` are two questions asked of it
+rather than two implementations. `scanImportRecords` drops type-only statements
+entirely (no names *and* no bare specifier) in every spelling: whole-clause,
+inline `{ type X, y }` where `y` still counts, `import type X from` (default),
+and `export type { X } from`; `scanReExports` leaves type-only re-exports out of
+the map `credit()` walks a barrel by, so a type name is never carried through
+one. X3 keeps the `<tool>.config.<ext>` name test and adds the structural half
+that makes it mechanical: a tool loads its config by path, so no module imports
+it — a `*.config.ts` something imports is a module.
+
+One more defect surfaced while running the corrected gate across the repository
+to check for lost credit: `checkTestCoverage` did not normalise its root
+argument, and `resolveSpecifier` always produces absolute paths while `walk`
+inherits whatever shape the root was given. Under a relative root E1/E2
+therefore credited nothing, and `bun run scripts/checks/test-coverage.ts .`
+reported nine files that the same check with no argument does not. Fixed with a
+`resolve()` and a test asserting the two spellings agree.
+
+Impact: **no real file in this repository loses coverage credit** — the gate's
+output over the whole tree is byte-identical before and after, and green. The
+holes were real and reachable (repo test files carry 14 whole-clause type-only
+import statements and 48 inline `type X` specifiers) but none was load-bearing:
+every target is also reached by a genuine value import or a sibling test. All
+six `*.config.*` files keep X3, including `apps/web/app/app.config.ts`, which
+sits under `app/` rather than at the member root and which nothing imports.
+Fixtures kept permanently at `scripts/checks/__fixtures__/test-coverage/`:
+`type-only-import`, `commented-assertion`, `nested-config`.
+
 ---
 
 ## Open Questions
 
 Decisions still owed. Move an entry out of this section once answered and record the answer
 in Findings.
+
+- **Two canonical constructs the editor cannot round trip.** Both fail closed at the probe, so no
+  saved document is corrupted — edit mode simply refuses to open them — but neither fits an existing
+  fixture bucket, because `modelled/` requires a byte-identical round trip and `refused/` requires
+  the source to be non-canonical. These are canonical markdown that the editor cannot represent.
+  1. **Inline images.** `![alt](url)` throws `UnsupportedConstructError`; `image` is in neither the
+     ProseMirror schema nor `VERBATIM_INLINE_TYPES`. Reference-style images work.
+  2. **Mark nesting is fixed by declaration rank.** `~~removed __bold__~~` serialises to the
+     corrupted `~~removed ~~__~~bold~~__`, and `[__bold link__](url)` inverts to
+     `__[bold link](url)__`. `schema.ts` documents this for `strong`/`emphasis` only; it applies to
+     `delete` and `link` too.
+  The decision owed is whether the editor gains real support (a schema node for images, nesting-aware
+  mark serialisation) or whether refusal becomes the documented product behaviour with a message
+  telling the author why. Refusing silently on a construct as ordinary as an inline image is not a
+  stable answer.
+- **The mention menu's ARIA ownership is incomplete on a screen the owner already passed.** The
+  editor `div` sets `aria-activedescendant` to an option id that is **not its descendant**, carries
+  no `aria-controls`/`aria-owns`, no `role="combobox"` and no `aria-expanded`, and the options sit
+  inside a plain `<ul>` between the `role="listbox"` and its `role="option"` children. Under the
+  ARIA spec both break listbox ownership, so most screen readers will announce nothing as the arrow
+  keys move the highlight — even though the `aria-activedescendant` value itself is correct and
+  tested. Fixing it is a markup change to a surface reviewed and passed on 2026-09-07, so it needs
+  the owner's review rather than a silent in-batch edit (UI-CHECKLIST §1). Until then the keyboard
+  path works visually and is untrustworthy assistively.
 
 - **Rule pack sharing scope.** Are rule packs shareable only across books within a single
   workspace, or across workspaces entirely? Cross-workspace sharing requires packs to carry

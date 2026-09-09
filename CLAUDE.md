@@ -46,13 +46,13 @@ Run from the repository root.
 | `bun run lint` | ESLint across the repository |
 | `bun run test` | Test suite for every package and app, plus the check scripts' own tests. `packages/db`'s suites auto-provision a disposable test Postgres (`packages/db/testing/provision.ts`); set `DEEPWIKI_TEST_NO_AUTOSTART=1` to opt out and fail fast instead |
 | `bun run check` | The structural guard rail. This is what the `.githooks/pre-commit` hook runs |
-| `bun run verify` | Every gate — `check`, the local `.env` port consistency, `lint`, `typecheck`, `test`. Run it before tagging a milestone; it is not in the commit hook |
+| `bun run verify` | Every gate — `check`, the local `.env` port consistency, `lint`, `typecheck`, `test`, `gate-2-round-trip`, and finally the Playwright `e2e` suite. Run it before tagging a milestone; it is not in the commit hook. The e2e step needs a browser binary once: `bun run e2e:install` |
 | `bun run env:check` | Compares your local `.env`'s ports against what `compose.yaml` publishes. Deliberately outside the commit hook: `.env` is your machine's state, not the repository's |
 
 `bun run check` fails when:
 
 - `pnpm-lock.yaml`, `pnpm-workspace.yaml` or `turbo.json` appears at the root, or Vitest spreads beyond the one workspace member allowed to use it (`workspace-shape.ts`);
-- a workspace member has no executing test, or a test file declares a test without a single `expect(`/`assert(` — an assertion-free test counts as no coverage, not as green (`test-coverage.ts`);
+- any source file under `apps/*` or `packages/*` has no test that names it — coverage is measured **per file**, not per workspace member. A file counts as covered when a test **value-**imports it directly, imports one of its exported **value** bindings by name through a pure re-export barrel or a workspace entry point, or has a named sibling test (`<stem>.test.ts`). A wildcard `import * as x` credits the barrel and nothing behind it, and a type-only import (`import type { X }`, `import { type X }`) credits nothing at all — it erases at compile time, so it exercises nothing. Exemptions are mechanical, not by name: a file is exempt when it erases to nothing at runtime (measured with `Bun.Transpiler().transformSync()`), when it is a pure re-export barrel, generated, or named `<tool>.config.<ext>` **and imported by no module** (a `*.config.ts` something imports is a module, not tool configuration) — plus an explicit `ALLOW_LIST` where each entry carries a reason and becomes an error once the file is covered or gone. A test file with zero assertions is an error in its own right and credits nothing — and assertions are counted in code only, never in a comment or a string literal (`test-coverage.ts`);
 - `packages/core` imports anything non-relative — a framework, a Bun API, or even a Node built-in — or declares a runtime dependency. Detection is AST-accurate via `Bun.Transpiler().scanImports()`; no ESLint disable comment can silence it (`core-purity.ts`);
 - `env.example` drifts from the zod schema in `packages/contracts/src/env.ts` (`env-example.ts`).
 </content>

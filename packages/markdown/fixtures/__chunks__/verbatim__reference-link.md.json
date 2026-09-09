@@ -1,0 +1,10 @@
+[
+  {
+    "blockIds": [
+      "d:f07ca035ce1f#0",
+      "d:3cb9a48708e6#0"
+    ],
+    "text": "See [the guide][ref] for details.\n\n[ref]: https://example.com/guide",
+    "ordinal": 0
+  }
+]

@@ -66,6 +66,8 @@ Every screen and every non-trivial component. Each state must be **demonstrable*
 - [ ] **Error — fatal.** Distinct treatment from recoverable. Preserves any unsaved user input and says explicitly whether the work was lost or preserved.
 - [ ] **Permission-denied.** This app is permission-heavy: deny wins, most-specific wins, and inheritance runs Workspace → Shelf → Book → Chapter → Page. A user who cannot see a book gets a coherent screen that says so and offers a request-access path — never a broken layout, never a half-rendered tree, never a 500, and never a silently empty list that implies the content does not exist.
 - [ ] **Permission-denied does not leak existence** where it should not. Decide per resource whether "you can't see this" or "this doesn't exist" is correct, and be consistent.
+- [ ] **Route-level failure has a screen, and it is one screen.** A URL that matches no route, and a request that fails before any page can render, both land on the application's own error screen — the same shell, chrome, type scale and theme as everything else, never the framework's default error page, which belongs to a different product. It distinguishes **not found** from **the server failed**, because the user's next move differs, and each states what happened in the user's terms and offers a real way forward: never a bare status code as the message, never a dead end, and never "go home" as the only offer when the address itself says where the user was trying to go.
+- [ ] **The not-found screen renders from the status code alone.** No field of the error object reaches the DOM — not `message`, not `statusMessage`, not `data`. That is what makes a 404 for a resource the viewer may not see byte-identical to a 404 for one that never existed, and it is the only reason any other surface can safely choose not to disclose. A screen that prints the server's reason turns every such decision into a leak. The address the user typed is the exception, because it came from the user; nothing the server said about *why* is.
 - [ ] **Offline / stale.** The connection to the workspace can drop. The UI says so, marks displayed data as possibly stale, disables actions that would fail, and recovers without a manual reload.
 - [ ] **Success.** Confirmed visibly and specifically. "Saved" is weak; "Saved as revision 12 · 2 min ago" is a confirmation the user can act on. Destructive or irreversible actions get a stronger confirmation than a toast that vanishes in 3s.
 - [ ] **Disabled.** Every disabled control explains why, on hover/focus, in one sentence. A disabled button with no reason is a defect.
@@ -82,8 +84,9 @@ Derived from this project's actual stack and domain.
 - [ ] No arbitrary Tailwind values (`w-[437px]`, `text-[13.5px]`, `bg-[#1a1a1a]`) fighting the library's scale. If the scale is genuinely wrong for this product, the scale gets changed once, centrally.
 - [ ] Reka UI primitives are used for anything with interaction semantics (menus, dialogs, comboboxes). Hand-rolled versions lose focus trapping, `aria-*` wiring, and keyboard handling that this checklist requires elsewhere.
 - [ ] No wrapper component that exists only to rename a Nuxt UI prop.
-- [ ] **Anything that appears on more than one screen is one component, not one copy per screen.** The header, the footer, the page heading block, the card that holds a form. A second copy is a defect even while the two copies are identical, because they will not stay identical — this is how the app bar came to say two different things and only one of two screens got a layout fix.
+- [ ] **Anything that appears on more than one screen is one component, not one copy per screen.** The header, the footer, the page heading block, the card that holds a form, the panel a screen shows instead of its content. A second copy is a defect even while the two copies are identical, because they will not stay identical — this is how the app bar came to say two different things and only one of two screens got a layout fix.
 - [ ] **Before building a screen, open the screen nearest to it and match its measured values** — container radius and tone, control height, heading size, the gaps between blocks. A screen may pass every box below in isolation and still make the product look unsystematic; this checklist audits one screen, so the comparison to the others has to be made deliberately.
+- [ ] **A hand-rolled replacement for a library primitive owes the keyboard and ARIA contract that primitive would have brought.** Reaching past the library for the one mechanism it lacks is sometimes right; dropping the mechanisms it *has* never is. Before writing one, list what the library component provides — tab order, roving focus, arrow keys, activation, `aria-*` wiring, focus return — and implement each. The navigation tree reached for drag-reorder, which `UTree` has no answer for, and shipped with zero tab stops: a screen whose whole purpose is finding a page could not open one without a mouse (2026-09-07 review).
 
 ### 4.2 Theming — user-selectable themes via CSS variables
 
@@ -104,7 +107,7 @@ Derived from this project's actual stack and domain.
 
 ### 4.4 Reading density — this is a tool people live in all day
 
-- [ ] Long-form document content has a **constrained measure**: roughly 65–80 characters per line. Full-viewport-width prose on a 27" monitor is a defect, not a feature.
+- [ ] Long-form document content has a **constrained measure**: roughly 65–80 characters per line. Full-viewport-width prose on a 27" monitor is a defect, not a feature. **Count it in the browser on real content**, by walking the laid-out text and splitting it where the line boxes change — 72ch is a token, and a token is a prediction about a font the theme is free to change. Measured this way on 2026-09-07, the read column holds a median of 77 characters (76–82 across its paragraphs) at 1280, 1024 and 768.
 - [ ] Real typographic hierarchy. Heading levels are visually distinguishable from each other and from body text by more than weight alone. A wiki whose h2 and h3 look identical has no scannable structure.
 - [ ] Generous vertical rhythm between blocks. Paragraph, list, code block, and diagram spacing is consistent and comes from tokens.
 - [ ] Reading comfort beats visual flourish. No gradient text, no animated headers, no decorative motion in the document body.
@@ -112,6 +115,7 @@ Derived from this project's actual stack and domain.
 - [ ] Chrome (nav, toolbars, panels) is visually quieter than content. If the sidebar competes with the document for attention, the sidebar loses.
 - [ ] **An eyebrow above a heading must add context the heading does not.** Repeating a word of the `h1` spends a hierarchy level for nothing. Added after the 2026-09-04 review removed the eyebrow from all four auth screens; recorded then in the Review Log but not here, which is why `/` kept "Phase 0 · Bootstrap" above "Bootstrap smoke page" for two more reviews.
 - [ ] **A page description is chrome, not document prose.** It takes `body-large` (16px on 24px leading), not `doc-body` (16px on 26px) — `docs/DESIGN-SYSTEM.md` §2.3 reserves the longer leading for the reading surface. The same sentence must not be set solid two ways on two screens.
+- [ ] **A screen's `<h1>` keeps one type role across every state it has.** The state changes the words, not the hierarchy: a permission-denied screen, a not-found screen and a loaded screen all render the page's one heading at the same size. Read and edit mode rendered theirs at `headline-medium` when the page loaded and `headline-small` when it did not, so the type scale reported how the request went (2026-09-07 review).
 
 ### 4.5 Read mode vs. edit mode
 
@@ -168,6 +172,31 @@ Derived from this project's actual stack and domain.
 - [ ] **This checklist remains the authority on required states, the accessibility floor, and responsive behaviour.** Where the two disagree on any of those, this file wins and the design system gets corrected.
 - [ ] Any deviation from the design system is deliberate and recorded in that file's change log — not improvised in a component.
 
+### 4.11 Timestamps
+
+Added 2026-09-08, after the page-history screen shipped with a decision this file had no rule
+for. deep-wiki is built for teams that are not in one place; a time is only useful if the reader
+knows which time it is.
+
+- [ ] Every timestamp renders in the **viewer's own timezone**, never the server's and never
+      forced to UTC.
+- [ ] The rendered string **names its zone** (`Sep 8, 2026, 10:07 AM GMT-5`). A bare local time
+      is ambiguous the moment two readers are in different places, which for this product is the
+      normal case rather than the edge one.
+- [ ] The exact instant is carried in a `<time datetime="…">` element as ISO 8601, so precision
+      survives however the visible text is formatted, and so a machine reading the page — this
+      product's other audience — gets the unambiguous value.
+- [ ] **The screen does not server-render a localised time.** The server does not know the
+      viewer's zone, so formatting during SSR renders the *server's* zone and then changes after
+      hydration: a visible flicker and a Vue hydration mismatch. Either the value is fetched
+      client-side and never server-rendered, or the localisation is explicitly deferred to the
+      client. Whichever holds, say so at the call site — an implicit invariant is one the next
+      person breaks by moving a fetch.
+- [ ] A test forces **at least two distinct timezones** and asserts the same instant renders
+      differently in each. A timezone test that runs only in the machine's own zone proves
+      nothing. Prefer a pair whose offset crosses a calendar day, so a whole-day error is caught
+      and not just a clock offset.
+
 ---
 
 ## 5. Accessibility floor
@@ -179,6 +208,8 @@ Non-negotiable. Each item is **pass/fail**, not an aspiration. A fail blocks the
 - [ ] **Focus order matches visual order.** No jumps to the end of the DOM and back.
 - [ ] **Focus is trapped in modals and returned on close** to the element that opened them.
 - [ ] **No keyboard trap.** Every transient surface can be escaped with Escape.
+- [ ] **Every pointer-only manipulation has a stated keyboard equivalent.** Drag-and-drop, resize, and reorder are the usual offenders: if the only way to move an item is to drag it, the feature does not exist for a keyboard user. Name the keys in the UI, not only in a comment — the navigation tree's reorder is `Alt` with the arrow keys, and the screen says so.
+- [ ] **A control that is unavailable uses `aria-disabled`, not the `disabled` attribute, whenever it carries an explanation.** The attribute removes the control from the tab order, which puts its own reason — required on hover *and* focus by §3 — behind a hover a keyboard user cannot perform.
 - [ ] **Contrast:** 4.5:1 for body text, 3:1 for large text and for the boundary of interactive controls. Verified in every theme shipped, not just the default.
 - [ ] **Color is never the sole carrier of meaning.** Diff add/remove, presence status, validation state, and pending-revision marking all carry a second signal (icon, text, pattern).
 - [ ] **Every form input has a programmatically associated label.** Placeholder text is not a label.
@@ -201,6 +232,7 @@ The app shell is a three-pane wiki: navigation tree · document · contextual pa
 - [ ] **Narrow (<768px):** single pane. The navigation tree becomes a drawer that traps focus and closes on selection and on Escape.
 - [ ] **The page body never scrolls horizontally.** At any breakpoint. Verify at 320px width.
 - [ ] **The page body never scrolls vertically on content that fits, and this is verified by measuring the rendered box** — `document.documentElement.scrollHeight === window.innerHeight` at 1280×900 and 320×900 — not by looking at a screenshot, which hides vertical overflow below the fold. Any page pairing `UMain` with `UFooter` is the specific trap: `UMain`'s base height is the viewport minus the *header* only, so the page overflows by exactly the footer's height. Recorded in the Review Log on 2026-09-04 and fixed there inside `AuthShell`; `/` was the one screen not using that shell and still carried 49px of scroll on 2026-09-06. The height now comes from `AppShell` plus the central `main` override in `app.config.ts`, so it cannot be had per screen — but the measurement is still the check.
+- [ ] **The content column's width *and* horizontal position come from the app shell, and are verified by measuring the rendered box** — `getBoundingClientRect()` on the column at 1280, 1024 and 768 in both themes, not by looking at a screenshot, which shows a plausible column and cannot show that the page beside it is empty. A screen names which of the shell's columns it stands in and states no width of its own. `max-w-*` caps a width and centres nothing: measured on 2026-09-07, the read, edit and navigation-tree screens each rendered 658.9px at x=32 in a 1280px viewport, so the right 589px of every product screen was unused, and all five screens had written their own container. This is the horizontal twin of the vertical rule above, and it failed the same way — a value that lives on one shell, spelled out per screen. `docs/DESIGN-SYSTEM.md` §2.4 names the three columns.
 - [ ] **Tables scroll inside their own `overflow-x: auto` container** with a visible affordance that more content exists.
 - [ ] **Code blocks scroll inside their own container** and do not wrap by default.
 - [ ] **Diagrams scroll or scale inside their own container** and never overflow the document column.
@@ -483,6 +515,299 @@ styled before both the shape ruling (§3.4) and the rhythm ruling (§7.4) landed
   `usePasswordResetRequest`) fail on this host with `setupNuxt` exceeding the
   60s hook timeout under concurrent load. Environmental, unrelated to these
   files; the five page suites (27 tests) pass.
+
+---
+
+### 2026-09-07 — Phase 2 product screens (read, edit, navigation tree) against the five existing screens
+
+**Reviewer:** Eduardo
+**Verdict:** Pass with follow-ups
+
+The three new screens were compared **to the five that already existed** rather than
+each to this checklist on its own. Computed styles were extracted from the running
+app at 1280×900 in both themes, for eight screens plus four extra states (locked,
+refused, permission-denied, empty), and tabulated per component class; a value that
+differed between two screens is a finding even where both sides are defensible
+alone. Chrome measured identical everywhere before and after — header 56px, footer
+49px, `oklch(0.94828)` light / `oklch(0.28448)` dark — and no screen carried
+vertical overflow at 1280×900 or horizontal overflow at 320px, in either theme.
+
+**Findings** (max 3, ordered by user impact)
+
+1. **The navigation tree could not be used without a mouse, and a click on a row did nothing at all.**
+   - *Observable evidence:* at 1280×900 in both themes, tabbing through
+     `/workspaces/:id/tree` produced exactly two stops — the brand mark and the
+     theme toggle — and then left the page. Every row measured `tabindex: null`,
+     `role: null` on the element carrying the label, `isLink: false`, and
+     `cursor: grab`; clicking one changed nothing. The screen's own pre-build
+     contract says its user is there to "find a page", and there was no way to
+     open one by keyboard or by mouse. Reordering existed only as a drag.
+   - *Root cause:* `NavigationTreeNode` is a deliberate hand-rolled exception to
+     §4.1, taken because `UTree` cannot drag-reorder. The exception was scoped to
+     the *drawing* and silently took the *behaviour* with it: `UTree`'s roving
+     tabindex, arrow-key navigation, activation and `aria-*` wiring were all
+     forfeited along with the one feature it lacks. Nothing in §4.1 said that a
+     hand-rolled primitive still owes the contract the library one brings, so the
+     trade read as sanctioned.
+   - *Correction applied:* the tree is now one tab stop with a roving tabindex;
+     arrows move between rows, `Home`/`End` jump to the ends, `ArrowLeft`/`Right`
+     walk to parent and first child, `Enter`/`Space` opens a page, and `Alt` with
+     the arrow keys is the keyboard equivalent of the three drop zones — stated on
+     the screen, not only in a comment. Rows carry `aria-level`, `aria-posinset`,
+     `aria-setsize` and `aria-expanded`, the icon's meaning is also given in text,
+     and the focus ring is relocated from the `treeitem` (which contains its whole
+     subtree) to the row, at the same width and role. Three tests in
+     `tree.test.ts` now hold it. Re-measured: the tab order is brand → toggle →
+     tree.
+   - *Rule added:* §4.1 — a hand-rolled replacement for a library primitive owes
+     the keyboard and ARIA contract that primitive would have brought, enumerated
+     before it is written. §5 — every pointer-only manipulation has a stated
+     keyboard equivalent, and an unavailable control that carries an explanation
+     uses `aria-disabled` rather than the attribute that removes it from the tab
+     order.
+
+2. **Every container on the three new screens sat on the chrome's tonal rung, measuring byte-identical to the header above it.**
+   - *Observable evidence:* the permission-denied, not-found, locked, empty and
+     network-error panels, and the tree's own list, were all hand-rolled
+     `div.flex.items-start.gap-3.rounded-lg.bg-elevated.p-6` and measured
+     `oklch(0.94828 0.002 262)` light / `oklch(0.28448 0.004 262)` dark — the same
+     values measured on the header and footer of the same screen. The auth card,
+     the nearest existing container, measured `oklch(0.91379)` / `oklch(0.34483)`,
+     one rung up. Same object, same radius, same padding, two tones on two screens.
+     The `<h1>` inside them measured 24px against 28px on the same screens' loaded
+     state, so the type scale reported how the request had gone; and they spanned
+     1216px while the document beside them held 659px.
+   - *Root cause:* the containers were built by hand, so the tone was chosen by
+     eye rather than read from a ruling. `docs/DESIGN-SYSTEM.md` §9.4 ruled only on
+     a card *inside a pane*, and none of these screens has a pane — the case that
+     actually occurs had no rule. §1.4's row naming "navigation tree" as
+     `bg-elevated` is about the tree as a pane, and was read as licence for the
+     tree rendered as a column.
+   - *Correction applied:* one `PageNotice.vue` replaces all eight copies — a
+     `UCard variant="soft"`, the same component and tone as the auth card, with the
+     heading *element* chosen by `level` and its *size* following §2.3 from that
+     level, so an `h1` is `headline-medium` in every state. The tree's list moved
+     into the same card. Both new columns are `max-w-measure` at the column, not
+     per branch. Re-measured: every content container on all eight screens is
+     `oklch(0.91379)` / `oklch(0.34483)`, the two deliberate exceptions being the
+     editor body at `bg-default` (§1.4's document canvas) and the error panels at
+     `error-container` (an accent role, not a surface rung).
+   - *Rule added:* §4.1 — anything on more than one screen is one component; and
+     compare against the nearest existing screen before building. §4.4 — a
+     screen's `<h1>` keeps one type role across every state. `docs/DESIGN-SYSTEM.md`
+     §9.4 now states which card a container on the app ground gets, and that
+     `bg-elevated` is never it.
+
+3. **Hover was painted by stepping to another surface rung, which was invisible on the tree and reversed direction between themes in the editor menus.**
+   - *Observable evidence:* a tree row's `hover:bg-elevated` resolved to
+     `oklch(0.94828)` in light over a container already at `oklch(0.94828)`, and
+     `oklch(0.28448)` over `oklch(0.28448)` in dark — the same tone painted over
+     itself, in both themes. The mention and slash menu rows carried the same class
+     over `bg-accented`: measured `oklch(0.93103)` → `oklch(0.94828)` in light
+     (lighter) and `oklch(0.32759)` → `oklch(0.28448)` in dark (darker). Those two
+     menus were also the only 16px menus in the app, beside `UDropdownMenu` at
+     12px, and a focused editor carried two focus indicators at once — the global
+     3px `secondary` outline plus a 2px `primary` ring of its own.
+   - *Root cause:* §5.2 supplied the state-layer mechanism and M3's opacities but
+     never said in one line that a surface rung is not a state, so reaching for
+     `hover:bg-*` passed a reading of the section that produced it. The 16px menus
+     came from §3.4 listing "menus" under Controls without saying the row binds a
+     menu the project draws itself.
+   - *Correction applied:* both the tree rows and both menus use `dw-state-layer` —
+     M3's `currentColor` overlay at 0.08/0.12 — so hover moves away from whatever
+     ground it is on, identically in both themes; the opaque
+     `secondary-container` fill is kept for the genuinely selected row, so selected
+     and hovered stay unmistakably different. Menus moved to `rounded-md`. The
+     editor's own ring was removed in favour of the one global indicator, and the
+     menus gained `aria-activedescendant` so the arrow keys are announced.
+   - *Rule added:* `docs/DESIGN-SYSTEM.md` §5.2 — a new subsection, "a state is a
+     layer, never a step to another surface rung", with both measured failure
+     modes. §3.4 — the Controls row's "menus" binds project-authored menus.
+
+**Checked and found already correct — no action**
+
+- **Read mode never boots the editor.** `scripts/checks/bundle-isolation.ts` and
+  `bundle-isolation-build.ts` both exit 0, and the read route's built chunk closure
+  was walked directly: 11 nodes, zero matching `prosemirror|milkdown|tiptap`, with
+  `packages/editor/src/mount/index.ts` reachable only through the edit route's
+  `dynamicImports`. Driving the real screen, 895 requests were made and none was
+  editor-shaped.
+- **The soft lock reads as a soft lock.** "Open read-only" and "Take over editing"
+  render simultaneously, both at 40px, and "Take over" states its consequence for
+  the other person before the confirm dialog (§4.8).
+- **The refused state names the construct and the line** ("Found *a setext heading*
+  on line 42") and offers both exits.
+- **Both editor menus are keyboard-first:** Escape dismisses and returns focus to
+  the editor at the cursor; neither fires inside a code block (verified by placing
+  the caret in a `<pre>` and typing `@`); the mention menu has a distinct
+  empty-query state ("Type to search people and pages…") and a no-results state
+  ("No matches"), and the slash menu shows its full command list on an empty query
+  and "No matching commands" on a miss.
+- **The tree's empty state names the object in the product's vocabulary** — "No
+  shelves yet" / "Create a shelf to start organising books, chapters and pages".
+- **Wiki-links are inert, and an unreadable target is indistinguishable from a
+  nonexistent one.** `render()` emits `[[Target]]` as literal text with no anchor,
+  class or attribute, so the two are byte-identical by construction. This holds
+  *because* nothing hyperlinks them yet; `docs/SPECS.md` §14 and `docs/TODO.md`
+  already record that closing that gap has to preserve the property, and it is the
+  one item here that a later batch can silently break.
+- Text fields: 56px tall, 12px radius, 16px text, 16px inset, identical on all four
+  auth screens. Container padding 64/64/32 on all eight screens.
+
+**Follow-ups carried forward, not fixed**
+
+- `e2e/auth-layout.spec.ts` still enumerates only the four auth paths. Its
+  measurement is what catches the `UMain` + `UFooter` trap, and the three new
+  screens are not in its list. Not done here — `e2e/**` is outside this review's
+  owned paths.
+- The tree renders unvirtualized. §6's "a book with 400 pages" is unmet; `UTree`'s
+  `virtualize` is the intended answer and is blocked on the same drag-reorder gap
+  that produced the hand-rolled node.
+- The three-pane shell of §6 does not exist yet: all three screens are a single
+  centred column, so the medium/narrow pane rules could not be exercised beyond
+  measuring that nothing overflows.
+- The two-icon-pack requirement (§4.3) remains untested — only `lucide` is
+  installed. Unchanged since 2026-09-04.
+- Contrast was not re-audited exhaustively; the tones in use here are the ones
+  measured on 2026-09-04, and no new colour pair was introduced.
+
+---
+
+### 2026-09-07 — The content column, and the screen a bad URL lands on
+
+**Reviewer:** Eduardo
+**Verdict:** Pass with follow-ups
+
+Both findings came out of the same screenshots: one about what every screen
+does with a wide viewport, one about what the product does with an address
+that does not resolve. Geometry was measured with `getBoundingClientRect()`
+on the running app at 1280, 1024, 768 and 320, in both themes, for seven
+screens; the reading measure was counted from real laid-out text rather
+than from the token, by splitting each paragraph where its line boxes
+change. Before and after are the same instrumentation on the same seeded
+content.
+
+**Findings** (max 3, ordered by user impact)
+
+1. **Every screen put its content against the left edge, leaving the right half of a wide viewport empty.**
+   - *Observable evidence:* at 1280×900 in both themes, the read, edit and
+     navigation-tree columns each measured **658.9px wide at x=32** — 589px
+     of unused page beside them. The same three at 1024 measured 658.9px at
+     x=32 (334px unused) and at 768, 658.9px at x=24 (85px unused). The
+     auth screens, alone, were centred: 448px at x=416. So the product
+     centred its narrowest screen and left-aligned the three a user spends
+     their day in.
+   - *Root cause:* `AppShell` owned the height and not the width. It
+     rendered `<UMain><slot /></UMain>` — no container, no max width, no
+     centring — so all five screens wrote their own `UContainer`, their own
+     column `div` and their own `py-10 sm:py-16`. Each then applied
+     `max-w-measure`, which is what `docs/DESIGN-SYSTEM.md` §2.4 asks for
+     and which sets a maximum width and no horizontal position at all.
+     §8.3's "Don't" list four sections later does say "then centre"; nobody
+     implementing §2.4 read that far. The five copies had already drifted in
+     the way §4.1 predicts: two centred, three not, and the smoke page
+     capped for its heading and uncapped for the grid under it.
+   - *Correction applied:* the column moved into `AppShell` beside the
+     height, as three named kinds a screen chooses between — `measure`
+     (72ch, `mx-auto`), `narrow` (`max-w-md`, the auth card) and `wide`
+     (`--ui-container`, a grid of panels). Read, edit, the tree and the new
+     error screen take `measure`; the choice is stated per screen and its
+     meaning exists once. `PageHeading` now caps its own block at
+     `max-w-measure` so prose stays measured even on the `wide` column.
+     Re-measured: 658.9px at **x=310.5** at 1280, x=182.5 at 1024, x=54.5 at
+     768, and 288px at x=16 at 320 — centred at every width, in both
+     themes, with the auth screens unmoved at 448px/x=416 and the smoke
+     page's grid still 1216px with its heading capped at 658.9px. The
+     reading measure holds a median of 77 characters (76–82) at 1280, 1024
+     and 768. No horizontal overflow at 320 anywhere; no vertical overflow
+     introduced on a page that fits. Read and edit mode now share the
+     column exactly — `<h1>` and document surface both 658.9px at x=310.5 —
+     though not yet the last 16px of it; see the follow-ups.
+   - *Rule added:* §6 — the content column's width *and* horizontal position
+     come from the app shell, verified by measuring the rendered box; a
+     screen names its column and states no width. §4.4 — count the measure
+     in the browser on real content, because 72ch is a prediction about a
+     font the theme may change. `docs/DESIGN-SYSTEM.md` §2.4 gains "a
+     measure is a cap, not a position", the three-column table, and the
+     reasoning for edit mode and the tree sharing the reading measure;
+     recorded in its §14.
+
+2. **A bad URL left the product: no error screen existed, so Nuxt's default one answered for it.**
+   - *Observable evidence:* `/this/route/does/not/exist` at 1280×900
+     rendered the framework's error page — no header, no footer, no theme,
+     no type scale, a stack trace in development. Probed for the shell's
+     landmarks it had none: `document.querySelector('main')` was `null` in
+     both themes at all four widths. There was no `error.vue` and no
+     catch-all route.
+   - *Root cause:* nothing in this checklist asked for one. §3 enumerates
+     the states *of a screen*, and a 404 is the absence of a screen rather
+     than a state of one, so it fell between the sections — the same shape
+     of gap as §9.4's "a card inside a pane" ruling that said nothing about
+     the case every screen actually had.
+   - *Correction applied:* `apps/web/app/error.vue`, built on `AppShell` and
+     `PageNotice` like every other screen, with two distinct states because
+     the next action differs: **not found** (neutral card, one action) and
+     **the server failed** (`error-container`, `role="alert"`, "Try again",
+     and `Reference: HTTP <code>` set beside the message for a bug report,
+     never instead of it). The 404's action comes out of the address the
+     user typed — a workspace in the URL offers that workspace's tree, a
+     page offers that page, and otherwise sign-in, since this product has
+     no public pages. Verified in the built app: all three navigate, and the
+     tab order is brand → theme toggle → the action.
+   - *Rule added:* §3 — route-level failure has a screen, it is one screen,
+     it uses the product's shell, and it distinguishes not-found from a
+     server failure.
+
+**Checked and found already correct — no action**
+
+- **The 404 cannot become a disclosure channel.** `apps/api/src/routes/
+  pages.ts` looks a node up before calling `can()` and therefore returns a
+  real 403 for a page that exists and is denied — deliberate for a direct
+  URL request, and recorded in `usePageRead`'s own note. The new screen is
+  built so that a *different* surface can choose otherwise: the not-found
+  branch is selected by status code alone and no field of the error object
+  reaches the DOM, so `createError({ statusCode: 404, message: 'forbidden' })`
+  renders byte-identically to a plain 404. Two tests hold it, and the copy
+  says out loud that the ambiguity is deliberate so a reader is not misled
+  into believing a page they cannot see was deleted.
+- **Nothing regressed that the last two reviews fixed.** GATE-2 green; both
+  bundle-isolation layers exit 0 against a fresh production build, so read
+  mode still never reaches ProseMirror; the tree's roving tabindex and
+  `Alt`-arrow reorder are untouched; and the `min-h-svh` column plus the
+  central `main` override still hold, measured at
+  `scrollHeight === innerHeight` on every screen whose content fits.
+- Chrome measured identical to the previous review — header 56px, footer
+  49px — and the auth screens' geometry is unchanged to the pixel.
+
+**Follow-ups carried forward, not fixed**
+
+- **Read and edit now share the column but not the last 16px.** Measured at
+  1280×900: the `<h1>` and the document surface are identical in both modes
+  (658.9px at x=310.5), but a paragraph is 658.9px at x=310.5 in read mode
+  and **626.9px at x=326.5** in edit — the editor's canvas carries `p-4`
+  (§1.4 gives it `bg-default` as the document canvas) while read mode's
+  prose sits directly on the app ground with no canvas at all. So the text
+  still steps 16px sideways when the mode changes. Two fixes exist and both
+  are a change to a surface the owner reviewed and passed on 2026-09-07:
+  drop the editor's inset, or give read mode the same `bg-default` canvas —
+  which is arguably what §1.4 already says, since it names the document
+  canvas and the editor body as one rung. That is a design-system ruling to
+  be made once and deliberately (§1's standing rule), not improvised inside
+  this batch, so it is recorded rather than taken.
+- No test asserts the column geometry. Both findings above were caught by
+  measuring the running app, and the suite would be green with the column
+  back against the left edge. `e2e/auth-layout.spec.ts` is the right home
+  and still enumerates only the four auth paths — unchanged since
+  2026-09-04, and now three screens plus the error screen behind it.
+- The server-error state has no e2e: reaching it needs a route that fails,
+  which this batch produced with a temporary probe page and then removed.
+- The three-pane shell of §6 still does not exist; every screen is one
+  centred column, so the medium/narrow pane rules remain unexercised.
+- The two-icon-pack requirement (§4.3) remains untested — only `lucide` is
+  installed. Unchanged since 2026-09-04.
+- No new colour pair was introduced, so contrast was not re-audited; the
+  error screen reuses `error-container`/`on-error-container`, already in use
+  on the refused and network-error notices.
 
 ---
 

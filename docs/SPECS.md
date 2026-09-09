@@ -269,9 +269,36 @@ document is only an in-memory representation used while editing.
 Without this suite, the editor silently corrupts user documents over time. This is the
 single highest-risk area of the codebase.
 
-The editor is built on **ProseMirror via Milkdown** — chosen over TipTap because Milkdown
-is Markdown-first rather than treating Markdown as a serialisation plugin, which matches
-the canonical-format decision.
+> **GATE-2 — Status: SATISFIED (2026-09-07).** The full fixture corpus round-trips
+> byte-identical through the real ProseMirror schema (`packages/editor/src/round-trip.ts`),
+> 69 fixture-driven tests green (`packages/editor/src/round-trip.test.ts`), and the suite
+> runs as a named, independently identifiable step (`gate-2-round-trip`) ahead of the
+> build step in `.github/workflows/ci.yml` and in `bun run verify`. This repository has
+> no git remote, so that workflow file never executes; enforcement today is local —
+> `bun run check` on every commit, `bun run verify` before tagging.
+
+The editor is built directly on ProseMirror (`prosemirror-view`/`-state`/`-keymap`/
+`-commands`/`-history`/`-inputrules`/`-schema-list`) rather than on the Milkdown package —
+a deviation from the original plan, recorded where it was made (WU-16.6's commit message)
+— chosen over TipTap because it stays Markdown-first rather than treating Markdown as a
+serialisation plugin, which matches the canonical-format decision.
+
+**The supported and refused construct set.** Every construct a document can contain falls
+into exactly one of three buckets, and `classify()` (`packages/editor/src/classify.ts`) is
+derived from the ProseMirror schema rather than written beside it, so the buckets cannot
+silently drift from what the schema actually models:
+
+| Bucket | Constructs | Behaviour |
+| --- | --- | --- |
+| **Modelled** | Paragraphs, headings, nested and mixed-marker lists (tight and loose, ordered and unordered), blockquotes, tables (incl. ragged alignment), code fences with and without an info string, footnotes, hard line breaks, entities and escapes, mixed emphasis and strong markers, wiki-links (resolved, unresolved, anchored), tags, block-anchor syntax (` ^id`), diagram fences | Byte-identical round trip through the real ProseMirror schema; edit mode opens |
+| **Verbatim** | Raw HTML (block and inline), reference-style links and images, frontmatter | Carried opaquely through the schema, not modelled node-by-node; byte-identical round trip; edit mode opens |
+| **Refused** | Setext headings, indented code blocks, and one non-canonical spelling per pinned serialiser option (bullet marker, ordered-list marker, emphasis marker, strong marker, fence style, list-item indent, resource-link spacing, thematic-break rule, tight definitions) | The edit-session probe (`packages/editor/src/probe.ts`) returns a `409` naming the reason and the construct; edit mode does not open. The refusal is surfaced in-product, not only in this document — see the read/edit screens' refusal UI (`document-editor` capability) |
+
+Byte-identity holds for canonical markdown in the modelled and verbatim buckets. It does
+not hold for non-canonical input, which is refused or normalised on purpose, and it makes
+no claim about markdown a future `remark` version parses differently — a dependency bump
+that changes parsing surfaces as a failing fixture test, never as a silently rewritten
+document.
 
 ### 5.2 Editor capabilities
 
@@ -748,7 +775,7 @@ API, and the indexer, and it is the reason the backend is TypeScript (§14).
 | **Rule packs are shareable entities authored as documents** | Sharing across projects requires independent identity; authoring them as documents inherits versioning, diffing, and commenting for free | Nothing foreseeable |
 | **Bun workspaces without Turborepo** | `bun run -F` covers the task graph; fewer build dependencies matters for a self-hosted product | Build times that measurably hurt |
 | **Postgres is the engine, but engine-specific features are paid for, not assumed** | The appliance question is answered: no single-binary/SQLite distribution, so the Bun + Hono decision stands. But the door stays open at low cost. The rule is a cost test, not a purity test: avoid a Postgres-only feature when a portable equivalent is nearly as good, accept one when it buys something the product genuinely needs. Applied: the `nodes` path is a `text` materialised path with `text_pattern_ops`, **not** `ltree` — the portable form is barely worse and `ltree` would have been the third hard lock-in. Recursive CTEs stay, because SQLite supports them too and they cost nothing in portability. `pgvector` stays and is accepted as a genuine lock-in, because RAG over the corpus is a core product function with no equivalent-maturity alternative | A decision to ship an appliance after all, which would reopen the backend choice as well |
-| **Read mode's cached HTML cannot bake in a per-viewer decision — UNRESOLVED** | §5 has read mode serve pre-rendered cacheable HTML, and §4 makes permissions per-viewer. Those two hold together only while nothing rendered depends on who is looking. A resolved wiki-link breaks it: a viewer who cannot read the target must see it exactly as an unresolved link, or the renderer becomes a disclosure channel — and one cached blob per page cannot express both. Discovered during Phase 2 implementation; today the non-disclosure test passes **vacuously**, because `render()` does not hyperlink wiki-links yet. The two viable closures are a per-request rewrite that re-checks each embedded link against the current viewer before serving, or rendering every wiki-link inert and resolving it client-side through the same non-disclosing endpoint. **This must be decided before wiki-links become clickable**, not after | Deciding either way; both keep read mode fast, and the choice is about where the check runs |
+| **Read mode's cached HTML never bakes in a per-viewer decision — DECIDED** | §5 has read mode serve pre-rendered cacheable HTML, and §4 makes permissions per-viewer. Those two hold together only while nothing rendered depends on who is looking, and anything per-viewer inside the blob turns the renderer into a disclosure channel — one cached blob per page cannot express two audiences. Discovered during Phase 2 implementation, when the non-disclosure test still passed **vacuously** because `render()` did not hyperlink wiki-links. **Resolved by the Phase 3 proposal** (`openspec/changes/versioning-and-collaboration/`, `specs/comment-overlay/spec.md`): the cache stays exactly one blob per page, byte-identical for every viewer; `render()` emits an invisible `data-block-id` per anchored block and nothing else; and anything per-viewer — comment indicators first — is a **separate overlay** fetched from its own `can('comment')`-gated endpoint and composed onto the unchanged HTML client-side. The general rule that falls out: the check runs at the endpoint that serves the per-viewer data, never inside the render. A clickable wiki-link is the same shape and takes the same treatment | A per-viewer variant of `rendered_html` being persisted, computed or cached, which the comment-overlay spec makes a named failing scenario |
 | **Authorisation walks `parent_id`, never the `path` cache** | `nodes.path` is a trigger-maintained denormalised cache that exists for subtree *navigation* queries. If it goes stale or corrupt, a resolver reading it grants or denies access silently and wrongly. `parent_id` is the authoritative structure, depth is bounded at five, and each step is a primary-key lookup. Correctness of the cache is then a separate, testable concern instead of a security dependency | A measured cost difference at realistic depth, which would require the path integrity check to run continuously rather than per test |
 | **The workspace is a real `nodes` row** | Materialising it as a fifth `node_type` gives the ancestor chain a genuine root, makes the resource foreign key unconditional, and deletes the workspace-level special case from the resolver. A branch in the authorisation query is exactly where an isolation bug hides. It also resolves a latent contradiction in this document, which previously declared `node_type` with four values in one place and five in another | Nothing foreseeable |
 | **Tenant isolation by composite foreign key `(id, workspace_id)`** | A cross-tenant row becomes *unrepresentable* rather than merely unqueried. A `WHERE workspace_id = ?` is one forgotten clause away from a leak; a composite FK cannot be forgotten. GATE-3 will rely on this | Nothing foreseeable |

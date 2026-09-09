@@ -44,6 +44,41 @@ const FORBIDDEN_UI_EDITOR = /\bU(Editor|EditorToolbar|EditorBubbleMenu)\b|useEdi
 /** Only these may reach for the pipeline's own building blocks. */
 const PARSER_OWNERS = ['packages/markdown/', 'packages/editor/'];
 
+/**
+ * The single file allowed to construct the shared `unified().use(remarkParse)`
+ * / `.use(remarkStringify)` processor. Every other file — including
+ * elsewhere inside `packages/markdown` and `packages/editor`, both
+ * `PARSER_OWNERS` above — must import `parse()`/`stringify()` from it
+ * instead of building a second processor of its own.
+ *
+ * `PARSER_OWNERS` above governs *who may import the raw remark/unified
+ * building blocks at all*; it does not, by itself, stop a second, divergent
+ * processor from being built with them once inside an owner directory. That
+ * is exactly the gap `render.ts` fell through: it lived inside
+ * `packages/markdown/`, an allowed owner, and instantiated its own bare
+ * `unified().use(remarkParse)` with none of the shared pipeline's GFM,
+ * frontmatter, or wiki-link/tag/block-anchor extensions — undetected,
+ * because this check only ever asked *which package* imported the parser,
+ * never *how many pipeline instances* existed inside it.
+ */
+const SOLE_PIPELINE_OWNER = 'packages/markdown/src/pipeline.ts';
+
+/** The specifiers that mean "this file constructs its own markdown processor". */
+const PIPELINE_CONSTRUCTION_SPECIFIERS: readonly string[] = ['remark-parse', 'remark-stringify'];
+
+/**
+ * Whether `relPath` may construct its own `remark-parse`/`remark-stringify`
+ * processor. `.test.ts` files are exempt: several already legitimately
+ * build a throwaway, deliberately "naive" comparison pipeline to prove what
+ * a missing pin or an unmodelled schema node would produce
+ * (`round-trip.test.ts`, `canonical.test.ts`) — the same "a check that
+ * describes a forbidden pattern necessarily contains it" exemption
+ * `isSelfReferential` below already grants this file's own test.
+ */
+function mayConstructPipeline(relPath: string): boolean {
+  return relPath === SOLE_PIPELINE_OWNER || relPath.endsWith('.test.ts');
+}
+
 const SOURCE_EXTENSIONS = new Set(['.ts', '.tsx', '.vue', '.js', '.mjs']);
 const SKIP_DIRS = new Set(['node_modules', 'dist', '.nuxt', '.output', '.git', 'drizzle', '__fixtures__']);
 
@@ -70,6 +105,21 @@ export function checkFile(relPath: string, contents: string): string[] {
         );
       }
     }
+  } else if (!mayConstructPipeline(relPath)) {
+    // Owned by packages/markdown or packages/editor, but not the sole
+    // pipeline owner nor a test: reaching for remark-parse/remark-stringify
+    // here builds a second, divergent processor inside an already-allowed
+    // package — the exact bug class the block above cannot see.
+    for (const specifier of PIPELINE_CONSTRUCTION_SPECIFIERS) {
+      if (contents.includes(`'${specifier}`) || contents.includes(`"${specifier}`)) {
+        errors.push(
+          `${relPath} imports \`${specifier}\` directly, constructing its own markdown processor. Only ` +
+            `${SOLE_PIPELINE_OWNER} may build the shared parse/stringify pipeline — every other file, including ` +
+            `inside packages/markdown and packages/editor, must import parse()/stringify() from it instead. A ` +
+            `second processor instance is a second parser even inside an allowed package.`,
+        );
+      }
+    }
   }
 
   if (FORBIDDEN_UI_EDITOR.test(contents)) {
@@ -86,9 +136,13 @@ export function checkFile(relPath: string, contents: string): string[] {
  * A check that describes forbidden patterns necessarily contains them. Its
  * own source and tests are excluded, following the precedent set by
  * `query-boundaries.ts`, which flagged itself for the same reason.
+ * `bundle-isolation.ts` (and its test, and its fixtures' violating cases)
+ * shares this exemption: it also compares against and asserts on
+ * `milkdown`/`@milkdown/`/`@tiptap/` string literals to describe the exact
+ * specifiers its own denylist forbids.
  */
 export function isSelfReferential(relPath: string): boolean {
-  return /(^|\/)single-parser(\.test)?\.ts$/.test(relPath);
+  return /(^|\/)(single-parser|bundle-isolation)(\.test)?\.ts$/.test(relPath);
 }
 
 export function checkSingleParser(root: string, roots: readonly string[]): SingleParserResult {

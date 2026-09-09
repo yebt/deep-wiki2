@@ -6,10 +6,22 @@ import { Argon2idPasswordHasher } from './adapters/crypto/argon2id-password-hash
 import { createBlobStore } from './adapters/blob';
 import { SmtpMailSender } from './adapters/mail/smtp-mail-sender';
 import { loadConfig } from './config';
+import { InMemoryPresenceBroadcaster } from './presence/broadcaster';
+import { PresenceStreamRegistry } from './presence/registry';
 import { createAdminRoutes } from './routes/admin';
 import { createAuthRoutes } from './routes/auth';
+import { createCommentRoutes } from './routes/comments';
 import { createInvitationRoutes } from './routes/invitations';
+import { createLinkRoutes } from './routes/links';
+import { createMentionRoutes } from './routes/mentions';
+import { createDiffRoutes } from './routes/diff';
+import { createPageRoutes } from './routes/pages';
+import { createPresenceRoutes } from './routes/presence';
+import { createRevisionRoutes } from './routes/revisions';
+import { createTagRoutes } from './routes/tags';
+import { createTreeRoutes } from './routes/tree';
 import { createUploadRoutes } from './routes/uploads';
+import { createWorkspaceRoutes } from './routes/workspaces';
 
 /**
  * Builds the application with CORS installed **before** any route.
@@ -87,6 +99,11 @@ if (import.meta.main) {
   const passwordHasher = new Argon2idPasswordHasher();
   const blobStore = createBlobStore(config);
   const smtpConfigHash = computeSmtpConfigHash(config);
+  // Single process is the assumed topology (design.md Decision 5,
+  // "Multiple API processes") — the presence route's own poll fallback is
+  // what keeps correctness from depending on that assumption.
+  const presenceBroadcaster = new InMemoryPresenceBroadcaster();
+  const presenceStreamRegistry = new PresenceStreamRegistry();
 
   app.route(
     '/',
@@ -134,6 +151,55 @@ if (import.meta.main) {
     }),
   );
 
+  app.route(
+    '/',
+    createPageRoutes({
+      sql,
+      sessionIdleTimeoutMinutes: config.SESSION_IDLE_TIMEOUT_MINUTES,
+      pageLockTtlSeconds: config.PAGE_LOCK_TTL_SECONDS,
+      changesetWindowMinutes: config.CHANGESET_WINDOW_MINUTES,
+      broadcaster: presenceBroadcaster,
+    }),
+  );
+
+  app.route('/', createLinkRoutes({ sql, sessionIdleTimeoutMinutes: config.SESSION_IDLE_TIMEOUT_MINUTES }));
+  app.route('/', createTagRoutes({ sql, sessionIdleTimeoutMinutes: config.SESSION_IDLE_TIMEOUT_MINUTES }));
+  app.route('/', createMentionRoutes({ sql, sessionIdleTimeoutMinutes: config.SESSION_IDLE_TIMEOUT_MINUTES }));
+  app.route('/', createWorkspaceRoutes({ sql, sessionIdleTimeoutMinutes: config.SESSION_IDLE_TIMEOUT_MINUTES }));
+  app.route('/', createTreeRoutes({ sql, sessionIdleTimeoutMinutes: config.SESSION_IDLE_TIMEOUT_MINUTES }));
+  app.route(
+    '/',
+    createCommentRoutes({
+      sql,
+      mailSender,
+      sessionIdleTimeoutMinutes: config.SESSION_IDLE_TIMEOUT_MINUTES,
+      changesetWindowMinutes: config.CHANGESET_WINDOW_MINUTES,
+    }),
+  );
+  app.route(
+    '/',
+    createPresenceRoutes({
+      sql,
+      sessionIdleTimeoutMinutes: config.SESSION_IDLE_TIMEOUT_MINUTES,
+      broadcaster: presenceBroadcaster,
+      pageLockTtlSeconds: config.PAGE_LOCK_TTL_SECONDS,
+      keepAliveSeconds: config.PAGE_LOCK_HEARTBEAT_SECONDS,
+      registry: presenceStreamRegistry,
+    }),
+  );
+  app.route('/', createRevisionRoutes({ sql, sessionIdleTimeoutMinutes: config.SESSION_IDLE_TIMEOUT_MINUTES }));
+  app.route('/', createDiffRoutes({ sql, sessionIdleTimeoutMinutes: config.SESSION_IDLE_TIMEOUT_MINUTES }));
+
   console.log(`apps/api: listening on port ${config.PORT}`);
   Bun.serve({ port: config.PORT, fetch: app.fetch });
+
+  // Termination (design.md Decision 5): a server shutdown closes every
+  // open presence stream deliberately rather than leaving connections to
+  // be torn down by the OS.
+  for (const signal of ['SIGTERM', 'SIGINT'] as const) {
+    process.on(signal, () => {
+      presenceStreamRegistry.closeAll();
+      process.exit(0);
+    });
+  }
 }

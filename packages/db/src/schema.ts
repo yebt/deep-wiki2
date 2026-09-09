@@ -31,6 +31,7 @@ export const subjectKind = pgEnum('subject_kind', ['user', 'cell', 'role', 'agen
 export const permAction = pgEnum('perm_action', ['read', 'comment', 'write', 'manage']);
 export const permEffect = pgEnum('perm_effect', ['allow', 'deny']);
 export const registrationMode = pgEnum('registration_mode', ['closed', 'invitation_only', 'open']);
+export const blockStatus = pgEnum('block_status', ['active', 'superseded', 'tombstoned']);
 
 export const plans = pgTable('plans', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -196,5 +197,183 @@ export const invitations = pgTable('invitations', {
   invitedByUserId: uuid('invited_by_user_id').references(() => users.id, { onDelete: 'set null' }),
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
   acceptedAt: timestamp('accepted_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * A page's canonical Markdown and its derived render/index (content-and-editor
+ * design.md "Schema"). The three-column FK `(node_id, workspace_id,
+ * node_type)` into `nodes (id, workspace_id, type)` — and the
+ * `nodes_id_workspace_id_type_key` unique key it targets — are declared
+ * only in the migration SQL (see the module doc comment above).
+ */
+export const pageContent = pgTable('page_content', {
+  nodeId: uuid('node_id').primaryKey(),
+  workspaceId: uuid('workspace_id')
+    .notNull()
+    .references(() => workspaces.id, { onDelete: 'cascade' }),
+  nodeType: nodeType('node_type').notNull().default('page'),
+  markdown: text('markdown').notNull(),
+  renderedHtml: text('rendered_html').notNull().default(''),
+  blockIndex: jsonb('block_index').notNull().default({}),
+  contentHash: text('content_hash').notNull(),
+  pipelineVersion: integer('pipeline_version').notNull().default(1),
+  updatedBy: uuid('updated_by').references(() => users.id, { onDelete: 'set null' }),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * The durable record of persisted block ids (design.md "Block identity" —
+ * Registry). The composite primary key, the composite FK into
+ * `page_content`, and the self-referential `superseded_by` FK are declared
+ * only in the migration SQL.
+ */
+export const pageBlocks = pgTable('page_blocks', {
+  pageId: uuid('page_id').notNull(),
+  workspaceId: uuid('workspace_id').notNull(),
+  blockId: text('block_id').notNull(),
+  status: blockStatus('status').notNull(),
+  supersededBy: text('superseded_by'),
+  /** The id of the block this one split from, written once at insert (0011_block_split_provenance.sql). */
+  splitFrom: text('split_from'),
+  contentHash: text('content_hash').notNull(),
+  excerpt: text('excerpt').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * The derived, save-triggered knowledge graph (content-and-editor design.md
+ * "Schema"; knowledge-graph spec). `source_page_id`'s composite FK into
+ * `page_content` and `target_page_id`'s nullable composite FK into `nodes`
+ * are declared only in the migration SQL — see the module doc comment
+ * above. Rows here are replaced wholesale by
+ * `packages/db/src/content/rebuild-derived.ts` on every save; no other
+ * module may write them (`scripts/checks/query-boundaries.ts`).
+ */
+export const links = pgTable('links', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  workspaceId: uuid('workspace_id')
+    .notNull()
+    .references(() => workspaces.id, { onDelete: 'cascade' }),
+  sourcePageId: uuid('source_page_id').notNull(),
+  targetPageId: uuid('target_page_id'),
+  targetRaw: text('target_raw').notNull(),
+  sourceBlockId: text('source_block_id'),
+  anchor: text('anchor'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * A workspace-scoped `#tag` name (knowledge-graph spec). The
+ * `(workspace_id, name)` and `(id, workspace_id)` unique constraints are
+ * declared only in the migration SQL.
+ */
+export const tags = pgTable('tags', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  workspaceId: uuid('workspace_id')
+    .notNull()
+    .references(() => workspaces.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * A page's association with a tag (knowledge-graph spec: Tags And
+ * Page-Tag Associations Are Rebuilt On Save). The composite primary key
+ * and both composite foreign keys are declared only in the migration SQL.
+ */
+export const pageTags = pgTable('page_tags', {
+  pageId: uuid('page_id').notNull(),
+  tagId: uuid('tag_id').notNull(),
+  workspaceId: uuid('workspace_id').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * The soft lock (content-and-editor design.md "The soft lock, coherent
+ * without presence"). No expiry column: a lock is held iff
+ * `heartbeat_at > now() - PAGE_LOCK_TTL_SECONDS`, computed on read by
+ * `packages/db/src/locks/page-lock.ts`. The composite FK into
+ * `page_content` is declared only in the migration SQL.
+ */
+export const pageLocks = pgTable('page_locks', {
+  nodeId: uuid('node_id').primaryKey(),
+  workspaceId: uuid('workspace_id').notNull(),
+  holderUserId: uuid('holder_user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  acquiredAt: timestamp('acquired_at', { withTimezone: true }).notNull().defaultNow(),
+  heartbeatAt: timestamp('heartbeat_at', { withTimezone: true }).notNull().defaultNow(),
+  takenOverFrom: uuid('taken_over_from').references(() => users.id, { onDelete: 'set null' }),
+  takenOverAt: timestamp('taken_over_at', { withTimezone: true }),
+});
+
+/**
+ * Book-scoped, implicit grouping of page revisions by author and window
+ * (versioning-and-collaboration design.md Decision 3, changesets spec).
+ * The composite `(book_id, workspace_id, book_node_type)` FK into `nodes`
+ * and the `changeset_open_per_author_idx` partial unique index are
+ * declared only in the migration SQL.
+ */
+export const changeset = pgTable('changeset', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  workspaceId: uuid('workspace_id')
+    .notNull()
+    .references(() => workspaces.id, { onDelete: 'cascade' }),
+  bookId: uuid('book_id').notNull(),
+  bookNodeType: nodeType('book_node_type').notNull().default('book'),
+  authorId: uuid('author_id').references(() => users.id, { onDelete: 'set null' }),
+  message: text('message'),
+  lastActivityAt: timestamp('last_activity_at', { withTimezone: true }).notNull().defaultNow(),
+  closedAt: timestamp('closed_at', { withTimezone: true }),
+});
+
+/**
+ * An immutable snapshot of a page's canonical Markdown and block index,
+ * written inside the same transaction as the ordinary save (design.md
+ * Decision 7, revision-history spec). The composite FKs into
+ * `page_content` and `changeset`, and the `BEFORE UPDATE`
+ * immutability trigger, are declared only in the migration SQL.
+ */
+export const pageRevision = pgTable('page_revision', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  workspaceId: uuid('workspace_id')
+    .notNull()
+    .references(() => workspaces.id, { onDelete: 'cascade' }),
+  pageId: uuid('page_id').notNull(),
+  authorId: uuid('author_id').references(() => users.id, { onDelete: 'set null' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  content: text('content').notNull(),
+  contentHash: text('content_hash').notNull(),
+  blockIndex: jsonb('block_index').notNull().default({}),
+  changesetId: uuid('changeset_id'),
+});
+
+/**
+ * One table for both thread roots and replies (versioning-and-collaboration
+ * design.md Decision 1; comment-threads/comment-overlay specs). A root row
+ * (`parentId` null) carries the anchor and resolution state; a reply
+ * carries none of its own. The composite FKs into `page_content` and
+ * `page_blocks`, the self-referential `parentId` FK, and the
+ * `comments_root_has_anchor` CHECK are declared only in the migration SQL.
+ */
+export const comments = pgTable('comments', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  workspaceId: uuid('workspace_id')
+    .notNull()
+    .references(() => workspaces.id, { onDelete: 'cascade' }),
+  pageId: uuid('page_id').notNull(),
+  parentId: uuid('parent_id'),
+  authorId: uuid('author_id').references(() => users.id, { onDelete: 'set null' }),
+  body: text('body').notNull(),
+  blockId: text('block_id'),
+  offsetStart: integer('offset_start'),
+  offsetEnd: integer('offset_end'),
+  quote: text('quote'),
+  quoteHash: text('quote_hash'),
+  status: text('status'),
+  resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+  resolvedBy: uuid('resolved_by').references(() => users.id, { onDelete: 'set null' }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });

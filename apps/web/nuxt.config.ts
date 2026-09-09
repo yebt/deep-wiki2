@@ -4,6 +4,24 @@ export default defineNuxtConfig({
 
   devtools: { enabled: true },
 
+  devServer: {
+    // Where apps/web listens in development, declared rather than left to
+    // Nuxt's default. Two reasons, and both of them have already cost time:
+    //
+    //   1. `APP_URL` in .env must name this exact origin — it is the single
+    //      origin apps/api allows through CORS *with credentials*, so if it
+    //      names anything else the browser discards the session cookie and
+    //      every login bounces straight back to sign-in, silently. It shipped
+    //      pointing at 4173, which no dev server ever listened on.
+    //      `bun run env:check` now reads the number below and compares them,
+    //      so the two can no longer drift.
+    //   2. Nuxt's default is 3000, which is also `PORT` — where apps/api
+    //      listens. Whichever started second was quietly moved to 3001 by the
+    //      dev server's own fallback, so the web origin depended on start
+    //      order. 3001 is that fallback, made deterministic.
+    port: 3001,
+  },
+
   css: ['~/assets/css/main.css'],
 
   icon: {

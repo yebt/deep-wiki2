@@ -13,10 +13,12 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "migrate": "bun run migrate.ts",
     "seed": "bun run seed.ts",
+    "backfill:render": "bun run backfill-render.ts",
     "verify:paths": "bun run verify-paths.ts"
   },
   "dependencies": {
     "@deep-wiki/core": "workspace:*",
+    "@deep-wiki/markdown": "workspace:*",
     "drizzle-orm": "^0.38.3",
     "postgres": "^3.4.5"
   },

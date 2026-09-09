@@ -1,0 +1,56 @@
+import { z } from 'zod';
+
+/**
+ * Request/response schemas for `apps/api/src/routes/pages.ts`
+ * (page-content spec; content-and-editor design.md "The save transaction",
+ * "Fail-closed: the per-document probe").
+ */
+
+export const SavePageRequestSchema = z.object({
+  markdown: z.string(),
+  /** `null` for the first save; otherwise the `contentHash` last read (D16). */
+  expectedContentHash: z.string().nullable(),
+});
+export type SavePageRequest = z.infer<typeof SavePageRequestSchema>;
+
+export const SavePageResponseSchema = z.object({
+  contentHash: z.string(),
+});
+export type SavePageResponse = z.infer<typeof SavePageResponseSchema>;
+
+export const ReadPageResponseSchema = z.object({
+  html: z.string(),
+  title: z.string(),
+});
+export type ReadPageResponse = z.infer<typeof ReadPageResponseSchema>;
+
+const OfferedExitSchema = z.enum(['read_only', 'normalise', 'take_over']);
+
+/** The per-document round-trip probe's refusal, verbatim in the 409 body (design.md "Fail-closed: the per-document probe"). */
+export const EditSessionRefusalSchema = z.object({
+  reason: z.enum(['unsupported_construct', 'not_byte_identical', 'locked']),
+  construct: z.string().optional(),
+  line: z.number().optional(),
+  holder: z.object({ userId: z.string(), acquiredAt: z.string(), heartbeatAt: z.string() }).optional(),
+  offeredExits: z.array(OfferedExitSchema),
+});
+export type EditSessionRefusal = z.infer<typeof EditSessionRefusalSchema>;
+
+export const EditSessionResponseSchema = z.object({
+  markdown: z.string(),
+  title: z.string(),
+  /** Needed client-side for the `@` mention endpoints, which are scoped by workspace. */
+  workspaceId: z.string(),
+  lock: z.object({ holderUserId: z.string(), acquiredAt: z.string(), heartbeatAt: z.string() }),
+});
+export type EditSessionResponse = z.infer<typeof EditSessionResponseSchema>;
+
+/** `PATCH /pages/:id/lock` (design.md "Heartbeat Keeps The Lock Alive"). */
+export const HeartbeatResponseSchema = z.object({
+  status: z.enum(['ok', 'lost']),
+});
+export type HeartbeatResponse = z.infer<typeof HeartbeatResponseSchema>;
+
+/** `POST /pages/:id/lock/take-over` — same shape as a successful edit-session, since take over always succeeds and hands back the doc to open. */
+export const TakeOverResponseSchema = EditSessionResponseSchema;
+export type TakeOverResponse = EditSessionResponse;

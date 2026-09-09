@@ -1,7 +1,14 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "types": ["@types/bun"]
+    "types": ["@types/bun"],
+    // "." (schema/classify/from-markdown/to-markdown/probe) never touches
+    // the DOM at runtime — this only widens the *type-checking* lib set so
+    // "./mount" (prosemirror-view, the real browser editing surface) can
+    // reference DOM types like `HTMLElement`. Adding a lib here has no
+    // bearing on scripts/checks/bundle-isolation.ts's runtime-import rule,
+    // which is what actually enforces read-mode isolation (D13).
+    "lib": ["ES2023", "DOM"]
   },
   "include": ["src/**/*.ts"]
 }

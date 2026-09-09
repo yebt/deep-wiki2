@@ -4,16 +4,29 @@
   "type": "module",
   "version": "0.0.0",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./pipeline": "./src/pipeline.ts"
   },
   "scripts": {
+    "goldens:update": "UPDATE_CHUNK_GOLDENS=1 bun test src/chunk-golden.test.ts",
     "test": "bun test",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
+    "@deep-wiki/core": "workspace:*",
+    "@types/hast": "^3.0.5",
     "@types/mdast": "^4.0.4",
+    "@types/unist": "^3.0.3",
+    "hast-util-to-html": "^9.0.5",
+    "mdast-util-to-hast": "^13.2.1",
+    "mdast-util-to-markdown": "^2.1.2",
+    "rehype-sanitize": "^6.0.0",
+    "remark-frontmatter": "^5.0.0",
+    "remark-gfm": "^4.0.1",
     "remark-parse": "^11.0.0",
+    "remark-rehype": "^11.1.2",
     "remark-stringify": "^11.0.0",
-    "unified": "^11.0.5"
+    "unified": "^11.0.5",
+    "unist-util-visit": "^5.1.0"
   }
 }

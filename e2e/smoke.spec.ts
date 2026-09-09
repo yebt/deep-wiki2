@@ -1,18 +1,27 @@
 import { expect, test } from '@playwright/test';
 
 /**
- * Phase 0 smoke journey: the app boots, renders its one screen with the
- * expected landmarks, is themed (a real, user-visible change on toggle),
- * and reports live API connectivity — not a product feature (see
- * apps/web/app/pages/index.vue and docs/UI-CHECKLIST.md's scope note).
+ * The front door boots, carries the shell's landmarks, and is themed.
+ *
+ * This suite used to drive the Phase 0 smoke page that lived at `/` — a
+ * grid of panels whose own copy said "there is no navigation tree, no
+ * editor and no sign-in" long after all three existed. `/` is now a
+ * redirect to the workspace list, so the journey starts the same way and
+ * lands on a real screen; the two assertions that were about the smoke
+ * page's health panel are gone, and what they were evidence for — that the
+ * browser really reaches `apps/api` — is now carried by
+ * e2e/navigation.spec.ts, which drives a live, permission-filtered list
+ * rather than a status dot.
  *
  * Assertions target accessible roles/names and observable visual state,
- * never CSS classes or test IDs (see docs/UI-CHECKLIST.md §7 rules).
+ * never CSS classes or test IDs (docs/UI-CHECKLIST.md §7).
  */
-test('boots, is themed, and reports API connectivity', async ({ page }) => {
+test('the front door boots, is themed, and lands on a real screen', async ({ page }) => {
   await page.goto('/');
 
-  await expect(page.getByRole('heading', { level: 1, name: 'Bootstrap smoke page' })).toBeVisible();
+  // `/` is an alias for the workspace list, not a screen of its own.
+  await expect(page).toHaveURL(/\/workspaces$/);
+  await expect(page.getByRole('heading', { level: 1, name: 'Workspaces' })).toBeVisible();
   await expect(page.getByRole('banner')).toBeVisible();
   await expect(page.getByRole('main')).toBeVisible();
   await expect(page.getByRole('contentinfo')).toBeVisible();
@@ -32,16 +41,4 @@ test('boots, is themed, and reports API connectivity', async ({ page }) => {
   await expect
     .poll(() => header.evaluate((el) => getComputedStyle(el).backgroundColor))
     .not.toBe(headerBackgroundBefore);
-
-  const status = page.getByRole('status');
-  await expect(status).toBeVisible();
-  // The health check fires automatically on mount; whatever the outcome
-  // (apps/api may or may not be running alongside this e2e run), it must
-  // settle away from its initial placeholder — proving the real network
-  // call actually happened, not just that the composable was wired up.
-  await expect(status).not.toHaveText('Not checked yet');
-
-  const retry = page.getByRole('button', { name: /re-check api connection/i });
-  await expect(retry).toBeVisible();
-  await expect(retry).toBeEnabled();
 });

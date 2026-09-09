@@ -62,3 +62,46 @@ export type {
 
 export { UploadAvatarResponseSchema } from './uploads';
 export type { UploadAvatarResponse } from './uploads';
+
+export {
+  EditSessionRefusalSchema,
+  EditSessionResponseSchema,
+  HeartbeatResponseSchema,
+  ReadPageResponseSchema,
+  SavePageRequestSchema,
+  SavePageResponseSchema,
+  TakeOverResponseSchema,
+} from './pages';
+export type {
+  EditSessionRefusal,
+  EditSessionResponse,
+  HeartbeatResponse,
+  ReadPageResponse,
+  SavePageRequest,
+  SavePageResponse,
+  TakeOverResponse,
+} from './pages';
+
+export {
+  CommentIndicatorSchema,
+  CommentIndicatorsResponseSchema,
+  CreateCommentRequestSchema,
+  CreateCommentResponseSchema,
+  SetThreadResolvedRequestSchema,
+} from './comments';
+export type {
+  CommentIndicator,
+  CommentIndicatorsResponse,
+  CreateCommentRequest,
+  CreateCommentResponse,
+  SetThreadResolvedRequest,
+} from './comments';
+
+export { PresenceEventSchema } from './presence';
+export type { PresenceEventPayload } from './presence';
+
+export { PageHistoryResponseSchema, RevisionSummarySchema } from './revisions';
+export type { PageHistoryResponse, RevisionSummaryPayload } from './revisions';
+
+export { WorkspaceListResponseSchema, WorkspaceSummarySchema } from './workspaces';
+export type { WorkspaceListResponse, WorkspaceSummaryPayload } from './workspaces';

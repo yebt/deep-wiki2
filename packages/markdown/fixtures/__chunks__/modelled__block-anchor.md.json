@@ -1,0 +1,9 @@
+[
+  {
+    "blockIds": [
+      "abc123"
+    ],
+    "text": "A paragraph with a persisted anchor. ^abc123",
+    "ordinal": 0
+  }
+]

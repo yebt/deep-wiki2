@@ -17,7 +17,7 @@
 import { randomUUID } from 'node:crypto';
 import postgres from 'postgres';
 import { provisionTestDatabase, resolveAdminUrl, dropTestDatabase, defaultProvisionDeps } from '@deep-wiki/db/testing/provision';
-import { createInvitation, createPasswordReset } from '@deep-wiki/db';
+import { createInvitation, createPasswordReset, createSession, insertGrants, savePage } from '@deep-wiki/db';
 
 async function seedFixtures(sql: postgres.Sql) {
   const [owner] = await sql<{ id: string }[]>`
@@ -82,6 +82,87 @@ async function seedFixtures(sql: postgres.Sql) {
   `;
   const { token: resetToken } = await createPasswordReset(sql, resetUser!.id, 30);
 
+  // e2e/read.spec.ts (document-modes: "Read Mode Serves Pre-Rendered HTML
+  // Without Reparsing"): a real page with real saved (and therefore
+  // rendered) content, a reader who can see it, and an outsider who
+  // cannot — sessions are minted directly rather than driven through the
+  // sign-in UI, since this suite exercises the read route, not
+  // authentication (already e2e/auth.spec.ts's job).
+  const [readPage] = await sql<{ id: string }[]>`
+    INSERT INTO nodes (workspace_id, parent_id, type, path, position, slug, title)
+    VALUES (${ws!.id}, ${root!.id}, 'page', '', 1, ${`e2e-read-${randomUUID()}`}, 'E2E Read Page')
+    RETURNING id
+  `;
+  // No top-level `#` heading here on purpose: the page's own title (the
+  // node's `title` column, rendered as the page's one <h1> by
+  // `PageHeading`) already supplies it. A body markdown starting with its
+  // own `# ` would render a second, redundant <h1>.
+  await savePage(sql, {
+    nodeId: readPage!.id,
+    workspaceId: ws!.id,
+    markdown: '## Overview\n\nRead mode serves this exact content, cached, without reparsing.\n',
+    expectedContentHash: null,
+  });
+
+  const [readerUser] = await sql<{ id: string }[]>`
+    INSERT INTO users (email, password_hash, display_name)
+    VALUES (${`e2e-reader-${randomUUID()}@example.com`}, 'unused', 'E2E Reader') RETURNING id
+  `;
+  // insertGrants, not a raw INSERT: packages/db/src/permissions/ is the
+  // sole directory allowed to reference `permissions`
+  // (scripts/checks/query-boundaries.ts).
+  await insertGrants(sql, ws!.id, 'user', readerUser!.id, [{ resourceId: readPage!.id, action: 'read', effect: 'allow' }]);
+  const { token: readerSessionToken } = await createSession(sql, {
+    userId: readerUser!.id,
+    idleTimeoutMinutes: 30,
+    absoluteTimeoutDays: 30,
+  });
+
+  const [outsiderUser] = await sql<{ id: string }[]>`
+    INSERT INTO users (email, password_hash, display_name)
+    VALUES (${`e2e-outsider-${randomUUID()}@example.com`}, 'unused', 'E2E Outsider') RETURNING id
+  `;
+  const { token: outsiderSessionToken } = await createSession(sql, {
+    userId: outsiderUser!.id,
+    idleTimeoutMinutes: 30,
+    absoluteTimeoutDays: 30,
+  });
+
+  // e2e/history.spec.ts (revision-history spec: "Page History Query
+  // Returns Revisions Newest First"): a page saved twice, so the reader
+  // sees two revisions authored by "E2E Owner", newest first.
+  const [historyPage] = await sql<{ id: string }[]>`
+    INSERT INTO nodes (workspace_id, parent_id, type, path, position, slug, title)
+    VALUES (${ws!.id}, ${root!.id}, 'page', '', 2, ${`e2e-history-${randomUUID()}`}, 'E2E History Page')
+    RETURNING id
+  `;
+  const historyFirstSave = await savePage(sql, {
+    nodeId: historyPage!.id,
+    workspaceId: ws!.id,
+    markdown: '## First version\n\nThe page as it was first saved.\n',
+    expectedContentHash: null,
+    updatedBy: owner!.id,
+  });
+  await savePage(sql, {
+    nodeId: historyPage!.id,
+    workspaceId: ws!.id,
+    markdown: '## Second version\n\nThe page after one edit.\n',
+    expectedContentHash: historyFirstSave.contentHash,
+    updatedBy: owner!.id,
+  });
+  await insertGrants(sql, ws!.id, 'user', readerUser!.id, [{ resourceId: historyPage!.id, action: 'read', effect: 'allow' }]);
+
+  // A page node that exists and is readable but has never been saved —
+  // reachable because `savePage()` is the only writer of `page_content`
+  // and `page_revision`, so a bare node has zero of both. The screen's
+  // real "empty" state, not a hypothetical.
+  const [emptyHistoryPage] = await sql<{ id: string }[]>`
+    INSERT INTO nodes (workspace_id, parent_id, type, path, position, slug, title)
+    VALUES (${ws!.id}, ${root!.id}, 'page', '', 3, ${`e2e-empty-history-${randomUUID()}`}, 'E2E Empty History Page')
+    RETURNING id
+  `;
+  await insertGrants(sql, ws!.id, 'user', readerUser!.id, [{ resourceId: emptyHistoryPage!.id, action: 'read', effect: 'allow' }]);
+
   return {
     signinEmail,
     signinInvitationToken,
@@ -90,6 +171,11 @@ async function seedFixtures(sql: postgres.Sql) {
     expiredInvitationToken,
     resetEmail,
     resetToken,
+    readPageId: readPage!.id,
+    historyPageId: historyPage!.id,
+    emptyHistoryPageId: emptyHistoryPage!.id,
+    readerSessionToken,
+    outsiderSessionToken,
   };
 }
 

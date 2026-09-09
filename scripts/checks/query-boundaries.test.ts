@@ -46,4 +46,12 @@ describe('checkQueryBoundaries', () => {
     expect(result.ok).toBe(false);
     expect(result.errors.some((e) => e.includes('user.ts') && e.includes('password_hash'))).toBe(true);
   });
+
+  // knowledge-graph: Links Are Never User-Editable Directly.
+  test('fails when a file outside packages/db/src/content/ writes to links or page_tags', () => {
+    const result = checkQueryBoundaries(join(FIXTURES_DIR, 'violating-links-write-boundary'));
+
+    expect(result.ok).toBe(false);
+    expect(result.errors.some((e) => e.includes('leaky-links.ts') && e.includes('links'))).toBe(true);
+  });
 });

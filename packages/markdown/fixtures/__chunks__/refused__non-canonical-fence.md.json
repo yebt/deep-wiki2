@@ -1,0 +1,9 @@
+[
+  {
+    "blockIds": [
+      "d:d54d5daf0d48#0"
+    ],
+    "text": "~~~ts\nconst x = 1;\n~~~",
+    "ordinal": 0
+  }
+]

@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
+import { z } from 'zod';
 import { checkEnvExample } from '../env-example';
 
 const FIXTURES_DIR = join(import.meta.dir, '..', '__fixtures__');
@@ -33,5 +34,44 @@ describe('checkEnvExample', () => {
     );
 
     expect(result.ok).toBe(false);
+  });
+});
+
+// versioning-and-collaboration: a schema key carrying `.default()` must
+// agree with the value env.example assigns it — today's checkEnvExample has
+// no such comparison at all, so a fixture where they disagree would
+// silently pass, exactly like PAGE_LOCK_TTL_SECONDS=120 agreeing with
+// `.default(120)` in packages/contracts/src/env.ts today by accident,
+// with nothing comparing them.
+const DEFAULTS_SCHEMA = z.object({
+  NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
+  PORT: z.coerce.number().int().positive(),
+  DATABASE_URL: z.string().url(),
+  SAMPLE_TIMEOUT_MINUTES: z.coerce.number().int().positive().default(30),
+});
+
+describe('checkEnvExample — defaults agreement', () => {
+  test('fails when a .default() value disagrees with env.example\'s assigned value', () => {
+    const result = checkEnvExample(
+      join(FIXTURES_DIR, 'env-example-defaults-mismatch', 'template.env'),
+      REQUIRED_KEYS,
+      DEFAULTS_SCHEMA,
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.errors.some((e) => e.includes('SAMPLE_TIMEOUT_MINUTES'))).toBe(true);
+    expect(result.errors.some((e) => e.includes('30'))).toBe(true);
+    expect(result.errors.some((e) => e.includes('99'))).toBe(true);
+  });
+
+  test('passes when a .default() value agrees with env.example\'s assigned value', () => {
+    const result = checkEnvExample(
+      join(FIXTURES_DIR, 'env-example-defaults-agree', 'template.env'),
+      REQUIRED_KEYS,
+      DEFAULTS_SCHEMA,
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.errors).toEqual([]);
   });
 });

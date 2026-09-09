@@ -34,6 +34,11 @@ interface SeedResult {
   readonly expiredInvitationToken: string;
   readonly resetEmail: string;
   readonly resetToken: string;
+  readonly readPageId: string;
+  readonly historyPageId: string;
+  readonly emptyHistoryPageId: string;
+  readonly readerSessionToken: string;
+  readonly outsiderSessionToken: string;
 }
 
 async function waitForHealth(url: string, timeoutMs: number): Promise<void> {
@@ -72,6 +77,14 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
       SESSION_ABSOLUTE_TIMEOUT_DAYS: '30',
       PASSWORD_RESET_TTL_MINUTES: '30',
       INVITATION_TTL_DAYS: '7',
+      // Required since versioning-and-collaboration Phase 5 added it to
+      // `packages/contracts/src/env.ts` with no `.default()` — this
+      // harness predates that change and never gained it, so every e2e
+      // run failed `loadConfig()` before this fix. `env.example`'s own
+      // value (30) is the only place the number is meant to exist; this
+      // is a copy of that fact for the e2e process's environment, not a
+      // second source of truth for it.
+      CHANGESET_WINDOW_MINUTES: '30',
       SMTP_HOST: 'localhost',
       SMTP_PORT: String(MAILPIT_SMTP_PORT),
       SMTP_SECURE: 'false',

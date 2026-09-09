@@ -497,6 +497,23 @@ body {
   outline-offset: var(--dw-focus-ring-offset);
 }
 
+/* The ARIA tree pattern puts the tab stop on the `treeitem`, which — per
+   that pattern — *contains* its own subtree. Ringing the item would ring
+   every descendant row along with the focused one: a box hundreds of
+   pixels tall on a deep book. The indicator moves to the row itself, at
+   the same width and in the same role as everywhere else. The ring is
+   relocated, never removed — checklist §5 is pass/fail on focus
+   visibility. The offset turns inward so the ring stays inside the tree's
+   own padding instead of overlapping the row above. */
+[role='treeitem']:focus-visible {
+  outline: none;
+}
+
+[role='treeitem']:focus-visible > .dw-tree-row {
+  outline: var(--dw-focus-ring-width) solid var(--ui-secondary);
+  outline-offset: calc(var(--dw-focus-ring-offset) * -1);
+}
+
 /* ─────────────────────────────────────────────────────────────
    10. STATE LAYER  (§5.2)
    The M3 model expressed literally: a translucent layer of the
@@ -545,5 +562,168 @@ body {
     animation-iteration-count: 1 !important;
     transition-duration: 1ms !important;
     scroll-behavior: auto !important;
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────
+   12. DOCUMENT BODY TYPOGRAPHY  (§2.3, §4.4, §7.2)
+   The read-mode and edit-mode document surfaces render server-produced
+   HTML (`v-html`, never user-typed markup at this layer — the source is
+   `remark-rehype` + `rehype-sanitize`'s allowlisted output, design.md
+   D12) or an editor's own DOM. Tailwind's preflight resets every heading
+   to inherit size and weight, so raw `<h2>`/`<h3>`/etc. render as plain
+   text unless something reintroduces the type scale — utility classes
+   cannot be applied to markup the component never authors itself, so
+   this is the one legitimate case for element-selector CSS reading the
+   same tokens every utility class reads (docs/UI-CHECKLIST.md §4.4:
+   "real typographic hierarchy… heading levels visually distinguishable
+   from each other and from body text by more than weight alone").
+   Every value below is the exact §2.3 table entry for that element —
+   nothing here is a new decision.
+   ───────────────────────────────────────────────────────────── */
+.doc-body {
+  & :where(h1, h2, h3, h4, h5, h6) {
+    color: var(--ui-text-highlighted);
+    margin-top: 2rem;
+    margin-bottom: 0.5rem;
+  }
+
+  & :where(h1, h2, h3, h4, h5, h6):first-child {
+    margin-top: 0;
+  }
+
+  & h1 {
+    font-size: var(--text-headline-medium);
+    line-height: var(--text-headline-medium--line-height);
+    font-weight: var(--text-headline-medium--font-weight);
+  }
+
+  & h2 {
+    font-size: var(--text-headline-small);
+    line-height: var(--text-headline-small--line-height);
+    font-weight: var(--text-headline-small--font-weight);
+  }
+
+  & h3 {
+    font-size: var(--text-title-large);
+    line-height: var(--text-title-large--line-height);
+    font-weight: var(--text-title-large--font-weight);
+  }
+
+  & h4 {
+    font-size: var(--text-title-medium);
+    line-height: var(--text-title-medium--line-height);
+    font-weight: var(--text-title-medium--font-weight);
+    letter-spacing: var(--text-title-medium--letter-spacing);
+  }
+
+  & h5 {
+    font-size: var(--text-title-small);
+    line-height: var(--text-title-small--line-height);
+    font-weight: var(--text-title-small--font-weight);
+    letter-spacing: var(--text-title-small--letter-spacing);
+  }
+
+  /* Distinguished from h5 by tracking, not size (§2.3: "use
+     letter-spacing, not size, to distinguish from h5"). */
+  & h6 {
+    font-size: var(--text-label-large);
+    line-height: var(--text-label-large--line-height);
+    font-weight: var(--text-label-large--font-weight);
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+
+  /* Paragraph rhythm: 16px between paragraphs (§7.2's "Paragraph
+     spacing in document"). */
+  & p {
+    margin-top: 1rem;
+  }
+
+  & > p:first-child {
+    margin-top: 0;
+  }
+
+  & :where(ul, ol) {
+    margin-top: 1rem;
+    padding-inline-start: 1.5rem;
+  }
+
+  & ul {
+    list-style-type: disc;
+  }
+
+  & ol {
+    list-style-type: decimal;
+  }
+
+  & li + li {
+    margin-top: 0.25rem;
+  }
+
+  & blockquote {
+    margin-top: 1.5rem;
+    padding-inline-start: 1rem;
+    border-inline-start: 2px solid var(--ui-border);
+    color: var(--ui-text-muted);
+  }
+
+  /* Inline code, size-matched to the surrounding 16px prose optically
+     (§2.3). */
+  & code {
+    font-family: var(--font-mono);
+    font-size: var(--text-body-medium);
+    background-color: var(--ui-bg-emphasized);
+    border-radius: var(--radius-xs);
+    padding-inline: 0.25rem;
+  }
+
+  /* A fenced code block's own <code> should not double the inline
+     treatment — the <pre> already carries the container tone and the
+     24px block spacing (§7.2's "Block spacing (code, table, diagram)"). */
+  & pre {
+    margin-top: 1.5rem;
+    background-color: var(--ui-bg-emphasized);
+    border-radius: var(--radius-lg);
+    padding: 1rem;
+    overflow-x: auto;
+
+    & code {
+      background-color: transparent;
+      padding-inline: 0;
+    }
+  }
+
+  & table {
+    margin-top: 1.5rem;
+    font-size: var(--text-body-medium);
+    display: block;
+    overflow-x: auto;
+  }
+
+  & :where(th, td) {
+    border: 1px solid var(--ui-border);
+    padding: 0.5rem 0.75rem;
+    text-align: left;
+  }
+
+  & hr {
+    margin-top: 1.5rem;
+    border-color: var(--ui-border);
+  }
+
+  & a {
+    color: var(--ui-primary);
+    text-underline-offset: 0.15em;
+  }
+
+  & a:hover {
+    text-decoration: underline;
+  }
+
+  & img {
+    margin-top: 1.5rem;
+    max-width: 100%;
+    border-radius: var(--radius-lg);
   }
 }
