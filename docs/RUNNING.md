@@ -123,8 +123,9 @@ Every route apps/api mounts. All are on `PORT` (3000 by default) and all except 
 ## 3. Ports — the part that actually goes wrong
 
 Several variables hold the same fact, and **only `bun run env:check` compares them**. This has
-broken five separate times in this project. If something is unreachable, or if signing in
-appears to work and then does not, check this before anything else.
+broken five separate times in this project. If something is unreachable, or if a screen tells
+you the server cannot be reached while the server is plainly running, check this before
+anything else.
 
 | If you change… | You must also change… |
 | --- | --- |
@@ -140,16 +141,26 @@ bun run env:check    # names both values when a pair disagrees
 It reads **`env.example` and your `.env`**, so a wrong shipped default fails even on a clone
 that has no `.env` yet.
 
-### `APP_URL` is the one that fails silently
+### `APP_URL` is the one that blames the wrong thing
 
-The other three fail loudly: the connection is refused, or it lands on some other project's
-service and *that* service complains. `APP_URL` does neither.
+The other three fail loudly *and honestly*: the connection is refused, or it lands on some
+other project's service and *that* service complains. `APP_URL` fails loudly and points you
+somewhere the fault is not.
 
-`apps/api` installs `cors({ origin: APP_URL, credentials: true })`. A cross-origin response
-only carries its `Set-Cookie` back into the browser when the API named **that exact origin**.
-Name a different one and login returns `200 OK`, the browser silently discards the session
-cookie, the next request is anonymous, and you are returned to sign-in — with nothing logged
-anywhere, on either side.
+`apps/api` installs `cors({ origin: APP_URL, credentials: true })`, so the API allows exactly
+one origin through CORS with credentials. Name a different one and the browser refuses the
+credentialed sign-in request **before the page ever sees a response**: Chromium logs
+`net::ERR_FAILED`, Firefox `NS_ERROR_DOM_BAD_URI`, the `fetch` rejects, no cookie is stored,
+and the sign-in form shows
+
+> Could not reach the server. Check your connection and try again.
+
+There is no `200 OK` to go looking for, because the request is refused rather than answered.
+That is what makes this worse than a silent failure: the screen blames the connection, the
+connection is fine, and neither server logs a word about CORS — so you go and check the
+network, the API process, the containers, everything except the one line that is wrong.
+Measured 2026-09-09 in both browsers against a live stack; until then this section said the
+opposite, and the afternoon that cost is the reason it now says this.
 
 So `APP_URL` is the browser's origin for **apps/web**, never the API's. It is also the host of
 the `/reset-password` and `/invite/accept` links sent by mail, so pointing it at the API's port
@@ -255,15 +266,18 @@ The error names the variable and points at `env.example`. The fix is to copy tha
 across — not to invent a value. The same is true of anything else `env.example` gained since
 you last copied it; `bun run check` fails if the template and the schema ever disagree.
 
-### 2. Sign-in appears to work, and then you are back at sign-in
+### 2. Sign-in says it cannot reach the server, and the server is running
 
 This is `APP_URL` naming an origin that is not where `apps/web` is actually serving. Read §3.
 It shipped this way: `env.example` carried `APP_URL=http://localhost:4173` while `nuxt dev`
-listened on 3000, so a fresh clone could not hold a session at all. `bun run env:check` now
-catches it, and `devServer.port` gives `APP_URL` something to be checked against.
+listened on 3000, so a fresh clone could not sign in at all. `bun run env:check` now catches
+it, and `devServer.port` gives `APP_URL` something to be checked against.
 
-Nothing logs an error when this happens. If sign-in bounces and the API's log says the login
-succeeded, this is why — do not go looking at the session code.
+The form shows *"Could not reach the server. Check your connection and try again."* and it is
+lying to you by accident: the browser refused the credentialed cross-origin request itself, so
+neither server logged anything and there is nothing wrong with your connection. If the API is
+up, `curl` reaches it, and the sign-in screen still says that sentence — check `APP_URL`
+before you touch the network or the session code.
 
 ### 3. You are browsing a leftover e2e server, and it is showing you another database
 

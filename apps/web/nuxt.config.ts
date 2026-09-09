@@ -9,12 +9,17 @@ export default defineNuxtConfig({
     // Nuxt's default. Two reasons, and both of them have already cost time:
     //
     //   1. `APP_URL` in .env must name this exact origin — it is the single
-    //      origin apps/api allows through CORS *with credentials*, so if it
-    //      names anything else the browser discards the session cookie and
-    //      every login bounces straight back to sign-in, silently. It shipped
-    //      pointing at 4173, which no dev server ever listened on.
-    //      `bun run env:check` now reads the number below and compares them,
-    //      so the two can no longer drift.
+    //      origin apps/api allows through CORS *with credentials*. Name any
+    //      other and the browser refuses the credentialed sign-in request
+    //      before the page sees a response (`net::ERR_FAILED` in Chromium,
+    //      `NS_ERROR_DOM_BAD_URI` in Firefox): no cookie is stored, and the
+    //      form shows "Could not reach the server. Check your connection and
+    //      try again." Loud, not silent — and misleading, which is worse: the
+    //      screen blames the connection, the connection is fine, and neither
+    //      server logs anything about CORS (measured 2026-09-09; this comment
+    //      claimed a silent 200 until then). It shipped pointing at 4173,
+    //      which no dev server ever listened on. `bun run env:check` now reads
+    //      the number below and compares them, so the two cannot drift again.
     //   2. Nuxt's default is 3000, which is also `PORT` — where apps/api
     //      listens. Whichever started second was quietly moved to 3001 by the
     //      dev server's own fallback, so the web origin depended on start

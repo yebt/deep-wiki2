@@ -93,7 +93,11 @@ describe('APP_URL against where apps/web actually listens', () => {
     expect(result.ok).toBe(false);
     expect(result.errors[0]).toContain('4173');
     expect(result.errors[0]).toContain('3001');
-    expect(result.errors[0]).toContain('returned to sign-in');
+    expect(result.errors[0]).toContain('Could not reach the server');
+    // The failure is loud and misleading, never silent. A message that promises
+    // silence, or a 200 to go looking for, sends the reader somewhere the fault
+    // is not — which is exactly what happened before 2026-09-09.
+    expect(result.errors[0]).not.toMatch(/silent|no error logged|returns 200/i);
   });
 
   test('an APP_URL on the port apps/web serves passes', () => {

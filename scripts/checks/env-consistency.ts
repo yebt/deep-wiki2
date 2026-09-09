@@ -22,14 +22,24 @@
  *
  * ## Why a wrong APP_URL is worse than a wrong port
  *
- * Every other pair here fails loudly: the connection is refused, or it lands
- * on another project's service and that service complains. `APP_URL` fails
- * *silently and successfully*. `apps/api` installs
- * `cors({ origin: APP_URL, credentials: true })`, and a cross-origin request
- * only carries `Set-Cookie` back to the browser when the API named that exact
- * origin. Name a different one and login returns 200, the browser drops the
- * session cookie on the floor, and the next request is anonymous — so the
- * user is bounced back to sign-in with nothing anywhere reporting an error.
+ * Every other pair here fails loudly *and honestly*: the connection is
+ * refused, or it lands on another project's service and that service
+ * complains. `APP_URL` fails loudly and blames the wrong thing. `apps/api`
+ * installs `cors({ origin: APP_URL, credentials: true })`, so the API allows
+ * exactly one origin through CORS with credentials. Name a different one and
+ * the browser refuses the credentialed sign-in request *before the page sees
+ * any response*: Chromium logs `net::ERR_FAILED`, Firefox
+ * `NS_ERROR_DOM_BAD_URI`, the `fetch` rejects, no cookie is stored, and the
+ * sign-in form shows "Could not reach the server. Check your connection and
+ * try again."
+ *
+ * There is no 200 to read, because the request is refused rather than
+ * answered. That is the trap, and it is not silence but misdirection: the
+ * screen blames the connection, the connection is fine, and neither server
+ * logs anything about CORS — so the search starts in the wrong place.
+ * Measured 2026-09-09 in both browsers against a live stack. Until then this
+ * header and the message below claimed the opposite — "login returns 200",
+ * "nothing reports an error" — and both halves were wrong.
  *
  * `env.example` shipped `APP_URL=http://localhost:4173` against a dev server
  * that does not listen there. 4173 is Vite's preview port, and it is also
@@ -102,14 +112,19 @@ export interface EnvConsistencyOptions {
 }
 
 /**
- * The symptom, in the words of what the owner actually sees. A message that
- * says only "these two numbers differ" describes the cause of a failure
- * nobody has connected to this file yet.
+ * The symptom, in the words of what the owner actually sees on the screen. A
+ * message that says only "these two numbers differ" describes the cause of a
+ * failure nobody has connected to this file yet — and this failure arrives
+ * wearing another failure's clothes, so naming the wrong-looking sentence the
+ * browser shows is the whole point.
  */
 const SESSION_SYMPTOM =
   'The API allows exactly one origin through CORS with credentials, so the browser will ' +
-  'discard the session cookie and you will be returned to sign-in after every successful ' +
-  'login, with no error logged anywhere.';
+  'refuse the credentialed sign-in request before the page sees any response ' +
+  '(net::ERR_FAILED in Chromium, NS_ERROR_DOM_BAD_URI in Firefox): no cookie is stored, ' +
+  'and the form shows "Could not reach the server. Check your connection and try again." ' +
+  'That message is the trap — the screen blames the connection, the connection is fine, ' +
+  'and neither server logs anything about CORS.';
 
 export function checkEnvConsistency(
   env: Map<string, string>,
