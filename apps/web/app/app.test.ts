@@ -3,7 +3,7 @@ import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime';
 import { describe, expect, test, vi } from 'vitest';
 import { ref } from 'vue';
 import App from './app.vue';
-import IndexPage from './pages/index.vue';
+import WorkspacesPage from './pages/workspaces/index.vue';
 
 /**
  * The root component. It renders no screen of its own, so its contract is
@@ -15,25 +15,26 @@ import IndexPage from './pages/index.vue';
  *   a claim about this file — none of them checks it. A page rendered
  *   beside `UApp` rather than inside it throws on the first tooltip.
  * - the document language, which is the one head value a screen inherits
- *   rather than states: `pages/index.vue` sets no head at all.
+ *   rather than states: `pages/workspaces/index.vue` sets only a title.
  *
- * `error.vue` is deliberately not covered here — Nuxt renders it *instead
- * of* this component, which is why it declares its own `UApp` and its own
- * `lang`, and `error.test.ts` holds that.
+ * The route mounted here is `/workspaces`, not `/`: `/` is now a redirect
+ * to it (see `pages/index.vue`), so it renders no component to assert
+ * against. `error.vue` is deliberately not covered here — Nuxt renders it
+ * *instead of* this component, which is why it declares its own `UApp` and
+ * its own `lang`, and `error.test.ts` holds that.
  */
-const { useApiHealthMock } = vi.hoisted(() => ({ useApiHealthMock: vi.fn() }));
+const { useWorkspacesMock } = vi.hoisted(() => ({ useWorkspacesMock: vi.fn() }));
 
-mockNuxtImport('useApiHealth', () => useApiHealthMock);
+mockNuxtImport('useWorkspaces', () => useWorkspacesMock);
 
 function mountApp() {
-  useApiHealthMock.mockReturnValue({
-    status: ref('idle'),
-    message: ref('Not checked yet'),
-    detail: ref(null),
-    checkedAt: ref(null),
-    check: vi.fn(async () => {}),
+  useWorkspacesMock.mockReturnValue({
+    status: ref('success'),
+    workspaces: ref([{ id: 'ws-1', name: 'Alpha Handbook', slug: 'alpha-handbook' }]),
+    message: ref(''),
+    load: vi.fn(async () => {}),
   });
-  return mountSuspended(App);
+  return mountSuspended(App, { route: '/workspaces' });
 }
 
 describe('app root', () => {
@@ -45,7 +46,7 @@ describe('app root', () => {
     // The page is a descendant of the provider, which is what makes every
     // page suite's `h(UApp, …, () => h(Page))` an honest reproduction of
     // how the page actually ships.
-    expect(app.findComponent(IndexPage).exists()).toBe(true);
+    expect(app.findComponent(WorkspacesPage).exists()).toBe(true);
     expect(app.element.contains(component.get('main').element)).toBe(true);
   });
 
@@ -53,17 +54,17 @@ describe('app root', () => {
     const component = await mountApp();
 
     // `<NuxtPage />`, not a hardcoded child: the shell renders whatever the
-    // route resolved to, and `/` is the smoke page.
-    expect(component.findComponent(IndexPage).exists()).toBe(true);
+    // route resolved to.
+    expect(component.findComponent(WorkspacesPage).exists()).toBe(true);
     expect(component.findAll('main')).toHaveLength(1);
   });
 
   test('the document declares its language, on a route that declares none itself', async () => {
     await mountApp();
 
-    // `pages/index.vue` sets no head of its own, so this value can only
-    // have come from the shell. Without it a screen reader has to guess the
-    // language of every page in the product.
+    // `pages/workspaces/index.vue` sets no `htmlAttrs` of its own, so this
+    // value can only have come from the shell. Without it a screen reader
+    // has to guess the language of every page in the product.
     //
     // `waitFor` because unhead patches the real document asynchronously,
     // after the component tree has already settled.

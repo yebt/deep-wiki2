@@ -1,14 +1,14 @@
 <script setup lang="ts">
-// Phase 0 has exactly one route (the smoke page) — see docs/UI-CHECKLIST.md's
-// scope note: this is a boot/theming/accessibility proof, not a product
-// screen. No navigation tree, editor or auth surface lives here yet.
+// The root component renders no screen of its own. It supplies `UApp` —
+// the Reka providers every tooltip, modal and toast injects — and the one
+// head value a screen inherits rather than states.
 useHead({
   htmlAttrs: { lang: 'en' },
 });
 
 useSeoMeta({
-  title: 'deep-wiki — bootstrap status',
-  description: 'Phase 0 smoke page proving the deep-wiki web shell boots, is themed, and is accessible.',
+  title: 'deep-wiki',
+  description: 'A self-hosted wiki for software teams and the agents that read it.',
 });
 </script>
 
