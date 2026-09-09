@@ -72,6 +72,14 @@ test('typing markdown syntax renders the formatted result inline, with no separa
 
   const editor = page.getByTestId('editor-surface');
   await expect(editor).toBeVisible({ timeout: 30000 });
+  // The surface's box is in the DOM before ProseMirror has mounted a
+  // document into it, and keystrokes sent in that window land nowhere at
+  // all — which is how this test failed under a full-suite run on four
+  // cores while passing every time it ran alone. The seeded content is the
+  // observable proof that the editor is live, so wait for it rather than
+  // for a longer timeout on the assertion three lines down, which would
+  // have been waiting for a keystroke that was never delivered.
+  await expect(editor).toContainText('Start.', { timeout: 30000 });
   await editor.click();
   await page.keyboard.press('End');
   await page.keyboard.type(' **bold**');
