@@ -415,6 +415,46 @@ makes conventions portable across projects.
 
 Discoveries and constraints. Newest first.
 
+### 2026-09-09 — Ten copies of one type guard, in four spellings, four of them wrong
+
+Four screens — the workspace list, the page tree, the edit session and the save path — sat on
+their loading skeleton forever whenever the API was unreachable. Reported as "no me carga
+nada": no list, no error notice, no way forward, and nothing in the console naming a cause.
+
+Each composable decided whether an HTTP response had arrived by asking only whether the key was
+there:
+
+```ts
+typeof error === 'object' && error !== null && 'response' in error
+```
+
+`ofetch` **always defines** `response` on the error it throws, setting it to `undefined` when
+nothing came back at all — connection refused, DNS failure, the API simply not running. So the
+guard passed, and the next line — `error.response.status` — threw `Cannot read properties of
+undefined` **inside the catch block**, before any status had been assigned. The composable's
+`status` ref never left `'loading'`, and `'loading'` is the state that renders an `aria-hidden`
+skeleton, so a dead API rendered as a page that is still loading and always will be. The catch
+block was the thing that failed, which is why nothing downstream of it reported anything.
+
+That one fact about one library was written out by hand **ten times** across
+`app/composables/`, in four different spellings. Four of the ten spelled the check correctly,
+with an explicit `response !== undefined`. Four spelled it as key-presence alone and then read
+`error.response.status` — those are the four screens that hung. The remaining two spelled it
+just as loosely and survived only by accident, reading `response?.status` with an optional
+chain that swallowed the same `undefined`.
+
+**Impact:** fixed in `742600b` by centralising it into `apps/web/app/utils/fetch-error.ts` —
+`serverResponded`, `httpStatusOf`, `responseBodyOf` — with a test that fails the build if an
+eleventh hand-rolled copy of the guard appears anywhere under `app/`. The rule worth carrying
+is not "know this about ofetch". It is that this is the repository's own named defect — *the
+same fact written in two places with nothing comparing them* — found at a scale nobody had
+counted, in the layer we had not thought to count it in: not configuration, not two files, but
+ten copies of a three-clause expression. And the four correct copies are why it survived so
+long, not despite them: any reader who happened to check one of those concluded the pattern was
+fine and stopped looking. A duplicated fact is not made safe by most of its copies being right;
+it is made *harder to find*. The test that pins it forbids divergence rather than pinning the
+expression, because divergence was the defect.
+
 ### 2026-09-09 — The sign-in button worked before the page did, and its native POST looked like a rejected password
 
 Second, independent cause of "signed in and bounced back to sign-in" — unrelated to the CORS
@@ -476,6 +516,11 @@ subsequent request headers.
 itself. Do not spend the afternoon on `Secure` again; the two real causes are the CORS entry
 below and the pre-hydration entry above.
 
+One gap in the evidence, recorded rather than glossed: **WebKit could not be tested on this
+host.** Playwright's WebKit build refuses to launch here for missing `libicu74`,
+`libjpeg-turbo8` and `gstreamer1.0-libav`. So "both browsers" above means Chromium and Firefox,
+measured; Safari's behaviour on `http://localhost` is unverified by us.
+
 ### 2026-09-09 — A wrong `APP_URL` fails loudly and misleadingly, not silently; three files said otherwise
 
 The 2026-09-08 entry below, `scripts/checks/env-consistency.ts`, `docs/RUNNING.md` §3 and
@@ -503,6 +548,13 @@ to claim the opposite. The same correction is still owed to `scripts/checks/env-
 prints), `docs/RUNNING.md` §3 and the `devServer` comment in `apps/web/nuxt.config.ts` — all
 three outside this batch's owned paths, and all three still telling the reader to expect
 silence. The check itself is correct and needs no change; only its prose is wrong.
+
+**Paid off later the same day:** all three are corrected. `SESSION_SYMPTOM` — the sentence a
+failing `bun run env:check` actually prints — now names both browsers' error codes and quotes
+the sentence the sign-in form shows, and its test asserts that the message can never again
+promise silence or a 200. `docs/RUNNING.md` §3 and §6 trap 2 and the `devServer` comment in
+`apps/web/nuxt.config.ts` say what was measured. The check's logic is untouched, including the
+deliberate rule that `APP_URL` is not compared against `PORT`.
 
 ### 2026-09-09 — `env.example` ships a port an unrelated project on this host already owns, and the app connects to it anyway
 
@@ -1746,6 +1798,22 @@ Fixtures kept permanently at `scripts/checks/__fixtures__/test-coverage/`:
 
 Decisions still owed. Move an entry out of this section once answered and record the answer
 in Findings.
+
+- **What a bodyless 409 should mean.** `useSavePage` and `useEditSession` both do
+  `responseBodyOf(error) as {…}` on a 409 and then read a field off the result — `body.canonical`
+  and `body.reason`. `responseBodyOf` returns `undefined` when the response carried no body, so a
+  409 with an empty body throws inside the catch block and the `status` ref never leaves
+  `'loading'`: the identical blank-skeleton hang the 2026-09-09 finding repaired, through a door
+  that finding did not close. It is not reachable from our own API today, which always sends a
+  body on the 409s it raises; it is reachable from a proxy, a gateway, or the next endpoint
+  someone writes.
+  Left unchanged deliberately, and that was the right call. `?? {}` would stop the throw by
+  **inventing a classification**: an empty object reads as `stale` in `useSavePage` ("Someone
+  else saved a newer version") and as `refused` with no reason in `useEditSession`, and a screen
+  that states a cause the server never gave is a worse failure than a visible one. The decision
+  owed is which honest answer to take — fail loudly on a bodyless 409, surfacing it as an error
+  state that names the malformed response, or classify it as an explicit unknown state the UI
+  can render as such. Both are defensible; guessing between them in a `??` is not.
 
 - **Two canonical constructs the editor cannot round trip.** Both fail closed at the probe, so no
   saved document is corrupted — edit mode simply refuses to open them — but neither fits an existing
