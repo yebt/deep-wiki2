@@ -139,18 +139,35 @@ async function seedFixtures(sql: postgres.Sql) {
   const historyFirstSave = await savePage(sql, {
     nodeId: historyPage!.id,
     workspaceId: ws!.id,
-    markdown: '## First version\n\nThe page as it was first saved.\n',
+    markdown: '## First version\n\nThe page as it was first saved, with no edits yet.\n',
     expectedContentHash: null,
     updatedBy: owner!.id,
   });
+  // The second save keeps the heading byte-identical (unchanged), edits
+  // the existing paragraph in place (high enough trigram similarity to
+  // classify `modified`, not remove-plus-add — verified directly against
+  // `diffBlocks()`), and adds a new paragraph (`added`). e2e/diff.spec.ts's
+  // happy path exercises all three classifications from one real diff.
   await savePage(sql, {
     nodeId: historyPage!.id,
     workspaceId: ws!.id,
-    markdown: '## Second version\n\nThe page after one edit.\n',
+    markdown:
+      '## First version\n\nThe page as it was first saved, now with one edit.\n\nA paragraph that did not exist in the first version.\n',
     expectedContentHash: historyFirstSave.contentHash,
     updatedBy: owner!.id,
   });
   await insertGrants(sql, ws!.id, 'user', readerUser!.id, [{ resourceId: historyPage!.id, action: 'read', effect: 'allow' }]);
+
+  // e2e/diff.spec.ts needs both revision ids directly for its
+  // permission-denied case: an outsider cannot reach the history screen
+  // at all (it 404s for them), so there is no click path onto the diff
+  // screen to prove its OWN non-disclosure guard — that case has to
+  // navigate by address, the one place this suite does.
+  const historyRevisionRows = await sql<{ id: string }[]>`
+    SELECT id FROM page_revision WHERE page_id = ${historyPage!.id} ORDER BY created_at ASC
+  `;
+  const historyFirstRevisionId = historyRevisionRows[0]!.id;
+  const historySecondRevisionId = historyRevisionRows[1]!.id;
 
   // A page node that exists and is readable but has never been saved —
   // reachable because `savePage()` is the only writer of `page_content`
@@ -173,6 +190,8 @@ async function seedFixtures(sql: postgres.Sql) {
     resetToken,
     readPageId: readPage!.id,
     historyPageId: historyPage!.id,
+    historyFirstRevisionId,
+    historySecondRevisionId,
     emptyHistoryPageId: emptyHistoryPage!.id,
     readerSessionToken,
     outsiderSessionToken,

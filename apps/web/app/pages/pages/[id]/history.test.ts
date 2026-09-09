@@ -112,13 +112,18 @@ describe('page-history screen', () => {
     expect(items[0]!.find('button[aria-disabled="true"]').exists()).toBe(false);
   });
 
-  test('the compare control is inert (aria-disabled) rather than removed from the tab order', async () => {
+  // Task 10.3 wired this control — it now links to the diff view between
+  // this revision and the one right before it, rather than being inert.
+  test('the compare control links to the diff view between this revision and the one right before it', async () => {
     mockHistory({ status: 'success', revisions: TWO_REVISIONS });
     const component = await mountSuspended(PageInApp);
 
-    const compare = component.get('button[aria-disabled="true"]');
-    expect(compare.text()).toMatch(/compare/i);
-    expect(compare.attributes('disabled')).toBeUndefined();
+    const compare = component.get('a[href*="/diff"]');
+    expect(compare.text()).toMatch(/compare with previous/i);
+    // Newest-first: row 0 is rev-2, and "previous" is rev-1, the row right
+    // after it — never the oldest revision on a longer list.
+    expect(compare.attributes('href')).toBe(`/pages/page-1/diff?from=rev-1&to=rev-2`);
+    expect(compare.attributes('aria-disabled')).toBeUndefined();
   });
 
   test('an author-less revision renders a named fallback, never a blank row', async () => {

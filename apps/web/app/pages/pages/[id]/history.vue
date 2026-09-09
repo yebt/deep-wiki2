@@ -3,24 +3,23 @@
  * Page history — the revision list (revision-history spec: "Page History
  * Query Returns Revisions Newest First"; design.md "New UI screens", row
  * 1, a human-gate screen per `execution_mode.human_gates` — task 10.2
- * stops here for owner review before task 10.3's diff view is built).
+ * stopped here for owner review before task 10.3's diff view was built).
  *
  * Pre-build contract (docs/UI-CHECKLIST.md §2):
  * - Who: any workspace member with `read` on this page, arriving to see
- *   who changed it, when, and to eventually compare two versions.
+ *   who changed it, when, and to compare two versions.
  * - Goal, in their words: "Show me every saved version of this page."
  * - Single primary action: none — a reading surface over metadata, like
  *   the navigation tree. Each row's "Compare with previous" is a
- *   per-revision navigation, not the screen's own primary action, and it
- *   is deliberately inert this batch (task 10.3 builds the diff view it
- *   would lead to; leaving it live would send a keyboard or pointer user
- *   into a route that does not exist yet).
+ *   per-revision navigation, not the screen's own primary action; it
+ *   links to `diff.vue` (task 10.3) between this revision and the one
+ *   right before it in this newest-first list.
  * - Data needed: exactly what `GET /pages/:id/history` returns — id,
  *   author id, author display name, `createdAt`, `changesetId`. No page
  *   title: that endpoint does not return one, so none is invented here;
  *   "Back to page" links out to the route that has it.
- * - Non-goals: no diff view (task 10.3), no book-level changeset history
- *   (task 10.5), no revision restore/rollback (out of this change).
+ * - Non-goals: no book-level changeset history (task 10.5), no revision
+ *   restore/rollback (out of this change).
  * - Empty / overflow: a page that has never been saved has zero
  *   revisions — a real, reachable state (a page node can exist and be
  *   readable before its first save), not a hypothetical. A page saved
@@ -42,6 +41,16 @@ onMounted(() => {
 /** Revisions arrive newest-first (revision-history spec); the last row is the oldest and has no earlier revision to compare against. */
 function hasPrevious(index: number): boolean {
   return index < revisions.value.length - 1;
+}
+
+/** The revision "right before" the one at `index` — the next row down in this newest-first list, never the oldest one on a longer list. */
+function previousRevisionId(index: number): string {
+  return revisions.value[index + 1]!.id;
+}
+
+function diffHref(index: number): string {
+  const revision = revisions.value[index]!;
+  return `/pages/${nodeId}/diff?from=${previousRevisionId(index)}&to=${revision.id}`;
 }
 
 useHead({ htmlAttrs: { lang: 'en' } });
@@ -152,15 +161,20 @@ useSeoMeta({ title: 'Revision history — deep-wiki' });
             </p>
           </div>
 
-          <!-- Inert: task 10.3 builds the diff view this would lead to.
-               `aria-disabled`, not the `disabled` attribute, because it
-               carries an explanation a keyboard user must be able to
-               reach on focus, not only on hover (docs/UI-CHECKLIST.md §5). -->
-          <UTooltip v-if="hasPrevious(index)" text="Page diff view isn't built yet">
-            <UButton size="sm" variant="ghost" trailing-icon="i-lucide-arrow-right" aria-disabled="true" @click.prevent>
-              Compare with previous
-            </UButton>
-          </UTooltip>
+          <!-- Wired (task 10.3): links to the diff between this revision
+               and the one right before it. A real `NuxtLink`, not a
+               button with a click handler — `UButton`'s `to` prop keeps
+               it in the normal navigation semantics a keyboard user and a
+               screen reader both already expect from a link. -->
+          <UButton
+            v-if="hasPrevious(index)"
+            size="sm"
+            variant="ghost"
+            trailing-icon="i-lucide-arrow-right"
+            :to="diffHref(index)"
+          >
+            Compare with previous
+          </UButton>
           <p v-else class="text-label-small text-muted">Initial version</p>
         </li>
       </ol>

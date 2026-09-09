@@ -6,10 +6,11 @@
  * shape `comments.ts`/`revisions.ts` already use.
  */
 import { can, getRevisionsByIds, listChangedPagesSince, readableResourceIds } from '@deep-wiki/db';
-import { ErrorResponseSchema } from '@deep-wiki/contracts';
-import { diffBlocks } from '@deep-wiki/markdown';
+import { ErrorResponseSchema, PageDiffResponseSchema } from '@deep-wiki/contracts';
+import { diffBlocks, parse, sliceBlocks } from '@deep-wiki/markdown';
 import { Hono, type Context } from 'hono';
 import type postgres from 'postgres';
+import { attachBlockText } from './attach-block-text';
 import { sessionMiddleware, type SessionVariables } from '../middleware/session';
 
 export interface DiffRouteDeps {
@@ -48,7 +49,23 @@ export function createDiffRoutes(deps: DiffRouteDeps): Hono<{ Variables: Session
     if (!fromRevision || !toRevision) return notFound(c);
 
     const diff = diffBlocks(fromRevision.content, toRevision.content);
-    return c.json({ diff });
+    // `diffBlocks()` reports classification only (design.md Decision 2);
+    // the diff view has nothing to render without each change's own text,
+    // looked up from the same two sides rather than re-parsed a third
+    // time.
+    const beforeSlices = sliceBlocks(parse(fromRevision.content), fromRevision.content);
+    const afterSlices = sliceBlocks(parse(toRevision.content), toRevision.content);
+    const changes = attachBlockText(diff.changes, beforeSlices, afterSlices);
+
+    return c.json(
+      PageDiffResponseSchema.parse({
+        diff: {
+          from: { id: fromRevision.id, createdAt: fromRevision.createdAt.toISOString() },
+          to: { id: toRevision.id, createdAt: toRevision.createdAt.toISOString() },
+          changes,
+        },
+      }),
+    );
   });
 
   // block-diff spec: "Book-Level Diff Aggregates Changed Pages Since A

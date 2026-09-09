@@ -16,6 +16,8 @@ import { expect, test, type BrowserContext } from '@playwright/test';
 interface Fixtures {
   readonly apiUrl: string;
   readonly historyPageId: string;
+  readonly historyFirstRevisionId: string;
+  readonly historySecondRevisionId: string;
   readonly emptyHistoryPageId: string;
   readonly readerSessionToken: string;
   readonly outsiderSessionToken: string;
@@ -52,15 +54,16 @@ test('a reader sees every revision newest-first, with its author and changeset m
   await expect(rows).toHaveCount(2, { timeout: 30000 });
 
   // Newest first: the second save is the first row, and it has a
-  // "Compare with previous" control because an earlier revision exists.
+  // "Compare with previous" control (task 10.3: a real link to the diff
+  // view) because an earlier revision exists.
   await expect(rows.nth(0)).toContainText('E2E Owner');
-  await expect(rows.nth(0).getByRole('button', { name: /compare with previous/i })).toBeVisible();
+  await expect(rows.nth(0).getByRole('link', { name: /compare with previous/i })).toBeVisible();
 
   // The oldest revision — the first save — has nothing before it
   // (revision-history spec): a real state, not an edge case.
   await expect(rows.nth(1)).toContainText('E2E Owner');
   await expect(rows.nth(1)).toContainText(/initial version/i);
-  await expect(rows.nth(1).getByRole('button', { name: /compare with previous/i })).toHaveCount(0);
+  await expect(rows.nth(1).getByRole('link', { name: /compare with previous/i })).toHaveCount(0);
 });
 
 /**
@@ -227,23 +230,27 @@ test("a revision's timestamp reads in each viewer's own timezone, and hydrates w
   expect(newYork.text).not.toBe(tokyo.text);
 });
 
-test('the inert compare control explains itself and does nothing when activated', async ({ page, context }) => {
+// Task 10.3 wired the control that used to be inert. Following it all the
+// way through — click, URL, and the diff screen's own content — is
+// e2e/diff.spec.ts's job (it is the one place that exercises that route);
+// this test stays scoped to history.vue's own contract: the control is a
+// real, keyboard-reachable link with the correct target, not a disabled
+// placeholder.
+test('the compare control is a real, keyboard-operable link, not a disabled placeholder', async ({ page, context }) => {
   await signInAs(context, fixtures.readerSessionToken);
 
   await page.goto(`/pages/${fixtures.historyPageId}/history`);
 
-  const compare = page.getByRole('listitem').nth(0).getByRole('button', { name: /compare with previous/i });
+  const compare = page.getByRole('listitem').nth(0).getByRole('link', { name: /compare with previous/i });
   await expect(compare).toBeVisible({ timeout: 30000 });
-  // aria-disabled, not the disabled attribute: it stays reachable by
-  // keyboard so its explanation is available on focus, not only on hover
-  // (docs/UI-CHECKLIST.md §5).
-  await expect(compare).toHaveAttribute('aria-disabled', 'true');
+  await expect(compare).not.toHaveAttribute('aria-disabled', 'true');
+  await expect(compare).toHaveAttribute(
+    'href',
+    `/pages/${fixtures.historyPageId}/diff?from=${fixtures.historyFirstRevisionId}&to=${fixtures.historySecondRevisionId}`,
+  );
+
   await compare.focus();
   await expect(compare).toBeFocused();
-
-  const urlBefore = page.url();
-  await compare.click({ force: true });
-  await expect(page).toHaveURL(urlBefore);
 });
 
 test('a page that has never been saved shows the empty state with a path forward', async ({ page, context }) => {

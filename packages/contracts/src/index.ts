@@ -103,5 +103,20 @@ export type { PresenceEventPayload } from './presence';
 export { PageHistoryResponseSchema, RevisionSummarySchema } from './revisions';
 export type { PageHistoryResponse, RevisionSummaryPayload } from './revisions';
 
+export { DiffBlockChangeSchema, PageDiffResponseSchema, RevisionMetaSchema } from './diff';
+export type { DiffBlockChangePayload, PageDiffResponse, RevisionMetaPayload } from './diff';
+
+export {
+  CreateNodeRequestSchema,
+  CreateNodeResponseSchema,
+  LEGAL_PARENT_TYPES,
+  legalChildTypes,
+  NODE_TITLE_MAX_LENGTH,
+  NodeTypeSchema,
+  RenameNodeRequestSchema,
+  RenameNodeResponseSchema,
+} from './nodes';
+export type { CreateNodeRequest, CreateNodeResponse, NodeType, RenameNodeRequest, RenameNodeResponse } from './nodes';
+
 export { WorkspaceListResponseSchema, WorkspaceSummarySchema } from './workspaces';
 export type { WorkspaceListResponse, WorkspaceSummaryPayload } from './workspaces';

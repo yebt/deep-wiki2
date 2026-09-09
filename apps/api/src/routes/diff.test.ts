@@ -104,6 +104,75 @@ describe('GET /pages/:id/diff', () => {
     expect(body.diff.changes.some((change) => change.kind === 'added')).toBe(true);
   });
 
+  test('the added block carries its own text, and the response names which two revisions were compared', async () => {
+    const fixture = await buildPageFixture();
+    const app = buildApp();
+
+    const res = await app.request(
+      `/pages/${fixture.pageId}/diff?from=${fixture.fromRevisionId}&to=${fixture.toRevisionId}`,
+      { headers: { cookie: fixture.readerCookie } },
+    );
+
+    const body = (await res.json()) as {
+      diff: { from: { id: string }; to: { id: string }; changes: (BlockChange & { text: string })[] };
+    };
+    expect(body.diff.from.id).toBe(fixture.fromRevisionId);
+    expect(body.diff.to.id).toBe(fixture.toRevisionId);
+    const added = body.diff.changes.find((change) => change.kind === 'added');
+    expect(added?.text).toContain('brand new paragraph');
+  });
+
+  test('a genuinely moved block is reported moved with its own byte-identical text, distinct from the unrelated block that stayed put', async () => {
+    const owner = await seedUser('Owner');
+    const reader = await seedUser('Reader');
+    const [ws] = await sql<{ id: string }[]>`
+      INSERT INTO workspaces (owner_id, name, slug) VALUES (${owner}, 'WS', ${`ws-${crypto.randomUUID()}`}) RETURNING id
+    `;
+    const [root] = await sql<{ id: string }[]>`
+      INSERT INTO nodes (workspace_id, parent_id, type, path, position, slug, title)
+      VALUES (${ws!.id}, NULL, 'workspace', '', 0, 'root', 'Root') RETURNING id
+    `;
+    const [page] = await sql<{ id: string }[]>`
+      INSERT INTO nodes (workspace_id, parent_id, type, path, position, slug, title)
+      VALUES (${ws!.id}, ${root!.id}, 'page', '', 0, ${`page-${crypto.randomUUID()}`}, 'A Page') RETURNING id
+    `;
+    await sql`
+      INSERT INTO permissions (workspace_id, subject_type, subject_id, resource_id, action, effect)
+      VALUES (${ws!.id}, 'user', ${reader}, ${page!.id}, 'read', 'allow')
+    `;
+    const first = await savePage(sql, {
+      nodeId: page!.id,
+      workspaceId: ws!.id,
+      markdown: 'First paragraph about apples.\n\nSecond paragraph about bananas.\n',
+      expectedContentHash: null,
+      updatedBy: owner,
+    });
+    await savePage(sql, {
+      nodeId: page!.id,
+      workspaceId: ws!.id,
+      markdown: 'Second paragraph about bananas.\n\nFirst paragraph about apples.\n',
+      expectedContentHash: first.contentHash,
+      updatedBy: owner,
+    });
+    const historyRows = await sql<{ id: string }[]>`
+      SELECT id FROM page_revision WHERE page_id = ${page!.id} ORDER BY created_at ASC
+    `;
+
+    const app = buildApp();
+    const res = await app.request(
+      `/pages/${page!.id}/diff?from=${historyRows[0]!.id}&to=${historyRows[1]!.id}`,
+      { headers: { cookie: await cookieFor(reader) } },
+    );
+
+    const body = (await res.json()) as { diff: { changes: (BlockChange & { text: string })[] } };
+    expect(body.diff.changes.some((c) => c.kind === 'added' || c.kind === 'removed')).toBe(false);
+    const moved = body.diff.changes.filter((c) => c.kind === 'moved');
+    expect(moved).toHaveLength(2);
+    expect(moved.every((c) => typeof c.text === 'string' && c.text.length > 0)).toBe(true);
+    expect(moved.some((c) => c.text.includes('apples'))).toBe(true);
+    expect(moved.some((c) => c.text.includes('bananas'))).toBe(true);
+  });
+
   test('denied without read', async () => {
     const fixture = await buildPageFixture();
     const app = buildApp();

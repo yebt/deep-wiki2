@@ -36,6 +36,8 @@ interface SeedResult {
   readonly resetToken: string;
   readonly readPageId: string;
   readonly historyPageId: string;
+  readonly historyFirstRevisionId: string;
+  readonly historySecondRevisionId: string;
   readonly emptyHistoryPageId: string;
   readonly readerSessionToken: string;
   readonly outsiderSessionToken: string;
