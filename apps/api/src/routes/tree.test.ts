@@ -6,6 +6,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { createSession } from '@deep-wiki/db';
 import { provisionTestDatabase, type ProvisionedTestDatabase } from '@deep-wiki/db/testing/provision';
 import postgres from 'postgres';
+import { expectNoDisclosure } from '../../testing/expect-no-disclosure';
 import { SESSION_COOKIE_NAME } from '../middleware/session';
 import { createTreeRoutes } from './tree';
 
@@ -167,5 +168,261 @@ describe('PATCH /nodes/:id/position', () => {
     expect(res.status).toBe(200);
     const [row] = await sql<{ position: number }[]>`SELECT position FROM nodes WHERE id = ${secondBook.id}`;
     expect(row!.position).toBe(0);
+  });
+});
+
+/*
+ * ── Creation and rename ───────────────────────────────────────────────
+ *
+ * Three traps this suite is written to avoid, each of which would let a
+ * green test sit on top of a broken rule:
+ *
+ * 1. **A creation test whose parent is always the workspace root
+ *    exercises `LEGAL_PARENT_TYPES` not at all** — `shelf` is the only
+ *    legal child of `workspace`, so every such test passes for the wrong
+ *    reason. Every case below nests at least three levels deep, and both
+ *    a legal and an illegal pairing are asserted, the illegal one naming
+ *    the reason.
+ * 2. **A non-disclosure test whose subject can read everything proves
+ *    nothing.** The subject below is denied `read` on the chapter it
+ *    tries to create under, and the assertion is that the refusal is
+ *    byte-identical to the refusal for an id that does not exist — body
+ *    and headers both, through the shared helper.
+ * 3. **A slug-collision test that never actually collides passes
+ *    trivially.** The collision below is produced by asking for the same
+ *    title twice through the route itself.
+ */
+describe('POST /nodes', () => {
+  test('a writer creates a page inside a chapter, three levels below the root', async () => {
+    const fixture = await buildFixture();
+    const app = buildApp();
+
+    const res = await app.request('/nodes', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie: fixture.writerCookie },
+      body: JSON.stringify({ parentId: fixture.hiddenChapter.id, type: 'page', title: 'Local Development Setup' }),
+    });
+
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { id: string; slug: string; type: string; parentId: string; position: number };
+    expect(body.slug).toBe('local-development-setup');
+    expect(body.type).toBe('page');
+    expect(body.parentId).toBe(fixture.hiddenChapter.id);
+
+    const [row] = await sql<{ workspace_id: string; title: string; parent_id: string }[]>`
+      SELECT workspace_id, title, parent_id FROM nodes WHERE id = ${body.id}
+    `;
+    expect(row!.workspace_id).toBe(fixture.workspaceId);
+    expect(row!.parent_id).toBe(fixture.hiddenChapter.id);
+    expect(row!.title).toBe('Local Development Setup');
+  });
+
+  test('a book under a page is refused, and the refusal names both types', async () => {
+    const fixture = await buildFixture();
+    const app = buildApp();
+
+    const res = await app.request('/nodes', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie: fixture.writerCookie },
+      body: JSON.stringify({ parentId: fixture.hiddenChapterPage.id, type: 'book', title: 'Handbook' }),
+    });
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toContain('"book"');
+    expect(body.error).toContain('"page"');
+
+    const rows = await sql<{ id: string }[]>`SELECT id FROM nodes WHERE parent_id = ${fixture.hiddenChapterPage.id}`;
+    expect(rows).toHaveLength(0);
+  });
+
+  test('a shelf under a book is refused — the same table that refuses moving one there', async () => {
+    const fixture = await buildFixture();
+    const app = buildApp();
+
+    const res = await app.request('/nodes', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie: fixture.writerCookie },
+      body: JSON.stringify({ parentId: fixture.visibleBook.id, type: 'shelf', title: 'Design' }),
+    });
+
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toContain('"shelf"');
+  });
+
+  test('creating under a parent the caller cannot read answers exactly as creating under one that does not exist', async () => {
+    const fixture = await buildFixture();
+    const app = buildApp();
+
+    // The reader carries an explicit deny on this chapter (most-specific
+    // wins), so it exists and is invisible to them.
+    const denied = await app.request('/nodes', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie: fixture.readerCookie },
+      body: JSON.stringify({ parentId: fixture.hiddenChapter.id, type: 'page', title: 'Probe' }),
+    });
+    const absent = await app.request('/nodes', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie: fixture.readerCookie },
+      body: JSON.stringify({ parentId: crypto.randomUUID(), type: 'page', title: 'Probe' }),
+    });
+
+    expect(denied.status).toBe(404);
+    expect(absent.status).toBe(denied.status);
+
+    const deniedBody = await denied.text();
+    expect(deniedBody).toBe(await absent.text());
+    expect(deniedBody).toBe(JSON.stringify({ error: 'not found' }));
+
+    // Headers as well as body: `headers` is required on this helper
+    // precisely because an optional channel is one a call site skips.
+    expectNoDisclosure(deniedBody, { id: fixture.hiddenChapter.id, slug: 'chapter-hidden', title: 'chapter-hidden' }, denied.headers);
+
+    const rows = await sql<{ id: string }[]>`SELECT id FROM nodes WHERE parent_id = ${fixture.hiddenChapter.id} AND slug = 'probe'`;
+    expect(rows).toHaveLength(0);
+  });
+
+  test('a subject who can read the parent but not write it is told so, because that discloses nothing', async () => {
+    const fixture = await buildFixture();
+    const app = buildApp();
+
+    const res = await app.request('/nodes', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie: fixture.readerCookie },
+      body: JSON.stringify({ parentId: fixture.visibleBook.id, type: 'chapter', title: 'Notes' }),
+    });
+
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as { error: string }).error).toBe('forbidden');
+  });
+
+  test('a second sibling with the same name is refused by name, not by a constraint violation', async () => {
+    const fixture = await buildFixture();
+    const app = buildApp();
+    const create = () =>
+      app.request('/nodes', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', cookie: fixture.writerCookie },
+        body: JSON.stringify({ parentId: fixture.hiddenChapter.id, type: 'page', title: 'Getting Started' }),
+      });
+
+    const first = await create();
+    expect(first.status).toBe(201);
+
+    const second = await create();
+    expect(second.status).toBe(409);
+    const body = (await second.json()) as { error: string };
+    expect(body.error).toContain('Getting Started');
+
+    const rows = await sql<{ id: string }[]>`
+      SELECT id FROM nodes WHERE parent_id = ${fixture.hiddenChapter.id} AND slug = 'getting-started'
+    `;
+    expect(rows).toHaveLength(1);
+  });
+
+  test('a title with nothing sluggable in it is refused before it reaches the database', async () => {
+    const fixture = await buildFixture();
+    const app = buildApp();
+
+    const res = await app.request('/nodes', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie: fixture.writerCookie },
+      body: JSON.stringify({ parentId: fixture.hiddenChapter.id, type: 'page', title: '###' }),
+    });
+
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toMatch(/letter or number/i);
+  });
+
+  test('a malformed body is a 400, not a 500', async () => {
+    const fixture = await buildFixture();
+    const app = buildApp();
+
+    const res = await app.request('/nodes', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie: fixture.writerCookie },
+      body: JSON.stringify({ parentId: fixture.hiddenChapter.id, title: 'No type' }),
+    });
+
+    expect(res.status).toBe(400);
+  });
+});
+
+describe('PATCH /nodes/:id', () => {
+  test('a writer renames a node, and the slug follows the title', async () => {
+    const fixture = await buildFixture();
+    const app = buildApp();
+
+    const res = await app.request(`/nodes/${fixture.hiddenChapterPage.id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', cookie: fixture.writerCookie },
+      body: JSON.stringify({ title: 'Renamed Page' }),
+    });
+
+    expect(res.status).toBe(200);
+    expect((await res.json()) as { id: string; slug: string; title: string }).toEqual({
+      id: fixture.hiddenChapterPage.id,
+      slug: 'renamed-page',
+      title: 'Renamed Page',
+    });
+
+    const [row] = await sql<{ title: string; slug: string }[]>`
+      SELECT title, slug FROM nodes WHERE id = ${fixture.hiddenChapterPage.id}
+    `;
+    expect(row!.title).toBe('Renamed Page');
+    expect(row!.slug).toBe('renamed-page');
+  });
+
+  test('renaming a node the caller cannot read answers as if it did not exist, disclosing nothing', async () => {
+    const fixture = await buildFixture();
+    const app = buildApp();
+
+    const denied = await app.request(`/nodes/${fixture.hiddenChapter.id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', cookie: fixture.readerCookie },
+      body: JSON.stringify({ title: 'Probe' }),
+    });
+    const absent = await app.request(`/nodes/${crypto.randomUUID()}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', cookie: fixture.readerCookie },
+      body: JSON.stringify({ title: 'Probe' }),
+    });
+
+    expect(denied.status).toBe(404);
+    const deniedBody = await denied.text();
+    expect(deniedBody).toBe(await absent.text());
+    expectNoDisclosure(deniedBody, { id: fixture.hiddenChapter.id, slug: 'chapter-hidden', title: 'chapter-hidden' }, denied.headers);
+
+    const [row] = await sql<{ title: string }[]>`SELECT title FROM nodes WHERE id = ${fixture.hiddenChapter.id}`;
+    expect(row!.title).toBe('chapter-hidden');
+  });
+
+  test('a read-only subject cannot rename', async () => {
+    const fixture = await buildFixture();
+    const app = buildApp();
+
+    const res = await app.request(`/nodes/${fixture.visibleBook.id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', cookie: fixture.readerCookie },
+      body: JSON.stringify({ title: 'Nope' }),
+    });
+
+    expect(res.status).toBe(403);
+  });
+
+  test('renaming onto a sibling’s name is the same refusal creation gives', async () => {
+    const fixture = await buildFixture();
+    const app = buildApp();
+    const sibling = await insertNode(fixture.workspaceId, fixture.hiddenChapter.id, 'page', 'overview', 1);
+    await grant(fixture.workspaceId, fixture.writerId, sibling.id, 'write');
+
+    const res = await app.request(`/nodes/${fixture.hiddenChapterPage.id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', cookie: fixture.writerCookie },
+      body: JSON.stringify({ title: 'Overview' }),
+    });
+
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { error: string }).error).toContain('Overview');
   });
 });

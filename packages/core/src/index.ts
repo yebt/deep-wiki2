@@ -8,6 +8,15 @@ export { can } from './permissions/can';
 export { decide } from './permissions/decide';
 export { decideMany } from './permissions/decide-many';
 export type { Action, Effect, GrantLookup, GrantQuery, ResolvedGrant, SubjectKind } from './permissions/types';
+export {
+  IllegalParentTypeError,
+  isLegalParentType,
+  LEGAL_PARENT_TYPES,
+  legalChildTypes,
+  NODE_TYPES,
+} from './nodes/hierarchy';
+export type { NodeType } from './nodes/hierarchy';
+export { MAX_SLUG_LENGTH, slugifyTitle } from './nodes/slug';
 export { normalizeEmail } from './email';
 export { Secret } from './secret';
 export type { PasswordHasher } from './ports/password-hasher';

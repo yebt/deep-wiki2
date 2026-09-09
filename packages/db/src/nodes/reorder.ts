@@ -12,19 +12,9 @@
  */
 import type postgres from 'postgres';
 import { isDescendantPath } from '@deep-wiki/core';
-import { CrossWorkspaceMoveError, CyclicMoveError, IllegalParentTypeError } from './move';
+import { assertLegalParent, type NodeType } from './legal-parent-types';
+import { CrossWorkspaceMoveError, CyclicMoveError } from './move';
 import { rewriteDescendantPaths } from './subtree';
-
-type NodeType = 'workspace' | 'shelf' | 'book' | 'chapter' | 'page';
-
-/** Workspace -> Shelf -> Book -> {Chapter -> Page, Page} (docs/SPECS.md §3.1) — kept identical to move.ts's table. */
-const LEGAL_PARENT_TYPES: Record<NodeType, readonly NodeType[]> = {
-  workspace: [],
-  shelf: ['workspace'],
-  book: ['shelf'],
-  chapter: ['book'],
-  page: ['book', 'chapter'],
-};
 
 export interface ReorderNodeInput {
   readonly nodeId: string;
@@ -69,10 +59,7 @@ export async function reorderNode(sql: postgres.Sql, input: ReorderNodeInput): P
       throw new CyclicMoveError(moved.id, newParent.id);
     }
 
-    const legalParents = LEGAL_PARENT_TYPES[moved.type];
-    if (!legalParents.includes(newParent.type)) {
-      throw new IllegalParentTypeError(moved.type, newParent.type);
-    }
+    assertLegalParent(moved.type, newParent.type);
 
     const parentChanged = moved.parent_id !== newParent.id;
     const oldPrefix = moved.path;

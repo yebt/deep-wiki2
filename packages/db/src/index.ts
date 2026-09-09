@@ -81,7 +81,18 @@ export type {
   TakeOverLockInput,
   TakeOverLockResult,
 } from './locks/page-lock';
-export { CrossWorkspaceMoveError, CyclicMoveError, IllegalParentTypeError, moveNode } from './nodes/move';
+export { assertLegalParent, IllegalParentTypeError, legalParentTypesUsedBy } from './nodes/legal-parent-types';
+export type { NodeType } from './nodes/legal-parent-types';
+export {
+  createNode,
+  DuplicateSiblingSlugError,
+  ParentNodeNotFoundError,
+  UnslugifiableTitleError,
+} from './nodes/create';
+export type { CreatedNode, CreateNodeInput } from './nodes/create';
+export { NodeNotFoundError, renameNode, WorkspaceRootRenameError } from './nodes/rename';
+export type { RenamedNode, RenameNodeInput } from './nodes/rename';
+export { CrossWorkspaceMoveError, CyclicMoveError, moveNode } from './nodes/move';
 export type { MoveNodeInput } from './nodes/move';
 export { reorderNode } from './nodes/reorder';
 export type { ReorderNodeInput } from './nodes/reorder';

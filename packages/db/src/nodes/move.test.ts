@@ -1,7 +1,8 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import postgres from 'postgres';
 import { provisionTestDatabase, type ProvisionedTestDatabase } from '../../testing/provision';
-import { CrossWorkspaceMoveError, CyclicMoveError, IllegalParentTypeError, moveNode } from './move';
+import { IllegalParentTypeError } from '@deep-wiki/core';
+import { CrossWorkspaceMoveError, CyclicMoveError, moveNode } from './move';
 
 let db: ProvisionedTestDatabase;
 let sql: postgres.Sql;
