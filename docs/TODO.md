@@ -415,6 +415,76 @@ makes conventions portable across projects.
 
 Discoveries and constraints. Newest first.
 
+### 2026-09-08 — `APP_URL` had nothing to be checked against, and shipped naming the e2e harness's port
+
+The session was lost on every login and nothing caught it. `apps/api` installs
+`cors({ origin: APP_URL, credentials: true })`, and a cross-origin response only carries its
+`Set-Cookie` into the browser when the API named that **exact** origin. So a wrong `APP_URL`
+does not fail: login returns 200, the browser discards the cookie, the next request is
+anonymous, and the user is returned to sign-in — with no error on either side.
+
+Two separate things were wrong, and the second is the one that matters.
+
+`env.example` shipped `APP_URL=http://localhost:4173` while `nuxt dev` listened on Nuxt's
+default 3000. 4173 is Vite's preview port, and it is also `MAIN_CHECKOUT_PORTS.web` in
+`packages/db/testing/worktree.ts` — the **e2e harness's** web port for the main checkout. It
+had never been the dev server's. It appeared to work only because `docs/RUNNING.md` on `main`
+told the reader to type `--port 4173` by hand, so the value was correct exactly as long as
+someone remembered a flag. This worktree's `.env` had gone one step further and carried
+`APP_URL=http://localhost:13150`, which is *this worktree's* derived e2e web port.
+
+The deeper fault: `scripts/checks/env-consistency.ts` tied `POSTGRES_HOST_PORT`↔`DATABASE_URL`,
+`MAILPIT_SMTP_HOST_PORT`↔`SMTP_PORT` and `PORT`↔`NUXT_PUBLIC_API_BASE_URL`, and deliberately
+did *not* tie `APP_URL` to `PORT` — correctly, because `APP_URL` is the web origin and not the
+API's. But it was then tied to **nothing**. The variable most able to fail silently was the one
+variable with no counterpart in the check.
+
+**Impact:** `apps/web/nuxt.config.ts` now declares `devServer.port`, which makes the web port a
+fact in the repository instead of a flag in a shell history, and gives `APP_URL` something to
+be checked against. `env-consistency.ts` reads that number straight out of the config file's
+text (never executing it) and requires `APP_URL` to name the same port, with a message that
+states the symptom — "you will be returned to sign-in" — rather than only the mismatch. It also
+requires the declared web port to differ from `PORT`: Nuxt's default was 3000 and so is the
+API's, so whichever process started second was silently moved by the dev server's own port
+fallback, and `APP_URL` then named whichever one lost. The web port is now 3001, which is the
+value that fallback was already producing.
+
+The check now reads `env.example` **as well as** `.env`, and always: the template is committed,
+every developer copies it, and the shipped default is where this bug came from — so a clone with
+no `.env` at all must still be able to fail. It stays out of `bun run check` and the pre-commit
+hook for the reason it always did: `.env` is local developer state.
+
+Two things this does not fix. `APP_URL` and `devServer.port` are still the same fact written
+twice — the check compares them rather than deriving one from the other, which is the same
+shape of debt the `DATABASE_URL` pair carries. And an `APP_URL` naming no port at all (a
+deployed `https://wiki.example.com`) is deliberately out of scope, because a reverse proxy in
+front of both apps is a legitimate arrangement the check cannot second-guess.
+
+### 2026-09-08 — The error screen asserted the visitor was signed out, and could not have known
+
+The owner reached `apps/web/app/error.vue` from `/workspaces/` while signed in and was offered
+"Go to sign-in", and nothing else. The recovery action read the address for a workspace or page
+id, found neither, and fell through to sign-in as its default.
+
+That is worse than an unhelpful action. It is a claim about the visitor that was false, on the
+one screen whose whole job is to be trustworthy about what just happened.
+
+It cannot be fixed by guessing better. The session cookie is `httpOnly`
+(`apps/api/src/middleware/session.ts`), so the browser cannot read it; the API has no session
+or `/me` endpoint to ask; and this screen must render when the server itself is what failed, so
+making it depend on a network round trip would break the branch that needs it most.
+
+**Impact:** the screen now names a **destination** and never a state. `/workspaces/…` with no
+valid id — the address the owner actually landed on — offers the workspaces list rather than
+falling past both patterns into sign-in. Sign-in stays on the screen, as a demoted second door
+that is never the only one, because every destination in this product needs a session and the
+screen genuinely cannot tell which of the two doors this visitor needs. A test asserts that
+sign-in is never the sole exit and never the first.
+
+Unchanged, and asserted by the two tests that already held them: the 404 branch is still
+selected by status code alone, and no field of the error object reaches the DOM, so a denied
+resource and a missing one remain byte-identical.
+
 ### 2026-09-08 — `verify` now needs more memory than the machine had, and was killed
 
 A single end-to-end `bun run verify` was killed by the operating system under memory pressure.
