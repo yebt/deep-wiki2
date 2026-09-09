@@ -35,6 +35,10 @@ export type {
 } from './auth/invitations';
 export { createWorkspace, PlanLimitExceededError } from './workspaces/create-workspace';
 export type { CreatedWorkspace, CreateWorkspaceInput } from './workspaces/create-workspace';
+export { listReadableWorkspaces } from './workspaces/list-readable-workspaces';
+export type { ListReadableWorkspacesInput, WorkspaceSummary } from './workspaces/list-readable-workspaces';
+export { readableWorkspaceIds } from './permissions/readable-workspaces';
+export type { ReadableWorkspaceIdsInput } from './permissions/readable-workspaces';
 export { can, createGrantLookup } from './permissions/queries';
 export { insertGrants } from './permissions/grants';
 export type { GrantInput } from './permissions/grants';
