@@ -2,6 +2,7 @@ import { UApp } from '#components';
 import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime';
 import { describe, expect, test, vi } from 'vitest';
 import { defineComponent, h, ref } from 'vue';
+import AuthSubmit from '../components/AuthSubmit.vue';
 import LoginPage from './login.vue';
 
 const { useLoginMock } = vi.hoisted(() => ({ useLoginMock: vi.fn() }));
@@ -76,5 +77,25 @@ describe('login page', () => {
 
     const status = component.get('[role="status"]');
     expect(status.text()).toMatch(/signed in/i);
+  });
+
+  /**
+   * What this asserts is *wiring*, and it is worth being blunt about the
+   * difference. Once the page has mounted, a guarded submit control and an
+   * unguarded one render identically — same element, same type, same label —
+   * so there is nothing here that could tell them apart. The window the guard
+   * exists for is the one before mount, and this test starts after it.
+   *
+   * The guarantee itself is held in `app/components/AuthSubmit.test.ts`,
+   * which server-renders the control and asserts against those exact bytes.
+   * This test exists so that a page which quietly stops routing through the
+   * guard fails in the suite instead of in somebody's browser. Read it as a
+   * wiring check and nothing more.
+   */
+  test('routes its submit control through the pre-hydration guard', async () => {
+    mockLogin();
+    const component = await mountSuspended(PageInApp);
+
+    expect(component.findComponent(AuthSubmit).exists()).toBe(true);
   });
 });

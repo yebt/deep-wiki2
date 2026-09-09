@@ -124,9 +124,17 @@ async function onSubmit(event: FormSubmitEvent<{ displayName: string; password: 
       :schema="acceptSchema"
       :fields="fields"
       :loading="status === 'loading'"
-      :submit="{ label: status === 'loading' ? 'Joining…' : 'Join workspace' }"
       @submit="onSubmit"
     >
+      <!-- See `AuthSubmit`. This is the screen the guard matters most on:
+           the invitation token is single-use, and a native POST before
+           hydration re-renders the form empty with no indication that
+           anything went wrong — leaving the invitee to wonder whether the
+           attempt consumed their one link. -->
+      <template #submit="{ loading }">
+        <AuthSubmit :label="status === 'loading' ? 'Joining…' : 'Join workspace'" :loading="loading" />
+      </template>
+
       <template #validation>
         <div v-if="status === 'network-error'" role="alert" class="flex items-start gap-3 rounded-md bg-error-container p-4">
           <UIcon name="i-lucide-circle-alert" class="size-5 shrink-0 text-on-error-container" aria-hidden="true" />

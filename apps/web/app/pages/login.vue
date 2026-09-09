@@ -70,9 +70,18 @@ async function onSubmit(event: FormSubmitEvent<{ email: string; password: string
       :schema="loginSchema"
       :fields="fields"
       :loading="status === 'loading'"
-      :submit="{ label: status === 'loading' ? 'Signing in…' : 'Sign in' }"
       @submit="onSubmit"
     >
+      <!-- `AuthSubmit` rather than `UAuthForm`'s own submit button: until
+           this page hydrates, its button is not a submit button at all, so
+           the browser cannot perform the native POST to this URL that
+           re-renders the screen with the fields cleared and looks exactly
+           like a rejected password. The whole reason lives in that
+           component. -->
+      <template #submit="{ loading }">
+        <AuthSubmit :label="status === 'loading' ? 'Signing in…' : 'Sign in'" :loading="loading" />
+      </template>
+
       <template #validation>
         <div
           v-if="status === 'invalid-credentials' || status === 'network-error'"

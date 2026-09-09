@@ -107,9 +107,17 @@ async function onSubmit(event: FormSubmitEvent<{ newPassword: string; confirmPas
       :schema="confirmSchema"
       :fields="fields"
       :loading="status === 'loading'"
-      :submit="{ label: status === 'loading' ? 'Setting your password…' : 'Set new password' }"
       @submit="onSubmit"
     >
+      <!-- See `AuthSubmit`: before this page hydrates its button is not a
+           submit button. A native POST here would re-render the screen with
+           both password fields cleared while the token stayed in the URL,
+           which reads as "the link is broken" rather than "the page was not
+           ready". -->
+      <template #submit="{ loading }">
+        <AuthSubmit :label="status === 'loading' ? 'Setting your password…' : 'Set new password'" :loading="loading" />
+      </template>
+
       <template #validation>
         <div v-if="status === 'network-error'" role="alert" class="flex items-start gap-3 rounded-md bg-error-container p-4">
           <UIcon name="i-lucide-circle-alert" class="size-5 shrink-0 text-on-error-container" aria-hidden="true" />

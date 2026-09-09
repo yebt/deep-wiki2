@@ -53,9 +53,15 @@ async function onSubmit(event: FormSubmitEvent<{ email: string }>) {
       :schema="requestSchema"
       :fields="fields"
       :loading="status === 'loading'"
-      :submit="{ label: status === 'loading' ? 'Sending…' : 'Send reset link' }"
       @submit="onSubmit"
     >
+      <!-- See `AuthSubmit`: before this page hydrates its button is not a
+           submit button, so a click cannot make the browser POST this form
+           to its own URL and blank the address the visitor just typed. -->
+      <template #submit="{ loading }">
+        <AuthSubmit :label="status === 'loading' ? 'Sending…' : 'Send reset link'" :loading="loading" />
+      </template>
+
       <template #validation>
         <div v-if="status === 'network-error'" role="alert" class="flex items-start gap-3 rounded-md bg-error-container p-4">
           <UIcon name="i-lucide-circle-alert" class="size-5 shrink-0 text-on-error-container" aria-hidden="true" />
