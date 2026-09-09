@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { checkEnvConsistency, parseEnv, portOfUrl } from '../env-consistency';
+import { checkEnvConsistency, parseEnv, parseWebDevPort, portOfUrl } from '../env-consistency';
 
 describe('parseEnv', () => {
   test('reads assignments and ignores comments and blanks', () => {
@@ -74,5 +74,39 @@ describe('checkEnvConsistency', () => {
   test('a missing half is not a failure — only a disagreement is', () => {
     expect(checkEnvConsistency(parseEnv('POSTGRES_HOST_PORT=25432\n')).ok).toBe(true);
     expect(checkEnvConsistency(parseEnv('DATABASE_URL=postgres://u:p@h:5432/db\n')).ok).toBe(true);
+  });
+});
+
+describe('parseWebDevPort', () => {
+  test('reads the port apps/web declares for its dev server', () => {
+    expect(parseWebDevPort('export default defineNuxtConfig({\n  devServer: { port: 3001 },\n})')).toBe(3001);
+  });
+
+  test('returns undefined when no dev server port is declared', () => {
+    expect(parseWebDevPort('export default defineNuxtConfig({ modules: [] })')).toBeUndefined();
+  });
+});
+
+describe('APP_URL against where apps/web actually listens', () => {
+  test('an APP_URL on a port apps/web does not serve fails, naming the symptom', () => {
+    const result = checkEnvConsistency(parseEnv('APP_URL=http://localhost:4173\n'), { webDevPort: 3001 });
+    expect(result.ok).toBe(false);
+    expect(result.errors[0]).toContain('4173');
+    expect(result.errors[0]).toContain('3001');
+    expect(result.errors[0]).toContain('returned to sign-in');
+  });
+
+  test('an APP_URL on the port apps/web serves passes', () => {
+    expect(checkEnvConsistency(parseEnv('APP_URL=http://localhost:3001\n'), { webDevPort: 3001 }).ok).toBe(true);
+  });
+
+  test('a deployed APP_URL that names no port is not this rule’s business', () => {
+    expect(checkEnvConsistency(parseEnv('APP_URL=https://wiki.example.com\n'), { webDevPort: 3001 }).ok).toBe(true);
+  });
+
+  test('apps/web and apps/api may not be given the same port', () => {
+    const result = checkEnvConsistency(parseEnv('PORT=3001\nAPP_URL=http://localhost:3001\n'), { webDevPort: 3001 });
+    expect(result.ok).toBe(false);
+    expect(result.errors.some((e) => e.includes('same port'))).toBe(true);
   });
 });

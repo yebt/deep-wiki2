@@ -24,7 +24,12 @@ export const envSchema = z.object({
   // password reset). Defaulted so most tooling never has to set it.
   // The browser-facing origin of apps/web, not the API's own address: it is
   // the CORS allowlist entry and the host of mailed reset/invite links.
-  APP_URL: z.string().url().default('http://localhost:4173'),
+  // The default must equal `devServer.port` in apps/web/nuxt.config.ts —
+  // `bun run env:check` compares them. It read 4173 until 2026-09-08, which
+  // is Vite's preview port and the e2e harness's main-checkout web port, and
+  // was never the dev server's: the browser then dropped the session cookie
+  // on every login and the user was returned to sign-in.
+  APP_URL: z.string().url().default('http://localhost:3001'),
 
   // Session lifetime (design.md — "Authentication").
   SESSION_IDLE_TIMEOUT_MINUTES: z.coerce.number().int().positive().default(30),
