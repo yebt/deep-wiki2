@@ -12,14 +12,6 @@ export interface TreeNode {
 export type FetchTree = (workspaceId: string) => Promise<{ rootId: string; nodes: readonly TreeNode[] }>;
 export type ReorderFetcher = (nodeId: string, newParentId: string, newIndex: number) => Promise<{ ok: boolean }>;
 
-interface ResponseError {
-  readonly response: { readonly status?: number };
-}
-
-function isResponseError(error: unknown): error is ResponseError {
-  return typeof error === 'object' && error !== null && 'response' in error;
-}
-
 export interface UseTreeDeps {
   readonly fetchTree?: FetchTree;
   readonly reorderFetcher?: ReorderFetcher;
@@ -72,12 +64,7 @@ export function useTree(workspaceId: string, deps: UseTreeDeps = {}): UseTreeRes
       status.value = 'success';
       message.value = '';
     } catch (error) {
-      if (!isResponseError(error)) {
-        status.value = 'network-error';
-        message.value = 'Cannot reach the server. Check your connection and try again.';
-        return;
-      }
-      const code = error.response.status;
+      const code = httpStatusOf(error);
       if (code === 403) {
         status.value = 'forbidden';
         message.value = "You don't have access to this workspace's tree.";

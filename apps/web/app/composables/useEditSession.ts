@@ -17,16 +17,6 @@ export interface EditSessionRefusal {
 
 export type EditSessionFetcher = (nodeId: string) => Promise<EditSessionReady>;
 
-/** Shape of the error ofetch/`$fetch` throws when the server responded with a non-2xx status: `.response.status` plus the parsed body on `.data`. */
-interface ResponseError {
-  readonly response: { readonly status?: number };
-  readonly data?: unknown;
-}
-
-function isResponseError(error: unknown): error is ResponseError {
-  return typeof error === 'object' && error !== null && 'response' in error;
-}
-
 export interface UseEditSessionResult {
   readonly status: Ref<EditSessionStatus>;
   readonly session: Ref<EditSessionReady | null>;
@@ -68,12 +58,7 @@ export function useEditSession(nodeId: string, fetcher?: EditSessionFetcher, tak
   }
 
   function applyFailure(error: unknown): void {
-    if (!isResponseError(error)) {
-      status.value = 'network-error';
-      message.value = 'Cannot reach the server. Check your connection and try again.';
-      return;
-    }
-    const code = error.response.status;
+    const code = httpStatusOf(error);
     if (code === 403) {
       status.value = 'forbidden';
       message.value = "You don't have access to edit this page.";
@@ -81,7 +66,7 @@ export function useEditSession(nodeId: string, fetcher?: EditSessionFetcher, tak
       status.value = 'not-found';
       message.value = 'This page does not exist.';
     } else if (code === 409) {
-      const body = error.data as EditSessionRefusal;
+      const body = responseBodyOf(error) as EditSessionRefusal;
       refusal.value = body;
       status.value = body.reason === 'locked' ? 'locked' : 'refused';
     } else {

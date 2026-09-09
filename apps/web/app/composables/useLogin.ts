@@ -4,20 +4,6 @@ export type LoginStatus = 'idle' | 'loading' | 'invalid-credentials' | 'network-
 
 export type LoginFetcher = (input: LoginRequest) => Promise<LoginResponse>;
 
-/** Shape of the error ofetch/`$fetch` throws when the server responded (with a non-2xx status). */
-interface ResponseError {
-  readonly response: { readonly status?: number };
-}
-
-function hasResponse(error: unknown): error is ResponseError {
-  return (
-    typeof error === 'object' &&
-    error !== null &&
-    'response' in error &&
-    (error as { response?: unknown }).response !== undefined
-  );
-}
-
 export interface UseLoginResult {
   readonly status: Ref<LoginStatus>;
   readonly message: Ref<string>;
@@ -66,7 +52,7 @@ export function useLogin(fetcher?: LoginFetcher): UseLoginResult {
       status.value = 'success';
       message.value = 'Signed in.';
     } catch (error) {
-      if (hasResponse(error)) {
+      if (serverResponded(error)) {
         status.value = 'invalid-credentials';
         message.value = 'Incorrect email or password.';
       } else {

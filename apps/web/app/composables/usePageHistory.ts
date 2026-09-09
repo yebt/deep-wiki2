@@ -14,18 +14,6 @@ export interface PageHistoryResponse {
 
 export type PageHistoryFetcher = (nodeId: string) => Promise<PageHistoryResponse>;
 
-/** Shape of the error ofetch/`$fetch` throws when the server responded (with a non-2xx status). */
-interface ResponseError {
-  readonly response: { readonly status?: number };
-}
-
-function statusOf(error: unknown): number | undefined {
-  if (typeof error === 'object' && error !== null && 'response' in error) {
-    return (error as ResponseError).response?.status;
-  }
-  return undefined;
-}
-
 export interface UsePageHistoryResult {
   readonly status: Ref<PageHistoryStatus>;
   readonly revisions: Ref<readonly RevisionSummary[]>;
@@ -68,7 +56,7 @@ export function usePageHistory(nodeId: string, fetcher?: PageHistoryFetcher): Us
       status.value = 'success';
       message.value = '';
     } catch (error) {
-      const code = statusOf(error);
+      const code = httpStatusOf(error);
       if (code === 403 || code === 404) {
         status.value = 'not-found';
         message.value = 'This page does not exist.';

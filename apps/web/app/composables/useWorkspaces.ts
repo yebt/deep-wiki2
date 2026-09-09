@@ -25,14 +25,6 @@ export interface WorkspaceSummary {
 
 export type FetchWorkspaces = () => Promise<{ workspaces: readonly WorkspaceSummary[] }>;
 
-interface ResponseError {
-  readonly response: { readonly status?: number };
-}
-
-function isResponseError(error: unknown): error is ResponseError {
-  return typeof error === 'object' && error !== null && 'response' in error;
-}
-
 export interface UseWorkspacesDeps {
   readonly fetchWorkspaces?: FetchWorkspaces;
 }
@@ -62,7 +54,7 @@ export function useWorkspaces(deps: UseWorkspacesDeps = {}): UseWorkspacesResult
       message.value = '';
     } catch (error) {
       workspaces.value = [];
-      if (isResponseError(error) && error.response.status === 401) {
+      if (httpStatusOf(error) === 401) {
         status.value = 'unauthenticated';
         message.value = 'Your session has ended.';
         return;

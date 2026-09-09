@@ -8,19 +8,6 @@ export type PasswordResetConfirmStatus = 'idle' | 'loading' | 'invalid-or-expire
 
 export type PasswordResetConfirmFetcher = (input: PasswordResetConfirmRequest) => Promise<PasswordResetConfirmResponse>;
 
-interface ResponseError {
-  readonly response: { readonly status?: number };
-}
-
-function hasResponse(error: unknown): error is ResponseError {
-  return (
-    typeof error === 'object' &&
-    error !== null &&
-    'response' in error &&
-    (error as { response?: unknown }).response !== undefined
-  );
-}
-
 export interface UsePasswordResetConfirmResult {
   readonly status: Ref<PasswordResetConfirmStatus>;
   readonly message: Ref<string>;
@@ -65,7 +52,7 @@ export function usePasswordResetConfirm(fetcher?: PasswordResetConfirmFetcher): 
       status.value = 'success';
       message.value = 'Your password has been changed.';
     } catch (error) {
-      if (hasResponse(error)) {
+      if (serverResponded(error)) {
         status.value = 'invalid-or-expired';
         message.value = 'This password reset link is invalid or has expired. Request a new one.';
       } else {

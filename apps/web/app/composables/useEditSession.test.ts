@@ -99,3 +99,70 @@ describe('useEditSession', () => {
     expect(takeOverFetcher).toHaveBeenCalledWith('page-1');
   });
 });
+
+/**
+ * ── The trap this bug hides behind ─────────────────────────────────────
+ *
+ * `responseError(500, {})` above does NOT reproduce the defect, and
+ * neither does a plain `new Error('fetch failed')`: both classify
+ * correctly even against the broken guard. It only appears with ofetch's
+ * real shape — `response` present as an own key and set to `undefined`,
+ * because no response ever arrived — which makes `'response' in error`
+ * true and lets `error.response.status` throw *inside `applyFailure`*,
+ * before any status is assigned.
+ *
+ * Both entry points into `applyFailure` are covered: a status stuck on
+ * `loading` is the editor's blank screen, whichever call produced it.
+ */
+function unreachableApi(): Error & { readonly response: undefined } {
+  return Object.assign(new Error('fetch failed'), { response: undefined });
+}
+
+describe('useEditSession when the API never responded', () => {
+  test('the fixture carries ofetch real shape, not a convenient mock', () => {
+    const error = unreachableApi();
+
+    expect('response' in error).toBe(true);
+    expect(error.response).toBeUndefined();
+  });
+
+  test('load() settles into network-error instead of hanging on the loading skeleton', async () => {
+    const { status, message, load } = useEditSession(
+      'page-1',
+      vi.fn(async () => {
+        throw unreachableApi();
+      }),
+    );
+
+    const settled = await load().then(
+      () => 'resolved' as const,
+      () => 'rejected' as const,
+    );
+
+    expect(status.value).not.toBe('loading');
+    expect(status.value).toBe('network-error');
+    expect(message.value).toMatch(/try again/i);
+    expect(settled).toBe('resolved');
+  });
+
+  test('takeOver() settles into network-error rather than leaving the editor loading', async () => {
+    const { status, takeOver } = useEditSession(
+      'page-1',
+      vi.fn(async () => {
+        throw unreachableApi();
+      }),
+      vi.fn(async () => {
+        throw unreachableApi();
+      }),
+    );
+
+    const settled = await takeOver().then(
+      () => 'resolved' as const,
+      () => 'rejected' as const,
+    );
+
+    expect(status.value).not.toBe('loading');
+    expect(status.value).toBe('network-error');
+    expect(settled).toBe('resolved');
+  });
+});

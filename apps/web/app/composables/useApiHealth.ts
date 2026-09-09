@@ -20,20 +20,6 @@ export interface UseApiHealthResult {
   readonly check: () => Promise<void>;
 }
 
-/** Shape of the error ofetch/`$fetch` throws when the server responded (with a non-2xx status). */
-interface ResponseError {
-  readonly response: { readonly status?: number };
-}
-
-function hasResponse(error: unknown): error is ResponseError {
-  return (
-    typeof error === 'object' &&
-    error !== null &&
-    'response' in error &&
-    (error as { response?: unknown }).response !== undefined
-  );
-}
-
 /**
  * Turns a caught failure into a human-facing message plus a technical
  * detail string. Distinguishes "the request never reached the API"
@@ -46,7 +32,7 @@ function hasResponse(error: unknown): error is ResponseError {
 function describeFailure(error: unknown): { message: string; detail: string } {
   const detail = error instanceof Error ? error.message : String(error);
 
-  if (hasResponse(error)) {
+  if (serverResponded(error)) {
     return {
       message: 'The API responded with an error. Try again in a moment.',
       detail,

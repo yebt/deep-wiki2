@@ -7,18 +7,6 @@ export interface PageReadResponse {
 
 export type PageReadFetcher = (nodeId: string) => Promise<PageReadResponse>;
 
-/** Shape of the error ofetch/`$fetch` throws when the server responded (with a non-2xx status). */
-interface ResponseError {
-  readonly response: { readonly status?: number };
-}
-
-function statusOf(error: unknown): number | undefined {
-  if (typeof error === 'object' && error !== null && 'response' in error) {
-    return (error as ResponseError).response?.status;
-  }
-  return undefined;
-}
-
 export interface UsePageReadResult {
   readonly status: Ref<PageReadStatus>;
   readonly html: Ref<string>;
@@ -72,7 +60,7 @@ export function usePageRead(nodeId: string, fetcher?: PageReadFetcher): UsePageR
       status.value = 'success';
       message.value = '';
     } catch (error) {
-      const code = statusOf(error);
+      const code = httpStatusOf(error);
       if (code === 403) {
         status.value = 'forbidden';
         message.value = "You don't have access to this page.";

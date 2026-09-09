@@ -52,3 +52,47 @@ describe('useSavePage', () => {
     expect(status.value).toBe('forbidden');
   });
 });
+
+/**
+ * ── The trap this bug hides behind ─────────────────────────────────────
+ *
+ * `responseError(500)` above does NOT reproduce the defect, and neither
+ * does a plain `new Error('fetch failed')`: both classify correctly even
+ * against the broken guard. It only appears with ofetch's real shape —
+ * `response` present as an own key and set to `undefined`, because no
+ * response ever arrived — which makes `'response' in error` true and lets
+ * `error.response.status` throw *inside the catch block*, before any
+ * status is assigned. The save button then stays on "Saving…" forever
+ * and the author is never told their work did not leave the tab.
+ */
+function unreachableApi(): Error & { readonly response: undefined } {
+  return Object.assign(new Error('fetch failed'), { response: undefined });
+}
+
+describe('useSavePage when the API never responded', () => {
+  test('the fixture carries ofetch real shape, not a convenient mock', () => {
+    const error = unreachableApi();
+
+    expect('response' in error).toBe(true);
+    expect(error.response).toBeUndefined();
+  });
+
+  test('settles into network-error instead of hanging on "Saving…"', async () => {
+    const { status, message, save } = useSavePage(
+      'page-1',
+      vi.fn(async () => {
+        throw unreachableApi();
+      }),
+    );
+
+    const settled = await save('# Hi\n', 'hash-1').then(
+      () => 'resolved' as const,
+      () => 'rejected' as const,
+    );
+
+    expect(status.value).not.toBe('saving');
+    expect(status.value).toBe('network-error');
+    expect(message.value).toMatch(/try saving again/i);
+    expect(settled).toBe('resolved');
+  });
+});

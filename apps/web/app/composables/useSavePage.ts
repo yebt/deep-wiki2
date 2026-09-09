@@ -2,15 +2,6 @@ export type SavePageStatus = 'idle' | 'saving' | 'success' | 'stale' | 'not-cano
 
 export type SavePageFetcher = (nodeId: string, markdown: string, expectedContentHash: string | null) => Promise<{ contentHash: string }>;
 
-interface ResponseError {
-  readonly response: { readonly status?: number };
-  readonly data?: unknown;
-}
-
-function isResponseError(error: unknown): error is ResponseError {
-  return typeof error === 'object' && error !== null && 'response' in error;
-}
-
 export interface UseSavePageResult {
   readonly status: Ref<SavePageStatus>;
   readonly contentHash: Ref<string | null>;
@@ -56,17 +47,12 @@ export function useSavePage(nodeId: string, fetcher?: SavePageFetcher): UseSaveP
       status.value = 'success';
       message.value = 'Saved.';
     } catch (error) {
-      if (!isResponseError(error)) {
-        status.value = 'network-error';
-        message.value = 'Cannot reach the server. Your changes are kept in this tab — try saving again.';
-        return;
-      }
-      const code = error.response.status;
+      const code = httpStatusOf(error);
       if (code === 403) {
         status.value = 'forbidden';
         message.value = "You don't have permission to save this page anymore.";
       } else if (code === 409) {
-        const body = error.data as { error?: string; canonical?: string };
+        const body = responseBodyOf(error) as { error?: string; canonical?: string };
         if (typeof body.canonical === 'string') {
           canonical.value = body.canonical;
           status.value = 'not-canonical';

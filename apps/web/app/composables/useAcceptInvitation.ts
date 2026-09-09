@@ -15,19 +15,6 @@ export type AcceptInvitationStatus =
 
 export type AcceptInvitationFetcher = (input: AcceptInvitationRequest) => Promise<AcceptInvitationResponse>;
 
-interface ResponseError {
-  readonly response: { readonly status?: number };
-}
-
-function hasResponse(error: unknown): error is ResponseError {
-  return (
-    typeof error === 'object' &&
-    error !== null &&
-    'response' in error &&
-    (error as { response?: unknown }).response !== undefined
-  );
-}
-
 export interface UseAcceptInvitationResult {
   readonly status: Ref<AcceptInvitationStatus>;
   readonly message: Ref<string>;
@@ -76,8 +63,8 @@ export function useAcceptInvitation(fetcher?: AcceptInvitationFetcher): UseAccep
       workspaceId.value = result.workspaceId;
       message.value = 'You have joined the workspace.';
     } catch (error) {
-      if (hasResponse(error)) {
-        const httpStatus = error.response.status;
+      if (serverResponded(error)) {
+        const httpStatus = httpStatusOf(error);
         if (httpStatus === 410) {
           status.value = 'expired';
           message.value = 'This invitation has expired. Ask whoever invited you to send a new one.';
