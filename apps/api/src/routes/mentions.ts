@@ -60,7 +60,29 @@ export function createMentionRoutes(deps: MentionRouteDeps): Hono<{ Variables: S
     const workspaceId = c.req.query('workspaceId');
     const pageId = c.req.query('pageId');
     const query = c.req.query('q') ?? '';
+    const session = c.get('session');
     if (!workspaceId || !pageId) return c.json(ErrorResponseSchema.parse({ error: 'workspaceId and pageId are required' }), 400);
+
+    // The caller's own gate, and the reason it has to exist: every filter
+    // below is about the *candidates*, so without this the handler answers
+    // whoever asks. `q` defaults to `''`, which
+    // `listWorkspaceMemberCandidates` turns into `ILIKE '%'` — the whole
+    // roster, 50 at a time — and the answer ("who can read this page") is
+    // a fact about a page, so it is owed the same read gate
+    // `/pages/:id/mentions/:userId/check` carries: absence and
+    // denial-of-read are one response, or the status is an existence
+    // oracle for a caller with no grant.
+    //
+    // The page must also belong to the workspace whose roster is being
+    // listed. The two ids arrive independently, and nothing else here
+    // relates them — a caller may not hold up a page they can read in one
+    // tenant to ask for another tenant's members.
+    const [node] = await deps.sql<{ workspace_id: string }[]>`SELECT workspace_id FROM nodes WHERE id = ${pageId}`;
+    const callerCanRead =
+      node !== undefined &&
+      node.workspace_id === workspaceId &&
+      (await can(deps.sql, { subjectType: 'user', subjectId: session.userId, resourceId: pageId, action: 'read' }));
+    if (!callerCanRead) return c.json(ErrorResponseSchema.parse({ error: 'not found' }), 404);
 
     const candidates = await listWorkspaceMemberCandidates(deps.sql, {
       workspaceId,

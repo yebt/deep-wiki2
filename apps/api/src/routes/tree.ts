@@ -1,9 +1,12 @@
 /**
  * The navigation tree (navigation-tree spec): only readable nodes, resolved
  * through `can()`/`readableResourceIds` — never by looping `can()` per node
- * (design.md "Listing without disclosure"). Drag-reorder is a distinct
- * route, gated by `write` on the node being moved (spec: "Reordering
- * Requires Write Or Manage Permission").
+ * (design.md "Listing without disclosure"), and only for a caller who can
+ * read something in this workspace at all. Drag-reorder is a distinct
+ * route, gated by `write` on the node being moved *and* on both branches
+ * the move rewrites (spec: "Reordering Requires Write Or Manage
+ * Permission"; see the route for why the destination and the old parent
+ * count).
  *
  * **Path-visible rule, recorded here because the spec states only the
  * single-level case.** A node is included only when its whole ancestor
@@ -20,6 +23,7 @@ import {
   createNode,
   DuplicateSiblingSlugError,
   readableResourceIds,
+  readableWorkspaceIds,
   renameNode,
   reorderNode,
   UnslugifiableTitleError,
@@ -137,9 +141,11 @@ async function authorizeWrite(
   sql: postgres.Sql,
   c: Context,
   input: { readonly nodeId: string; readonly userId: string },
-): Promise<{ ok: true; node: { workspace_id: string; type: string } } | { ok: false; response: Response }> {
-  const [node] = await sql<{ workspace_id: string; type: string }[]>`
-    SELECT workspace_id, type FROM nodes WHERE id = ${input.nodeId}
+): Promise<
+  { ok: true; node: { workspace_id: string; type: string; parent_id: string | null } } | { ok: false; response: Response }
+> {
+  const [node] = await sql<{ workspace_id: string; type: string; parent_id: string | null }[]>`
+    SELECT workspace_id, type, parent_id FROM nodes WHERE id = ${input.nodeId}
   `;
   const canRead =
     node !== undefined &&
@@ -172,14 +178,38 @@ export function createTreeRoutes(deps: TreeRouteDeps): Hono<{ Variables: Session
   const app = new Hono<{ Variables: SessionVariables }>();
   const auth = sessionMiddleware(deps.sql, { idleTimeoutMinutes: deps.sessionIdleTimeoutMinutes ?? 30 });
 
+  /**
+   * The caller's gate is the same question `GET /workspaces` answers —
+   * `readableWorkspaceIds`, "the workspaces in which this subject can read
+   * at least one node" — so the set of ids a client is handed is exactly
+   * the set of ids that open. Anything else and the two endpoints disagree
+   * about what a workspace id is worth.
+   *
+   * It is deliberately *not* `can(read)` on the root node: a member with a
+   * grant on one shelf and none on the root reads that shelf's tree today,
+   * and rooting the gate at the root would revoke it.
+   *
+   * **Absence and denial answer identically.** `readableResourceIds`
+   * already emptied `nodes` for an outsider, but `rootId` came back
+   * regardless and 200-versus-404 still separated a workspace that exists
+   * from one that does not — and that root id is a valid `resourceId` for
+   * `can()`, so it is the `pageId` and `newParentId` every other route
+   * takes. Reading nothing *as a member* is still a 200 with an empty
+   * `nodes` (workspaces.ts — "Reading nothing is a 200"); reading nothing
+   * because you are not part of this workspace is a 404, byte-identical
+   * to a workspace that was never created.
+   */
   app.get('/workspaces/:id/tree', auth, async (c) => {
     const workspaceId = c.req.param('id');
     const session = c.get('session');
 
+    const readableWorkspaces = await readableWorkspaceIds(deps.sql, { subjectType: 'user', subjectId: session.userId });
+    if (!readableWorkspaces.has(workspaceId)) return notFound(c);
+
     const [root] = await deps.sql<{ id: string }[]>`
       SELECT id FROM nodes WHERE workspace_id = ${workspaceId} AND type = 'workspace' AND parent_id IS NULL
     `;
-    if (!root) return c.json(ErrorResponseSchema.parse({ error: 'not found' }), 404);
+    if (!root) return notFound(c);
 
     const rows = await deps.sql<NodeRow[]>`
       SELECT id, parent_id, type, slug, title, position, path
@@ -202,20 +232,64 @@ export function createTreeRoutes(deps: TreeRouteDeps): Hono<{ Variables: Session
     return c.json({ rootId: root.id, nodes });
   });
 
-  // navigation-tree: Reordering Requires Write Or Manage Permission.
+  /**
+   * navigation-tree: Reordering Requires Write Or Manage Permission.
+   *
+   * **A move is a write to three things, not one.** `newParentId`
+   * reparents, so the request changes the node, the branch that gains it
+   * and the branch that loses it — and authorising only the node let a
+   * caller holding nothing but `write` on their own book either publish
+   * it (drop it under a shelf they cannot read, and that shelf's readers
+   * inherit the whole subtree) or conceal it (drop a book the team
+   * depends on into a subtree they cannot read, indistinguishable from
+   * the deletion this product has deliberately not built).
+   *
+   * **`write`, on both parents.** Against `packages/core`'s action
+   * lattice (`read < comment < write < manage`), `write` is the least
+   * action that may change content, and `manage` is about administering
+   * grants — requiring it would refuse ordinary drag-and-drop to the
+   * writers the spec means to allow, and `write` already implies `read`,
+   * so the gate cannot be passed by someone who cannot see the branch.
+   * The precedent is one function down and exact: `POST /nodes` requires
+   * `write` on the parent because *adding a child to a branch changes
+   * that branch*. Putting an existing child there is the same act, and
+   * `authorizeWrite` is therefore reused rather than reimplemented.
+   *
+   * **The old parent too.** Removal is the same change as addition, seen
+   * from the branch that loses the child: its child list is what its
+   * readers navigate. A same-parent reorder needs no second check — the
+   * destination *is* the source. Its natural consequence is that dragging
+   * a shelf among its siblings needs `write` on the workspace root, which
+   * is exactly what creating a shelf there already needs.
+   *
+   * **404 before 403.** This route used to answer 403 for a node that
+   * exists and the caller may not read, and 404 for one that does not —
+   * the existence oracle `docs/TODO.md` (2026-09-08) recorded as a
+   * follow-up when the comment routes were fixed. `authorizeWrite` has
+   * answered it correctly for creation and rename since; using it here
+   * closes the last case rather than adding a second rule.
+   */
   app.patch('/nodes/:id/position', auth, async (c) => {
     const nodeId = c.req.param('id');
     const session = c.get('session');
 
-    const [node] = await deps.sql<{ workspace_id: string }[]>`SELECT workspace_id FROM nodes WHERE id = ${nodeId}`;
-    if (!node) return c.json(ErrorResponseSchema.parse({ error: 'not found' }), 404);
-
-    const authorized = await can(deps.sql, { subjectType: 'user', subjectId: session.userId, resourceId: nodeId, action: 'write' });
-    if (!authorized) return c.json(ErrorResponseSchema.parse({ error: 'forbidden' }), 403);
+    const moved = await authorizeWrite(deps.sql, c, { nodeId, userId: session.userId });
+    if (!moved.ok) return moved.response;
 
     const body = await readJsonBody(c.req.raw);
     const parsed = ReorderRequestSchema.safeParse(body);
     if (!parsed.success) return c.json(ErrorResponseSchema.parse({ error: 'newParentId and newIndex are required' }), 400);
+
+    const destination = await authorizeWrite(deps.sql, c, { nodeId: parsed.data.newParentId, userId: session.userId });
+    if (!destination.ok) return destination.response;
+
+    // Only when the node actually leaves a branch. `parent_id` is null
+    // only for the workspace root, which `assertLegalParent` refuses to
+    // move at all.
+    if (moved.node.parent_id !== null && moved.node.parent_id !== parsed.data.newParentId) {
+      const source = await authorizeWrite(deps.sql, c, { nodeId: moved.node.parent_id, userId: session.userId });
+      if (!source.ok) return source.response;
+    }
 
     try {
       await reorderNode(deps.sql, { nodeId, newParentId: parsed.data.newParentId, newIndex: parsed.data.newIndex });

@@ -216,3 +216,78 @@ describe('GET /pages/:id/mentions/:userId/check', () => {
     expect(body.canRead).toBe(true);
   });
 });
+
+/*
+ * ── The *caller's* authorisation ──────────────────────────────────────
+ *
+ * The two cases above both vary the **candidate's** access while the
+ * requester happens to hold a grant on the page, so neither of them can
+ * fail if the handler never looks at the requester at all. These two do:
+ * the requester is the variable, and the roster is the thing that must not
+ * come back. `/mentions/pages` filters by the session subject and
+ * `/pages/:id/mentions/:userId/check` read-gates the caller for exactly
+ * this reason; this endpoint answers about the same page and owes the
+ * same gate.
+ */
+describe('GET /mentions/subjects — caller authorisation', () => {
+  test('a caller with no grant anywhere gets the same answer as for a page that does not exist, and no roster', async () => {
+    const owner = await insertUser('owner-roster');
+    const [ws] = await sql<{ id: string }[]>`INSERT INTO workspaces (owner_id, name, slug) VALUES (${owner}, 'WSR', ${`wsr-${crypto.randomUUID()}`}) RETURNING id`;
+    const root = await insertNode(ws!.id, null, 'workspace', 'root-roster', 'Root');
+    const page = await insertNode(ws!.id, root, 'page', 'page-roster', 'Page');
+    // A real member who really can read the page: without her the endpoint
+    // would return `[]` for the honest reason and prove nothing.
+    const member = await insertUser('alicesecret');
+    await sql`
+      INSERT INTO permissions (workspace_id, subject_type, subject_id, resource_id, action, effect)
+      VALUES (${ws!.id}, 'user', ${member}, ${page}, 'read', 'allow')
+    `;
+    // Holds nothing: no grant in any workspace, no cell membership, owns
+    // no workspace. Only a session.
+    const outsider = await insertUser('outsider-roster');
+    const cookie = await cookieFor(outsider);
+    const MISSING_PAGE_ID = '00000000-0000-4000-8000-0000000000fd';
+
+    const app = buildApp();
+    const denied = await app.request(`/mentions/subjects?workspaceId=${ws!.id}&pageId=${page}&q=`, { headers: { cookie } });
+    const missing = await app.request(`/mentions/subjects?workspaceId=${ws!.id}&pageId=${MISSING_PAGE_ID}&q=`, { headers: { cookie } });
+
+    const deniedBody = await denied.text();
+    const missingBody = await missing.text();
+
+    expect(denied.status).toBe(404);
+    expect(missing.status).toBe(denied.status);
+    expect(deniedBody).toBe(missingBody);
+    expectNoDisclosure(deniedBody, { id: member, values: ['alicesecret'] }, denied.headers);
+  });
+
+  test('a workspace member who cannot read the page is refused the list of who can', async () => {
+    const owner = await insertUser('owner-roster2');
+    const [ws] = await sql<{ id: string }[]>`INSERT INTO workspaces (owner_id, name, slug) VALUES (${owner}, 'WSR2', ${`wsr2-${crypto.randomUUID()}`}) RETURNING id`;
+    const root = await insertNode(ws!.id, null, 'workspace', 'root-roster2', 'Root');
+    const page = await insertNode(ws!.id, root, 'page', 'page-roster2', 'Page');
+    const elsewhere = await insertNode(ws!.id, root, 'page', 'page-elsewhere', 'Elsewhere');
+    const member = await insertUser('bobsecret');
+    await sql`
+      INSERT INTO permissions (workspace_id, subject_type, subject_id, resource_id, action, effect)
+      VALUES (${ws!.id}, 'user', ${member}, ${page}, 'read', 'allow')
+    `;
+    // A genuine member of this workspace — but of a different page. The
+    // gate is per-page, not per-workspace, because the answer is a fact
+    // about `page`.
+    const stranger = await insertUser('stranger-roster');
+    await sql`
+      INSERT INTO permissions (workspace_id, subject_type, subject_id, resource_id, action, effect)
+      VALUES (${ws!.id}, 'user', ${stranger}, ${elsewhere}, 'read', 'allow')
+    `;
+
+    const app = buildApp();
+    const res = await app.request(`/mentions/subjects?workspaceId=${ws!.id}&pageId=${page}&q=`, {
+      headers: { cookie: await cookieFor(stranger) },
+    });
+
+    const body = await res.text();
+    expect(res.status).toBe(404);
+    expectNoDisclosure(body, { id: member, values: ['bobsecret'] }, res.headers);
+  });
+});

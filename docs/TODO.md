@@ -415,6 +415,323 @@ makes conventions portable across projects.
 
 Discoveries and constraints. Newest first.
 
+### 2026-09-09 — Three routes authorised the object and never the subject, and they chained
+
+An adversarial audit reproduced three authorisation holes against a real Postgres. They are the
+same defect wearing three costumes, and the second one hands an outsider the id the first one needs.
+
+**1. `GET /mentions/subjects` performed no authorisation on the caller at all.** The handler read
+`workspaceId` and `pageId` off the query string and never called `c.get('session')`. The `auth`
+middleware requires *a* session; nothing required it to relate to that workspace. A user with no
+grant anywhere, no cell membership and no workspace of their own got
+`{"subjects":[{"id":"…","displayName":"alicesecret"}]}` back. `q` defaults to `''`, which
+`packages/db/src/permissions/candidates.ts` turns into `ILIKE '%'` — the entire roster, 50 rows at
+a time. Both sibling handlers in that same file were already correct: `/mentions/pages` filters by
+the session subject, and `/pages/:id/mentions/:userId/check` carries an explicit caller read-gate
+with a comment explaining why.
+
+**2. `GET /workspaces/:id/tree` had no membership or read gate.** `readableResourceIds` emptied
+`nodes` for an outsider, which *looked* like the gate — but `rootId` was returned unconditionally,
+and 200 (exists) versus 404 (does not) was itself the oracle. `exists → 200
+{"rootId":"1becec0e-…","nodes":[]}`, `absent → 404`. That root id is a valid `resourceId` for
+`can()`, which is exactly the `pageId` hole 1 wanted and the `newParentId` hole 3 wanted. Any
+authenticated user — a self-registered one on an `open` instance included — who held or guessed a
+workspace UUID got it. `apps/api/src/routes/workspaces.ts` is scrupulous about this exact class
+("Absent, never marked"; "Reading nothing is a 200"), which is what marks this as an oversight
+rather than a decision.
+
+**3. `PATCH /nodes/:id/position` authorised `write` on the moved node and nothing on the
+destination.** `reorderNode` accepts `newParentId` and reparents, guarded only by
+`CrossWorkspaceMoveError`, `CyclicMoveError` and `assertLegalParent` — none of which is about the
+caller. `reorder-into-unreadable-parent → 200 {"ok":true}`, with the new parent the secret shelf.
+Two directions of damage: **disclosure**, since moving your book under a shelf you cannot read
+publishes it and its whole subtree to that shelf's readers, performed by someone holding only
+`write`; and **concealment**, since moving a book the team depends on into a subtree they cannot
+read makes it vanish from their tree, indistinguishable from the deletion this product has
+deliberately not built. `POST /nodes`, one function further down the same file, has always called
+`authorizeWrite(parentId)` because creating a child requires `write` on the parent.
+
+**The shape.** *A route that authorises the object but not the subject, or the source but not the
+destination.* Hole 1 authorised the page's candidates and never the caller. Hole 2 authorised each
+node and never the workspace. Hole 3 authorised the node and never either branch the move rewrites.
+In each, something was checked, which is why each read as finished.
+
+**What the gates are now.**
+
+- `/mentions/subjects` requires `read` on `pageId` and requires that page to belong to
+  `workspaceId` — the two ids arrive independently and nothing else related them, so a page
+  readable in one tenant could otherwise be held up to ask for another tenant's roster. Absence,
+  denial and tenant mismatch are one 404, as on the check endpoint.
+- `/workspaces/:id/tree` gates on `readableWorkspaceIds` — the same question `GET /workspaces`
+  answers, so the set of ids a client is handed is exactly the set that opens. Deliberately *not*
+  `can(read)` on the root node: a member with a grant on one shelf and none on the root reads that
+  shelf's tree today, and rooting the gate there would revoke it. A member reading nothing still
+  gets `200 {rootId, nodes: []}`; a non-member gets a 404 byte-identical to a workspace that was
+  never created.
+- Reorder requires `write` on the node, on the destination parent, **and** on the old parent when
+  the node actually leaves one. Against `packages/core/src/permissions/actions.ts`
+  (`read < comment < write < manage`), `write` is the least action that may change content;
+  `manage` administers grants and would refuse ordinary drag-and-drop to the writers the spec means
+  to allow. `write` implies `read`, so the gate cannot be passed by someone who cannot see the
+  branch. The old parent is included because **removal is addition seen from the branch that loses
+  the child** — its child list is what its readers navigate, and `POST /nodes` already charges
+  `write` on a parent for adding one. A same-parent reorder needs no second check, the destination
+  being the source. The natural consequence is that dragging a shelf among its siblings needs
+  `write` on the workspace root, which is exactly what creating a shelf there already needs.
+
+**Also closed:** `PATCH /nodes/:id/position` answered 403 for exists-but-unreadable and 404 for
+absent — the last case of the 2026-09-08 existence-oracle finding, recorded there as a follow-up.
+It now reuses `authorizeWrite`, which has answered this correctly for creation and rename since.
+
+**Why the suite missed all three.** Each test varied the wrong variable.
+`mentions.test.ts`'s two `/mentions/subjects` cases both vary the *candidate's* access while the
+caller happens to hold a grant on the page — neither can fail if the caller is never consulted.
+`tree.test.ts` asserted non-disclosure of a hidden *chapter* to a member, never the
+outsider-versus-nonexistent-workspace case, so its subject could always read something.
+`reorder.test.ts` (`packages/db`) tests reparenting for correctness of `position` and `path` and
+has no permission dimension at all, and `tree.test.ts`'s two reorder cases both keep the node under
+the parent it already had, so `newParentId` never named a branch the caller had no right to.
+
+**Impact:** the rule to carry forward is **authorise the subject, not just the object, and both
+ends of a move, not just the source**. Concretely, when reviewing a route: name the caller's right
+before naming the resource's filter; if the handler never reads `c.get('session')`, it has no
+authorisation whatever else it checks; and if a request names two resources, both are gated. For
+the tests: a non-disclosure test must seed a subject who genuinely holds *nothing* — this batch
+added an `outsider` to `tree.test.ts`'s fixture for exactly that reason — and a mutation test must
+vary the parameter the mutation travels through, not merely exercise the endpoint.
+
+### 2026-09-09 — Two pipelines, one verified and one not, agreeing on the bytes and disagreeing on what the user sees
+
+An author writes a collapsible runbook as `<details><summary>Rollback steps</summary>…</details>`.
+`probe()` returns `{ok: true}`, so edit mode opens. The save succeeds. The markdown in
+`page_content` is correct to the byte, and `canonicalise()` is a fixpoint on it. SPECS §5.1
+classifies raw HTML as **Verbatim** — "carried opaquely through the schema… byte-identical round
+trip; edit mode opens" — and every one of those clauses was true. Every reader saw an empty gap.
+
+**The mechanism.** `parse()` emits native mdast `html` nodes for raw HTML.
+`remarkRehype({allowDangerousHtml: true})` turns those into hast `raw` nodes — strings of
+unparsed HTML. `rehypeSanitize` handles `root`, `element`, `text`, comment and doctype, and
+nothing else, so it dropped every `raw` node wholesale. `rehype-raw` — the plugin that reparses
+those strings into real elements the allowlist can then vet — was never in the pipeline. Block
+raw HTML lost its text entirely (`"<div>hello world</div>"` rendered as `""`); inline raw HTML
+lost only its tags (`"Some <b>bold</b> inline."` rendered as `"<p>Some bold inline.</p>"`), which
+is why nobody noticed — the common case degrades quietly instead of vanishing.
+
+**The shape, which is the reason this is written down.** Markdown has two consumers here, and
+they are separate pipelines: `markdown → ProseMirror → markdown` (the editor) and
+`markdown → HTML` (`render()`, cached and served to read mode). GATE-2 is a real gate with a
+69-fixture corpus, and it measures the first one only. It never calls `render()`. So the corpus
+proved, rigorously and correctly, that the bytes survived — and proved nothing whatsoever about
+whether anyone could read them. Two pipelines fed by one canonical artefact, one of them
+verified to a high standard, the other not verified at all, agreeing on what is stored and
+disagreeing on what is shown. A green gate on the wrong pipeline reads exactly like a green gate
+on the right one. The `verbatim/html-block.md` and `verbatim/html-inline.md` fixtures were both
+green throughout.
+
+**The fix, and the security argument it had to survive.** `rehype-raw` now runs between
+`remarkRehype` and `rehypeSanitize`. The alternative — refusing raw HTML at the probe so the
+editor never accepts what the reader cannot see — is honest but contradicts §5.1's Verbatim
+classification and would reject documents that already exist; a visible placeholder was rejected
+too, because it leaves the runbook unreadable, which is the actual complaint. Parsing raw HTML
+does change the attack surface: read-mode HTML is cached and injected with `v-html`, so anything
+surviving `SANITIZE_SCHEMA` reaches every reader's DOM, and eleven XSS probes that passed before
+passed **partly because raw HTML was dropped entirely** — a pass for the wrong reason, in the
+security tests specifically. Fifteen probes were re-run against the parsed pipeline and all
+fifteen are clean (script; `img onerror`; `javascript:`, `vbscript:` and `data:` hrefs; `iframe`;
+`object`/`embed`; `svg`+`use` with a `data:` URI; the `math`/`mtext`/`table`/`mglyph`/`style`
+mXSS sequence; `details ontoggle`; `style` exfiltration; `base`/`meta`/`link`;
+`xlink:href`/`formaction`/`srcset`; a `data:text/html` image; `template`/`noscript`/`textarea`
+escapes; and two DOM-clobbering shapes). Each probe in `render.test.ts` now pairs its negative
+assertion with a positive one proving the surrounding HTML *did* render, so none of them can
+ever go green again by the pipeline throwing the input away.
+
+**`clobberPrefix: ''` had to be re-derived, not re-justified.** It was safe only incidentally:
+raw HTML was the single route to an author-chosen `id`, and raw HTML was dropped, so there was
+nothing unprefixed for a prefix to defend against. Parsing raw HTML retires that reasoning
+completely. Re-enabling the sanitiser's own prefix is not the answer and never was — it rewrites
+`id` but never `href`, so it breaks the footnote pairs `mdast-util-to-hast` already prefixed,
+which is why it was disabled in the first place. The new reasoning is positive instead of
+residual: `name` is no longer allowed on any element, and `id` is allowed only when it matches
+one of the shapes `remark-rehype` itself mints (`user-content-fn-*`, `user-content-fnref-*`,
+`footnote-label`). None of those is a valid JavaScript identifier, so none can become a
+`window.<name>` handle by named access, and `name` — the `document.currentScript` and
+form-scoped-named-access route — is gone outright. `span`'s open `className`, which existed only
+so `wikiLinkHandler`/`tagHandler` could carry their own class, is narrowed to those two literal
+values; `dataBlockId` is pinned to the block-anchor grammar `[0-9A-Za-z]+`; and `style`, `svg`,
+`math`, `iframe`, `object`, `embed`, `noscript`, `template`, `textarea` and `title` are now
+*stripped* with their children rather than unwrapped, since their child text is stylesheet
+source or notation markup, never prose.
+
+**What is deliberately left open.** `rehype-raw` reserializes and reparses the whole document —
+it must, because a `<details>` block arrives as two unbalanced `html` nodes that cannot be parsed
+in isolation — and that erases node identity. Marking machine-minted nodes beforehand does not
+survive it (verified: every element comes back with its `data` gone). So the sanitiser can bound
+the *shape* of an `id` but not its *origin*: an author can still write
+`<div id="user-content-fn-1">` and duplicate a footnote's jump target, or wear `class="wiki-link"`.
+Both are bounded to the author's own page, whose entire text they already control, and neither has
+any script consequence, so the per-render nonce that exact provenance would cost was not spent.
+`render.test.ts` pins that boundary in both directions — no other `id` shape or class survives,
+and these do — so widening it cannot pass unnoticed.
+
+**A silent regression the narrowing itself introduced, caught only by adding the test.** Pinning
+`id` to `/^user-content-fn(?:ref)?-/` alone drops `id="footnote-label"` from the footnote
+section's heading while leaving every reference's `aria-describedby="footnote-label"` pointing at
+it — an orphaned aria reference, invisible in rendered output and in every existing assertion.
+The pre-existing footnote test asserted the four `id`/`href` halves and `class="footnotes"`, and
+stayed green through it. It now asserts both halves of the aria pair too.
+
+### 2026-09-09 — A foreign key that constrains the tenant while the code depends on a narrower scope
+
+Two defects, one shape. A composite foreign key existed, was correct about the *tenant*, and
+was read as if it were correct about everything — while the application's own logic depended
+on a narrower scope the key never mentioned and nothing else checked either.
+
+**`comments.parent_id` — the page.** `createReply` inserted `(workspace_id, page_id,
+parent_id, ...)` with `page_id` from the URL and `parent_id` verbatim from the request body,
+and `comments_parent_fk (parent_id, workspace_id) -> comments (id, workspace_id)` reconciled
+only the first two. The route gated `can('comment')` on the URL's page and never looked at the
+parent's. Every *reader* of a thread, however, attributes a reply to its **root's** page:
+`listCommentIndicators` joins `reply.parent_id = root.id` with no page predicate on the reply
+side, so a reply written with `page_id = A` and a parent rooted on page B raised page B's
+indicator count from 1 to 2 — reproduced at the data layer, and over HTTP with a caller who had
+no grant of any kind on page B. It was latent only because a root comment's uuid is returned
+solely to its own author; `comments_thread_idx ON (parent_id, created_at)` is already built for
+the thread-read endpoint that would turn it into content injection, listing an attacker's reply
+body to readers of a page she cannot open.
+
+**`POST /uploads/avatar` — the workspace.** `workspaceId` arrived in the multipart form,
+validated only as a non-empty string, and was interpolated straight into
+`workspaces/${workspaceId}/avatars/...` with no membership check at all. A first pass called
+this contained — `FsBlobStore.#resolveKey` rejects `..`, backslashes, nulls and absolute paths
+and then re-verifies the resolved path under its root — and that was wrong twice over.
+
+It was wrong at the route: `workspaceId: "../../../../etc"` returned **HTTP 200**, producing
+the key `workspaces/../../../../etc/avatars/u/x.webp`, and so did a non-UUID and a foreign
+workspace's id. The test that was supposed to pin the key shape asserted
+`/^workspaces\/.+\/avatars\/.+\/.+\.webp$/` — and `.+` matches `/`, so the traversal
+satisfied it.
+
+It was wrong about the store: containment was one adapter's property, not the system's.
+`S3BlobStore.put/get/delete` handed the key to `Bun.S3Client` with no key policy whatsoever.
+`FsBlobStore` had five rejected-key tests; `S3BlobStore` had none, so every rejection its suite
+observed came from MinIO rather than from the adapter — live against MinIO, `/etc/passwd` and
+`a\b.txt` were accepted and round-tripped. Its one "contract proof" was
+`const _typeContract: BlobStore = new S3BlobStore(...)`, a type annotation the compiler checks
+and no test run can fail.
+
+**Impact.** For the reply, both halves, because they answer different questions. Migration
+`0015_comment_parent_page_scope` re-keys `comments_parent_fk` to `(parent_id, page_id,
+workspace_id) -> comments (id, page_id, workspace_id)` behind a new
+`comments_id_page_workspace_unique`: a cross-page reply now has no referenced row, exactly as
+`comments_block_fk` already makes a cross-page block reference unrepresentable rather than
+merely unqueried. It subsumes the old tenant guarantee — `page_id` still travels with
+`workspace_id` — and its up migration first deletes any reply whose page already disagreed with
+its parent's, rows that are illegitimate by construction. The route additionally looks the
+parent up scoped by `page_id` and `workspace_id` and answers `notFound` on a miss, which is not
+a second guard so much as the difference between a 404 and a constraint violation surfacing as
+a 500; scoping the lookup also makes "a parent on a page you cannot read" indistinguishable
+from "a parentId that names nothing". A route check *alone* was rejected: it leaves the
+database able to hold the bad row, and the reader that miscounts it is a query, not a route.
+For the upload, three layers, because the traversal crossed all three. The route validates
+`workspaceId` as a uuid and gates the handler on `isWorkspaceMember` before the size, sniff and
+`sharp` work; a malformed id gets the same 403 as a workspace the caller is simply not in,
+since `workspace_id` is a uuid column and there is nothing to disclose by distinguishing them.
+The key assertion's `.+` became `[^/]+`, so it can no longer match a separator. And the key
+policy moved out of `FsBlobStore` into `blob-key.ts`, which both adapters now call on every
+`put`, `get` and `delete` — the filesystem adapter keeps its own resolve-and-recheck on top,
+because reasoning about characters and reasoning about a resolved path fail differently.
+
+The two adapters are held to one policy by `blob-store-key-contract.ts`, a suite both test
+files run over the same key list. Its discriminating assertion is `error.reason ===
+'invalid blob key'`, never `ok === false`: an adapter with no policy at all still *fails* on a
+bad key whenever its backend is unreachable, which is how an empty S3 policy stayed green, and
+the S3 factory deliberately points at `http://127.0.0.1:1` so any key reaching the network
+proves the adapter did not refuse it. A trailing accepted-key case pins the other side, so a
+guard that rejected everything could not pass either. The type-only `_typeContract` is gone,
+replaced by a suite that exercises all three port methods at runtime.
+
+**The trap in the tests.** A reply test whose parent sits on the same page exercises nothing;
+an upload test whose caller belongs to the target workspace proves nothing; and a store test
+whose "rejection" is the backend's refusal proves less than nothing, because it reads as
+coverage. All three were live here. The new tests seed the other case deliberately, and the
+five pre-existing upload tests were posting a `crypto.randomUUID()` workspace that existed
+nowhere — they now seed a real member, which is the same hole in miniature.
+
+### 2026-09-09 — `login_attempt` retained an address the caller chose, on a public endpoint
+
+The login route logged `{ event: 'login_attempt', email, outcome }`. The invariant everyone
+checked held — no plaintext password, no hash, and `auth.test.ts` asserts both — so the field
+beside them was never questioned. But `email` on a **failure** is not the instance's data: it
+is whatever an unauthenticated caller typed. A script walking a list of addresses writes that
+list into stdout, and from there into whatever aggregator collects it, at one line per guess.
+The value bought in return is telemetry nothing reads: the outcome alone already says a login
+failed, and the abuse question ("who is doing this, how fast") is answered by a rate limit
+keyed on the caller — a gap this file already carries — not by retaining third-party
+addresses in a log.
+
+**Impact.** `login_attempt` now logs `outcome`, plus `userId` on success only — the
+application's own identifier, enough to correlate with the session that follows, and never
+attacker-supplied. The choice is stated in a comment at the log line rather than left as an
+absence someone re-adds. Two tests pin it, for the failure and the success path.
+`openspec/changes/archive/2026-09-06-tenancy-and-permissions/verify-report.md` quotes the old
+line as evidence; it is an archived record of what was true then and stays as it is.
+
+### 2026-09-09 — The non-disclosure guarantee was enforced in the payload and broken by the work before it
+
+`POST /auth/password-reset` returns a byte-identical 202 whether or not the address has an
+account, and a test proved it. What no test looked at was what each branch *did* before
+producing that byte-identical answer. The hit branch ran `createPasswordReset` and then
+`await deps.mailSender.send(...)` **inside the request**; the miss branch ran
+`simulatePasswordResetWork`, one SHA-256 and one `DELETE`. `SmtpMailSender` builds an
+unpooled transport, so every send is a fresh TCP connect, EHLO, optional STARTTLS and
+MAIL/RCPT/DATA. Measured against this repository's own local Mailpit — same host, no TLS,
+the best case that exists:
+
+```
+avg sendMail ms:    13.6
+avg dummy hash ms:   0.0898
+```
+
+A 150x separation on the friendliest possible relay. A self-hoster pointing at a real one
+pays 100 ms to 1 s; a dead one pays the transport's full 5 s `connectionTimeout`, at which
+point the address oracle is readable with a stopwatch — and nothing bounds the rate, because
+"no rate limiting on login or password reset" is a gap this file already carries forward.
+The code comment beside the dummy branch claimed it kept "the two response paths' latency
+comparable"; it kept the two *database* paths comparable and had never seen the mail.
+
+The test that was supposed to catch this is the more instructive half. `auth.test.ts` had a
+wall-clock test, "timing is comparable between a known and an unknown account", asserting the
+known/unknown ratio stayed under 5 — and it passed, on `main`, at the moment of the
+measurement above. It passed because it built the route with `RecordingMailSender`, which
+pushes to an array and returns. It mocked away the single cost it existed to bound, then
+compared two ~1 ms numbers whose ratio is mostly scheduler noise. Twenty instances now of a
+test passing for a reason unrelated to its name.
+
+**Impact.** Mail is handed off, never awaited. `apps/api/src/adapters/mail/background-mail-dispatcher.ts`
+introduces `MailDispatcher`, whose `dispatch` returns `void` — the route holds nothing it
+*can* await, so the guarantee is carried by the type rather than by a reviewer noticing a
+missing `await`. `BackgroundMailDispatcher` is the safety half of the hand-off: it starts the
+send on a later tick (nothing of it runs in the caller's tick), catches a returned `err`
+*and* a thrown rejection, logs one `mail_dispatch_failed` line naming the purpose and the
+recipient so an operator can still answer "the reset mail never arrived", and can never
+become the unhandled rejection that takes a process down. `SIGTERM`/`SIGINT` drain it for up
+to two seconds so a hand-off does not become a silent drop at shutdown.
+
+The replacement tests are one causal and one temporal, because neither alone is honest. The
+causal one gates the transport on a promise the test releases only *after* racing the
+response: a handler that awaits the send cannot win that race at any machine speed, and the
+one that does not always wins it immediately. The temporal one *injects* 250 ms into the
+transport instead of mocking it away, and asserts a one-sided bound far outside what two DB
+round trips cost. Neither proves constant time; they prove the mail transport is not on the
+response's causal path. The residue is one `INSERT`, sub-millisecond, and closing that needs
+a fixed response deadline rather than a dummy — recorded, not silently implied.
+
+**The rule.** A guarantee about a response is a guarantee about everything the handler does
+before sending it. When a test asserts that two paths are indistinguishable, ask what each
+path *did*, and never let the test double remove the cost under investigation: a stub that
+returns instantly turns a latency test into a test of the stub. Injected latency, or an
+ordering assertion, or nothing.
+
 ### 2026-09-09 — `LEGAL_PARENT_TYPES` existed twice before it existed once
 
 The table that says a book's parent is a shelf — `Workspace -> Shelf -> Book -> {Chapter ->
@@ -1953,6 +2270,30 @@ Fixtures kept permanently at `scripts/checks/__fixtures__/test-coverage/`:
 
 Decisions still owed. Move an entry out of this section once answered and record the answer
 in Findings.
+
+- **Registration answers the question password reset refuses.** `POST /auth/register`
+  returns `409 "an account already exists for this email address"`, while
+  `POST /auth/password-reset` goes to deliberate lengths — an identical body and now an
+  identical latency — never to disclose the same fact. The oracle is bounded to `open` mode:
+  `closed` and `invitation_only` both return 403 before the address is ever looked up (guarded
+  by a test in `admin.test.ts`), so only an instance that has opened public sign-up answers the
+  question. Two honest options, and the choice is a product one:
+  1. **Keep the 409.** Sign-up stays one step: submit, get an account, get told plainly that
+     the address is taken. Cost: on an open instance, anyone can enumerate which addresses
+     hold accounts, one request each, at whatever rate they like. Rewording the message buys
+     nothing — 409 against 201 is the signal, not the sentence.
+  2. **Make it non-disclosing.** Every submission gets the same generic acknowledgement, and
+     the mail decides: a new address receives a link that completes the registration, an
+     already-registered one receives "someone tried to register with your address". Cost: a
+     verification-token table, a confirm route, and a rewritten sign-up screen in `apps/web`;
+     sign-up becomes two steps and inbox-dependent, so a self-hoster with a broken relay can
+     no longer register anyone (the instance already requires a successful SMTP test before
+     `open` mode can be selected, so the dependency is at least consistent with what is there);
+     and the "someone tried to register" mail is itself a thing an attacker can make the
+     instance send to a stranger.
+  Deliberately not decided in-flight: option 2 spans three packages and changes what sign-up
+  *is*. Until it is answered, `admin.ts` carries a comment saying the disclosure is known,
+  which mode it is reachable in, and why the wording is not the fix.
 
 - **What a bodyless 409 should mean.** `useSavePage` and `useEditSession` both do
   `responseBodyOf(error) as {…}` on a 409 and then read a field off the result — `body.canonical`

@@ -65,6 +65,8 @@ interface Fixture {
   readerCookie: string;
   writerCookie: string;
   writerId: string;
+  /** Holds nothing anywhere: no grant, no cell membership, owns no workspace. */
+  outsiderCookie: string;
 }
 
 async function buildFixture(): Promise<Fixture> {
@@ -76,6 +78,11 @@ async function buildFixture(): Promise<Fixture> {
   `;
   const [writer] = await sql<{ id: string }[]>`
     INSERT INTO users (email, password_hash, display_name) VALUES (${`writer-${crypto.randomUUID()}@example.com`}, 'hash', 'Writer') RETURNING id
+  `;
+  // Deliberately granted nothing, ever. A non-disclosure test whose
+  // subject can read something in the workspace proves nothing.
+  const [outsider] = await sql<{ id: string }[]>`
+    INSERT INTO users (email, password_hash, display_name) VALUES (${`outsider-${crypto.randomUUID()}@example.com`}, 'hash', 'Outsider') RETURNING id
   `;
   const [ws] = await sql<{ id: string }[]>`
     INSERT INTO workspaces (owner_id, name, slug) VALUES (${owner!.id}, 'WS', ${`ws-${crypto.randomUUID()}`}) RETURNING id
@@ -108,6 +115,7 @@ async function buildFixture(): Promise<Fixture> {
     readerCookie: await cookieFor(reader!.id),
     writerCookie: await cookieFor(writer!.id),
     writerId: writer!.id,
+    outsiderCookie: await cookieFor(outsider!.id),
   };
 }
 
@@ -135,6 +143,50 @@ describe('GET /workspaces/:id/tree', () => {
     expect(ids).toContain(fixture.visibleBook.id);
     expect(ids).not.toContain(fixture.hiddenChapter.id);
     expect(ids).not.toContain(fixture.hiddenChapterPage.id);
+  });
+});
+
+/*
+ * The test above proves a hidden *chapter* is absent from a member's tree.
+ * It cannot fail if the endpoint answers a subject who is in no way part
+ * of this workspace, because its subject is a member. This one varies the
+ * caller instead: `rootId` is returned unconditionally and 200-versus-404
+ * separates "exists" from "does not exist", so an outsider holding or
+ * guessing a workspace UUID learns both that it exists and a valid
+ * `resourceId` to aim other routes at.
+ */
+describe('GET /workspaces/:id/tree — an outsider cannot tell it apart from nothing', () => {
+  test('a subject with no grant in the workspace gets exactly what a workspace that does not exist gets', async () => {
+    const fixture = await buildFixture();
+    const app = buildApp();
+
+    const denied = await app.request(`/workspaces/${fixture.workspaceId}/tree`, { headers: { cookie: fixture.outsiderCookie } });
+    const absent = await app.request(`/workspaces/${crypto.randomUUID()}/tree`, { headers: { cookie: fixture.outsiderCookie } });
+
+    const deniedBody = await denied.text();
+
+    expect(denied.status).toBe(404);
+    expect(absent.status).toBe(denied.status);
+    expect(deniedBody).toBe(await absent.text());
+    expect(deniedBody).toBe(JSON.stringify({ error: 'not found' }));
+
+    // The root id is the value that mattered: it is a legal `resourceId`
+    // for can(), and therefore a legal `pageId` and `newParentId`.
+    expectNoDisclosure(
+      deniedBody,
+      { id: fixture.root.id, slug: 'root', values: [fixture.shelf.id, fixture.visibleBook.id] },
+      denied.headers,
+    );
+  });
+
+  test('a member who can read only part of the workspace still gets its root', async () => {
+    const fixture = await buildFixture();
+    const app = buildApp();
+
+    const res = await app.request(`/workspaces/${fixture.workspaceId}/tree`, { headers: { cookie: fixture.readerCookie } });
+
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { rootId: string }).rootId).toBe(fixture.root.id);
   });
 });
 
@@ -168,6 +220,118 @@ describe('PATCH /nodes/:id/position', () => {
     expect(res.status).toBe(200);
     const [row] = await sql<{ position: number }[]>`SELECT position FROM nodes WHERE id = ${secondBook.id}`;
     expect(row!.position).toBe(0);
+  });
+
+  /*
+   * ── The destination, and the branch the node leaves ────────────────
+   *
+   * The two cases above authorise the node being dragged and nothing
+   * else, which is exactly the hole: `newParentId` reparents, and a move
+   * is a write to two branches — the one that gains a child and the one
+   * that loses it. `POST /nodes` one function down has always required
+   * `write` on the parent to add a child there; putting an existing one
+   * there is the same act.
+   */
+  test('moving a node under a parent the caller cannot read answers as if that parent did not exist, and does not move it', async () => {
+    const fixture = await buildFixture();
+    const app = buildApp();
+    // A shelf the writer holds nothing on: it exists, and to them it is
+    // invisible. Moving under it would publish the book to its readers.
+    const secretShelf = await insertNode(fixture.workspaceId, fixture.root.id, 'shelf', 'shelf-secret', 1);
+
+    const denied = await app.request(`/nodes/${fixture.visibleBook.id}/position`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', cookie: fixture.writerCookie },
+      body: JSON.stringify({ newParentId: secretShelf.id, newIndex: 0 }),
+    });
+    const absent = await app.request(`/nodes/${fixture.visibleBook.id}/position`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', cookie: fixture.writerCookie },
+      body: JSON.stringify({ newParentId: crypto.randomUUID(), newIndex: 0 }),
+    });
+
+    const deniedBody = await denied.text();
+
+    expect(denied.status).toBe(404);
+    expect(absent.status).toBe(denied.status);
+    expect(deniedBody).toBe(await absent.text());
+    expectNoDisclosure(deniedBody, { id: secretShelf.id, slug: 'shelf-secret' }, denied.headers);
+
+    const [row] = await sql<{ parent_id: string }[]>`SELECT parent_id FROM nodes WHERE id = ${fixture.visibleBook.id}`;
+    expect(row!.parent_id).toBe(fixture.shelf.id);
+  });
+
+  test('moving a node under a parent the caller can read but not write is a 403, because that discloses nothing', async () => {
+    const fixture = await buildFixture();
+    const app = buildApp();
+    const readOnlyShelf = await insertNode(fixture.workspaceId, fixture.root.id, 'shelf', 'shelf-read-only', 2);
+    await grant(fixture.workspaceId, fixture.writerId, readOnlyShelf.id, 'read');
+
+    const res = await app.request(`/nodes/${fixture.visibleBook.id}/position`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', cookie: fixture.writerCookie },
+      body: JSON.stringify({ newParentId: readOnlyShelf.id, newIndex: 0 }),
+    });
+
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as { error: string }).error).toBe('forbidden');
+
+    const [row] = await sql<{ parent_id: string }[]>`SELECT parent_id FROM nodes WHERE id = ${fixture.visibleBook.id}`;
+    expect(row!.parent_id).toBe(fixture.shelf.id);
+  });
+
+  test('moving a node out of a branch the caller may only read is refused — removal changes that branch too', async () => {
+    const fixture = await buildFixture();
+    const app = buildApp();
+    const [mover] = await sql<{ id: string }[]>`
+      INSERT INTO users (email, password_hash, display_name) VALUES (${`mover-${crypto.randomUUID()}@example.com`}, 'hash', 'Mover') RETURNING id
+    `;
+    const destination = await insertNode(fixture.workspaceId, fixture.root.id, 'shelf', 'shelf-destination', 3);
+    const book = await insertNode(fixture.workspaceId, fixture.shelf.id, 'book', 'book-depended-on', 4);
+
+    // Everything the move needs except a right over the branch it leaves:
+    // write on the node, write on the destination, read on the source.
+    await grant(fixture.workspaceId, mover!.id, fixture.shelf.id, 'read');
+    await grant(fixture.workspaceId, mover!.id, book.id, 'write');
+    await grant(fixture.workspaceId, mover!.id, destination.id, 'write');
+
+    const res = await app.request(`/nodes/${book.id}/position`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', cookie: await cookieFor(mover!.id) },
+      body: JSON.stringify({ newParentId: destination.id, newIndex: 0 }),
+    });
+
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as { error: string }).error).toBe('forbidden');
+
+    const [row] = await sql<{ parent_id: string }[]>`SELECT parent_id FROM nodes WHERE id = ${book.id}`;
+    expect(row!.parent_id).toBe(fixture.shelf.id);
+  });
+
+  // docs/TODO.md 2026-09-08 recorded this route as the one place still
+  // answering 403 for exists-but-unreadable. `authorizeWrite` in the same
+  // file already answers it correctly for creation and rename.
+  test('reordering a node the caller cannot read answers as if it did not exist', async () => {
+    const fixture = await buildFixture();
+    const app = buildApp();
+
+    const denied = await app.request(`/nodes/${fixture.hiddenChapter.id}/position`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', cookie: fixture.readerCookie },
+      body: JSON.stringify({ newParentId: fixture.visibleBook.id, newIndex: 0 }),
+    });
+    const absent = await app.request(`/nodes/${crypto.randomUUID()}/position`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', cookie: fixture.readerCookie },
+      body: JSON.stringify({ newParentId: fixture.visibleBook.id, newIndex: 0 }),
+    });
+
+    const deniedBody = await denied.text();
+
+    expect(denied.status).toBe(404);
+    expect(absent.status).toBe(denied.status);
+    expect(deniedBody).toBe(await absent.text());
+    expectNoDisclosure(deniedBody, { id: fixture.hiddenChapter.id, slug: 'chapter-hidden' }, denied.headers);
   });
 });
 
