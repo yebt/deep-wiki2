@@ -1,5 +1,6 @@
 export { createDb } from './client';
 export { describeInvalidDatabaseUrl } from './database-url';
+export { DatabaseIdentityError, guardDatabaseIdentity, probeDatabaseIdentity } from './database-identity';
 export type { Db } from './client';
 export {
   createSession,

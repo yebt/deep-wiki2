@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { guardDatabaseIdentity } from '@deep-wiki/db';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import postgres from 'postgres';
@@ -82,7 +83,12 @@ const DEFAULT_MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 // in-memory request.
 if (import.meta.main) {
   const config = loadConfig();
-  const sql = postgres(config.DATABASE_URL);
+  // The one long-lived application client. Guarded so that the first
+  // query establishes this really is deep-wiki's database: on a developer
+  // machine the conventional Postgres port is often already published by
+  // an unrelated project, and connecting there succeeds — it is the data
+  // that comes back wrong. See packages/db/src/database-identity.ts.
+  const sql = guardDatabaseIdentity(postgres(config.DATABASE_URL));
 
   const app = createApp({ appUrl: config.APP_URL });
 

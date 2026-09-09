@@ -1509,6 +1509,28 @@ Fix: what changed, with the commit or PR reference.
 Impact: what else this touches, or "contained".
 ```
 
+### 2026-09-09 — A dev machine could connect to another project's Postgres and read it as a deep-wiki bug
+
+Symptom: twice. Once the owner saw "a workspace and no pages" and the seed was chased; once an
+e2e server's database was browsed while debugging the dev one. Both times the connection
+succeeded — the wrong data is what was wrong.
+Cause: `env.example` ships the conventional `localhost:5432`, and on this host that port (with
+1025, 8025, 9000 and 9001) belongs to an unrelated `menukap` compose project. A port check
+cannot see this: the port is open, it is simply the wrong server, and both halves of the
+configuration agree on 5432, so `scripts/checks/env-consistency.ts` is the wrong home for it.
+Fix: `packages/db/src/database-identity.ts`. `guardDatabaseIdentity(sql)` wraps a `postgres.js`
+client and, on the **first query only**, asks one round trip whether `public.workspaces` and
+`public.cell_members` are there. Identity is that pair: `workspaces` alone is too common a table
+name, and `drizzle.__drizzle_migrations` identifies any Drizzle project. Applied to the one
+long-lived application client in `apps/api/src/index.ts`. Not applied to `createDb`, whose only
+consumer is the migrator — a migrator must be able to run against a database without our schema.
+Impact: three distinct messages, because "somebody else's database" and "our own database
+before migrations have run" must never read the same — the second is the normal state on first
+setup. The seam is `postgres.js`'s per-query `handler`, which is internal to the driver; the
+real-database tests in `database-identity.test.ts` are what would catch a driver upgrade moving
+it. `env.example` keeps 5432 — `docs/RUNNING.md` §6's ruling stands, the probe is the fix and
+the default was never the problem.
+
 ### 2026-09-04 — `setRegistrationMode` reconciled SMTP verification only on the way to `open`
 
 Symptom: none observed in use — found by reading the reconciliation path while auditing
