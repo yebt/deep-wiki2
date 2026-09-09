@@ -9,7 +9,7 @@ export function loadConfig(raw: Record<string, string | undefined> = process.env
   const result = parseEnv(raw);
 
   if (!result.ok) {
-    const details = result.error.map((issue) => `  - ${issue.variable}: ${issue.message}`).join('\n');
+    const details = result.error.map((issue) => `  - ${issue.message}`).join('\n');
     throw new Error(`apps/api: invalid configuration\n${details}`);
   }
 

@@ -85,6 +85,133 @@ export interface EnvIssue {
   readonly message: string;
 }
 
+/**
+ * Diagnostics, in the spirit of `packages/db/src/database-url.ts`.
+ *
+ * zod reports the symptom it can see, which for an environment variable is
+ * routinely the wrong story: `z.coerce.number()` turns an *unset* variable
+ * into `NaN`, so the reader is told "Expected number, received nan" and goes
+ * looking for a bad value that was never typed. The fix for an unset variable
+ * is a missing line; the fix for an empty one is a missing value; the fix for
+ * a `${...}` placeholder is understanding that a `.env` never interpolates.
+ * Those are three different actions, so they get three different sentences.
+ *
+ * The template of record is the repository root's `env.example` (never
+ * `.env.example`), which `scripts/checks/env-example.ts` keeps in step with
+ * this schema — so pointing at it is always pointing at a current line.
+ *
+ * NOTHING here may echo a value. These variables hold `DATABASE_URL`'s
+ * password, `SMTP_PASSWORD` and `BLOB_STORE_S3_SECRET_ACCESS_KEY`, and an
+ * error message travels into logs and issue reports.
+ */
+const TEMPLATE = 'env.example at the repository root';
+
+/** `${FOO}` in any case, or a bare `$FOO` in the shouting case a .env uses. */
+const UNEXPANDED_REFERENCE = /\$\{[A-Za-z_][A-Za-z0-9_]*\}|\$[A-Z_][A-Z0-9_]*/;
+
+/**
+ * The recognisable shapes a raw value takes when it is wrong for reasons the
+ * schema cannot articulate. Returns `undefined` when the value has no such
+ * shape, leaving the caller to say something more specific.
+ */
+function describeEnvValue(
+  variable: string,
+  raw: string | undefined,
+  expectsNumber: boolean,
+): string | undefined {
+  if (raw === undefined) {
+    return (
+      `${variable} is not set: your .env has no line for it. Add one — copy that line from ` +
+      `${TEMPLATE}, which is the template of record.`
+    );
+  }
+
+  const value = raw.trim();
+
+  if (value === '') {
+    return (
+      `${variable} is present but carries no value: the line is there and the right-hand side ` +
+      `is blank — it needs a value, not a new line. ${TEMPLATE} shows the expected form.`
+    );
+  }
+
+  if (UNEXPANDED_REFERENCE.test(value)) {
+    return (
+      `${variable} still contains an unexpanded variable reference. A .env does not interpolate: ` +
+      `the text reaches the process literally, so the placeholder never becomes a value. Write ` +
+      `the value out literally, the way ${TEMPLATE} does.`
+    );
+  }
+
+  if (expectsNumber && !Number.isFinite(Number(value))) {
+    return `${variable} must be a number, and the value your .env gives it is not numeric. ${TEMPLATE} shows the expected form.`;
+  }
+
+  return undefined;
+}
+
+/** Strips `.default()`/`.optional()`/`.nullable()` down to the field's real type. */
+function unwrapField(field: z.ZodTypeAny): z.ZodTypeAny {
+  if (field instanceof z.ZodDefault) return unwrapField(field.removeDefault() as z.ZodTypeAny);
+  if (field instanceof z.ZodOptional || field instanceof z.ZodNullable) {
+    return unwrapField(field.unwrap() as z.ZodTypeAny);
+  }
+  return field;
+}
+
+/** Derived from the schema, so a variable that becomes numeric never needs a second edit here. */
+const NUMERIC_VARIABLES: ReadonlySet<string> = new Set(
+  Object.entries(envSchema.shape)
+    .filter(([, field]) => unwrapField(field as z.ZodTypeAny) instanceof z.ZodNumber)
+    .map(([variable]) => variable),
+);
+
+/**
+ * zod issue codes whose rendered message is built from the *schema* (bounds,
+ * expected types, validator names) and therefore cannot contain the value.
+ * Anything outside this set — `invalid_enum_value` most of all, which prints
+ * `received '<value>'` — is re-worded here rather than passed through.
+ */
+const VALUE_FREE_ZOD_CODES: ReadonlySet<string> = new Set([
+  z.ZodIssueCode.invalid_type,
+  z.ZodIssueCode.invalid_string,
+  z.ZodIssueCode.invalid_date,
+  z.ZodIssueCode.too_small,
+  z.ZodIssueCode.too_big,
+  z.ZodIssueCode.not_finite,
+]);
+
+function describeZodIssue(variable: string, raw: string | undefined, issue: z.ZodIssue): string {
+  const shape = describeEnvValue(variable, raw, NUMERIC_VARIABLES.has(variable));
+  if (shape !== undefined) return shape;
+
+  if (issue.code === z.ZodIssueCode.invalid_enum_value) {
+    return `${variable} must be one of: ${issue.options.join(', ')}. ${TEMPLATE} shows the expected form.`;
+  }
+
+  if (VALUE_FREE_ZOD_CODES.has(issue.code)) {
+    return `${variable}: ${issue.message}`;
+  }
+
+  return `${variable} has a value its schema rejects. ${TEMPLATE} shows the expected form.`;
+}
+
+/**
+ * A conditionally required variable gets the same shape sentence as a
+ * schema-required one, followed by the reason it is required at all — which
+ * is the part `envSchema` alone cannot express.
+ */
+function missingVariableIssue(variable: string, value: string | undefined, reason: string): EnvIssue {
+  const shape =
+    describeEnvValue(variable, value, NUMERIC_VARIABLES.has(variable)) ??
+    `${variable} has no usable value. ${TEMPLATE} shows the expected form.`;
+
+  return { variable, message: `${shape} ${reason}` };
+}
+
+const MAIL_REASON =
+  'The application always needs a MailSender for invitations and password reset, so there is no "mail disabled" mode.';
+
 const REQUIRED_S3_VARS = [
   'BLOB_STORE_S3_ENDPOINT',
   'BLOB_STORE_S3_BUCKET',
@@ -100,21 +227,27 @@ export function refineEnv(env: Env): Result<Env, EnvIssue[]> {
   const issues: EnvIssue[] = [];
 
   if (!env.SMTP_HOST) {
-    issues.push({ variable: 'SMTP_HOST', message: 'required — the application always needs a MailSender' });
+    issues.push(missingVariableIssue('SMTP_HOST', env.SMTP_HOST, MAIL_REASON));
   }
   if (!env.MAIL_FROM) {
-    issues.push({ variable: 'MAIL_FROM', message: 'required — the application always needs a MailSender' });
+    issues.push(missingVariableIssue('MAIL_FROM', env.MAIL_FROM, MAIL_REASON));
   }
 
   if (env.BLOB_STORE_DRIVER === 's3') {
     for (const variable of REQUIRED_S3_VARS) {
       if (!env[variable]) {
-        issues.push({ variable, message: 'required when BLOB_STORE_DRIVER=s3' });
+        issues.push(missingVariableIssue(variable, env[variable], 'It is required when BLOB_STORE_DRIVER=s3.'));
       }
     }
   } else if (env.BLOB_STORE_DRIVER === 'filesystem') {
     if (!env.BLOB_STORE_FS_ROOT) {
-      issues.push({ variable: 'BLOB_STORE_FS_ROOT', message: 'required when BLOB_STORE_DRIVER=filesystem' });
+      issues.push(
+        missingVariableIssue(
+          'BLOB_STORE_FS_ROOT',
+          env.BLOB_STORE_FS_ROOT,
+          'It is required when BLOB_STORE_DRIVER=filesystem.',
+        ),
+      );
     }
   }
 
@@ -129,10 +262,12 @@ export function parseEnv(raw: Record<string, string | undefined>): Result<Env, E
   const parsed = envSchema.safeParse(raw);
 
   if (!parsed.success) {
-    const issues: EnvIssue[] = parsed.error.issues.map((issue) => ({
-      variable: issue.path.join('.') || '(root)',
-      message: issue.message,
-    }));
+    const issues: EnvIssue[] = parsed.error.issues.map((issue) => {
+      const variable = issue.path.join('.');
+      if (variable === '') return { variable: '(root)', message: issue.message };
+
+      return { variable, message: describeZodIssue(variable, raw[variable], issue) };
+    });
 
     return err(issues);
   }
