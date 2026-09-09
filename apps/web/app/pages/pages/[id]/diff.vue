@@ -60,12 +60,27 @@ interface ChangeMeta {
 // other three share, so the distinction survives even for a viewer who
 // cannot use hue at all (the icon and label carry it too — checklist §5,
 // "colour is never the sole carrier of meaning").
+//
+// `moved`'s own icon/label are placeholders here — `badgeIcon`/`badgeLabel`
+// below always replace them with a directional one (`↓`/`↑`, "Moved
+// down"/"Moved up"). A generic crosshair icon and a bare "Moved" label are
+// legible only by reading the badge; a review of the first cut of this
+// screen found exactly that: the moved block appeared only in its NEW
+// position with nothing communicating that it came from somewhere else.
+// The direction is free — `moved`/`modified.moved` always carry distinct
+// `fromSlot`/`toSlot` by construction (block-diff spec) — so an arrow that
+// actually points the right way costs nothing extra to compute.
 const KIND_META: Record<Exclude<Kind, 'unchanged'>, ChangeMeta> = {
   added: { label: 'Added', icon: 'i-lucide-plus', color: 'success' },
   removed: { label: 'Removed', icon: 'i-lucide-minus', color: 'error' },
   modified: { label: 'Modified', icon: 'i-lucide-pencil', color: 'warning' },
   moved: { label: 'Moved', icon: 'i-lucide-move', color: 'secondary' },
 };
+
+/** "down" when the block's new position is later in the document than its old one, "up" otherwise. `fromSlot`/`toSlot` are always distinct for `moved` and for `modified` with `moved: true` (block-diff spec). */
+function movedDirection(fromSlot: number, toSlot: number): 'up' | 'down' {
+  return toSlot > fromSlot ? 'down' : 'up';
+}
 
 const ROW_CLASS: Record<Exclude<Kind, 'unchanged'>, string> = {
   added: 'bg-success-container',
@@ -92,12 +107,21 @@ function textClass(change: BlockChangeWithText): string {
 
 function badgeLabel(change: BlockChangeWithText): string {
   if (change.kind === 'unchanged') return '';
-  if (change.kind === 'modified' && change.moved) return 'Modified · moved';
+  if (change.kind === 'moved') {
+    return movedDirection(change.fromSlot, change.toSlot) === 'down' ? 'Moved down' : 'Moved up';
+  }
+  if (change.kind === 'modified' && change.moved) {
+    return movedDirection(change.fromSlot, change.toSlot) === 'down' ? 'Modified · moved down' : 'Modified · moved up';
+  }
   return KIND_META[change.kind].label;
 }
 
 function badgeIcon(change: BlockChangeWithText): string {
-  return change.kind === 'unchanged' ? '' : KIND_META[change.kind].icon;
+  if (change.kind === 'unchanged') return '';
+  if (change.kind === 'moved' || (change.kind === 'modified' && change.moved)) {
+    return movedDirection(change.fromSlot, change.toSlot) === 'down' ? 'i-lucide-arrow-down' : 'i-lucide-arrow-up';
+  }
+  return KIND_META[change.kind].icon;
 }
 
 function badgeColor(change: BlockChangeWithText): ChangeMeta['color'] | undefined {

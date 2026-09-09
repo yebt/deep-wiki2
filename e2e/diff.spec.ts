@@ -4,10 +4,13 @@ import { expect, test, type BrowserContext } from '@playwright/test';
 /**
  * Page-level diff (block-diff spec: "Diff Reports Added, Removed,
  * Modified, And Moved"; docs/UI-CHECKLIST.md §4.7). Against the same
- * seeded `historyPageId` e2e/history.spec.ts uses — two real saves, the
- * second one both changing the existing paragraph and adding a new one,
- * so this suite's happy path exercises two distinct classifications from
- * one real diff rather than one block repeated twice.
+ * seeded `historyPageId` e2e/history.spec.ts uses — two real saves whose
+ * fixture (e2e/seed.bun.ts) is built so this suite's happy path exercises
+ * all four classifications from one real diff: an unchanged heading, a
+ * small in-place edit (modified), a new paragraph (added), a removed
+ * paragraph, and a paragraph copied byte-for-byte into a later slot
+ * (moved) — verified directly against `diffBlocks()` before trusting the
+ * fixture text, per the quality-bar note in tasks.md 10.3.
  */
 
 interface Fixtures {
@@ -35,7 +38,7 @@ async function signInAs(context: BrowserContext, token: string): Promise<void> {
  * "Compare with previous" control deleted from history.vue, which is
  * exactly the wiring this test exists to prove (task 10.3).
  */
-test('a reader reaches the diff by clicking from history, and sees the added and modified blocks distinctly', async ({
+test('a reader reaches the diff by clicking from history, and sees all four classifications distinctly', async ({
   page,
   context,
 }) => {
@@ -62,12 +65,22 @@ test('a reader reaches the diff by clicking from history, and sees the added and
   );
   await expect(page.getByRole('heading', { level: 1, name: 'Page diff' })).toBeVisible();
 
-  // The added block (new second-save paragraph) and the modified block
-  // (the changed first paragraph) both appear, each under its own
-  // distinct label — not merged into one classification.
-  await expect(page.getByText('A paragraph that did not exist in the first version.')).toBeVisible({ timeout: 30000 });
+  // All four classifications appear, each under its own distinct label —
+  // never merged into one another.
+  await expect(page.getByText('A brand new paragraph about kiwis, added in this revision.')).toBeVisible({
+    timeout: 30000,
+  });
   await expect(page.getByText('Added', { exact: true })).toBeVisible();
   await expect(page.getByText('Modified', { exact: true })).toBeVisible();
+  await expect(page.getByText('Removed', { exact: true })).toBeVisible();
+  // Directional, not a bare "Moved": the apples paragraph moves to a LATER
+  // slot in the second save (block-diff spec; the badge names the
+  // direction so the move reads as one without requiring the viewer to
+  // compare positions themselves).
+  await expect(page.getByText('Moved down', { exact: true })).toBeVisible();
+  // The removed paragraph's own text is present under its own label — not
+  // silently dropped.
+  await expect(page.getByText('A paragraph about bananas that will be removed entirely.')).toBeVisible();
 });
 
 /**
@@ -90,7 +103,7 @@ test('an outsider with no read grant sees the same not-found state a nonexistent
   await expect(page.getByRole('heading', { name: 'This page does not exist' })).toBeVisible({ timeout: 30000 });
 
   const deniedHtml = await page.content();
-  expect(deniedHtml).not.toContain('did not exist in the first version');
+  expect(deniedHtml).not.toContain('kiwis');
   expect(deniedHtml).not.toContain('E2E Owner');
 
   await page.goto(

@@ -136,23 +136,40 @@ async function seedFixtures(sql: postgres.Sql) {
     VALUES (${ws!.id}, ${root!.id}, 'page', '', 2, ${`e2e-history-${randomUUID()}`}, 'E2E History Page')
     RETURNING id
   `;
+  // Deliberately four blocks in the first save so the second save can
+  // produce all four `diffBlocks()` classifications from one real diff —
+  // not just added+modified. Each block's fate:
+  //   - heading            -> unchanged
+  //   - "as it was..."     -> modified (small in-place edit)
+  //   - "apples..."        -> moved (byte-identical text, later slot)
+  //   - "bananas..."       -> removed (absent from the second save)
+  // and the second save adds one brand-new paragraph ("kiwis...").
+  // Verified directly against `diffBlocks()` before trusting this fixture
+  // (versioning-and-collaboration tasks.md 10.3's quality-bar note): a
+  // full-rewrite edit falls below `matchBlocks()`'s `MATCH_THRESHOLD` and
+  // classifies as remove-plus-add rather than modified, and a block that
+  // both moves AND changes text classifies `modified` (with `moved: true`)
+  // rather than `moved` — the "apples" paragraph below is copied
+  // byte-for-byte into its new position for exactly this reason.
   const historyFirstSave = await savePage(sql, {
     nodeId: historyPage!.id,
     workspaceId: ws!.id,
-    markdown: '## First version\n\nThe page as it was first saved, with no edits yet.\n',
+    markdown:
+      '## First version\n\n' +
+      'The page as it was first saved, with no edits yet.\n\n' +
+      'A paragraph about apples that will move down in the next revision.\n\n' +
+      'A paragraph about bananas that will be removed entirely.\n',
     expectedContentHash: null,
     updatedBy: owner!.id,
   });
-  // The second save keeps the heading byte-identical (unchanged), edits
-  // the existing paragraph in place (high enough trigram similarity to
-  // classify `modified`, not remove-plus-add — verified directly against
-  // `diffBlocks()`), and adds a new paragraph (`added`). e2e/diff.spec.ts's
-  // happy path exercises all three classifications from one real diff.
   await savePage(sql, {
     nodeId: historyPage!.id,
     workspaceId: ws!.id,
     markdown:
-      '## First version\n\nThe page as it was first saved, now with one edit.\n\nA paragraph that did not exist in the first version.\n',
+      '## First version\n\n' +
+      'The page as it was first saved, now with one small edit.\n\n' +
+      'A brand new paragraph about kiwis, added in this revision.\n\n' +
+      'A paragraph about apples that will move down in the next revision.\n',
     expectedContentHash: historyFirstSave.contentHash,
     updatedBy: owner!.id,
   });

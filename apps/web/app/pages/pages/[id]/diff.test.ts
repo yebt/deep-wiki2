@@ -1,4 +1,4 @@
-import { UApp } from '#components';
+import { UApp, UIcon } from '#components';
 import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime';
 import { describe, expect, test, vi } from 'vitest';
 import { defineComponent, h, ref } from 'vue';
@@ -54,7 +54,7 @@ const MIXED_CHANGES: Change[] = [
   { kind: 'modified', id: 'b-modified', fromSlot: 1, toSlot: 0, moved: false, text: 'Paragraph about grapes, now changed.' },
   { kind: 'unchanged', id: 'b-unchanged', slot: 1, text: 'Paragraph about pears, never touched.' },
   { kind: 'added', id: 'b-added', slot: 2, text: 'Paragraph about kiwis, brand new.' },
-  { kind: 'moved', id: 'b-moved', fromSlot: 3, toSlot: 3, text: 'Paragraph about bananas, only its position changed.' },
+  { kind: 'moved', id: 'b-moved', fromSlot: 0, toSlot: 3, text: 'Paragraph about bananas, only its position changed.' },
 ];
 
 describe('page-diff screen', () => {
@@ -153,6 +153,52 @@ describe('page-diff screen', () => {
     expect([backgroundClassOf(addedRow), backgroundClassOf(removedRow), backgroundClassOf(modifiedRow)]).not.toContain(
       movedBackground,
     );
+  });
+
+  // Follow-up from owner review of the first cut: a moved block appearing
+  // ONLY in its new position, with a generic crosshair icon, was legible
+  // only by reading the "Moved" label — the ordering itself communicated
+  // nothing. The badge now names and points a direction. Both directions
+  // are asserted here, in isolation from each other, so a hardcoded
+  // "always down" implementation cannot pass.
+  test('a block moved later in the document reads "Moved down" with a downward arrow', async () => {
+    mockDiff({
+      status: 'success',
+      changes: [{ kind: 'moved', id: 'b1', fromSlot: 0, toSlot: 3, text: 'This paragraph moved later in the document.' }],
+    });
+    const component = await mountSuspended(PageInApp);
+
+    expect(component.text()).toContain('Moved down');
+    const iconNames = component.findAllComponents(UIcon).map((icon) => icon.props('name'));
+    expect(iconNames).toContain('i-lucide-arrow-down');
+    expect(iconNames).not.toContain('i-lucide-arrow-up');
+  });
+
+  test('a block moved earlier in the document reads "Moved up" with an upward arrow', async () => {
+    mockDiff({
+      status: 'success',
+      changes: [{ kind: 'moved', id: 'b1', fromSlot: 3, toSlot: 0, text: 'This paragraph moved earlier in the document.' }],
+    });
+    const component = await mountSuspended(PageInApp);
+
+    expect(component.text()).toContain('Moved up');
+    const iconNames = component.findAllComponents(UIcon).map((icon) => icon.props('name'));
+    expect(iconNames).toContain('i-lucide-arrow-up');
+    expect(iconNames).not.toContain('i-lucide-arrow-down');
+  });
+
+  test('a modified block that also changed position carries the same directional cue as a pure move', async () => {
+    mockDiff({
+      status: 'success',
+      changes: [
+        { kind: 'modified', id: 'b1', fromSlot: 0, toSlot: 2, moved: true, text: 'Edited and moved later.' },
+      ],
+    });
+    const component = await mountSuspended(PageInApp);
+
+    expect(component.text()).toContain('Modified · moved down');
+    const iconNames = component.findAllComponents(UIcon).map((icon) => icon.props('name'));
+    expect(iconNames).toContain('i-lucide-arrow-down');
   });
 
   test("renders the block's own text content, not just its classification", async () => {
