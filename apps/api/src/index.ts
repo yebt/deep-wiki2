@@ -21,6 +21,7 @@ import { createRevisionRoutes } from './routes/revisions';
 import { createTagRoutes } from './routes/tags';
 import { createTreeRoutes } from './routes/tree';
 import { createUploadRoutes } from './routes/uploads';
+import { createWorkspaceRoutes } from './routes/workspaces';
 
 /**
  * Builds the application with CORS installed **before** any route.
@@ -164,6 +165,7 @@ if (import.meta.main) {
   app.route('/', createLinkRoutes({ sql, sessionIdleTimeoutMinutes: config.SESSION_IDLE_TIMEOUT_MINUTES }));
   app.route('/', createTagRoutes({ sql, sessionIdleTimeoutMinutes: config.SESSION_IDLE_TIMEOUT_MINUTES }));
   app.route('/', createMentionRoutes({ sql, sessionIdleTimeoutMinutes: config.SESSION_IDLE_TIMEOUT_MINUTES }));
+  app.route('/', createWorkspaceRoutes({ sql, sessionIdleTimeoutMinutes: config.SESSION_IDLE_TIMEOUT_MINUTES }));
   app.route('/', createTreeRoutes({ sql, sessionIdleTimeoutMinutes: config.SESSION_IDLE_TIMEOUT_MINUTES }));
   app.route(
     '/',

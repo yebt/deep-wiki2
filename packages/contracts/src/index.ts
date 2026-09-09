@@ -102,3 +102,6 @@ export type { PresenceEventPayload } from './presence';
 
 export { PageHistoryResponseSchema, RevisionSummarySchema } from './revisions';
 export type { PageHistoryResponse, RevisionSummaryPayload } from './revisions';
+
+export { WorkspaceListResponseSchema, WorkspaceSummarySchema } from './workspaces';
+export type { WorkspaceListResponse, WorkspaceSummaryPayload } from './workspaces';
