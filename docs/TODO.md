@@ -415,6 +415,136 @@ makes conventions portable across projects.
 
 Discoveries and constraints. Newest first.
 
+### 2026-09-09 — The sign-in button worked before the page did, and its native POST looked like a rejected password
+
+Second, independent cause of "signed in and bounced back to sign-in" — unrelated to the CORS
+one below, and reproducible in a real browser against a live stack.
+
+`/login` is server-rendered, so its `<form>` and its `<button type="submit">` exist and are
+fully operable before any JavaScript has run. Press the button in that window and the browser
+does exactly what the markup says: a native submit to the page's own URL. The server answers
+with the same screen, the fields empty, and nothing logged on either side — which is
+indistinguishable from a password that was rejected. Nothing guarded it: no disabled state, no
+pending state, no indication that the page was not ready.
+
+Measured on the dev server, cold hydration of `/login` took **8–17 seconds**. Chromium hit the
+window on every attempt; Firefox hydrated fast enough to escape it, which is why it read as
+browser-specific for a while. A production build closes most of the window, and "most" is not
+a guard.
+
+The same shape existed on all four auth screens, and the worst one to lose is `/invite/accept`:
+its token is single-use, so a submit that appears to fail leaves the invitee unable to tell
+whether their one link was spent.
+
+**Impact:** `apps/web/app/components/AuthSubmit.vue` — one component, used by all four screens
+(docs/UI-CHECKLIST.md §4.1), which until it is mounted renders `type="button"` instead of
+`type="submit"`. A form with no submit control cannot be submitted natively, by the button or
+by Enter in a field, and that is true of the markup itself rather than of anything that has to
+run first. The control keeps the tab order and carries `aria-disabled` rather than the
+`disabled` attribute (§5), and its reason is its own label — "Preparing the form…" — so the
+explanation §3 requires needs neither a hover nor a tooltip that could not exist yet. The box
+does not change: same element, same classes, one word swapped inside a `block` button whose
+height `app.config.ts` pins at `min-h-10`. A `<noscript>` line distinguishes "not hydrated
+yet" from "will never hydrate", because those two render identically and only one of them ever
+resolves.
+
+Two things worth recording about the *test*. A test that mounts the component cannot observe
+this defect at all — it starts after the window closes, and it passes just as happily against
+the broken version. `AuthSubmit.test.ts` therefore reproduces the timeline instead: it renders
+the component through `vue/server-renderer`, puts those exact bytes in the document, asserts
+against that DOM, then hydrates the same nodes and asserts what changed. What it cannot hold
+is geometry — happy-dom has no layout engine, so "no layout shift" is asserted as far as a DOM
+can carry it (same node, same classes across hydration) and the measured version belongs to
+`e2e/auth-layout.spec.ts`, which is named in a comment so nobody reads the green unit test as
+proof of it. The four page suites gained only a *wiring* check, and each says so in a comment:
+after mount a guarded control and an unguarded one are byte-identical, so a page-level test
+can only assert that the guard is still plugged in.
+
+### 2026-09-09 — `Secure` on `http://localhost` was suspected and refuted; both browsers store and resend the cookie
+
+Recorded because it cost investigation time and would cost it again. While chasing the bounce
+back to sign-in, the session cookie's `Secure` attribute was the leading suspect: the dev stack
+is plain `http://`, and `Secure` is documented as restricting a cookie to secure transports.
+
+It is not the cause. `localhost` is a **trustworthy origin** in both engines — Chromium's
+secure-context rules and Firefox's both treat `http://localhost` as potentially trustworthy —
+so a `Secure` cookie set over plain HTTP on localhost is stored, and resent on the next
+request. Verified in both browsers, in the running stack, by inspecting the cookie jar and the
+subsequent request headers.
+
+**Impact:** none in the code — nothing needed changing. The value of the entry is the dead end
+itself. Do not spend the afternoon on `Secure` again; the two real causes are the CORS entry
+below and the pre-hydration entry above.
+
+### 2026-09-09 — A wrong `APP_URL` fails loudly and misleadingly, not silently; three files said otherwise
+
+The 2026-09-08 entry below, `scripts/checks/env-consistency.ts`, `docs/RUNNING.md` §3 and
+`apps/web/nuxt.config.ts` all tell the same story about a mismatched `APP_URL`: that nothing
+reports an error, that login returns 200, and that the browser quietly drops the session
+cookie. Measured 2026-09-09 against a live stack with `APP_URL` deliberately mismatched, that
+story is wrong on both counts.
+
+What actually happens: the API allows exactly one origin through CORS with credentials, and
+when that is not the origin the page was served from the browser rejects the credentialed
+exchange before the page sees any response at all. Chromium reports `net::ERR_FAILED`, Firefox
+`NS_ERROR_DOM_BAD_URI`, the `fetch` rejects, no cookie is stored, and the sign-in screen shows
+its own network-error state: "Could not reach the server. Check your connection and try again."
+There is no 200 to read, because the request is refused rather than answered.
+
+So the failure is visible — and that is not the good news it sounds like. The screen blames the
+connection, the connection is fine, and neither server logs anything about CORS. A developer
+who believes the old comment goes looking for a silent 200 that does not exist, and a developer
+who reads the screen goes looking for a network fault that does not exist either.
+
+**Impact:** `env.example`'s `APP_URL` comment is rewritten to say what was measured, names both
+browsers' error codes and the exact sentence the screen shows, and says out loud that it used
+to claim the opposite. The same correction is still owed to `scripts/checks/env-consistency.ts`
+(its file header and `SESSION_SYMPTOM`, whose text is what a failing `bun run env:check`
+prints), `docs/RUNNING.md` §3 and the `devServer` comment in `apps/web/nuxt.config.ts` — all
+three outside this batch's owned paths, and all three still telling the reader to expect
+silence. The check itself is correct and needs no change; only its prose is wrong.
+
+### 2026-09-09 — `env.example` ships a port an unrelated project on this host already owns, and the app connects to it anyway
+
+On this machine, ports **5432, 1025, 8025, 9000 and 9001** belong to an unrelated `menukap`
+compose project. `env.example` ships `POSTGRES_HOST_PORT=5432` and
+`DATABASE_URL=…@localhost:5432/deepwiki`, so a developer who copies the template as instructed
+gets a working connection — to somebody else's Postgres.
+
+The two halves fail differently, and only one of them fails usefully. `podman compose up`
+refuses to start on a collision, loudly, before any service comes up. The *application* does
+not: `DATABASE_URL` names `localhost:5432` and something is listening there, so the connection
+succeeds. The symptom is not a refused connection but wrong or missing data, which reads as a
+bug in deep-wiki. This project has already lost time to that exact class twice — the 2026-09-04
+entries below on the dev stack competing with the test harness, and on an error message naming
+"a database and a role the developer had never heard of".
+
+**A port check cannot catch this.** The port is open; it is the wrong server answering.
+`scripts/checks/env-consistency.ts` compares `POSTGRES_HOST_PORT` against the port inside
+`DATABASE_URL` — the same fact written twice — and both would be `5432` here and agree. Its
+job is that the two halves of one configuration match, not that the thing at the other end is
+ours, and it is a static text check that opens no sockets: giving it a live database
+connection would put network I/O into a script that runs from the pre-commit hook.
+
+**Decision: do not move the default, and add an identity probe instead.** Moving
+`POSTGRES_HOST_PORT` to an uncontended range would help exactly one machine and is forbidden
+in writing — `docs/RUNNING.md` §6 trap 4 rules that `env.example` keeps the conventional ports
+(5432, 1025, 3000) even where the host cannot use them, because the file is a template every
+developer copies, and that "a port like 25432 in this file is somebody's laptop, and should be
+reverted rather than accommodated". It has leaked twice already that way. So the template keeps
+5432 and now says loudly, next to `DATABASE_URL`, what that leaves open and where to move your
+own ports (`.env`, which is gitignored and exists for it).
+
+The probe is the part that actually detects it, and it belongs in `packages/db` rather than in
+a check script: on the first connection, ask the database whether it is deep-wiki's — a schema
+question such as `to_regclass('public.workspaces')`, or the presence of
+`drizzle.__drizzle_migrations` — and fail with a message that names the collision ("connected
+to localhost:5432, but that database has no deep-wiki schema; something else on this machine
+is probably listening on that port") instead of letting the app run against a stranger's rows.
+`createDb` is the single place every consumer goes through, and `postgres.js` connects lazily
+there, so the probe has to hang off the first query rather than off the factory. Not
+implemented here — `packages/db` is outside this batch's owned paths.
+
 ### 2026-09-08 — `APP_URL` had nothing to be checked against, and shipped naming the e2e harness's port
 
 The session was lost on every login and nothing caught it. `apps/api` installs
