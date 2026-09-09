@@ -1,7 +1,8 @@
 import { UApp } from '#components';
 import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime';
 import { describe, expect, test, vi } from 'vitest';
-import { defineComponent, h, ref } from 'vue';
+import { defineComponent, h, nextTick, ref } from 'vue';
+import NavigationTreeActions from '~/components/NavigationTreeActions.vue';
 import TreePage from './tree.vue';
 
 const { useTreeMock, useRouteMock, navigateToMock } = vi.hoisted(() => ({
@@ -159,6 +160,72 @@ describe('navigation tree page', () => {
 
       await items[1]!.trigger('keydown', { key: 'ArrowDown', altKey: true });
       expect(reorder).toHaveBeenCalledWith('page-1', 'shelf-1', 1);
+    });
+  });
+
+  /*
+   * The write affordances. They sit in a toolbar above the tree and never
+   * inside a row: `NavigationTreeNode` carries the drag-and-drop and the
+   * `Alt`-arrow reorder that are this screen's accessibility contract, and
+   * a `keydown` reaching `tree.vue` once per ancestor was fixed there by
+   * guarding on `closest('[role="treeitem"]') !== currentTarget`. A new
+   * control inside a row is exactly what would reopen that.
+   */
+  describe('creating and renaming', () => {
+    const NODES = [
+      {
+        id: 'shelf-1',
+        type: 'shelf',
+        slug: 'shelf',
+        title: 'Engineering',
+        position: 0,
+        children: [{ id: 'book-1', type: 'book', slug: 'book', title: 'Handbook', position: 0, children: [] }],
+      },
+    ];
+
+    test('the toolbar renders with the loaded tree, outside the tree itself', async () => {
+      mockTree({ status: 'success', nodes: NODES });
+      const component = await mountSuspended(PageInApp);
+
+      const actions = component.findComponent(NavigationTreeActions);
+      expect(actions.exists()).toBe(true);
+      expect(actions.find('[role="treeitem"]').exists()).toBe(false);
+      expect(component.find('[role="tree"]').element.contains(actions.element)).toBe(false);
+    });
+
+    test('the empty workspace still offers a way to make the first shelf', async () => {
+      mockTree({ status: 'success', nodes: [] });
+      const component = await mountSuspended(PageInApp);
+
+      expect(component.text()).toMatch(/no shelves yet/i);
+      expect(component.findComponent(NavigationTreeActions).exists()).toBe(true);
+    });
+
+    test('a write reloads the tree, so the new node is the server’s answer and not a guess', async () => {
+      const { load } = mockTree({ status: 'success', nodes: NODES });
+      const component = await mountSuspended(PageInApp);
+      const before = load.mock.calls.length;
+
+      component.findComponent(NavigationTreeActions).vm.$emit('changed');
+      await nextTick();
+
+      expect(load.mock.calls.length).toBe(before + 1);
+    });
+
+    test('no write affordance is offered while the tree is unknown or refused', async () => {
+      for (const status of ['loading', 'forbidden', 'not-found', 'network-error']) {
+        mockTree({ status });
+        const component = await mountSuspended(PageInApp);
+        expect(component.findComponent(NavigationTreeActions).exists()).toBe(false);
+      }
+    });
+
+    test('the tree’s active row is handed to the toolbar, so “new” means “here”', async () => {
+      mockTree({ status: 'success', nodes: NODES });
+      const component = await mountSuspended(PageInApp);
+
+      expect(component.findComponent(NavigationTreeActions).props('activeId')).toBe('shelf-1');
+      expect(component.findComponent(NavigationTreeActions).props('rootId')).toBe('root-1');
     });
   });
 });

@@ -7,18 +7,27 @@
  * Pre-build contract (docs/UI-CHECKLIST.md §2):
  * - Who: any workspace member, most often navigating from the header
  *   brand link while reading or editing a page.
- * - Goal, in their words: "Find a page, or reorganise how they're shelved."
- * - Single primary action: none — a navigation surface, not a form. Drag
- *   reorder is an in-place manipulation of the tree itself, not a
- *   separate submit step.
- * - Data needed: the can()-filtered tree this route already returns —
- *   nothing here is designed against data that does not exist yet.
- * - Non-goals: no create/rename/delete affordances (a separate, later
- *   surface); no multi-select.
+ * - Goal, in their words: "Find a page, put a new one where it belongs,
+ *   or fix a name I got wrong."
+ * - Single primary action: **create**. Rename is secondary and demoted to
+ *   an outlined button; drag reorder stays an in-place manipulation of the
+ *   tree itself rather than a submit step, so there is still exactly one
+ *   filled action on the screen.
+ * - Data needed: the can()-filtered tree this route already returns, plus
+ *   `legalChildTypes()` from `@deep-wiki/contracts` — which is the one
+ *   `LEGAL_PARENT_TYPES` table the server enforces, not a client copy of
+ *   it. Nothing here is designed against data that does not exist.
+ * - Non-goals: **no delete** — what becomes of a node's children, its
+ *   revisions and its comments is a product decision nobody has made, and
+ *   guessing it is worse than not having it (docs/TODO.md). No move by
+ *   dialog (the tree already reorders by drag and by Alt+arrow), no
+ *   multi-select, no bulk import.
  * - Empty / overflow: a workspace with nothing yet, and a shelf with
- *   hundreds of pages, are both handled below (empty state; the tree
- *   renders unvirtualized in this batch, a recorded scope limit for a
- *   400-page book).
+ *   hundreds of pages, are both handled below. The empty state now has a
+ *   path forward rather than a sentence about one (checklist §3): the
+ *   toolbar renders above it, so the first shelf is one button away. The
+ *   tree still renders unvirtualized, a recorded scope limit for a
+ *   400-page book.
  */
 import type { TreeNode } from '~/composables/useTree';
 
@@ -32,6 +41,16 @@ onMounted(() => {
 });
 
 const reorderError = ref<string | null>(null);
+
+/**
+ * A create or a rename re-reads the tree rather than splicing the new row
+ * in locally. The server decides position, slug and — through `can()` —
+ * whether the row is even visible to this viewer, so a locally-inserted
+ * node would be a guess about three separate server-side facts.
+ */
+async function onTreeChanged(): Promise<void> {
+  await load();
+}
 
 async function onReorder(payload: { draggedId: string; newParentId: string; newIndex: number }): Promise<void> {
   reorderError.value = null;
@@ -214,57 +233,67 @@ useSeoMeta({ title: 'Navigation tree — deep-wiki' });
       </template>
     </PageNotice>
 
-    <!-- First-run empty state, distinct from "nothing readable" — this
-         batch has no filter/search on this screen, so there is no
-         filtered-empty variant to distinguish it from. It names the
-         object in the product's own vocabulary (checklist §3). -->
-    <PageNotice v-else-if="nodes.length === 0" icon="i-lucide-library-big" heading="No shelves yet" :level="2">
-      Create a shelf to start organising books, chapters and pages.
-    </PageNotice>
+    <template v-else>
+      <!-- The write affordances live here, above the tree and outside it,
+           for both the empty and the loaded case: a control inside a row
+           would sit on top of `NavigationTreeNode`'s drag-and-drop and its
+           `Alt`-arrow reorder, which are this screen's §5 contract and
+           whose `keydown` guard was fixed only recently. -->
+      <NavigationTreeActions :nodes="nodes" :root-id="rootId" :active-id="activeId" @changed="onTreeChanged" />
 
-    <div v-else>
-      <p v-if="reorderError" role="alert" class="mb-4 rounded-md bg-error-container px-3 py-2 text-body-small text-on-error-container">
-        {{ reorderError }}
-      </p>
-      <!-- The keyboard contract is spelled out on the screen rather
-           than left to be discovered: the tree is one tab stop and the
-           arrows do the rest, which no visual affordance can say
-           (docs/UI-CHECKLIST.md §5). -->
-      <p id="tree-keyboard-help" class="text-body-small text-muted mb-2">
-        Arrow keys move through the tree, Enter opens a page, and Alt with the arrow keys moves an item among its siblings.
-      </p>
-      <!-- §1.4 gives `bg-elevated` to the navigation tree *as a pane*.
-           This screen has no panes: the tree is content in a column
-           sitting directly on the app ground, and drawn at
-           `bg-elevated` it measured oklch(0.94828) light /
-           oklch(0.28448) dark — byte-identical to the header above it.
-           A container on the app ground is the Filled card, the same
-           component and tone as the auth card (§9.4). The rows inside
-           it keep their own state layer and their `secondary-container`
-           drop target, both of which are ground-independent. -->
-      <UCard variant="soft" :ui="{ body: 'p-2' }">
-        <ul
-          ref="treeEl"
-          role="tree"
-          aria-label="Navigation tree"
-          aria-describedby="tree-keyboard-help"
-        >
-          <NavigationTreeNode
-            v-for="(node, index) in nodes"
-            :key="node.id"
-            :node="node"
-            :depth="0"
-            :parent-id="rootId ?? ''"
-            :index="index"
-            :set-size="nodes.length"
-            :active-id="activeId"
-            @reorder="onReorder"
-            @activate="onActivate"
-            @open="onOpen"
-            @keydown="onKeydown"
-          />
-        </ul>
-      </UCard>
-    </div>
+      <!-- First-run empty state, distinct from "nothing readable" — this
+           batch has no filter/search on this screen, so there is no
+           filtered-empty variant to distinguish it from. It names the
+           object in the product's own vocabulary (checklist §3), and the
+           toolbar above it is the path forward. -->
+      <PageNotice v-if="nodes.length === 0" icon="i-lucide-library-big" heading="No shelves yet" :level="2">
+        Use New… above to create the first shelf, then fill it with books, chapters and pages.
+      </PageNotice>
+
+      <div v-else>
+        <p v-if="reorderError" role="alert" class="mb-4 rounded-md bg-error-container px-3 py-2 text-body-small text-on-error-container">
+          {{ reorderError }}
+        </p>
+        <!-- The keyboard contract is spelled out on the screen rather
+             than left to be discovered: the tree is one tab stop and the
+             arrows do the rest, which no visual affordance can say
+             (docs/UI-CHECKLIST.md §5). -->
+        <p id="tree-keyboard-help" class="text-body-small text-muted mb-2">
+          Arrow keys move through the tree, Enter opens a page, and Alt with the arrow keys moves an item among its siblings.
+        </p>
+        <!-- §1.4 gives `bg-elevated` to the navigation tree *as a pane*.
+             This screen has no panes: the tree is content in a column
+             sitting directly on the app ground, and drawn at
+             `bg-elevated` it measured oklch(0.94828) light /
+             oklch(0.28448) dark — byte-identical to the header above it.
+             A container on the app ground is the Filled card, the same
+             component and tone as the auth card (§9.4). The rows inside
+             it keep their own state layer and their `secondary-container`
+             drop target, both of which are ground-independent. -->
+        <UCard variant="soft" :ui="{ body: 'p-2' }">
+          <ul
+            ref="treeEl"
+            role="tree"
+            aria-label="Navigation tree"
+            aria-describedby="tree-keyboard-help"
+          >
+            <NavigationTreeNode
+              v-for="(node, index) in nodes"
+              :key="node.id"
+              :node="node"
+              :depth="0"
+              :parent-id="rootId ?? ''"
+              :index="index"
+              :set-size="nodes.length"
+              :active-id="activeId"
+              @reorder="onReorder"
+              @activate="onActivate"
+              @open="onOpen"
+              @keydown="onKeydown"
+            />
+          </ul>
+        </UCard>
+      </div>
+    </template>
   </AppShell>
 </template>
