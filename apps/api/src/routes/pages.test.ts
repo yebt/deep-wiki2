@@ -258,12 +258,30 @@ describe('GET /pages/:id/edit-session', () => {
     const res = await app.request(`/pages/${fixture.pageId}/edit-session`, { headers: { cookie: fixture.writerCookie } });
 
     expect(res.status).toBe(409);
-    const body = (await res.json()) as { reason?: string; offeredExits: string[] };
-    expect(body.reason).toBeDefined();
+    const body = (await res.json()) as { reason?: string; line?: number; offeredExits: string[] };
+    expect(body.reason).toBe('not_byte_identical');
+    // edit.vue points the author at this line; a refusal without it cannot explain itself.
+    expect(body.line).toBe(1);
     expect(body.offeredExits).toEqual(expect.arrayContaining(['read_only', 'normalise']));
 
     const [lockRow] = await sql`SELECT 1 AS x FROM page_locks WHERE node_id = ${fixture.pageId}`;
     expect(lockRow).toBeUndefined();
+  });
+
+  test('an empty page opens an edit session rather than being refused forever', async () => {
+    // `markdown: z.string()` has no minimum and `canonicalise('') === ''`, so
+    // a writer who clears a page and saves stores exactly this row. Until
+    // the probe accepted an empty document, this request answered 409 with
+    // no construct and no line — the page could never be edited again.
+    const fixture = await buildFixture();
+    await savePage(sql, { nodeId: fixture.pageId, workspaceId: fixture.workspaceId, markdown: '', expectedContentHash: null });
+    const app = buildApp();
+
+    const res = await app.request(`/pages/${fixture.pageId}/edit-session`, { headers: { cookie: fixture.writerCookie } });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { markdown: string };
+    expect(body.markdown).toBe('');
   });
 
   test('a page already locked by another writer reports the holder and offers read-only/take-over', async () => {

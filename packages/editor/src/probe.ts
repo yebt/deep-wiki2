@@ -1,9 +1,24 @@
 import { fromMarkdown, UnsupportedConstructError } from './from-markdown';
 import { toMarkdown } from './to-markdown';
 
+/**
+ * `construct` and `line` are REQUIRED on the `unsupported_construct`
+ * variant, not optional. The edit screen renders both, and the API's
+ * edit-session route (WU-12) copies both into its 409 body: a refusal that
+ * names neither leaves the UI with "we will not open this page" and nothing
+ * the author can act on, which is a defect in its own right regardless of
+ * why the refusal happened. Making them required is what stops the next
+ * unexpected throw from silently becoming one again — `refusalFor` below
+ * cannot compile without supplying them.
+ *
+ * `not_byte_identical` carries a `line` and no `construct` on purpose: the
+ * document parses fine, so there is no offending construct to name, only
+ * the place where the re-serialised bytes first diverge.
+ */
 export type ProbeResult =
   | { ok: true }
-  | { ok: false; reason: 'unsupported_construct' | 'not_byte_identical'; construct?: string; line?: number };
+  | { ok: false; reason: 'unsupported_construct'; construct: string; line: number }
+  | { ok: false; reason: 'not_byte_identical'; line: number };
 
 /**
  * The 1-based line number of the first character at which `a` and `b`
@@ -24,6 +39,27 @@ function firstDivergenceLine(a: string, b: string): number {
 }
 
 /**
+ * Turns whatever the conversion threw into a refusal that can explain
+ * itself.
+ *
+ * An `UnsupportedConstructError` already knows the mdast type and the source
+ * line, and that is the path bucket C was designed for. Anything else is a
+ * conversion the schema could not perform for a reason nobody anticipated —
+ * an empty document was one, hitting `doc`'s `block+` content expression as
+ * a bare `RangeError` — and the honest report is the error's own name and
+ * line 1, never a blank refusal. Exported so both branches are directly
+ * testable: the second one used to be reachable only through a defect, which
+ * is exactly why it went unnoticed.
+ */
+export function refusalFor(error: unknown): ProbeResult {
+  if (error instanceof UnsupportedConstructError) {
+    return { ok: false, reason: 'unsupported_construct', construct: error.construct, line: error.line ?? 1 };
+  }
+  const construct = error instanceof Error ? error.name : typeof error;
+  return { ok: false, reason: 'unsupported_construct', construct, line: 1 };
+}
+
+/**
  * The per-document fail-closed check (design.md "Fail-closed: the
  * per-document probe"): `toMarkdown(fromMarkdown(md)) === md`. Edit mode
  * only opens when this holds; a document whose constructs the schema
@@ -37,9 +73,6 @@ export function probe(markdown: string): ProbeResult {
     if (back === markdown) return { ok: true };
     return { ok: false, reason: 'not_byte_identical', line: firstDivergenceLine(markdown, back) };
   } catch (error) {
-    if (error instanceof UnsupportedConstructError) {
-      return { ok: false, reason: 'unsupported_construct', construct: error.construct, line: error.line };
-    }
-    return { ok: false, reason: 'unsupported_construct' };
+    return refusalFor(error);
   }
 }

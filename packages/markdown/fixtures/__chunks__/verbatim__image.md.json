@@ -1,0 +1,9 @@
+[
+  {
+    "blockIds": [
+      "d:67e89216f33d#0"
+    ],
+    "text": "An inline ![alt text](https://example.com/pic.png) image, and one with a\ntitle: ![logo](/logo.svg \"Our logo\").",
+    "ordinal": 0
+  }
+]

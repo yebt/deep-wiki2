@@ -2,13 +2,19 @@ import type { Schema } from 'prosemirror-model';
 
 /**
  * mdast node types carried verbatim as an opaque atom rather than modelled
- * directly (design.md bucket B): raw/inline HTML, reference-style
- * links/images (which need their paired `definition` to resolve), and YAML
- * frontmatter. None of these are ProseMirror node names — `classify()`
- * checks the schema first, so this list only matters for a type the schema
- * does not already claim.
+ * directly (design.md bucket B): raw/inline HTML, images (resource and
+ * reference alike — SPECS §5.1's Verbatim row), reference-style links
+ * (which need their paired `definition` to resolve), and YAML frontmatter.
+ * None of these are ProseMirror node names — `classify()` checks the schema
+ * first, so this list only matters for a type the schema does not already
+ * claim.
+ *
+ * Kept deliberately in step with `from-markdown.ts`'s
+ * `VERBATIM_BLOCK_TYPES`/`VERBATIM_INLINE_TYPES`: a type this file calls
+ * verbatim that the converter refuses would classify a page as openable
+ * that edit mode then rejects.
  */
-const VERBATIM_TYPES = new Set(['html', 'definition', 'linkReference', 'imageReference', 'yaml']);
+const VERBATIM_TYPES = new Set(['html', 'definition', 'image', 'linkReference', 'imageReference', 'yaml']);
 
 export type Classification =
   | { bucket: 'modelled' }

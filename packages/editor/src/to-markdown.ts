@@ -76,6 +76,62 @@ interface OpenWrap {
   children: PhrasingContent[];
 }
 
+/** The half-open range of consecutive inline children, around `index`, that all carry a mark equal to `mark`. */
+function runOf(marksPerChild: readonly (readonly Mark[])[], index: number, mark: Mark): { start: number; end: number } {
+  let start = index;
+  while (start > 0 && marksPerChild[start - 1]!.some((candidate) => sameMark(candidate, mark))) start--;
+  let end = index + 1;
+  while (end < marksPerChild.length && marksPerChild[end]!.some((candidate) => sameMark(candidate, mark))) end++;
+  return { start, end };
+}
+
+/**
+ * Orders one inline child's marks outermost-first, by the **extent** of the
+ * run each mark covers: the mark that starts earliest wins, and on a tie the
+ * one that reaches furthest.
+ *
+ * This is the whole fix for the save direction, and it exists because a
+ * ProseMirror mark set is *sorted by declaration rank*, not by nesting.
+ * `_x y z_` with `y` bolded holds three text nodes — `x ` marked
+ * `{emphasis}`, `y` marked `{strong, emphasis}`, ` z` marked `{emphasis}` —
+ * and `strong` is declared before `emphasis`, so the middle node's set reads
+ * `[strong, emphasis]` while its neighbours' read `[emphasis]`. Matching
+ * those two as a common *prefix* finds nothing in common, so `emphasis` was
+ * closed and reopened around the bolded word: three sibling wrappers where
+ * the user made one continuous italic run. `mdast-util-to-markdown` then did
+ * exactly what that tree asked for — an `emphasis` ending in a space cannot
+ * carry a right-flanking `_`, so the space became `&#x20;`, and two adjacent
+ * `_`-delimited wrappers had to grow their delimiter runs apart from each
+ * other — producing `_x&#x20;____y____&#x20;z_`, which is no longer the
+ * document and no longer re-openable.
+ *
+ * Extent order reconstructs the nesting the mark set threw away: `emphasis`
+ * spans all three children and `strong` only the middle one, so `emphasis`
+ * is the outer wrapper and the prefix match succeeds for every child.
+ *
+ * **What this still cannot decide.** Two marks covering *exactly* the same
+ * run are genuinely ambiguous — `__[a](b)__` and `[__a__](b)` are the same
+ * mark set and only one spelling can come back. `own` arrives in declaration
+ * rank order and `Array.prototype.sort` is stable, so rank remains the
+ * tiebreak there and `strong` stays outside `link`. That is a document the
+ * probe refuses to open (fail-closed, no byte is rewritten), not a document
+ * the editor corrupts: whichever spelling this emits re-parses to the same
+ * mark set and re-serialises identically.
+ */
+function orderMarksByExtent(marksPerChild: readonly (readonly Mark[])[], index: number): readonly Mark[] {
+  const own = marksPerChild[index]!;
+  if (own.length < 2) return own;
+
+  const runs = new Map<Mark, { start: number; end: number }>();
+  for (const mark of own) runs.set(mark, runOf(marksPerChild, index, mark));
+
+  return [...own].sort((a, b) => {
+    const first = runs.get(a)!;
+    const second = runs.get(b)!;
+    return first.start - second.start || second.end - first.end;
+  });
+}
+
 /**
  * Converts a PM inline fragment (a paragraph's, heading's or table cell's
  * content) into mdast phrasing nodes, merging adjacent runs that share a
@@ -85,15 +141,33 @@ interface OpenWrap {
  * `strong` around the middle run instead of nesting `emphasis` inside one
  * continuous `strong`. Mirrors how a DOM/HTML serialiser merges adjacent
  * marked runs, applied to mdast's node-per-mark tree shape instead.
+ *
+ * The merge is only as good as the order the marks are opened in, which is
+ * what `orderMarksByExtent` decides — see its comment.
  */
 function convertInline(node: PMNode): PhrasingContent[] {
   const root: PhrasingContent[] = [];
   const stack: OpenWrap[] = [];
+  const children: PMNode[] = [];
+  node.forEach((child) => children.push(child));
+
+  // `inlineCode` is a leaf transform, not a wrapper (see `convertLeaf`).
+  //
+  // An inline ATOM's own marks count exactly as a text node's do. Reading
+  // them as `[]` was the second half of the same corruption: `addMark` puts
+  // `strong` on a `wikiLink`/`tag`/`break`/`verbatimInline` node just as it
+  // does on the text either side of it, so bolding a line containing a
+  // wiki-link is ONE strong run — but an atom reported as unmarked closed
+  // that run and reopened it, and `__a __[[Page]]__ b__` came back with the
+  // spaces entity-encoded and `#tag` mangled to `#ta&#x67;`.
+  const marksPerChild: readonly Mark[][] = children.map((child) =>
+    child.marks.filter((mark) => mark.type.name !== 'inlineCode'),
+  );
 
   const currentChildren = (): PhrasingContent[] => (stack.length === 0 ? root : stack[stack.length - 1]!.children);
 
-  node.forEach((child) => {
-    const wrappingMarks = child.isText ? child.marks.filter((mark) => mark.type.name !== 'inlineCode') : [];
+  children.forEach((child, index) => {
+    const wrappingMarks = orderMarksByExtent(marksPerChild, index);
 
     let matchLength = 0;
     while (

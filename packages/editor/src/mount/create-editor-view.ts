@@ -17,16 +17,13 @@
  * slash-plugin.ts for the DOM-independent state-machine logic this
  * factory only wires together.
  */
-import { baseKeymap, chainCommands, exitCode, toggleMark } from 'prosemirror-commands';
-import { history, redo, undo } from 'prosemirror-history';
 import { inputRules } from 'prosemirror-inputrules';
-import { keymap } from 'prosemirror-keymap';
 import { Node } from 'prosemirror-model';
-import { liftListItem, sinkListItem, splitListItem } from 'prosemirror-schema-list';
 import { EditorState } from 'prosemirror-state';
 import { EditorView } from 'prosemirror-view';
 import { schema } from '../schema';
 import { buildInputRules } from './input-rules';
+import { buildHistory, buildKeymap } from './keymap';
 import { createMentionPlugin, insertMention, type MentionPluginOptions } from './mention-plugin';
 import { createSlashPlugin, type SlashPluginOptions } from './slash-plugin';
 
@@ -41,22 +38,6 @@ export interface CreateEditorViewOptions {
     readonly onConfirmed?: (candidate: Parameters<MentionPluginOptions['onConfirm']>[0]) => void;
   };
   readonly slash?: SlashPluginOptions;
-}
-
-function buildKeymap() {
-  const listItem = schema.nodes.listItem!;
-  return keymap({
-    ...baseKeymap,
-    'Mod-b': toggleMark(schema.marks.strong!),
-    'Mod-i': toggleMark(schema.marks.emphasis!),
-    'Mod-z': undo,
-    'Shift-Mod-z': redo,
-    'Mod-y': redo,
-    Enter: chainCommands(splitListItem(listItem), baseKeymap.Enter!),
-    Tab: sinkListItem(listItem),
-    'Shift-Tab': liftListItem(listItem),
-    'Mod-Enter': exitCode,
-  });
 }
 
 /**
@@ -82,7 +63,7 @@ export function createEditorView(options: CreateEditorViewOptions): EditorView {
   const state = EditorState.create({
     schema,
     doc: options.doc,
-    plugins: [buildKeymap(), history(), inputRules({ rules: buildInputRules(schema) }), mentionPlugin, slashPlugin],
+    plugins: [buildKeymap(), buildHistory(), inputRules({ rules: buildInputRules(schema) }), mentionPlugin, slashPlugin],
   });
 
   let transactionCount = 0;

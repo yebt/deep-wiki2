@@ -117,10 +117,14 @@ export function createPageRoutes(deps: PageRouteDeps): Hono<{ Variables: Session
     // request — a refused document never touches the lock at all.
     const result = probe(content.markdown);
     if (!result.ok) {
+      // `line` is on every refusal; `construct` only on `unsupported_construct`
+      // (a `not_byte_identical` document parsed fine — there is no offending
+      // construct to name, only the line where the bytes first diverge).
+      // edit.vue renders both, so each is forwarded whenever the probe has it.
       return c.json(
         {
           reason: result.reason,
-          construct: result.construct,
+          ...(result.reason === 'unsupported_construct' ? { construct: result.construct } : {}),
           line: result.line,
           offeredExits: ['read_only', 'normalise'],
         },

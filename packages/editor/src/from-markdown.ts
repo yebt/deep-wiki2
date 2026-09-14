@@ -21,8 +21,28 @@ import type { Schema } from 'prosemirror-model';
 
 /** mdast node types carried verbatim as an opaque block atom (design.md bucket B, block-level members). */
 const VERBATIM_BLOCK_TYPES = new Set(['html', 'definition', 'yaml']);
-/** mdast node types carried verbatim as an opaque inline atom (design.md bucket B, inline-level members). */
-const VERBATIM_INLINE_TYPES = new Set(['html', 'linkReference', 'imageReference']);
+/**
+ * mdast node types carried verbatim as an opaque inline atom (design.md
+ * bucket B, inline-level members).
+ *
+ * `image` is here for the same reason `imageReference` is, and SPECS §5.1
+ * already puts both in one row of the Verbatim bucket — "reference-style
+ * links and images … carried opaquely through the schema, not modelled
+ * node-by-node; byte-identical round trip; edit mode opens". A resource
+ * image is that same construct with its destination written inline, and
+ * read mode renders it either way. Refusing it meant a page holding one
+ * screenshot rendered perfectly and could never be edited again, which is
+ * not a bucket this product has: `refused/` is for NON-canonical spellings
+ * the save path would rewrite, and `![alt](url)` is canonical.
+ *
+ * The cost is honest and bounded: the image is an opaque atom, so the
+ * author can select, move or delete it but not retype its URL in place
+ * until a real `image` schema node exists. Carrying it verbatim does not
+ * foreclose that — it makes byte identity structural (the literal source
+ * slice) instead of something a future alt-text-escaping rule could get
+ * wrong.
+ */
+const VERBATIM_INLINE_TYPES = new Set(['html', 'image', 'linkReference', 'imageReference']);
 
 /**
  * A construct neither bucket A nor bucket B names (design.md bucket C).
@@ -95,12 +115,24 @@ class FromMarkdownConverter {
     private readonly source: string,
   ) {}
 
+  /**
+   * An empty document is a document. `doc`'s content expression is `block+`,
+   * so a tree with no children cannot be handed to `schema.node('doc', …)`
+   * at all — it throws a `RangeError`, which is not an
+   * `UnsupportedConstructError` and so reached `probe`'s catch-all as a
+   * refusal naming no construct and no line. That is reachable from the
+   * product: `markdown: z.string()` has no minimum and `canonicalise('')`
+   * is `''`, so a user who selects a page's whole contents, deletes them
+   * and saves has stored a document edit mode would then refuse forever.
+   *
+   * One empty paragraph is what an empty document *is* in this schema, and
+   * it costs nothing on the way back out: `stringify()` emits zero bytes
+   * for a root holding one empty paragraph, so `toMarkdown(fromMarkdown(''))`
+   * is `''` and the probe accepts it.
+   */
   convertRoot(root: Root): PMNode {
-    return this.schema.node(
-      'doc',
-      null,
-      root.children.map((child) => this.convertBlock(child)),
-    );
+    const children = root.children.map((child) => this.convertBlock(child));
+    return this.schema.node('doc', null, children.length > 0 ? children : [this.schema.node('paragraph')]);
   }
 
   private convertInline(nodes: PhrasingContent[], marks: readonly Mark[] = []): PMNode[] {
@@ -111,13 +143,24 @@ class FromMarkdownConverter {
     return result;
   }
 
+  /**
+   * An inline ATOM carries the surrounding marks exactly as a text node
+   * does. Dropping them made `_a [[Page]] b_` parse into an emphasis run
+   * broken in three by an unmarked `wikiLink`, which `to-markdown.ts` then
+   * had to serialise as three wrappers — and it is also what the editor
+   * itself produces, since `addMark` marks an atom inside the selection
+   * like anything else. Both directions have to agree or a document
+   * changes shape every time it is opened.
+   */
   private convertInlineNode(node: PhrasingContent, marks: readonly Mark[]): PMNode[] {
     const s = this.schema;
     switch (node.type) {
       case 'text':
         return node.value.length === 0 ? [] : [s.text(node.value, marks as Mark[])];
       case 'break':
-        return [s.node('break', { spelling: (node.data as { spelling?: string } | undefined)?.spelling ?? 'backslash' })];
+        return [
+          s.node('break', { spelling: (node.data as { spelling?: string } | undefined)?.spelling ?? 'backslash' }, undefined, marks as Mark[]),
+        ];
       case 'emphasis':
         return this.convertInline(node.children, [...marks, s.mark('emphasis')]);
       case 'strong':
@@ -133,20 +176,27 @@ class FromMarkdownConverter {
         ]);
       case 'wikiLink':
         return [
-          s.node('wikiLink', {
-            raw: node.raw,
-            target: node.target,
-            anchor: node.anchor ?? null,
-            alias: node.alias ?? null,
-          }),
+          s.node(
+            'wikiLink',
+            { raw: node.raw, target: node.target, anchor: node.anchor ?? null, alias: node.alias ?? null },
+            undefined,
+            marks as Mark[],
+          ),
         ];
       case 'tag':
-        return [s.node('tag', { name: node.name })];
+        return [s.node('tag', { name: node.name }, undefined, marks as Mark[])];
       case 'footnoteReference':
-        return [s.node('footnoteReference', { identifier: node.identifier })];
+        return [s.node('footnoteReference', { identifier: node.identifier }, undefined, marks as Mark[])];
       default:
         if (VERBATIM_INLINE_TYPES.has(node.type)) {
-          return [s.node('verbatimInline', { raw: sourceSliceOf(node, this.source), nodeType: node.type })];
+          return [
+            s.node(
+              'verbatimInline',
+              { raw: sourceSliceOf(node, this.source), nodeType: node.type },
+              undefined,
+              marks as Mark[],
+            ),
+          ];
         }
         throw new UnsupportedConstructError(node.type, node.position?.start.line, 'inline');
     }

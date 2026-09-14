@@ -415,6 +415,86 @@ makes conventions portable across projects.
 
 Discoveries and constraints. Newest first.
 
+### 2026-09-14 — GATE-2 verified one direction over one producer's inputs, and the product's only real producer is the other one
+
+**What happened.** Open `_x y z_` in the editor, select `y`, press `Mod-b` (the real binding in
+`create-editor-view.ts`), save. The serialiser wrote `_x&#x20;____y____&#x20;z_`. The page could
+then never be reopened in edit mode — the probe refused its own output as `not_byte_identical` —
+and every further pass added two more underscores. The same happened bolding a word inside `~~…~~`
+(`~~x ~~__~~y~~__~~ z~~`), inside a link (`[x ](/a)__[y](/a)__[ z](/a)` — one link became three),
+and bolding a line containing a `[[wiki-link]]`, a `#tag`, an image or a hard break
+(`__a&#x20;__#ta&#x67;__&#x20;b__`).
+
+**Why 162 green tests could not see it.** GATE-2 runs `md → doc → md` over a 57-file corpus, and
+every one of those documents was produced by the *parser*. A parsed document's mark sets always
+arrive already nested the way the source nested them. A document the *editor* built is a different
+shape: a ProseMirror mark set is sorted by declaration rank (`strong` before `emphasis` before
+`delete` before `link`) and carries no memory of which of two overlapping marks was written
+outermost. `toggleMark(strong)` over `y` inside an emphasis run leaves three text nodes marked
+`[emphasis]`, `[strong, emphasis]`, `[emphasis]`; `to-markdown.ts` matched those sets as a common
+*prefix*, found none between `[emphasis]` and `[strong, emphasis]`, and so closed `emphasis` and
+reopened it around the bolded word — three sibling wrappers where the user made one run.
+`mdast-util-to-markdown` then did exactly what that tree asked: an `emphasis` ending in a space
+cannot carry a right-flanking `_`, so the space became `&#x20;`, and two adjacent `_`-delimited
+wrappers had to grow their delimiter runs apart from each other. The `&#x20;` and the quadrupled
+underscores were not an escaping bug and not a delimiter bug — they were a correct rendering of a
+wrong tree. The second half of the same defect: an inline atom (`wikiLink`, `tag`, `break`,
+`verbatimInline`) was read as carrying no marks at all, in both directions — `from-markdown.ts`
+dropped the surrounding marks when it built the atom, and `to-markdown.ts` hard-coded `[]` for any
+non-text child — although `addMark` marks an atom inside the selection exactly as it marks text.
+
+**The shape.** A gate that verifies one direction (`md → doc → md`) over inputs from one producer
+(the parser), while the product's only real producer is the other one (the editor). The number was
+honest about what it measured and silent about what it did not: nothing tested a document that came
+from `toggleMark`, which is the only kind of document a real save ever contains. This is the
+twenty-first recorded instance of a test passing for the wrong reason, and it is the one with the
+highest cost: markdown is the source of truth, the user owns the file, and the gate's own claim is
+"round-tripping must not alter it".
+
+**The fix.** `orderMarksByExtent` in `to-markdown.ts` orders a child's marks outermost-first by the
+*extent* of the run each mark covers (earliest start, then furthest end), which reconstructs the
+nesting the mark set threw away; declaration rank remains only the tiebreak for two marks covering
+exactly the same run. Atoms carry marks in both directions. `editor-round-trip.test.ts` (GATE-2b)
+now runs `doc → md → doc` over documents built by driving `EDITOR_KEY_BINDINGS` — the exact record
+`createEditorView` installs, split out into `mount/keymap.ts` so a DOM-free test can execute it —
+and asserts four things per case: the saved bytes, that `probe()` re-opens them, that re-parsing
+yields the same document (`Node.eq`), and that a second save is a fixed point. Twelve cases, all
+red on `main`. Two new fixtures (`modelled/emphasis-around-inline-atoms.md`,
+`verbatim/image.md`) cover the parse direction of the same shapes; GATE-2 is 168 cases.
+
+**What it resolves of the "mark nesting is fixed by declaration rank" open question.** The
+`~~removed __bold__~~` half is resolved — that is an extent difference, and it now round-trips
+byte-identical. The `[__bold link__](url)` half is **not**: `strong` and `link` there cover exactly
+the same run, `__[a](b)__` and `[__a__](b)` are the same mark set, and only one spelling can come
+back. Rank keeps `strong` outside, so the first opens and the second is refused by the probe. That
+is fail-closed on a document the user did not write in the editor, not corruption of one they did:
+whichever spelling the editor emits re-parses to the same mark set and re-serialises identically.
+It stays an open question, narrowed to coextensive marks only.
+
+**Two more ways a page became permanently uneditable, found alongside.** `probe('')` returned
+`{ok: false, reason: 'unsupported_construct'}` with no `construct` and no `line`: `doc`'s content
+expression is `block+`, so `schema.node('doc', null, [])` threw a bare `RangeError` that fell into
+`probe`'s catch-all. Reachable — `markdown: z.string()` has no minimum and `canonicalise('') === ''`
+— so clearing a page and saving stored a document edit mode refused forever, and told the author
+nothing. Fixed by making an empty document one empty paragraph (`stringify()` emits zero bytes for
+it, so the probe accepts `''`) and by making `construct` and `line` *required* on the
+`unsupported_construct` variant so the catch-all cannot compile without naming something.
+And `![alt](url)` threw `UnsupportedConstructError` — recorded before as a construct the editor
+could not represent, but its consequence is that any page with one inline image rendered perfectly
+in read mode and could never be edited again. Now carried verbatim as `verbatimInline`, the bucket
+SPECS §5.1 already assigns to "reference-style links and images": modelling it would add a new
+spelling surface (alt escaping, title quoting) to pin and fixture before it bought anything, and
+refusing-with-a-reason would leave the page uneditable, which is the defect. The image is an opaque
+atom the author can move or delete but not retype in place; a real `image` node can replace the
+carrier later without changing the bytes.
+
+**Impact:** `bun run gate-2-round-trip` proves the parser's documents survive; `editor-round-trip.test.ts`
+proves the editor's do. Both run in `bun run -F @deep-wiki/editor test`. A future mark, inline node
+or binding needs a GATE-2b case built by driving the command, not a hand-built node — a hand-built
+node is a guess about what the editor produces, and this defect lived exactly in that gap.
+`apps/api/src/routes/pages.ts` narrows on `reason` before forwarding `construct`; `line` is now on
+every refusal.
+
 ### 2026-09-09 — Three routes authorised the object and never the subject, and they chained
 
 An adversarial audit reproduced three authorisation holes against a real Postgres. They are the
@@ -2467,10 +2547,16 @@ in Findings.
   state that names the malformed response, or classify it as an explicit unknown state the UI
   can render as such. Both are defensible; guessing between them in a `??` is not.
 
-- **Two canonical constructs the editor cannot round trip.** Both fail closed at the probe, so no
-  saved document is corrupted — edit mode simply refuses to open them — but neither fits an existing
-  fixture bucket, because `modelled/` requires a byte-identical round trip and `refused/` requires
-  the source to be non-canonical. These are canonical markdown that the editor cannot represent.
+- ~~**Two canonical constructs the editor cannot round trip.**~~ **Answered 2026-09-14, in part** —
+  see the Finding of that date. Inline images are carried verbatim (SPECS §5.1's own bucket for
+  images) and open in edit mode; extent-ordered mark nesting resolves `~~removed __bold__~~` and
+  every case where one mark's run is a strict subset of another's. **What remains open, narrowed:**
+  two marks covering *exactly* the same run — `[__bold link__](url)` against `__[bold link](url)__`
+  — are one ProseMirror mark set, and only one spelling can come back. Rank keeps `strong` outside,
+  so the first is refused by the probe (fail-closed, no byte rewritten) while the editor's own
+  output always re-opens. Resolving it means remembering nesting order the mark set does not hold —
+  a mark attribute, or a serialisation-order attribute on the text node — and deciding which
+  spelling is canonical when both parse. Not decided in-flight. Superseded original text follows.
   1. **Inline images.** `![alt](url)` throws `UnsupportedConstructError`; `image` is in neither the
      ProseMirror schema nor `VERBATIM_INLINE_TYPES`. Reference-style images work.
   2. **Mark nesting is fixed by declaration rank.** `~~removed __bold__~~` serialises to the
