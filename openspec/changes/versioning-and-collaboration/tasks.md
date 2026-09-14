@@ -167,7 +167,7 @@ Chain strategy: pending
 - [ ] 10.8 **STOP — owner review gate 4/6: comment gutter and thread panel.**
 - [ ] 10.9 Build the orphaned-comment surface as a first-class state (§4.7) — never a crash, never a silent vanish; wire the "no anchors known" degradation from Phase 6.9 into this surface explicitly.
 - [ ] 10.10 **STOP — owner review gate 5/6: orphaned-comment surface.**
-- [ ] 10.11 Build presence indicators on read and edit screens (who + since when, expires visibly, never reads as a hard lock, §4.8); e2e coverage per §7 including the soft-lock-path scenario.
+- [x] 10.11 Build presence indicators on read and edit screens (who + since when, expires visibly, never reads as a hard lock, §4.8); e2e coverage per §7 including the soft-lock-path scenario.
 - [ ] 10.12 **STOP — owner review gate 6/6: presence indicators.**
 
 ## Phase 11: Documentation and Final Verification

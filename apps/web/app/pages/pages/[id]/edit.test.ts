@@ -4,16 +4,18 @@ import { describe, expect, test, vi } from 'vitest';
 import { defineComponent, h, ref } from 'vue';
 import EditPage from './edit.vue';
 
-const { useEditSessionMock, useLockHeartbeatMock, useSavePageMock, useRouteMock } = vi.hoisted(() => ({
+const { useEditSessionMock, useLockHeartbeatMock, useSavePageMock, usePresenceStreamMock, useRouteMock } = vi.hoisted(() => ({
   useEditSessionMock: vi.fn(),
   useLockHeartbeatMock: vi.fn(),
   useSavePageMock: vi.fn(),
+  usePresenceStreamMock: vi.fn(),
   useRouteMock: vi.fn(() => ({ params: { id: 'page-1' } })),
 }));
 
 mockNuxtImport('useEditSession', () => useEditSessionMock);
 mockNuxtImport('useLockHeartbeat', () => useLockHeartbeatMock);
 mockNuxtImport('useSavePage', () => useSavePageMock);
+mockNuxtImport('usePresenceStream', () => usePresenceStreamMock);
 mockNuxtImport('useRoute', () => useRouteMock);
 
 const PageInApp = defineComponent({
@@ -40,16 +42,37 @@ function mockSession(overrides: {
   return { load, takeOver };
 }
 
-function mockDefaults(saveOverrides: { status?: string; corrected?: string | null; anchors?: unknown[]; message?: string } = {}) {
-  useLockHeartbeatMock.mockReturnValue({ status: ref('idle'), start: vi.fn(async () => {}), stop: vi.fn() });
+function mockDefaults(
+  saveOverrides: {
+    status?: string;
+    canonical?: string | null;
+    corrected?: string | null;
+    anchors?: unknown[];
+    message?: string;
+    heartbeatStatus?: string;
+  } = {},
+) {
+  useLockHeartbeatMock.mockReturnValue({ status: ref(saveOverrides.heartbeatStatus ?? 'idle'), start: vi.fn(async () => {}), stop: vi.fn() });
+  const save = vi.fn(async () => {});
   useSavePageMock.mockReturnValue({
     status: ref(saveOverrides.status ?? 'idle'),
     contentHash: ref('hash-1'),
-    canonical: ref(null),
+    canonical: ref(saveOverrides.canonical ?? null),
     corrected: ref(saveOverrides.corrected ?? null),
     anchors: ref(saveOverrides.anchors ?? []),
     message: ref(saveOverrides.message ?? ''),
-    save: vi.fn(async () => {}),
+    save,
+  });
+  mockPresence();
+  return { save };
+}
+
+function mockPresence(editors: readonly { userId: string; userDisplayName: string; since: string }[] = []) {
+  usePresenceStreamMock.mockReturnValue({
+    editors: ref(editors),
+    connectionMode: ref('idle'),
+    start: vi.fn(),
+    stop: vi.fn(),
   });
 }
 
@@ -133,6 +156,79 @@ describe('edit-mode page', () => {
     expect(offerButton).toBeDefined();
   });
 
+  // The gap named in docs/TODO.md's dead-anchor fix (commit 87979d5):
+  // `useSavePage` has exposed `canonical` on a `not canonical` 409 since
+  // before that commit, and this screen never rendered it — the
+  // not-canonical 409 had no UI at all. Same shape as the dead-anchor
+  // banner directly above: `role="alert"`, the message, and an action
+  // that loads the corrected text back into the editor.
+  test('a not-canonical save reports what happened and offers the canonical document', async () => {
+    mockDefaults({
+      status: 'not-canonical',
+      canonical: '# Hi\n\nCanonicalised.\n',
+      message: 'This document is not in its canonical form.',
+    });
+    mockSession({
+      status: 'ready',
+      session: { markdown: '# Hi\n', title: 'Hi', workspaceId: 'ws-1', lock: { holderUserId: 'me', acquiredAt: 'x', heartbeatAt: 'x' } },
+    });
+    const component = await mountSuspended(PageInApp, { global: { stubs: { EditorSurface: true } } });
+
+    const banner = component.get('[role="alert"]');
+    expect(banner.text()).toMatch(/not in its canonical form/i);
+    const offerButton = component.findAll('button').find((button) => /canonical document/i.test(button.text()));
+    expect(offerButton).toBeDefined();
+  });
+
+  test('clicking "Use the canonical document" loads the canonical text into the editor and marks the buffer dirty', async () => {
+    mockDefaults({
+      status: 'not-canonical',
+      canonical: '# Hi\n\nCanonicalised.\n',
+      message: 'This document is not in its canonical form.',
+    });
+    mockSession({
+      status: 'ready',
+      session: { markdown: '# Hi\n', title: 'Hi', workspaceId: 'ws-1', lock: { holderUserId: 'me', acquiredAt: 'x', heartbeatAt: 'x' } },
+    });
+    const component = await mountSuspended(PageInApp, { global: { stubs: { EditorSurface: true } } });
+
+    const offerButton = component.findAll('button').find((button) => /canonical document/i.test(button.text()))!;
+    await offerButton.trigger('click');
+
+    const editorStub = component.findComponent({ name: 'EditorSurface' });
+    expect(editorStub.props('markdown')).toBe('# Hi\n\nCanonicalised.\n');
+  });
+
+  // editing-presence spec: "show the other holder if one appears
+  // mid-session" (docs/UI-CHECKLIST.md §4.8: who + since when).
+  test('shows another editor who appears mid-session, naming them and since when', async () => {
+    mockDefaults();
+    mockPresence([{ userId: 'other-1', userDisplayName: 'Ana', since: '2026-01-01T00:00:00.000Z' }]);
+    mockSession({
+      status: 'ready',
+      session: { markdown: '# Hi\n', title: 'Hi', workspaceId: 'ws-1', lock: { holderUserId: 'me', acquiredAt: 'x', heartbeatAt: 'x' } },
+    });
+    const component = await mountSuspended(PageInApp, { global: { stubs: { EditorSurface: true } } });
+
+    expect(component.text()).toMatch(/Ana is editing/);
+  });
+
+  // The self-exclusion this composable's own `otherEditors` filter exists
+  // for: the current holder is *this tab*, and a presence event that is
+  // simply this session's own heartbeat echoing back must never render as
+  // "someone else is editing" — that would be a false, alarming positive.
+  test('never reports the current tab itself as "another" editor', async () => {
+    mockDefaults();
+    mockPresence([{ userId: 'me', userDisplayName: 'Me', since: '2026-01-01T00:00:00.000Z' }]);
+    mockSession({
+      status: 'ready',
+      session: { markdown: '# Hi\n', title: 'Hi', workspaceId: 'ws-1', lock: { holderUserId: 'me', acquiredAt: 'x', heartbeatAt: 'x' } },
+    });
+    const component = await mountSuspended(PageInApp, { global: { stubs: { EditorSurface: true } } });
+
+    expect(component.text()).not.toMatch(/is editing/);
+  });
+
   test('renders the page title as the one h1 once ready, with the editor surface handed the right props', async () => {
     mockDefaults();
     mockSession({
@@ -153,5 +249,192 @@ describe('edit-mode page', () => {
     expect(component.get('h1').text()).toBe('Hi');
     const editorStub = component.findComponent({ name: 'EditorSurface' });
     expect(editorStub.exists() || component.find('editor-surface-stub').exists()).toBe(true);
+  });
+
+  // docs/UI-CHECKLIST.md §4.11: the locked notice's timestamp must name
+  // the viewer's zone and carry the exact instant in `<time datetime>` —
+  // the same rule `formatRevisionDate` + `<time>` already enforce on
+  // history.vue, not a second ad hoc `toLocaleTimeString()`.
+  test('the locked notice names the zone and preserves the exact instant', async () => {
+    mockDefaults();
+    mockSession({
+      status: 'locked',
+      refusal: {
+        reason: 'locked',
+        holder: { userId: 'other', acquiredAt: '2026-01-01T00:00:00.000Z', heartbeatAt: '2026-01-01T00:00:00.000Z' },
+        offeredExits: ['read_only', 'take_over'],
+      },
+    });
+    const component = await mountSuspended(PageInApp);
+
+    const time = component.get('time');
+    expect(time.attributes('datetime')).toBe('2026-01-01T00:00:00.000Z');
+    expect(time.text()).toMatch(/GMT|UTC|[A-Z]{2,5}$/);
+  });
+
+  describe('Save button — reason on hover and focus, never a bare `disabled`', () => {
+    // docs/UI-CHECKLIST.md §3 ("a disabled button with no reason is a
+    // defect") and §5 (`aria-disabled`, never `disabled`, so the reason
+    // survives keyboard focus) — the same standard `AuthSubmit.vue`
+    // already meets.
+    test('is aria-disabled, with a reason, when there is nothing to save yet', async () => {
+      mockDefaults();
+      mockSession({
+        status: 'ready',
+        session: { markdown: '# Hi\n', title: 'Hi', workspaceId: 'ws-1', lock: { holderUserId: 'me', acquiredAt: 'x', heartbeatAt: 'x' } },
+      });
+      const component = await mountSuspended(PageInApp, { global: { stubs: { EditorSurface: true } } });
+
+      const saveButton = component.findAll('button').find((button) => /Save/.test(button.text()))!;
+      expect(saveButton.attributes('aria-disabled')).toBe('true');
+      expect(saveButton.attributes('disabled')).toBeUndefined();
+    });
+
+    test('becomes actionable once the document is dirty', async () => {
+      mockDefaults();
+      mockSession({
+        status: 'ready',
+        session: { markdown: '# Hi\n', title: 'Hi', workspaceId: 'ws-1', lock: { holderUserId: 'me', acquiredAt: 'x', heartbeatAt: 'x' } },
+      });
+      const component = await mountSuspended(PageInApp, { global: { stubs: { EditorSurface: true } } });
+      const editorStub = component.findComponent({ name: 'EditorSurface' });
+      editorStub.vm.$emit('update', '# Hi\n\nedited\n');
+      await component.vm.$nextTick();
+
+      const saveButton = component.findAll('button').find((button) => /Save/.test(button.text()))!;
+      expect(saveButton.attributes('aria-disabled')).toBeUndefined();
+    });
+  });
+
+  // §3 "Error — fatal": a `stale` conflict offers no document to merge —
+  // the banner must carry the reload it names, and Save must not invite a
+  // retry that would just 409 again on the same hash (docs/TODO.md
+  // Finding, this task).
+  test('a stale save offers Reload, confirms before discarding unsaved edits, and disables Save meanwhile', async () => {
+    mockDefaults({ status: 'stale', message: 'Someone else saved a newer version. Reload before saving again.' });
+    mockSession({
+      status: 'ready',
+      session: { markdown: '# Hi\n', title: 'Hi', workspaceId: 'ws-1', lock: { holderUserId: 'me', acquiredAt: 'x', heartbeatAt: 'x' } },
+    });
+    const component = await mountSuspended(PageInApp, { global: { stubs: { EditorSurface: true } } });
+    const editorStub = component.findComponent({ name: 'EditorSurface' });
+    editorStub.vm.$emit('update', '# Hi\n\nedited\n');
+    await component.vm.$nextTick();
+
+    const saveButton = component.findAll('button').find((button) => /Save/.test(button.text()))!;
+    expect(saveButton.attributes('aria-disabled')).toBe('true');
+
+    const confirmMock = vi.fn().mockReturnValue(false);
+    const reloadSpy = vi.fn();
+    vi.stubGlobal('confirm', confirmMock);
+    vi.stubGlobal('location', { ...window.location, reload: reloadSpy });
+
+    const reloadButton = component.findAll('button').find((button) => /Reload/.test(button.text()))!;
+    await reloadButton.trigger('click');
+    expect(confirmMock).toHaveBeenCalled();
+    expect(reloadSpy).not.toHaveBeenCalled(); // declined the confirm — nothing discarded
+
+    confirmMock.mockReturnValue(true);
+    await reloadButton.trigger('click');
+    expect(reloadSpy).toHaveBeenCalledTimes(1);
+
+    vi.unstubAllGlobals();
+  });
+
+  // §3 "Error — fatal": preserves unsaved input and says explicitly
+  // whether it was lost or preserved.
+  test('a forbidden save states the work is preserved but cannot be saved, and offers read-only', async () => {
+    mockDefaults({ status: 'forbidden', message: "You don't have permission to save this page anymore." });
+    mockSession({
+      status: 'ready',
+      session: { markdown: '# Hi\n', title: 'Hi', workspaceId: 'ws-1', lock: { holderUserId: 'me', acquiredAt: 'x', heartbeatAt: 'x' } },
+    });
+    const component = await mountSuspended(PageInApp, { global: { stubs: { EditorSurface: true } } });
+
+    const banner = component.get('[role="alert"]');
+    expect(banner.text()).toMatch(/don't have permission/i);
+    expect(banner.text()).toMatch(/nothing was saved/i);
+    expect(component.find('a[href="/pages/page-1"]').exists()).toBe(true);
+    const saveButton = component.findAll('button').find((button) => /Save/.test(button.text()))!;
+    expect(saveButton.attributes('aria-disabled')).toBe('true');
+  });
+
+  // §3 "Error — recoverable": states what failed and offers a real next
+  // action, never a dead end — and, per `saveMessage`, states the work is
+  // preserved.
+  test('a network-error save states the work is preserved and offers Retry', async () => {
+    const { save } = mockDefaults({
+      status: 'network-error',
+      message: 'Cannot reach the server. Your changes are kept in this tab — try saving again.',
+    });
+    mockSession({
+      status: 'ready',
+      session: { markdown: '# Hi\n', title: 'Hi', workspaceId: 'ws-1', lock: { holderUserId: 'me', acquiredAt: 'x', heartbeatAt: 'x' } },
+    });
+    const component = await mountSuspended(PageInApp, { global: { stubs: { EditorSurface: true } } });
+    // A network error leaves the buffer exactly as dirty as it was before
+    // the failed attempt — `onSave` only clears `isDirty` on `success`
+    // (edit.vue's own `onSave`), so this mirrors the real precondition
+    // rather than asserting Retry against an artificially clean buffer.
+    const editorStub = component.findComponent({ name: 'EditorSurface' });
+    editorStub.vm.$emit('update', '# Hi\n\nedited\n');
+    await component.vm.$nextTick();
+
+    const banner = component.get('[role="alert"]');
+    expect(banner.text()).toMatch(/kept in this tab/i);
+    const retryButton = component.findAll('button').find((button) => /Retry/.test(button.text()))!;
+    await retryButton.trigger('click');
+    expect(save).toHaveBeenCalledTimes(1);
+  });
+
+  // §3 "Success": "Saved." is the exact weak example this rule names.
+  // This must name what was saved, and must stop claiming it once the
+  // document is dirty again.
+  describe('the success confirmation', () => {
+    test('names what was saved, not a bare "Saved."', async () => {
+      mockDefaults({ status: 'success' });
+      mockSession({
+        status: 'ready',
+        session: { markdown: '# Hi\n', title: 'My Page', workspaceId: 'ws-1', lock: { holderUserId: 'me', acquiredAt: 'x', heartbeatAt: 'x' } },
+      });
+      const component = await mountSuspended(PageInApp, { global: { stubs: { EditorSurface: true } } });
+
+      const banner = component.get('[role="status"][aria-live="polite"]');
+      expect(banner.text()).not.toBe('Saved.');
+      expect(banner.text()).toMatch(/My Page/);
+    });
+
+    test('stops claiming "Saved" once the document is dirty again', async () => {
+      mockDefaults({ status: 'success' });
+      mockSession({
+        status: 'ready',
+        session: { markdown: '# Hi\n', title: 'My Page', workspaceId: 'ws-1', lock: { holderUserId: 'me', acquiredAt: 'x', heartbeatAt: 'x' } },
+      });
+      const component = await mountSuspended(PageInApp, { global: { stubs: { EditorSurface: true } } });
+      expect(component.find('[role="status"][aria-live="polite"]').exists()).toBe(true);
+
+      const editorStub = component.findComponent({ name: 'EditorSurface' });
+      editorStub.vm.$emit('update', '# Hi\n\nedited again\n');
+      await component.vm.$nextTick();
+
+      expect(component.find('[role="status"][aria-live="polite"]').exists()).toBe(false);
+    });
+  });
+
+  // Defect 11 (UI audit): the lock-lost indicator previously lived in the
+  // fixed-height app bar, where it wrapped and overflowed at 320px. It now
+  // lives in the wrapping content flow, and preserves the "work kept, not
+  // saved" statement §3 requires of a fatal-adjacent error.
+  test('the lock-lost notice lives in the content flow, not the header, and says the work is kept', async () => {
+    mockDefaults({ heartbeatStatus: 'lost' });
+    mockSession({
+      status: 'ready',
+      session: { markdown: '# Hi\n', title: 'Hi', workspaceId: 'ws-1', lock: { holderUserId: 'me', acquiredAt: 'x', heartbeatAt: 'x' } },
+    });
+    const component = await mountSuspended(PageInApp, { global: { stubs: { EditorSurface: true } } });
+
+    expect(component.find('header').text()).not.toMatch(/lock lost/i);
+    expect(component.find('main').text()).toMatch(/lock lost/i);
+    expect(component.text()).toMatch(/kept/i);
   });
 });

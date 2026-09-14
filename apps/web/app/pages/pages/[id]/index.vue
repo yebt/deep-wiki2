@@ -28,6 +28,37 @@ const nodeId = route.params.id as string;
 const { status, html, title, message, load } = usePageRead(nodeId);
 
 /**
+ * editing-presence spec / design.md Decision 5 ("Presence and SSE"): "who
+ * is editing this page, and since when" (docs/UI-CHECKLIST.md §4.8),
+ * surfaced through the same `usePresenceStream` composable edit.vue uses.
+ *
+ * **Known gap, not worked around here:** the stream is
+ * `GET /workspaces/:workspaceId/presence/stream`, workspace-scoped, and
+ * this screen has no workspace id to give it. `usePageRead`'s response
+ * (`ReadPageResponseSchema`: `{ html, title }`) does not carry one, and no
+ * other read-only, side-effect-free endpoint reachable from a read screen
+ * does either — the only place the client currently learns a page's
+ * workspace id is `GET /pages/:id/edit-session`, which acquires the soft
+ * lock as a side effect and must never be called from a read-only screen
+ * just to read a field off it. So `presence.start()` is never called
+ * below; `editors` stays permanently empty and `PresenceIndicator` never
+ * renders, which is the correct degradation for "no data", not a bug. The
+ * seam is wired so a `workspaceId` added to the read response is a
+ * one-line change here — see the reported Finding for what that change is.
+ *
+ * **Cost, since read mode is ~95% of this product's traffic
+ * (docs/SPECS.md §5.3):** `usePresenceStream` pauses its connection
+ * whenever `document.visibilityState` is `hidden` and resumes on
+ * `visibilitychange`, rather than holding one workspace-wide SSE
+ * connection (plus the server's own poll-tick over the `presence` view,
+ * design.md "Multiple API processes") open per backgrounded read tab. That
+ * is the one lever available client-side against the read screen's own
+ * traffic share; it would matter the moment the gap above closes.
+ */
+const presence = usePresenceStream(nodeId);
+onBeforeUnmount(() => presence.stop());
+
+/**
  * Whether the app bar may offer the page's other two surfaces at all.
  *
  * `forbidden` and `not-found` are the two states where every route that
@@ -55,6 +86,12 @@ useSeoMeta({ title: () => (title.value ? `${title.value} — deep-wiki` : 'deep-
 <template>
   <AppShell>
     <template #header-end>
+      <!-- editing-presence spec: who is editing this page right now, and
+           since when — informational only, never a lock of any kind on
+           this screen (docs/UI-CHECKLIST.md §4.8). See the composable's
+           and this screen's own comments above for why it is currently
+           always empty. -->
+      <PresenceIndicator :editors="presence.editors.value" class="mr-2" />
       <!-- The way to this page's revision history. Until now `/pages/:id/
            history` was reachable only by typing the URL — a screen nobody
            can navigate to is not shipped, which is this repository's

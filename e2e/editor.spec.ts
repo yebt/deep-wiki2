@@ -123,3 +123,67 @@ test('entering edit mode while another holder is active offers both "Take over" 
   await expect(page.getByText(/will lose the ability to save/i)).toBeVisible();
   await expect(page.getByRole('button', { name: 'Take over', exact: true })).toBeVisible();
 });
+
+// The gap this task closes (docs/TODO.md Finding, reported alongside this
+// commit): `useSavePage` has exposed `canonical` on a `not canonical` 409
+// since before this task, and edit.vue never rendered it — the
+// not-canonical 409 had no UI at all. Same pattern as the dead-anchor
+// banner: `role="alert"`, the message, and an action that loads the
+// offered document back into the editor via the same remount-key trick.
+test('a save refused as "not canonical" offers the canonical document back, and loading it lets the retry succeed', async ({ page }) => {
+  test.setTimeout(60000);
+  await signIn(page);
+  await page.route(`${apiOrigin()}/pages/${PAGE_ID}/edit-session`, (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        markdown: 'Not canonical yet.\n',
+        title: 'Not Canonical Test',
+        workspaceId: 'ws-e2e',
+        lock: { holderUserId: 'me', acquiredAt: new Date().toISOString(), heartbeatAt: new Date().toISOString() },
+      }),
+    }),
+  );
+  await page.route(`${apiOrigin()}/pages/${PAGE_ID}/lock`, (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ status: 'ok' }) }),
+  );
+
+  let saveAttempts = 0;
+  await page.route(`${apiOrigin()}/pages/${PAGE_ID}`, (route) => {
+    if (route.request().method() !== 'PUT') return route.fallback();
+    saveAttempts += 1;
+    if (saveAttempts === 1) {
+      return route.fulfill({
+        status: 409,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: 'not canonical', canonical: 'Canonicalised by the server.\n' }),
+      });
+    }
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ contentHash: 'hash-2' }) });
+  });
+
+  await page.goto(`/pages/${PAGE_ID}/edit`);
+  const editor = page.getByTestId('editor-surface');
+  await expect(editor).toBeVisible({ timeout: 30000 });
+  await expect(editor).toContainText('Not canonical', { timeout: 30000 });
+  await editor.click();
+  await page.keyboard.press('End');
+  await page.keyboard.type(' edited');
+
+  await page.getByRole('button', { name: /Save/ }).click();
+
+  const banner = page.getByRole('alert').filter({ hasText: /canonical form/i });
+  await expect(banner).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Use the canonical document' })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Use the canonical document' }).click();
+  await expect(editor).toContainText('Canonicalised by the server.');
+
+  // The buffer is dirty again after loading the offered document (the
+  // same "retry, not stuck" contract dead-anchor's exit has) — saving
+  // again must be possible, and this time the mock succeeds.
+  await page.getByRole('button', { name: /Save/ }).click();
+  await expect(page.getByRole('status').filter({ hasText: /Saved/ })).toBeVisible();
+  expect(saveAttempts).toBe(2);
+});

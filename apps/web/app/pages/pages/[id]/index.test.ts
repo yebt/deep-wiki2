@@ -4,12 +4,14 @@ import { describe, expect, test, vi } from 'vitest';
 import { defineComponent, h, ref } from 'vue';
 import ReadPage from './index.vue';
 
-const { usePageReadMock, useRouteMock } = vi.hoisted(() => ({
+const { usePageReadMock, usePresenceStreamMock, useRouteMock } = vi.hoisted(() => ({
   usePageReadMock: vi.fn(),
+  usePresenceStreamMock: vi.fn(),
   useRouteMock: vi.fn(() => ({ params: { id: 'page-1' } })),
 }));
 
 mockNuxtImport('usePageRead', () => usePageReadMock);
+mockNuxtImport('usePresenceStream', () => usePresenceStreamMock);
 mockNuxtImport('useRoute', () => useRouteMock);
 
 const PageInApp = defineComponent({
@@ -26,7 +28,19 @@ function mockRead(overrides: Partial<{ status: string; html: string; title: stri
     message: ref(overrides.message ?? ''),
     load,
   });
+  mockPresence();
   return load;
+}
+
+function mockPresence(editors: readonly { userId: string; userDisplayName: string; since: string }[] = []) {
+  const start = vi.fn();
+  usePresenceStreamMock.mockReturnValue({
+    editors: ref(editors),
+    connectionMode: ref('idle'),
+    start,
+    stop: vi.fn(),
+  });
+  return start;
 }
 
 describe('read-mode page', () => {
@@ -142,5 +156,40 @@ describe('read-mode page', () => {
     // Transient, and the page may well resolve into something with a
     // history — the same call `Edit` already makes.
     expect(component.find('a[href*="/history"]').exists()).toBe(true);
+  });
+
+  // editing-presence spec (docs/UI-CHECKLIST.md §4.8): who is editing this
+  // page, and since when. The wiring itself — render whatever
+  // `usePresenceStream` reports — is independent of *whether* this screen
+  // can currently open the stream (see index.vue's own header comment for
+  // that gap), so it is testable and tested on its own.
+  test('shows who is editing this page and since when, once presence reports it', async () => {
+    mockRead({ status: 'success', title: 'A Page', html: '<p>Hello</p>' });
+    mockPresence([{ userId: 'u1', userDisplayName: 'Ana', since: '2026-01-01T00:00:00.000Z' }]);
+    const component = await mountSuspended(PageInApp);
+
+    expect(component.text()).toMatch(/Ana is editing/);
+  });
+
+  test('renders no presence indicator when nobody is editing', async () => {
+    mockRead({ status: 'success', title: 'A Page', html: '<p>Hello</p>' });
+    const component = await mountSuspended(PageInApp);
+
+    expect(component.find('[role="status"]').exists()).toBe(false);
+  });
+
+  // The known, reported gap: `usePageRead`'s response carries no
+  // `workspaceId`, so this screen has nothing to open the workspace-scoped
+  // presence stream with. Calling `start()` with anything else (or at
+  // all) would be worse than not starting — a stream request against the
+  // wrong workspace, or fabricated data. This asserts the honest
+  // degradation directly, so a future edit cannot silently "fix" this by
+  // starting the stream with a wrong value instead of the real one.
+  test('never starts the presence stream, for lack of a workspace id to start it with', async () => {
+    mockRead({ status: 'success', title: 'A Page', html: '<p>Hello</p>' });
+    const start = mockPresence();
+    await mountSuspended(PageInApp);
+
+    expect(start).not.toHaveBeenCalled();
   });
 });
