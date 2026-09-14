@@ -18,6 +18,17 @@ import { randomUUID } from 'node:crypto';
 import postgres from 'postgres';
 import { provisionTestDatabase, resolveAdminUrl, dropTestDatabase, defaultProvisionDeps } from '@deep-wiki/db/testing/provision';
 import { createInvitation, createPasswordReset, createSession, insertGrants, savePage } from '@deep-wiki/db';
+import { ensureTestServices } from '../apps/api/testing/services';
+
+/**
+ * e2e/onboarding.spec.ts signs two people in through the real sign-in
+ * screen, so their rows need a hash `Argon2idPasswordHasher` will verify —
+ * the same parameters `packages/db/seed.ts` uses.
+ */
+const ONBOARDING_PASSWORD = 'correct-horse-battery-staple';
+async function hashPassword(): Promise<string> {
+  return Bun.password.hash(ONBOARDING_PASSWORD, { algorithm: 'argon2id', memoryCost: 19_456, timeCost: 2 });
+}
 
 async function seedFixtures(sql: postgres.Sql) {
   const [owner] = await sql<{ id: string }[]>`
@@ -197,7 +208,147 @@ async function seedFixtures(sql: postgres.Sql) {
   `;
   await insertGrants(sql, ws!.id, 'user', readerUser!.id, [{ resourceId: emptyHistoryPage!.id, action: 'read', effect: 'allow' }]);
 
+  // e2e/book-history.spec.ts (changesets spec: "Book-Level History Is One
+  // Query"; block-diff spec: "Book-Level Diff Aggregates Changed Pages
+  // Since A Date"; task 10.5): a shelf > book > two pages structure, with
+  // TWO changesets by the same author — a fixture with a single changeset
+  // would exercise no grouping at all (task 10.5's own quality-bar
+  // warning). The tree's "path-visible rule" (apps/api/src/routes/tree.ts)
+  // requires every ancestor to be independently readable, not just the
+  // leaf pages, so the reader is granted read on the shelf and the book
+  // too, not only on the two pages.
+  const [bookShelf] = await sql<{ id: string }[]>`
+    INSERT INTO nodes (workspace_id, parent_id, type, path, position, slug, title)
+    VALUES (${ws!.id}, ${root!.id}, 'shelf', '', 4, ${`e2e-book-shelf-${randomUUID()}`}, 'E2E Book Shelf')
+    RETURNING id
+  `;
+  const [book] = await sql<{ id: string }[]>`
+    INSERT INTO nodes (workspace_id, parent_id, type, path, position, slug, title)
+    VALUES (${ws!.id}, ${bookShelf!.id}, 'book', '', 0, ${`e2e-book-${randomUUID()}`}, 'E2E Book History Handbook')
+    RETURNING id
+  `;
+  const [bookPageA] = await sql<{ id: string }[]>`
+    INSERT INTO nodes (workspace_id, parent_id, type, path, position, slug, title)
+    VALUES (${ws!.id}, ${book!.id}, 'page', '', 0, ${`e2e-book-page-a-${randomUUID()}`}, 'E2E Book Page Alpha')
+    RETURNING id
+  `;
+  const [bookPageB] = await sql<{ id: string }[]>`
+    INSERT INTO nodes (workspace_id, parent_id, type, path, position, slug, title)
+    VALUES (${ws!.id}, ${book!.id}, 'page', '', 1, ${`e2e-book-page-b-${randomUUID()}`}, 'E2E Book Page Beta')
+    RETURNING id
+  `;
+
+  // Changeset 1: both pages saved once, close together, same author — the
+  // book-history screen's "N pages changed" grouping (changesets spec:
+  // "Saves Group Implicitly By Author, Book, And Window"). Page A's edit
+  // mirrors historyPage's own proven fixture (heading unchanged, one
+  // sentence modified, one paragraph moved, one paragraph removed, one
+  // paragraph added) so the book-diff screen's focused page exercises all
+  // four `diffBlocks()` classifications; Page B gets a single modified
+  // paragraph, deliberately different content, so navigating "Next" from
+  // Page A to Page B is provably showing a DIFFERENT page rather than a
+  // re-render of the first (the trap named explicitly in tasks.md 10.5).
+  const bookPageASave1 = await savePage(sql, {
+    nodeId: bookPageA!.id,
+    workspaceId: ws!.id,
+    markdown:
+      '## Book page alpha\n\n' +
+      'The page as it was first saved, with no edits yet.\n\n' +
+      'A paragraph about oranges that will move down in the next revision.\n\n' +
+      'A paragraph about grapefruit that will be removed entirely.\n',
+    expectedContentHash: null,
+    updatedBy: owner!.id,
+  });
+  const bookPageBSave1 = await savePage(sql, {
+    nodeId: bookPageB!.id,
+    workspaceId: ws!.id,
+    markdown: '## Book page beta\n\nThe page as it was first saved, with no edits yet.\n',
+    expectedContentHash: null,
+    updatedBy: owner!.id,
+  });
+
+  // The book-diff "since" boundary: captured from the database's own
+  // clock, not the JS process's, so it agrees exactly with what
+  // `page_revision.created_at` holds — one millisecond after the later of
+  // the two round-1 saves, so round 1's own revisions are excluded by the
+  // route's strict `created_at > since` (block-diff spec) and round 2's
+  // are included.
+  const [{ since: bookDiffSinceIso }] = await sql<{ since: string }[]>`
+    SELECT (max(created_at) + interval '1 millisecond')::text AS since
+      FROM page_revision
+     WHERE page_id = ANY(${[bookPageA!.id, bookPageB!.id]})
+  `;
+
+  // Force changeset 1 closed so round 2 opens a genuinely SECOND changeset
+  // rather than joining the first — directly, the same way
+  // `expiredInvitationToken` above backdates a row rather than waiting out
+  // a real `CHANGESET_WINDOW_MINUTES`.
+  await sql`
+    UPDATE changeset SET closed_at = now() - interval '2 hours'
+     WHERE workspace_id = ${ws!.id} AND book_id = ${book!.id} AND author_id = ${owner!.id} AND closed_at IS NULL
+  `;
+
+  // Changeset 2: both pages saved again, grouped together, distinct from
+  // changeset 1.
+  await savePage(sql, {
+    nodeId: bookPageA!.id,
+    workspaceId: ws!.id,
+    markdown:
+      '## Book page alpha\n\n' +
+      'The page as it was first saved, now with one small edit.\n\n' +
+      'A brand new paragraph about pineapples, added in this revision.\n\n' +
+      'A paragraph about oranges that will move down in the next revision.\n',
+    expectedContentHash: bookPageASave1.contentHash,
+    updatedBy: owner!.id,
+  });
+  await savePage(sql, {
+    nodeId: bookPageB!.id,
+    workspaceId: ws!.id,
+    markdown: '## Book page beta\n\nThe page as it was first saved, now with one small edit.\n',
+    expectedContentHash: bookPageBSave1.contentHash,
+    updatedBy: owner!.id,
+  });
+
+  await insertGrants(sql, ws!.id, 'user', readerUser!.id, [
+    { resourceId: bookShelf!.id, action: 'read', effect: 'allow' },
+    { resourceId: book!.id, action: 'read', effect: 'allow' },
+    { resourceId: bookPageA!.id, action: 'read', effect: 'allow' },
+    { resourceId: bookPageB!.id, action: 'read', effect: 'allow' },
+  ]);
+
+  // e2e/onboarding.spec.ts (the front door): a founder with a plan and no
+  // workspace, who creates one by clicking; and a colleague who already has
+  // an account and is invited into it. The plan allows exactly one
+  // workspace, so the limit the screen renders is a real one.
+  const [onboardingPlan] = await sql<{ id: string }[]>`
+    INSERT INTO plans (name, max_workspaces, max_seats, max_storage_bytes, max_ai_tokens_monthly)
+    VALUES (${`e2e-onboarding-${randomUUID()}`}, 1, 10, '1000000', '1000')
+    RETURNING id
+  `;
+  const passwordHash = await hashPassword();
+  const founderEmail = `e2e-founder-${randomUUID()}@example.com`;
+  await sql`
+    INSERT INTO users (email, password_hash, display_name, plan_id)
+    VALUES (${founderEmail}, ${passwordHash}, 'E2E Founder', ${onboardingPlan!.id})
+  `;
+  const colleagueEmail = `e2e-colleague-${randomUUID()}@example.com`;
+  await sql`
+    INSERT INTO users (email, password_hash, display_name)
+    VALUES (${colleagueEmail}, ${passwordHash}, 'E2E Colleague')
+  `;
+
+  // The instance operator, for the registration screen.
+  const superRootEmail = `e2e-super-root-${randomUUID()}@example.com`;
+  await sql`
+    INSERT INTO users (email, password_hash, display_name, is_super_root)
+    VALUES (${superRootEmail}, ${passwordHash}, 'E2E Super Root', true)
+  `;
+
   return {
+    founderEmail,
+    colleagueEmail,
+    superRootEmail,
+    onboardingPassword: ONBOARDING_PASSWORD,
     signinEmail,
     signinInvitationToken,
     keyboardEmail,
@@ -210,6 +361,13 @@ async function seedFixtures(sql: postgres.Sql) {
     historyFirstRevisionId,
     historySecondRevisionId,
     emptyHistoryPageId: emptyHistoryPage!.id,
+    workspaceId: ws!.id,
+    bookHistoryShelfTitle: 'E2E Book Shelf',
+    bookHistoryBookId: book!.id,
+    bookHistoryBookTitle: 'E2E Book History Handbook',
+    bookHistoryPageAId: bookPageA!.id,
+    bookHistoryPageBId: bookPageB!.id,
+    bookDiffSinceIso,
     readerSessionToken,
     outsiderSessionToken,
   };
@@ -225,6 +383,10 @@ async function main(): Promise<void> {
     return;
   }
 
+  // The invitation e2e reads the accept link out of the real mail the API
+  // sends, so the test Mailpit has to be reachable — the same stack the
+  // apps/api adapter suites bring up, on this worktree's own ports.
+  await ensureTestServices();
   const testDb = await provisionTestDatabase();
   const sql = postgres(testDb.url, { max: 5 });
   try {
