@@ -18,6 +18,7 @@
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
+import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -58,7 +59,58 @@ async function waitForHealth(url: string, timeoutMs: number): Promise<void> {
   throw new Error(`apps/api did not become healthy within ${timeoutMs}ms: ${String(lastError)}`);
 }
 
+/**
+ * This file used to spawn apps/api on `API_PORT` and then just poll
+ * `${API_URL}/health`. If a second `bun run e2e` starts in the same
+ * checkout while a first is still up, the derived port is already bound by
+ * the FIRST run's apps/api, our own spawn below fails to bind, and
+ * `waitForHealth` happily observes the other run's server anyway — nothing
+ * here noticed our own process never came up. The second run then
+ * overwrites `.auth-fixtures.json` and, at teardown, drops its own
+ * (still in-flight) database, poisoning the run that was already going.
+ *
+ * Decision: refuse to start, honestly and immediately, rather than making
+ * fixtures/seed per-process. A loud refusal naming the exact env var to run
+ * alongside it with is honest; silently reusing another run's server is
+ * not. (`apps/web`'s dev server has the same shape of problem — Nuxt's own
+ * per-checkout lock, not a port collision — but that lock cannot be
+ * checked safely from here: Playwright starts its `webServer` independently
+ * of `globalSetup`, so by the time this function runs, the lock may already
+ * be *this exact run's own* legitimate `nuxt dev`, not a foreign one. See
+ * `scripts/e2e.ts`, which checks it before Playwright is even invoked —
+ * the only point a lock file found there can belong to someone else.)
+ */
+
+/** Probes a port by actually trying to bind it — the only honest EADDRINUSE test. */
+function defaultTryListen(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const server = createServer();
+    server.once('error', (error: NodeJS.ErrnoException) => {
+      resolve(error.code !== 'EADDRINUSE');
+    });
+    server.once('listening', () => {
+      server.close(() => resolve(true));
+    });
+    server.listen(port, '127.0.0.1');
+  });
+}
+
+/** Refuses to start when `port` is already held by some other process. */
+export async function assertPortFree(port: number, label: string, tryListen: (port: number) => Promise<boolean> = defaultTryListen): Promise<void> {
+  if (await tryListen(port)) return;
+  throw new Error(
+    `e2e global-setup: ${label} port ${port} is already in use — another e2e run (or a leftover server) is bound ` +
+      'to it. Run alongside it with DEEPWIKI_TEST_SLOT=<1..248> (docs/RUNNING.md §4), or stop the other run first.',
+  );
+}
+
 export default async function globalSetup(): Promise<() => Promise<void>> {
+  // Fail fast, before provisioning a database or spawning apps/api: an
+  // honest refusal here costs nothing, where the same collision discovered
+  // later (via a false-positive health check) has already wasted a
+  // database and poisoned another run's fixtures.
+  await assertPortFree(API_PORT, 'apps/api');
+
   const seedOutput = execFileSync('bun', ['run', 'e2e/seed.bun.ts'], {
     cwd: REPO_ROOT,
     encoding: 'utf8',

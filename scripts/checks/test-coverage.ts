@@ -170,14 +170,6 @@ export const ALLOW_LIST: readonly Exemption[] = [
       'src/content/backfill-render.ts is directly tested; only the argv/exit-code shell is untested.',
   },
   {
-    file: 'e2e/global-setup.ts',
-    reason:
-      "Playwright's own globalSetup hook, loaded by path from playwright.config.ts exactly as a tool loads " +
-      'its config — the same shape as X3, but it carries real provisioning logic, so it is written down here ' +
-      'rather than exempted by name. It runs on every `bun run e2e` and fails that run loudly if the ' +
-      'database, apps/api or the seed do not come up; nothing under `bun test` can stand in for that.',
-  },
-  {
     file: 'e2e/seed.bun.ts',
     reason:
       'The e2e seed, spawned as a `bun` child process by e2e/global-setup.ts (never imported), so no test ' +
