@@ -37,6 +37,24 @@ describe('GET /health', () => {
 
     expect(res.headers.get('Access-Control-Allow-Origin')).not.toBe('http://evil.example');
   });
+
+  // Found by e2e/comments.spec.ts on 2026-09-14: a browser's preflight for
+  // `PATCH /comments/:id/resolved` was answered without PATCH in
+  // Access-Control-Allow-Methods, so the browser never sent the request and
+  // the panel reported a dead connection. Every PATCH the client makes —
+  // the lock heartbeat, node rename and reorder, thread resolution — was
+  // blocked the same way, while every server-side test passed, because
+  // `app.request()` never preflights. This preflight is what a browser
+  // actually sends.
+  test('a preflight for PATCH is allowed, like the other methods the client uses', async () => {
+    const res = await createApp({ appUrl: WEB_ORIGIN }).request('/comments/thread/resolved', {
+      method: 'OPTIONS',
+      headers: { Origin: WEB_ORIGIN, 'Access-Control-Request-Method': 'PATCH' },
+    });
+
+    expect(res.status).toBe(204);
+    expect(res.headers.get('Access-Control-Allow-Methods')?.split(',').map((method) => method.trim())).toContain('PATCH');
+  });
 });
 
 class NoopBroadcaster implements PresenceBroadcaster {

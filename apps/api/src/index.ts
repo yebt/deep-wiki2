@@ -50,7 +50,11 @@ export function createApp(options: { readonly appUrl: string }): Hono {
     cors({
       origin: options.appUrl,
       credentials: true,
-      allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+      // PATCH is what the lock heartbeat, node rename/reorder and thread
+      // resolution use; a preflight answered without it blocks every one
+      // of them in a real browser while `app.request()` tests stay green
+      // (index.test.ts holds the preflight).
+      allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     }),
   );
 
