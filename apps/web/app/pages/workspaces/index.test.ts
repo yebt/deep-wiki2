@@ -113,3 +113,24 @@ describe('the workspaces index route', () => {
     expect(resolved.name).toBe('workspaces');
   });
 });
+
+describe('the new-workspace affordance', () => {
+  test('a signed-in caller can reach the new-workspace screen from the list, whether or not it is empty', async () => {
+    mockWorkspaces({ status: 'success', workspaces: [] });
+    const empty = await mountSuspended(PageInApp);
+    const fromEmpty = empty.findAll('a').find((a) => /new workspace/i.test(a.text()));
+    expect(fromEmpty?.attributes('href')).toBe('/workspaces/new');
+
+    mockWorkspaces({ status: 'success', workspaces: [alpha] });
+    const loaded = await mountSuspended(PageInApp);
+    const fromLoaded = loaded.findAll('a').find((a) => /new workspace/i.test(a.text()));
+    expect(fromLoaded?.attributes('href')).toBe('/workspaces/new');
+  });
+
+  test('a signed-out visitor is not offered the new-workspace screen', async () => {
+    mockWorkspaces({ status: 'unauthenticated' });
+    const component = await mountSuspended(PageInApp);
+
+    expect(component.findAll('a').find((a) => /new workspace/i.test(a.text()))).toBeUndefined();
+  });
+});

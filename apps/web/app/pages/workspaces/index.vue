@@ -11,16 +11,20 @@
  *   a bookmark to the root.
  * - Goal, in their words: "Open the wiki I work in."
  * - Single primary action: open a workspace. There is exactly one, and
- *   every row is it; there is no create/rename/leave affordance competing
- *   with it here.
+ *   every row is it. Creating a workspace is a secondary, outlined
+ *   affordance above the list — the way into `/workspaces/new` for a
+ *   signed-in user who has nothing to open yet — and it is deliberately
+ *   not the empty state's primary action, because "nothing shared with me
+ *   yet" and "I should start my own" are different situations and this
+ *   screen cannot tell which one the caller is in.
  * - Data: `workspaces.name`, `workspaces.slug` and the id the tree link is
  *   built from — the three fields `GET /workspaces` returns, and nothing
  *   designed against data that does not exist. No timestamp is rendered:
  *   `workspaces.updated_at` tracks the row, not the content, so a "last
  *   edited" reading of it would be false, and §4.11 rightly makes an
  *   honest one a piece of work rather than a decoration.
- * - Non-goals: no creation, no settings, no membership management, no
- *   per-workspace content preview.
+ * - Non-goals: no settings, no membership management, no per-workspace
+ *   content preview; creation happens on its own screen.
  * - Empty / overflow: a caller who can open nothing gets the state below;
  *   a long workspace name truncates with the full name on hover and focus
  *   rather than widening the row (§6).
@@ -103,47 +107,56 @@ useSeoMeta({ title: 'Workspaces — deep-wiki' });
       </template>
     </PageNotice>
 
-    <PageNotice
-      v-else-if="workspaces.length === 0"
-      icon="i-lucide-library-big"
-      heading="No workspaces you can open"
-      :level="2"
-    >
-      Nothing has been shared with you yet. A workspace admin can grant you access to a shelf, a
-      book or a page, and it will appear here.
-    </PageNotice>
+    <template v-else>
+      <!-- The one write affordance on this screen, outlined so it does not
+           compete with the rows (the primary action). 16px below it: the
+           4dp grid (docs/DESIGN-SYSTEM.md §7.3). -->
+      <div class="mb-4 flex flex-wrap items-center justify-end gap-3">
+        <UButton to="/workspaces/new" variant="outline" color="neutral" icon="i-lucide-plus">New workspace</UButton>
+      </div>
 
-    <!-- A container sitting directly on the app ground is M3's Filled
-         card, which is `UCard variant="soft"` retargeted to
-         `bg-emphasized` — the same component and tone as the auth card and
-         the navigation tree's own list (docs/DESIGN-SYSTEM.md §9.4). Never
-         `bg-elevated`: that rung belongs to the chrome above it. -->
-    <UCard v-else variant="soft" :ui="{ body: 'p-2' }">
-      <ul class="space-y-1">
-        <li v-for="workspace in workspaces" :key="workspace.id">
-          <!-- The row is one 40px tab stop whose visible text is its
-               accessible name (§7). Hover, focus and press are the M3
-               state layer — a `currentColor` overlay that moves away from
-               whatever ground it is drawn on, never a step to another
-               surface rung (§5.2). -->
-          <ULink
-            :to="`/workspaces/${workspace.id}/tree`"
-            class="dw-state-layer flex min-h-10 w-full items-center gap-2 rounded-md px-2 py-1 text-body-large text-default"
-          >
-            <UIcon name="i-lucide-library-big" class="size-5 shrink-0 text-muted" aria-hidden="true" />
-            <!-- The full name stays available on hover and focus rather
-                 than widening the row (§6). -->
-            <span class="truncate" :title="workspace.name">{{ workspace.name }}</span>
-            <!-- `workspaces.name` is not unique and `slug` is, so the slug
-                 is what tells two identically-named workspaces apart. It
-                 is supporting text, so it steps down a type role and is
-                 dropped at the narrowest widths rather than competing with
-                 the name for the same line. -->
-            <span class="text-body-small text-muted hidden shrink-0 sm:inline">{{ workspace.slug }}</span>
-            <UIcon name="i-lucide-chevron-right" class="ms-auto size-4 shrink-0 text-muted" aria-hidden="true" />
-          </ULink>
-        </li>
-      </ul>
-    </UCard>
+      <PageNotice
+        v-if="workspaces.length === 0"
+        icon="i-lucide-library-big"
+        heading="No workspaces you can open"
+        :level="2"
+      >
+        Nothing has been shared with you yet. A workspace admin can grant you access to a shelf, a
+        book or a page, and it will appear here — or start a workspace of your own with New workspace above.
+      </PageNotice>
+
+      <!-- A container sitting directly on the app ground is M3's Filled
+           card, which is `UCard variant="soft"` retargeted to
+           `bg-emphasized` — the same component and tone as the auth card and
+           the navigation tree's own list (docs/DESIGN-SYSTEM.md §9.4). Never
+           `bg-elevated`: that rung belongs to the chrome above it. -->
+      <UCard v-else variant="soft" :ui="{ body: 'p-2' }">
+        <ul class="space-y-1">
+          <li v-for="workspace in workspaces" :key="workspace.id">
+            <!-- The row is one 40px tab stop whose visible text is its
+                 accessible name (§7). Hover, focus and press are the M3
+                 state layer — a `currentColor` overlay that moves away from
+                 whatever ground it is drawn on, never a step to another
+                 surface rung (§5.2). -->
+            <ULink
+              :to="`/workspaces/${workspace.id}/tree`"
+              class="dw-state-layer flex min-h-10 w-full items-center gap-2 rounded-md px-2 py-1 text-body-large text-default"
+            >
+              <UIcon name="i-lucide-library-big" class="size-5 shrink-0 text-muted" aria-hidden="true" />
+              <!-- The full name stays available on hover and focus rather
+                   than widening the row (§6). -->
+              <span class="truncate" :title="workspace.name">{{ workspace.name }}</span>
+              <!-- `workspaces.name` is not unique and `slug` is, so the slug
+                   is what tells two identically-named workspaces apart. It
+                   is supporting text, so it steps down a type role and is
+                   dropped at the narrowest widths rather than competing with
+                   the name for the same line. -->
+              <span class="text-body-small text-muted hidden shrink-0 sm:inline">{{ workspace.slug }}</span>
+              <UIcon name="i-lucide-chevron-right" class="ms-auto size-4 shrink-0 text-muted" aria-hidden="true" />
+            </ULink>
+          </li>
+        </ul>
+      </UCard>
+    </template>
   </AppShell>
 </template>
