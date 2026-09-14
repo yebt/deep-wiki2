@@ -48,6 +48,17 @@ function previousRevisionId(index: number): string {
   return revisions.value[index + 1]!.id;
 }
 
+/**
+ * The list card's body inset. `UCard`'s body is `p-4 sm:p-6`; a bare
+ * `'p-2'` override replaces only the `p-4` half and leaves `sm:p-6`
+ * standing, so the rows were inset 8px below 640px and 24px above it
+ * (audit, 2026-09-14). Both breakpoints are set deliberately: 8px of card
+ * inset plus the row's own 16px puts the text 24px from the card edge at
+ * every width — the card's own medium-and-up inset (§7.4) — and the
+ * skeleton reads the same constant so it cannot drift from the list.
+ */
+const CARD_BODY_INSET = 'p-2 sm:p-2';
+
 function diffHref(index: number): string {
   const revision = revisions.value[index]!;
   return `/pages/${nodeId}/diff?from=${previousRevisionId(index)}&to=${revision.id}`;
@@ -73,12 +84,34 @@ useSeoMeta({ title: 'Revision history — deep-wiki' });
 
     <!-- Loading: a skeleton matched to the row shape it replaces, not a
          spinner — the list's shape is known before the response arrives
-         (docs/UI-CHECKLIST.md §3). -->
-    <div v-if="status === 'idle' || status === 'loading'" data-testid="history-skeleton" class="space-y-3" aria-hidden="true">
-      <USkeleton class="h-16 w-full" />
-      <USkeleton class="h-16 w-full" />
-      <USkeleton class="h-16 w-5/6" />
-    </div>
+         (docs/UI-CHECKLIST.md §3). It is the SAME card and the SAME row
+         classes as the loaded list below, with the two text lines swapped
+         for skeleton bars of their line heights (24px `body-large`, 20px
+         `body-medium`), so the box is identical by construction rather
+         than by estimate: measured on 2026-09-14, three bare `h-16` bars
+         stood outside the card at y=224 and 64px tall where the loaded
+         rows sat at y=248 and 73px. `e2e/history.spec.ts` holds the
+         response back and measures both. -->
+    <UCard v-if="status === 'idle' || status === 'loading'" variant="soft" :ui="{ body: CARD_BODY_INSET }" data-testid="history-skeleton" aria-hidden="true">
+      <ol class="divide-y divide-default">
+        <li v-for="n in 3" :key="n" class="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+          <!-- `as="span"` inside the `<p>`s: a `<div>` in a paragraph is
+               invalid HTML, and the server-rendered skeleton would be
+               re-parsed with the paragraph closed early (measured: 93px
+               rows instead of 73). -->
+          <div class="min-w-0">
+            <p class="flex items-center gap-2">
+              <USkeleton as="span" class="block size-5 shrink-0 rounded-full" />
+              <USkeleton as="span" class="block h-6 w-40" />
+            </p>
+            <p class="mt-1 flex">
+              <USkeleton as="span" class="block h-5 w-64" />
+            </p>
+          </div>
+          <USkeleton class="h-8 w-44" />
+        </li>
+      </ol>
+    </UCard>
 
     <!-- Absence and denial share this ONE state (revision-history spec:
          "History denied without read"; the route returns a byte-identical
@@ -133,7 +166,7 @@ useSeoMeta({ title: 'Revision history — deep-wiki' });
          branch above. A container on the app ground is the Filled card,
          never `bg-elevated` (docs/DESIGN-SYSTEM.md §9.4; the same
          precedent the navigation tree's own list follows). -->
-    <UCard v-else variant="soft" :ui="{ body: 'p-2' }">
+    <UCard v-else variant="soft" :ui="{ body: CARD_BODY_INSET }">
       <ol aria-label="Revision history, newest first" class="divide-y divide-default">
         <li
           v-for="(revision, index) in revisions"
@@ -142,7 +175,9 @@ useSeoMeta({ title: 'Revision history — deep-wiki' });
         >
           <div class="min-w-0">
             <p class="flex items-center gap-2 text-body-large text-highlighted">
-              <UIcon name="i-lucide-user-round" class="size-4 shrink-0 text-muted" aria-hidden="true" />
+              <!-- 20px: docs/DESIGN-SYSTEM.md §9.8's leading icon in a dense
+                   list (the audit found this at `size-4`, 16px). -->
+              <UIcon name="i-lucide-user-round" class="size-5 shrink-0 text-muted" aria-hidden="true" />
               <span class="truncate">{{ revision.authorDisplayName ?? 'Unknown author' }}</span>
             </p>
             <!-- The timestamp reads in the VIEWER's timezone (owner

@@ -143,6 +143,9 @@ const currentChanges = computed(() =>
   (diff.value?.changes ?? []).filter((change) => change.kind !== 'removed').toSorted((a, b) => afterPosition(a) - afterPosition(b)),
 );
 
+/** Same constant, same reason as history.vue: a bare `'p-2'` leaves `UCard`'s `sm:p-6` standing, so the rows were inset 8px below 640px and 24px above (audit, 2026-09-14). 8px of card plus the row's 16px is 24px from the edge at every width. */
+const CARD_BODY_INSET = 'p-2 sm:p-2';
+
 const hasDifferences = computed(() => (diff.value?.changes ?? []).some((change) => change.kind !== 'unchanged'));
 
 useHead({ htmlAttrs: { lang: 'en' } });
@@ -204,7 +207,7 @@ useSeoMeta({ title: 'Page diff — deep-wiki' });
     </PageNotice>
 
     <div v-else class="space-y-6">
-      <UCard v-if="removedChanges.length > 0" variant="soft" :ui="{ body: 'p-2' }">
+      <UCard v-if="removedChanges.length > 0" variant="soft" :ui="{ body: CARD_BODY_INSET }">
         <p class="px-4 pt-3 text-label-large text-muted">Removed in this revision</p>
         <ol aria-label="Blocks removed since the earlier revision" class="divide-y divide-default">
           <li
@@ -221,7 +224,7 @@ useSeoMeta({ title: 'Page diff — deep-wiki' });
         </ol>
       </UCard>
 
-      <UCard variant="soft" :ui="{ body: 'p-2' }">
+      <UCard variant="soft" :ui="{ body: CARD_BODY_INSET }">
         <ol aria-label="Current revision, annotated with what changed" class="divide-y divide-default">
           <li
             v-for="change in currentChanges"

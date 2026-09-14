@@ -167,19 +167,28 @@ useSeoMeta({ title: () => (title.value ? `${title.value} — deep-wiki` : 'deep-
          panels rendered 1216px wide while the document beside them rendered
          659px, so the screen changed width with its state. -->
 
-    <!-- Loading: a skeleton matched to the real layout (a title line
-         plus paragraph-shaped lines), not a spinner — the document's
-         shape is known in advance (docs/UI-CHECKLIST.md §3). -->
+    <!-- Loading: a skeleton matched to the real layout, not a spinner —
+         the document's shape is known in advance (docs/UI-CHECKLIST.md
+         §3). It takes the loaded screen's own boxes rather than estimates
+         of them: the title is `PageHeading`'s block — a 36px
+         `headline-medium` line with the 32px `mb-8` under it — and the
+         lines sit in real `doc-body` paragraphs, so each line box is the
+         26px leading the prose gets and paragraphs are 16px apart, exactly
+         as the rendered article lays them out. Before this the skeleton
+         put a 16px line 24px under the title where the article puts a
+         26px line 32px under the `h1` (audit, 2026-09-14).
+         `e2e/read.spec.ts` holds the response back and measures both. -->
     <div v-if="status === 'idle' || status === 'loading'" data-testid="read-skeleton" aria-hidden="true">
-      <USkeleton class="h-9 w-2/3" />
-      <div class="mt-6 space-y-3">
-        <USkeleton class="h-4 w-full" />
-        <USkeleton class="h-4 w-full" />
-        <USkeleton class="h-4 w-5/6" />
+      <div class="mb-8 max-w-measure">
+        <USkeleton class="h-9 w-2/3" data-testid="read-skeleton-title" />
       </div>
-      <div class="mt-6 space-y-3">
-        <USkeleton class="h-4 w-full" />
-        <USkeleton class="h-4 w-2/3" />
+      <!-- `as="span"`: a `<div>` inside a `<p>` is invalid HTML and the
+           server-rendered skeleton would be re-parsed with the paragraph
+           closed early, losing the 26px line box this exists for. -->
+      <div class="doc-body text-doc-body">
+        <p data-testid="read-skeleton-line"><USkeleton as="span" class="inline-block h-4 w-full align-middle" /></p>
+        <p><USkeleton as="span" class="inline-block h-4 w-full align-middle" /></p>
+        <p><USkeleton as="span" class="inline-block h-4 w-5/6 align-middle" /></p>
       </div>
     </div>
 

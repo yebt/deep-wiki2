@@ -49,6 +49,9 @@ afterEach(() => {
 });
 
 describe('page-history screen', () => {
+  // Presence only. The §3 guarantee that the skeleton occupies the loaded
+  // box is a measurement, and happy-dom has no layout engine: its owner is
+  // `e2e/history.spec.ts` ("the history skeleton occupies the box…").
   test('renders the loading skeleton, not a spinner, while the request is in flight', async () => {
     mockHistory({ status: 'loading' });
     const component = await mountSuspended(PageInApp);

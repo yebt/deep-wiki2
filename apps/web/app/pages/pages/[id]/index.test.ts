@@ -45,6 +45,9 @@ function mockPresence(editors: readonly { userId: string; userDisplayName: strin
 }
 
 describe('read-mode page', () => {
+  // Presence only. The §3 guarantee that the skeleton occupies the loaded
+  // box is a measurement, and happy-dom has no layout engine: its owner is
+  // `e2e/read.spec.ts` ("the read skeleton occupies the box…").
   test('renders the loading skeleton, not a spinner, while the request is in flight', async () => {
     mockRead({ status: 'loading' });
     const component = await mountSuspended(PageInApp);

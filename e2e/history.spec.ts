@@ -278,3 +278,67 @@ test('an outsider with no read grant sees the same not-found state a nonexistent
   await page.goto(`/pages/${crypto.randomUUID()}/history`);
   await expect(page.getByRole('heading', { name: 'This page does not exist' })).toBeVisible({ timeout: 30000 });
 });
+
+/**
+ * docs/UI-CHECKLIST.md §3: "The skeleton occupies the same box the loaded
+ * content will. Measure it; do not assume it." Measured on 2026-09-14 the
+ * history skeleton rows were 64px tall against 73px loaded, and the first
+ * row started 24px higher than the first loaded row — the skeleton stood
+ * outside the card the list renders in. happy-dom has no layout engine,
+ * so this file is the owner of that guarantee: the response is held back,
+ * the skeleton is measured, the response is released, the loaded list is
+ * measured, and the two boxes must agree.
+ */
+test('the history skeleton occupies the box the loaded list takes: same first-row top, same row height', async ({ page, context }) => {
+  await signInAs(context, fixtures.readerSessionToken);
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route(`${fixtures.apiUrl}/pages/${fixtures.historyPageId}/history`, async (route) => {
+    await held;
+    await route.continue();
+  });
+
+  await page.goto(`/pages/${fixtures.historyPageId}/history`);
+  const skeletonRows = page.getByTestId('history-skeleton').locator('li');
+  await expect(skeletonRows.first()).toBeVisible({ timeout: 30000 });
+  const skeletonFirst = (await skeletonRows.first().boundingBox())!;
+  const skeletonSecond = (await skeletonRows.nth(1).boundingBox())!;
+
+  release();
+  const rows = page.getByRole('list', { name: /revision history/i }).locator('li');
+  await expect(rows.first()).toBeVisible({ timeout: 30000 });
+  const loadedFirst = (await rows.first().boundingBox())!;
+  const loadedSecond = (await rows.nth(1).boundingBox())!;
+
+  expect(Math.abs(skeletonFirst.y - loadedFirst.y), `first row top: skeleton ${skeletonFirst.y}, loaded ${loadedFirst.y}`).toBeLessThanOrEqual(1);
+  expect(Math.abs(skeletonFirst.height - loadedFirst.height), `row height: skeleton ${skeletonFirst.height}, loaded ${loadedFirst.height}`).toBeLessThanOrEqual(1);
+  expect(Math.abs(skeletonSecond.y - loadedSecond.y), `second row top: skeleton ${skeletonSecond.y}, loaded ${loadedSecond.y}`).toBeLessThanOrEqual(1);
+  expect(Math.abs(skeletonFirst.x - loadedFirst.x)).toBeLessThanOrEqual(1);
+});
+
+/**
+ * `:ui="{ body: 'p-2' }"` replaces only the card's `p-4` and leaves its
+ * `sm:p-6` standing (audit, 2026-09-14): the list was inset 8px below
+ * 640px and 24px above it. Both breakpoints are now set deliberately, so
+ * the row text sits 24px from the card edge at every width — the card's
+ * own medium-and-up inset (docs/DESIGN-SYSTEM.md §7.4).
+ */
+for (const viewport of [{ width: 1280, height: 900 }, { width: 320, height: 900 }] as const) {
+  test(`the revision rows are inset 24px from the card edge at ${viewport.width}px`, async ({ page, context }) => {
+    await page.setViewportSize(viewport);
+    await signInAs(context, fixtures.readerSessionToken);
+    await page.goto(`/pages/${fixtures.historyPageId}/history`);
+    const rows = page.getByRole('list', { name: /revision history/i }).locator('li');
+    await expect(rows.first()).toBeVisible({ timeout: 30000 });
+
+    const inset = await rows.first().evaluate((row) => {
+      const card = row.closest('[class*="rounded-lg"]')!;
+      const text = row.querySelector('span')!;
+      return text.getBoundingClientRect().left - card.getBoundingClientRect().left;
+    });
+    expect(inset).toBe(24);
+  });
+}
+
