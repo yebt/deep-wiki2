@@ -148,7 +148,7 @@ if (import.meta.main) {
     createInvitationRoutes({
       sql,
       passwordHasher,
-      mailSender,
+      mailDispatcher,
       appUrl: config.APP_URL,
       invitationTtlDays: config.INVITATION_TTL_DAYS,
       sessionIdleTimeoutMinutes: config.SESSION_IDLE_TIMEOUT_MINUTES,

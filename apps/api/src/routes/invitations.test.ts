@@ -9,7 +9,9 @@ import { can, createSession } from '@deep-wiki/db';
 import { provisionTestDatabase, type ProvisionedTestDatabase } from '@deep-wiki/db/testing/provision';
 import { ok, type MailSendError, type MailSender, type Result, type SendMailInput } from '@deep-wiki/core';
 import postgres from 'postgres';
+import { expectNoDisclosure } from '../../testing/expect-no-disclosure';
 import { Argon2idPasswordHasher } from '../adapters/crypto/argon2id-password-hasher';
+import { BackgroundMailDispatcher, type MailDispatcher } from '../adapters/mail/background-mail-dispatcher';
 import { SESSION_COOKIE_NAME } from '../middleware/session';
 import { createInvitationRoutes } from './invitations';
 
@@ -35,8 +37,29 @@ class RecordingMailSender implements MailSender {
   }
 }
 
+/** A transport that never answers — the relay that hangs while connecting. */
+class NeverSettlingMailSender implements MailSender {
+  entered = 0;
+  send(): Promise<Result<void, MailSendError>> {
+    this.entered += 1;
+    return new Promise(() => {});
+  }
+}
+
+/** A recording sender behind the dispatcher the real app uses, with a way to wait for the hand-off to land. */
+class TestMail {
+  readonly sender = new RecordingMailSender();
+  readonly dispatcher = new BackgroundMailDispatcher(this.sender);
+  async sent(): Promise<SendMailInput[]> {
+    await this.dispatcher.whenIdle();
+    return this.sender.sent;
+  }
+}
+
 interface Fixture {
   readonly workspaceId: string;
+  readonly workspaceSlug: string;
+  readonly rootId: string;
   readonly bookId: string;
   readonly adminCookie: string;
 }
@@ -50,8 +73,9 @@ async function buildFixture(): Promise<Fixture> {
     INSERT INTO users (email, password_hash, display_name)
     VALUES (${`admin-${crypto.randomUUID()}@example.com`}, 'hash', 'Admin') RETURNING id
   `;
+  const workspaceSlug = `ws-${crypto.randomUUID()}`;
   const [ws] = await sql<{ id: string }[]>`
-    INSERT INTO workspaces (owner_id, name, slug) VALUES (${owner!.id}, 'WS', ${`ws-${crypto.randomUUID()}`}) RETURNING id
+    INSERT INTO workspaces (owner_id, name, slug) VALUES (${owner!.id}, 'WS', ${workspaceSlug}) RETURNING id
   `;
   const [root] = await sql<{ id: string }[]>`
     INSERT INTO nodes (workspace_id, parent_id, type, path, position, slug, title)
@@ -72,14 +96,14 @@ async function buildFixture(): Promise<Fixture> {
   `;
   const { token } = await createSession(sql, { userId: admin!.id, idleTimeoutMinutes: 30, absoluteTimeoutDays: 30 });
 
-  return { workspaceId: ws!.id, bookId: book!.id, adminCookie: `${SESSION_COOKIE_NAME}=${token}` };
+  return { workspaceId: ws!.id, workspaceSlug, rootId: root!.id, bookId: book!.id, adminCookie: `${SESSION_COOKIE_NAME}=${token}` };
 }
 
-function buildApp(mailSender: MailSender = new RecordingMailSender()) {
+function buildApp(mailDispatcher: MailDispatcher = new TestMail().dispatcher) {
   return createInvitationRoutes({
     sql,
     passwordHasher: hasher,
-    mailSender,
+    mailDispatcher,
     appUrl: 'http://localhost:3000',
     invitationTtlDays: 7,
     sessionIdleTimeoutMinutes: 30,
@@ -89,8 +113,8 @@ function buildApp(mailSender: MailSender = new RecordingMailSender()) {
 describe('POST /invitations', () => {
   test('an authorised Workspace Admin creates an invitation and it is delivered through MailSender', async () => {
     const fixture = await buildFixture();
-    const mailSender = new RecordingMailSender();
-    const app = buildApp(mailSender);
+    const mail = new TestMail();
+    const app = buildApp(mail.dispatcher);
     const email = `invitee-${crypto.randomUUID()}@example.com`;
 
     const res = await app.request('/invitations', {
@@ -104,11 +128,52 @@ describe('POST /invitations', () => {
     });
 
     expect(res.status).toBe(201);
-    expect(mailSender.sent).toHaveLength(1);
-    expect(mailSender.sent[0]!.to).toBe(email);
+    const sent = await mail.sent();
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.to).toBe(email);
   });
 
-  test('a subject without manage on the workspace root cannot create an invitation', async () => {
+  /**
+   * The mail is handed off, never awaited: the response must come back
+   * even when the relay never answers, so an unreachable SMTP host cannot
+   * hold an admin's request open for the transport's whole timeout
+   * (`background-mail-dispatcher.ts`).
+   */
+  test('the response does not wait for the relay — a send that never settles still yields a 201', async () => {
+    const fixture = await buildFixture();
+    const sender = new NeverSettlingMailSender();
+    const app = buildApp(new BackgroundMailDispatcher(sender));
+
+    const request = Promise.resolve(
+      app.request('/invitations', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', cookie: fixture.adminCookie },
+        body: JSON.stringify({
+          workspaceId: fixture.workspaceId,
+          email: `invitee-${crypto.randomUUID()}@example.com`,
+          startingGrants: [{ resourceId: fixture.bookId, action: 'read' }],
+        }),
+      }),
+    );
+    const outcome = await Promise.race([
+      request.then((res) => ({ kind: 'response' as const, status: res.status })),
+      new Promise<{ kind: 'timeout' }>((resolve) => setTimeout(() => resolve({ kind: 'timeout' }), 2_000)),
+    ]);
+
+    expect(outcome).toEqual({ kind: 'response', status: 201 });
+    // The hand-off did happen — the route did not simply skip the mail.
+    await Promise.resolve();
+    expect(sender.entered).toBe(1);
+  });
+
+  /**
+   * `workspaceId` comes from the request body, so anyone can name any
+   * id. A caller without `manage` must get the same answer whether the
+   * id names a real workspace or nothing — otherwise the route is an
+   * oracle for which ids exist (docs/SPECS.md §4; `tree.ts`, "Absence and
+   * denial answer identically").
+   */
+  test('a subject without manage on the workspace root gets the same 404 as a nonexistent workspace, and learns nothing', async () => {
     const fixture = await buildFixture();
     const [nobody] = await sql<{ id: string }[]>`
       INSERT INTO users (email, password_hash, display_name)
@@ -116,26 +181,34 @@ describe('POST /invitations', () => {
     `;
     const { token } = await createSession(sql, { userId: nobody!.id, idleTimeoutMinutes: 30, absoluteTimeoutDays: 30 });
     const app = buildApp();
+    const attempt = (workspaceId: string) =>
+      app.request('/invitations', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', cookie: `${SESSION_COOKIE_NAME}=${token}` },
+        body: JSON.stringify({
+          workspaceId,
+          email: 'someone@example.com',
+          startingGrants: [{ resourceId: fixture.bookId, action: 'read' }],
+        }),
+      });
 
-    const res = await app.request('/invitations', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', cookie: `${SESSION_COOKIE_NAME}=${token}` },
-      body: JSON.stringify({
-        workspaceId: fixture.workspaceId,
-        email: 'someone@example.com',
-        startingGrants: [{ resourceId: fixture.bookId, action: 'read' }],
-      }),
-    });
+    const denied = await attempt(fixture.workspaceId);
+    const absent = await attempt(crypto.randomUUID());
 
-    expect(res.status).toBe(403);
+    expect(denied.status).toBe(404);
+    expect(absent.status).toBe(404);
+    const deniedText = await denied.text();
+    expect(deniedText).toBe(await absent.text());
+    expectNoDisclosure(deniedText, { id: fixture.workspaceId, slug: fixture.workspaceSlug, values: [fixture.rootId] }, denied.headers);
+    expect(await sql`SELECT id FROM invitations WHERE workspace_id = ${fixture.workspaceId}`).toHaveLength(0);
   });
 });
 
 describe('POST /invitations/accept', () => {
   test('a valid acceptance attaches the user to the workspace and can(user, read, book) resolves allow immediately after', async () => {
     const fixture = await buildFixture();
-    const mailSender = new RecordingMailSender();
-    const app = buildApp(mailSender);
+    const mail = new TestMail();
+    const app = buildApp(mail.dispatcher);
     const email = `invitee-${crypto.randomUUID()}@example.com`;
 
     await app.request('/invitations', {
@@ -147,7 +220,7 @@ describe('POST /invitations/accept', () => {
         startingGrants: [{ resourceId: fixture.bookId, action: 'read' }],
       }),
     });
-    const link = mailSender.sent[0]!.body;
+    const link = (await mail.sent())[0]!.body;
     const token = new URL(link.match(/https?:\/\/\S+/)![0]).searchParams.get('token')!;
 
     const res = await app.request('/invitations/accept', {
