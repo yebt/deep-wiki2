@@ -11,28 +11,32 @@
  * - Single primary action: none — a reading surface, like page history.
  *   Each changeset's "View diff since here" is a per-row navigation into
  *   task 10.5's other screen (`diff.vue`), not this screen's own action.
- * - Data needed: exactly what `GET /books/:id/history` returns — a
- *   changeset's id, author id/name, optional message, `windowStart`/
- *   `windowEnd`, and the revisions (id, pageId, createdAt) it groups.
- *   Neither the book's own title nor its `workspaceId` is in that
- *   response, so neither is invented here — see the finding filed for
- *   docs/TODO.md, which is also why the empty state below states why
- *   rather than offering a fabricated "open this book" link this screen
- *   cannot resolve.
+ * - Data needed: exactly what `GET /books/:id/history` returns — the
+ *   book's own title and workspace, and per changeset its id, author
+ *   id/name, optional message, `windowStart`/`windowEnd`, and the
+ *   revisions (id, pageId, createdAt) it groups. The title names the
+ *   screen and the workspace is where "back to the tree" goes; a page is
+ *   still identified by a shortened id, because the response names pages
+ *   by id only (a filed finding).
  * - Non-goals: no changeset message authoring (changesets spec: settable
  *   at save time, not from this read-only screen), no revision restore.
  * - Empty / overflow: a book that has never been saved into has zero
  *   changesets — real and reachable, since a book node (and pages under
- *   it) can exist and be readable before any of them are ever saved. A
- *   book with many changesets, each grouping several pages, is the
- *   ordinary case this screen groups by design rather than flattening.
+ *   it) can exist and be readable before any of them are ever saved; its
+ *   way forward is the tree the book lives in, where a page can be opened
+ *   and edited. A book with many changesets, each grouping several pages,
+ *   is the ordinary case this screen groups by design rather than
+ *   flattening.
  */
 import { formatRevisionDate } from '~/utils/format-revision-date';
 
 const route = useRoute();
 const bookId = route.params.id as string;
 
-const { status, changesets, message, load } = useBookHistory(bookId);
+const { status, title, workspaceId, changesets, message, load } = useBookHistory(bookId);
+
+/** One `<h1>`, whose words change with the state and whose role does not (docs/UI-CHECKLIST.md §4.4). */
+const heading = computed(() => (title.value ? `${title.value} — book history` : 'Book history'));
 
 onMounted(() => {
   void load();
@@ -61,12 +65,28 @@ function diffHref(changeset: { windowStart: string }): string {
 }
 
 useHead({ htmlAttrs: { lang: 'en' } });
-useSeoMeta({ title: 'Book history — deep-wiki' });
+useSeoMeta({ title: () => `${heading.value} — deep-wiki` });
 </script>
 
 <template>
   <AppShell>
-    <PageHeading heading="Book history" description="Every changeset in this book, newest first." />
+    <template #header-end>
+      <!-- The way back to the book's place in the tree, once the response
+           has named the workspace. Icon-only with both halves §4.3
+           demands — the same control the book-diff screen carries. -->
+      <UTooltip v-if="workspaceId" text="Navigation tree">
+        <UButton
+          icon="i-lucide-list-tree"
+          variant="ghost"
+          color="neutral"
+          size="sm"
+          aria-label="Navigation tree"
+          :to="`/workspaces/${workspaceId}/tree`"
+        />
+      </UTooltip>
+    </template>
+
+    <PageHeading :heading="heading" description="Every changeset in this book, newest first." />
 
     <!-- Loading: a skeleton matched to the row shape it replaces
          (docs/UI-CHECKLIST.md §3). Measured against the real row below at
@@ -106,14 +126,17 @@ useSeoMeta({ title: 'Book history — deep-wiki' });
     <!-- Genuinely empty, and real: a book (and pages under it) can exist
          and be readable before anything in it has ever been saved,
          exactly as a single page can (page-history's own empty state).
-         No action is offered here — unlike page history's "Start
-         editing", this screen has no single page to send the reader to,
-         and neither this response nor the diff one names the book's
-         workspace to build a tree link from (a filed finding, not a gap
-         papered over with a guessed URL). -->
+         The way forward is the tree the book lives in — the response
+         names the workspace now — where a page can be opened and edited
+         (docs/UI-CHECKLIST.md §3: an empty state has a path forward). -->
     <PageNotice v-else-if="changesets.length === 0" icon="i-lucide-history" heading="No changes yet" :level="2">
       This book hasn't been saved into yet. Once a page inside it is saved, its changesets will
       appear here, grouped by author and time.
+      <template v-if="workspaceId" #actions>
+        <UButton variant="outline" color="neutral" icon="i-lucide-list-tree" :to="`/workspaces/${workspaceId}/tree`">
+          Open the book in the tree
+        </UButton>
+      </template>
     </PageNotice>
 
     <UCard v-else variant="soft" :ui="{ body: 'p-2 sm:p-2' }">

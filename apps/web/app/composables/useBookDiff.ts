@@ -1,38 +1,18 @@
+import type { BookDiffResponse, ChangedPageDiffPayload } from '@deep-wiki/contracts';
+
 export type BookDiffStatus = 'idle' | 'loading' | 'success' | 'not-found' | 'network-error';
 
-/**
- * The raw `BlockChange` shape (`packages/core/src/content/diff.ts`), with
- * every variant's fields folded into one loose type: `apps/api/src/routes/
- * diff.ts`'s book-level route returns `diffBlocks()`'s own output
- * unvalidated by any zod schema (unlike the page-level route, there is no
- * `PageDiffResponseSchema`-equivalent for it), so this composable reads it
- * defensively rather than assuming a discriminated union survived JSON
- * round-tripping untouched.
- */
-export interface BookDiffBlockChange {
-  readonly kind: 'added' | 'removed' | 'modified' | 'moved' | 'unchanged';
-  readonly id: string;
-  readonly slot?: number;
-  readonly fromSlot?: number;
-  readonly toSlot?: number;
-  readonly splitFrom?: string;
-  readonly mergedInto?: string;
-  readonly moved?: boolean;
-}
-
-export interface ChangedPageDiff {
-  readonly pageId: string;
-  readonly diff: { readonly changes: readonly BookDiffBlockChange[] };
-}
-
-export interface BookDiffResponse {
-  readonly pages: readonly ChangedPageDiff[];
-}
+/** One changed page as `GET /books/:id/diff` returns it — text-bearing changes, both revision ids, and the page's title. */
+export type ChangedPageDiff = ChangedPageDiffPayload;
 
 export type BookDiffFetcher = (bookId: string, since: string) => Promise<BookDiffResponse>;
 
 export interface UseBookDiffResult {
   readonly status: Ref<BookDiffStatus>;
+  /** The book's own title, once the response names it. */
+  readonly title: Ref<string>;
+  /** `null` until a successful response names it — where "back to the tree" goes. */
+  readonly workspaceId: Ref<string | null>;
   readonly pages: Ref<readonly ChangedPageDiff[]>;
   readonly message: Ref<string>;
   readonly load: () => Promise<void>;
@@ -44,11 +24,15 @@ export interface UseBookDiffResult {
  * `not-found` status for both 403 and 404, the same non-disclosure
  * precedent `usePageDiff`/`useBookHistory` follow.
  *
- * This is the *overview* fetch only — which pages changed, and each
- * change's classification with no block text (the route does not attach
- * any; see `BookDiffBlockChange`'s note). The book-diff screen pairs this
- * with `useBookPageDiff` to render one page's full, text-bearing diff at a
- * time as the reader moves between changed pages.
+ * This is the book-diff screen's only request. The route answers with the
+ * book's title and workspace and, per changed page, the page's title, its
+ * baseline and latest revision ids and the same text-bearing
+ * `DiffBlockChangeSchema` changes the page-level route returns
+ * (`packages/contracts/src/diff.ts`). Until it did, the screen re-derived
+ * the revision ids from `GET /pages/:id/history` and re-fetched the text
+ * from `GET /pages/:id/diff` for every focused page — the N+1
+ * `packages/db/src/changesets/book-diff.ts` exists to avoid, reintroduced
+ * client-side. That composable is gone; this is what replaced it.
  */
 export function useBookDiff(bookId: string, since: string, fetcher?: BookDiffFetcher): UseBookDiffResult {
   const get =
@@ -62,6 +46,8 @@ export function useBookDiff(bookId: string, since: string, fetcher?: BookDiffFet
     });
 
   const status = ref<BookDiffStatus>('idle');
+  const title = ref('');
+  const workspaceId = ref<string | null>(null);
   const pages = ref<readonly ChangedPageDiff[]>([]);
   const message = ref('');
 
@@ -71,6 +57,8 @@ export function useBookDiff(bookId: string, since: string, fetcher?: BookDiffFet
 
     try {
       const response = await get(bookId, since);
+      title.value = response.title;
+      workspaceId.value = response.workspaceId;
       pages.value = response.pages;
       status.value = 'success';
       message.value = '';
@@ -86,5 +74,5 @@ export function useBookDiff(bookId: string, since: string, fetcher?: BookDiffFet
     }
   }
 
-  return { status, pages, message, load };
+  return { status, title, workspaceId, pages, message, load };
 }

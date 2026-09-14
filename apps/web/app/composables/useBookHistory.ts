@@ -17,6 +17,9 @@ export interface BookChangesetSummary {
 }
 
 export interface BookHistoryResponse {
+  /** The book node's own title and workspace — what the screen names itself by, and where "back to the tree" goes. */
+  readonly title: string;
+  readonly workspaceId: string;
   readonly changesets: readonly BookChangesetSummary[];
 }
 
@@ -24,6 +27,9 @@ export type BookHistoryFetcher = (bookId: string) => Promise<BookHistoryResponse
 
 export interface UseBookHistoryResult {
   readonly status: Ref<BookHistoryStatus>;
+  readonly title: Ref<string>;
+  /** `null` until a successful response names it. */
+  readonly workspaceId: Ref<string | null>;
   readonly changesets: Ref<readonly BookChangesetSummary[]>;
   readonly message: Ref<string>;
   readonly load: () => Promise<void>;
@@ -47,6 +53,8 @@ export function useBookHistory(bookId: string, fetcher?: BookHistoryFetcher): Us
     });
 
   const status = ref<BookHistoryStatus>('idle');
+  const title = ref('');
+  const workspaceId = ref<string | null>(null);
   const changesets = ref<readonly BookChangesetSummary[]>([]);
   const message = ref('');
 
@@ -56,6 +64,8 @@ export function useBookHistory(bookId: string, fetcher?: BookHistoryFetcher): Us
 
     try {
       const response = await get(bookId);
+      title.value = response.title;
+      workspaceId.value = response.workspaceId;
       changesets.value = response.changesets;
       status.value = 'success';
       message.value = '';
@@ -71,5 +81,5 @@ export function useBookHistory(bookId: string, fetcher?: BookHistoryFetcher): Us
     }
   }
 
-  return { status, changesets, message, load };
+  return { status, title, workspaceId, changesets, message, load };
 }

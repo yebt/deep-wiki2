@@ -32,12 +32,14 @@ interface Changeset {
   revisions: ChangesetRevision[];
 }
 
-function mockHistory(overrides: Partial<{ status: string; changesets: Changeset[]; message: string }> = {}) {
+function mockHistory(overrides: Partial<{ status: string; changesets: Changeset[]; message: string; title: string; workspaceId: string | null }> = {}) {
   const load = vi.fn(async () => {});
   useBookHistoryMock.mockReturnValue({
     status: ref(overrides.status ?? 'idle'),
     changesets: ref(overrides.changesets ?? []),
     message: ref(overrides.message ?? ''),
+    title: ref(overrides.title ?? 'E2E Handbook'),
+    workspaceId: ref(overrides.workspaceId === undefined ? 'ws-1' : overrides.workspaceId),
     load,
   });
   return load;
@@ -164,5 +166,25 @@ describe('book-history screen', () => {
     const component = await mountSuspended(PageInApp);
 
     expect(component.findAll('h1')).toHaveLength(1);
+  });
+
+  // The route names the book and its workspace now. The heading says which
+  // book this is, and the empty state — which used to explain why it could
+  // not offer a way forward — offers one: the book's own place in the tree.
+  test('names the book in the heading and offers the way back to its tree', async () => {
+    mockHistory({ status: 'success', changesets: TWO_CHANGESETS });
+    const component = await mountSuspended(PageInApp);
+
+    expect(component.get('h1').text()).toContain('E2E Handbook');
+    expect(component.find('a[href="/workspaces/ws-1/tree"]').exists()).toBe(true);
+  });
+
+  test('the empty state has a way forward: the tree the book lives in', async () => {
+    mockHistory({ status: 'success', changesets: [] });
+    const component = await mountSuspended(PageInApp);
+
+    expect(component.text()).toMatch(/no changes yet/i);
+    const notice = component.get('[role="status"]');
+    expect(notice.find('a[href="/workspaces/ws-1/tree"]').exists()).toBe(true);
   });
 });

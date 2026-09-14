@@ -15,28 +15,29 @@
  *   since <date>, and let me flip through the pages that changed."
  * - Single primary action: none — a reading surface. "Next"/"Previous"
  *   are this screen's own navigation, not an action on data.
- * - Data needed: `GET /books/:id/diff?since=` for which pages changed
- *   (`useBookDiff`), and — because that route attaches neither block text
- *   nor a page title (its own note) — `GET /pages/:id/history` plus `GET
- *   /pages/:id/diff?from=&to=` per focused page (`useBookPageDiff`) for
- *   the actual content. Neither response names a page's title, so pages
- *   are identified by a shortened id plus an "Open page" link — a filed
- *   finding, not a guessed label.
+ * - Data needed: `GET /books/:id/diff?since=` and nothing else. The
+ *   response names the book (title, workspace) and, per changed page, its
+ *   title, its baseline and latest revision ids and its text-bearing
+ *   changes. Until it did, this screen re-fetched every focused page's
+ *   history and diff to get at the same facts — the N+1 the server-side
+ *   query exists to avoid, done again from the browser — and identified
+ *   pages by eight characters of their id. Both are gone with that route
+ *   change.
  * - Non-goals: no revision restore, no editing from this screen.
  * - Empty / overflow: zero pages changed since the given date is real and
  *   reachable (a quiet window, or `since` set to "now"). A page created
- *   during the window has no earlier revision to diff against — a
- *   `degraded` per-page state (`useBookPageDiff`'s own note), never a
- *   crash or a silently skipped entry in the switcher.
+ *   during the window has no earlier revision to diff against — the route
+ *   says so with `baselineRevisionId: null`, and the screen renders it as
+ *   a state of its own, never a crash or a silently skipped entry in the
+ *   switcher.
  *
  * **Between-pages navigation, and the rule behind it**
- * (`useBookDiffNavigator`): the changed-page LIST is fetched exactly once.
- * "Next"/"Previous" and the page-switcher menu only ever swap which one
- * page's own diff is focused and re-fetch THAT page alone — they never
- * re-fetch the list and this screen never routes to one. `?page=` is kept
- * in sync with the focused page (`router.replace`, no history entry) so
- * the current page survives a reload or a shared link without turning
- * "next" into a real navigation.
+ * (`useBookDiffNavigator`): the book diff is fetched exactly once.
+ * "Next"/"Previous" only ever change which of the already-held pages is
+ * focused — nothing is fetched per page and this screen never routes to a
+ * list. `?page=` is kept in sync with the focused page (`router.replace`,
+ * no history entry) so the current page survives a reload or a shared
+ * link without turning "next" into a real navigation.
  */
 const route = useRoute();
 const bookId = route.params.id as string;
@@ -66,23 +67,45 @@ watch(
 const sinceLabel = computed(() => (sinceIsValid ? formatRevisionDate(since) : ''));
 
 const hasDifferences = computed(
-  () => (nav?.currentPageDiff.value?.changes ?? []).some((change) => change.kind !== 'unchanged'),
+  () => (nav?.currentPage.value?.diff.changes ?? []).some((change) => change.kind !== 'unchanged'),
 );
 
+/**
+ * One `<h1>`, whose words change with the state and whose role does not
+ * (docs/UI-CHECKLIST.md §4.4): the book's own name once the response
+ * carries it, the screen's name until then.
+ */
+const heading = computed(() => (nav?.title.value ? `${nav.title.value} — book diff` : 'Book diff'));
+
 useHead({ htmlAttrs: { lang: 'en' } });
-useSeoMeta({ title: 'Book diff — deep-wiki' });
+useSeoMeta({ title: () => `${heading.value} — deep-wiki` });
 </script>
 
 <template>
   <AppShell>
     <template #header-end>
+      <!-- The way back to the book's place in the tree, once the response
+           has named the workspace — a screen reached from the tree that
+           could only go back to history was one door short. Icon-only,
+           with both halves §4.3 demands, because the bar at 320px already
+           holds a labelled control. -->
+      <UTooltip v-if="nav?.workspaceId.value" text="Navigation tree">
+        <UButton
+          icon="i-lucide-list-tree"
+          variant="ghost"
+          color="neutral"
+          size="sm"
+          aria-label="Navigation tree"
+          :to="`/workspaces/${nav.workspaceId.value}/tree`"
+        />
+      </UTooltip>
       <UButton icon="i-lucide-arrow-left" variant="ghost" color="neutral" size="sm" :to="`/books/${bookId}/history`">
         Back to history
       </UButton>
     </template>
 
     <PageHeading
-      heading="Book diff"
+      :heading="heading"
       :description="sinceIsValid ? `What changed since ${sinceLabel}.` : 'What changed since a given date.'"
     />
 
@@ -169,22 +192,22 @@ useSeoMeta({ title: 'Book diff — deep-wiki' });
           </UTooltip>
         </div>
 
-        <div v-if="nav!.currentPageId.value" class="flex items-center justify-between gap-3">
-          <p class="text-body-small text-muted">
-            Page <code class="text-label-small">{{ nav!.currentPageId.value.slice(0, 8) }}</code>
-          </p>
-          <UButton size="sm" variant="ghost" trailing-icon="i-lucide-external-link" :to="`/pages/${nav!.currentPageId.value}`">
+        <!-- The focused page, by its title: the route names it now, so the
+             screen no longer shows eight characters of an id. -->
+        <div v-if="nav!.currentPage.value" class="flex flex-wrap items-center justify-between gap-3">
+          <h2 class="min-w-0 truncate text-title-large text-highlighted" :title="nav!.currentPage.value.pageTitle">
+            {{ nav!.currentPage.value.pageTitle }}
+          </h2>
+          <UButton size="sm" variant="ghost" trailing-icon="i-lucide-external-link" :to="`/pages/${nav!.currentPage.value.pageId}`">
             Open page
           </UButton>
         </div>
 
-        <div v-if="nav!.currentPageStatus.value === 'loading'" data-testid="book-diff-page-skeleton" class="space-y-3" aria-hidden="true">
-          <USkeleton class="h-16 w-full" />
-          <USkeleton class="h-16 w-full" />
-        </div>
-
+        <!-- Created during this window: nothing earlier to compare against
+             (`baselineRevisionId` is `null`). A real state, with its own
+             way forward. -->
         <PageNotice
-          v-else-if="nav!.currentPageStatus.value === 'degraded'"
+          v-if="nav!.currentPage.value && nav!.currentPage.value.baselineRevisionId === null"
           icon="i-lucide-history"
           heading="This page was created during this window"
           :level="2"
@@ -192,39 +215,8 @@ useSeoMeta({ title: 'Book diff — deep-wiki' });
           There is no earlier revision to compare it against — created during this window, not
           edited from an earlier point.
           <template #actions>
-            <UButton
-              v-if="nav!.currentPageId.value"
-              variant="outline"
-              color="neutral"
-              icon="i-lucide-history"
-              :to="`/pages/${nav!.currentPageId.value}/history`"
-            >
+            <UButton variant="outline" color="neutral" icon="i-lucide-history" :to="`/pages/${nav!.currentPage.value.pageId}/history`">
               View this page's full history
-            </UButton>
-          </template>
-        </PageNotice>
-
-        <PageNotice
-          v-else-if="nav!.currentPageStatus.value === 'not-found'"
-          icon="i-lucide-file-question"
-          heading="This page's diff is unavailable"
-          :level="2"
-        >
-          A revision this diff needed may have been removed since the changeset list loaded.
-        </PageNotice>
-
-        <PageNotice
-          v-else-if="nav!.currentPageStatus.value === 'network-error'"
-          icon="i-lucide-circle-alert"
-          heading="Couldn't load this page's diff"
-          :level="2"
-          tone="error"
-          role="alert"
-        >
-          {{ nav!.currentPageMessage.value }}
-          <template #actions>
-            <UButton variant="outline" color="error" icon="i-lucide-refresh-cw" @click="nav!.goTo(nav!.currentIndex.value)">
-              Retry
             </UButton>
           </template>
         </PageNotice>
@@ -234,7 +226,7 @@ useSeoMeta({ title: 'Book diff — deep-wiki' });
         </PageNotice>
 
         <UCard v-else variant="soft" :ui="{ body: 'p-2 sm:p-2' }">
-          <BookDiffBlockChanges :changes="nav!.currentPageDiff.value?.changes ?? []" />
+          <BookDiffBlockChanges :changes="nav!.currentPage.value?.diff.changes ?? []" />
         </UCard>
       </div>
     </template>

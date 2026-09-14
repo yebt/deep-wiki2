@@ -59,7 +59,8 @@ test('a reader reaches book history from the tree, and book diff from history, e
   await bookHistoryLink.click();
 
   await expect(page).toHaveURL(`/books/${fixtures.bookHistoryBookId}/history`, { timeout: 30000 });
-  await expect(page.getByRole('heading', { level: 1, name: 'Book history' })).toBeVisible({ timeout: 30000 });
+  // The screen names the book it is about, not only what kind of screen it is.
+  await expect(page.getByRole('heading', { level: 1, name: `${fixtures.bookHistoryBookTitle} — book history` })).toBeVisible({ timeout: 30000 });
 
   // Grouping is real: two changesets, not one flattened list of saves —
   // the trap this fixture exists to not-trivially pass.
@@ -76,11 +77,13 @@ test('a reader reaches book history from the tree, and book diff from history, e
   await diffLink.click();
 
   await expect(page).toHaveURL(new RegExp(`^.*/books/${fixtures.bookHistoryBookId}/diff\\?since=`), { timeout: 30000 });
-  await expect(page.getByRole('heading', { level: 1, name: 'Book diff' })).toBeVisible({ timeout: 30000 });
+  await expect(page.getByRole('heading', { level: 1, name: `${fixtures.bookHistoryBookTitle} — book diff` })).toBeVisible({ timeout: 30000 });
 
-  // Two pages changed; the switcher says so, and the first page's own
-  // content is what's showing.
+  // Two pages changed; the switcher says so, the focused page is named by
+  // its title (the route carries it now — no more eight characters of an
+  // id), and the first page's own content is what's showing.
   await expect(page.getByText(/page 1 of 2/i)).toBeVisible({ timeout: 30000 });
+  await expect(page.getByRole('heading', { level: 2, name: 'E2E Book Page Alpha' })).toBeVisible();
   await expect(page.getByText('pineapples', { exact: false })).toBeVisible();
   await expect(page.getByText('Added', { exact: true })).toBeVisible();
   await expect(page.getByText('Moved down', { exact: true })).toBeVisible();
@@ -93,6 +96,7 @@ test('a reader reaches book history from the tree, and book diff from history, e
   await nextButton.click();
 
   await expect(page.getByText(/page 2 of 2/i)).toBeVisible({ timeout: 30000 });
+  await expect(page.getByRole('heading', { level: 2, name: 'E2E Book Page Beta' })).toBeVisible();
   await expect(page.getByText('Book page beta', { exact: false })).toBeVisible();
   await expect(page.getByText('pineapples', { exact: false })).toHaveCount(0);
 
@@ -102,6 +106,12 @@ test('a reader reaches book history from the tree, and book diff from history, e
 
   await expect(page.getByText(/page 1 of 2/i)).toBeVisible({ timeout: 30000 });
   await expect(page.getByText('pineapples', { exact: false })).toBeVisible();
+
+  // Click 3 — the way back to the book's place in the tree, which the
+  // response names now. A screen reached from the tree that could only go
+  // back to history was one door short.
+  await page.getByRole('link', { name: 'Navigation tree' }).click();
+  await expect(page).toHaveURL(`/workspaces/${fixtures.workspaceId}/tree`, { timeout: 30000 });
 });
 
 test('an outsider with no read grant sees the same not-found state a nonexistent book would render, for both screens', async ({

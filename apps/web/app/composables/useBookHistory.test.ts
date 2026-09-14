@@ -33,21 +33,25 @@ describe('useBookHistory', () => {
         ],
       },
     ];
-    const fetcher = vi.fn(async () => ({ changesets }));
-    const { status, changesets: result, load } = useBookHistory('book-1', fetcher);
+    const fetcher = vi.fn(async () => ({ title: 'Handbook', workspaceId: 'ws-1', changesets }));
+    const { status, title, workspaceId, changesets: result, load } = useBookHistory('book-1', fetcher);
 
     expect(status.value).toBe('idle');
+    expect(workspaceId.value).toBeNull();
     const promise = load();
     expect(status.value).toBe('loading');
     await promise;
 
     expect(status.value).toBe('success');
+    // The book's own name and workspace: what the screen names itself by, and where "back to the tree" goes.
+    expect(title.value).toBe('Handbook');
+    expect(workspaceId.value).toBe('ws-1');
     expect(result.value).toEqual(changesets);
     expect(fetcher).toHaveBeenCalledWith('book-1');
   });
 
   test('a book that exists but has no changesets yet resolves to success with an empty list, not an error', async () => {
-    const fetcher = vi.fn(async () => ({ changesets: [] }));
+    const fetcher = vi.fn(async () => ({ title: 'Handbook', workspaceId: 'ws-1', changesets: [] }));
     const { status, changesets: result, load } = useBookHistory('book-1', fetcher);
 
     await load();
@@ -95,7 +99,7 @@ describe('useBookHistory', () => {
     const fetcher = vi.fn(async () => {
       attempt += 1;
       if (attempt === 1) throw new Error('fetch failed');
-      return { changesets: [] };
+      return { title: 'Handbook', workspaceId: 'ws-1', changesets: [] };
     });
     const { status, load } = useBookHistory('book-1', fetcher);
 

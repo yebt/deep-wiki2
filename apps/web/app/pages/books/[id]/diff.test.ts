@@ -28,46 +28,66 @@ interface NavState {
   status?: string;
   pageIds?: string[];
   currentIndex?: number;
-  currentPageStatus?: string;
-  currentPageDiff?: { changes: unknown[] } | null;
   message?: string;
+  title?: string;
+  workspaceId?: string | null;
+}
+
+interface PageContent {
+  changes: unknown[];
+  /** `null` is the route's "created during this window" — no earlier revision to compare against. */
+  baselineRevisionId?: string | null;
+  pageTitle?: string;
 }
 
 /**
  * A real, tiny state machine standing in for `useBookDiffNavigator`, so
  * `next()`/`prev()` visibly change what the mock reports — a mock that
- * always returns the SAME `currentPageDiff` regardless of calls would let
- * a "only checks the first page" test pass for the wrong reason, exactly
- * the trap tasks.md 10.5 names.
+ * always returns the SAME `currentPage` regardless of calls would let a
+ * "only checks the first page" test pass for the wrong reason, exactly the
+ * trap tasks.md 10.5 names. The shape is the navigator's current one: the
+ * focused page is one of the already-held `pages`, with its title, its
+ * baseline and its text — nothing is fetched per page any more.
  */
-function mockNavigator(pagesContent: Record<string, { changes: unknown[] }>, overrides: NavState = {}) {
+function mockNavigator(pagesContent: Record<string, PageContent>, overrides: NavState = {}) {
   const pageIds = overrides.pageIds ?? Object.keys(pagesContent);
   const currentIndex = ref(overrides.currentIndex ?? 0);
   const status = ref(overrides.status ?? 'success');
-  const currentPageStatus = ref(overrides.currentPageStatus ?? 'success');
   const load = vi.fn(async () => {});
-  const goTo = vi.fn(async (index: number) => {
+  const goTo = vi.fn((index: number) => {
     currentIndex.value = index;
   });
-  const next = vi.fn(async () => {
+  const next = vi.fn(() => {
     if (currentIndex.value < pageIds.length - 1) currentIndex.value += 1;
   });
-  const prev = vi.fn(async () => {
+  const prev = vi.fn(() => {
     if (currentIndex.value > 0) currentIndex.value -= 1;
   });
+  const pages = computed(() =>
+    pageIds.map((pageId) => {
+      const content = pagesContent[pageId] ?? { changes: [] };
+      return {
+        pageId,
+        pageTitle: content.pageTitle ?? `Title of ${pageId}`,
+        baselineRevisionId: content.baselineRevisionId === undefined ? `${pageId}-rev-1` : content.baselineRevisionId,
+        latestRevisionId: `${pageId}-rev-2`,
+        diff: { changes: content.changes },
+      };
+    }),
+  );
 
   useBookDiffNavigatorMock.mockReturnValue({
     status,
     message: ref(overrides.message ?? ''),
-    pageSummaries: ref([]),
+    title: ref(overrides.title ?? 'E2E Handbook'),
+    workspaceId: ref(overrides.workspaceId === undefined ? 'ws-1' : overrides.workspaceId),
+    pages,
     pageIds: computed(() => pageIds),
     currentIndex,
+    currentPage: computed(() => pages.value[currentIndex.value] ?? null),
     currentPageId: computed(() => pageIds[currentIndex.value] ?? null),
     hasPrev: computed(() => currentIndex.value > 0),
     hasNext: computed(() => currentIndex.value < pageIds.length - 1),
-    currentPageStatus,
-    currentPageDiff: computed(() => (pageIds[currentIndex.value] ? pagesContent[pageIds[currentIndex.value]!] ?? null : null)),
-    currentPageMessage: ref(''),
     load,
     goTo,
     next,
@@ -188,14 +208,45 @@ describe('book-diff screen', () => {
   });
 
   test('a page created during this window (no baseline) degrades gracefully with a link to its own full history, not a crash', async () => {
-    mockNavigator(
-      { 'page-1': { changes: [] } },
-      { currentPageStatus: 'degraded' },
-    );
+    mockNavigator({ 'page-1': { changes: [], baselineRevisionId: null } });
     const component = await mountSuspended(PageInApp);
 
     expect(component.text()).toMatch(/created during this window|no earlier revision/i);
     expect(component.find('a[href="/pages/page-1/history"]').exists()).toBe(true);
+  });
+
+  // The route names the book and each page now; before it did, the screen
+  // identified a page by eight characters of its id (a filed finding).
+  test('names the book in the heading and the focused page by its title, and the title follows the navigation', async () => {
+    mockNavigator({
+      'page-1': { changes: [{ kind: 'added', id: 'b1', slot: 0, text: 'First.' }], pageTitle: 'Alpha' },
+      'page-2': { changes: [{ kind: 'added', id: 'b2', slot: 0, text: 'Second.' }], pageTitle: 'Beta' },
+    });
+    const component = await mountSuspended(PageInApp);
+
+    expect(component.get('h1').text()).toContain('E2E Handbook');
+    expect(component.get('h2').text()).toContain('Alpha');
+    expect(component.text()).not.toMatch(/page-1/);
+
+    await component.get('button[aria-label="Next changed page"]').trigger('click');
+    await component.vm.$nextTick();
+    expect(component.get('h2').text()).toContain('Beta');
+  });
+
+  test('offers the way back to the book’s tree once the workspace is known, beside the way back to its history', async () => {
+    mockNavigator({ 'page-1': { changes: [] } });
+    const component = await mountSuspended(PageInApp);
+
+    expect(component.find('a[href="/workspaces/ws-1/tree"]').exists()).toBe(true);
+    expect(component.find('a[href="/books/book-1/history"]').exists()).toBe(true);
+  });
+
+  test('renders exactly one h1, even while the book’s title is not yet known', async () => {
+    mockNavigator({}, { status: 'loading', title: '' });
+    const component = await mountSuspended(PageInApp);
+
+    expect(component.findAll('h1')).toHaveLength(1);
+    expect(component.get('h1').text()).toMatch(/Book diff/);
   });
 
   test('every change is unchanged renders a real "no differences" state for the focused page', async () => {
