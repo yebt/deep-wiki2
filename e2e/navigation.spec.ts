@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { expect, test, type BrowserContext } from '@playwright/test';
+import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 
 /**
  * Navigation, end to end: from the front door to a page's content, by
@@ -21,6 +21,8 @@ import { expect, test, type BrowserContext } from '@playwright/test';
 interface Fixtures {
   readonly readerSessionToken: string;
   readonly outsiderSessionToken: string;
+  readonly superRootEmail: string;
+  readonly onboardingPassword: string;
 }
 
 const fixtures: Fixtures = JSON.parse(readFileSync(new URL('.auth-fixtures.json', import.meta.url), 'utf8'));
@@ -37,6 +39,26 @@ async function signInAs(context: BrowserContext, token: string): Promise<void> {
   await context.addCookies([
     { name: 'session', value: token, domain: 'localhost', path: '/', httpOnly: true, secure: true, sameSite: 'Lax' },
   ]);
+}
+
+/**
+ * A field filled — or a button clicked — before hydration lands on
+ * `UAuthForm`'s own documented gotcha: until Vue's handlers attach, its
+ * submit control is not a submit button at all, so the click falls
+ * through to the browser's native form submission and reloads the page
+ * with the fields cleared, which looks exactly like a rejected password.
+ * `e2e/auth.spec.ts` and `e2e/onboarding.spec.ts` both wait for Nuxt's own
+ * `isHydrating` signal before touching a form for this exact reason —
+ * network-idle alone is not enough, since the dev server's HMR socket and
+ * Vite's many small requests can reach idle with hydration still pending.
+ */
+async function gotoAndWaitForHydration(page: Page, path: string): Promise<void> {
+  await page.goto(path);
+  await page.waitForLoadState('networkidle');
+  await page.waitForFunction(() => {
+    const nuxt = (globalThis as { useNuxtApp?: () => { isHydrating?: boolean } }).useNuxtApp;
+    return typeof nuxt === 'function' && nuxt().isHydrating === false;
+  });
 }
 
 test('a signed-in reader gets from the front door to a page by clicking, never by typing a URL', async ({ page, context }) => {
@@ -86,6 +108,64 @@ test('a signed-out visitor reaches sign-in from the front door, by clicking', as
 
   await expect(page).toHaveURL(/\/login$/);
   await expect(page.getByRole('heading', { level: 1, name: /sign in/i })).toBeVisible();
+});
+
+test('a signed-in member reaches the workspace members screen by clicking the tree’s Members link, never by typing the URL', async ({
+  page,
+  context,
+}) => {
+  await signInAs(context, fixtures.readerSessionToken);
+
+  // The one and only address this test types.
+  await page.goto('/');
+
+  await expect(page.getByRole('heading', { level: 1, name: 'Workspaces' })).toBeVisible({ timeout: 30000 });
+
+  // Click 1 — the list row, same as the happy-path test above.
+  await page.getByRole('link', { name: /E2E Workspace/ }).click();
+
+  await expect(page.getByRole('heading', { level: 1, name: 'Navigation tree' })).toBeVisible({ timeout: 30000 });
+
+  // Click 2 — the Members link this task adds beside the book-history
+  // links. It renders for every caller who can open this tree at all
+  // (docs/TODO.md — no `manage` signal reaches this screen today), so a
+  // plain workspace member is enough to prove the click actually goes
+  // somewhere; the screen's own "Nothing to manage here" state is what
+  // would gate a caller without `manage`, not this link's visibility.
+  await page.getByRole('link', { name: 'Members' }).click();
+
+  await expect(page.getByRole('heading', { level: 1, name: 'Members' })).toBeVisible({ timeout: 30000 });
+  await expect(page).toHaveURL(/\/workspaces\/[0-9a-f-]+\/members$/);
+});
+
+/*
+ * The seeded operator (`superRootEmail`) carries no grant on any
+ * workspace in this fixture set — `is_super_root` does not bypass `can()`
+ * (design.md D11), and nothing in `e2e/seed.bun.ts` grants this user
+ * workspace access. So this flow signs in through the real form instead
+ * of a minted cookie (the one `page.goto` is to `/login`, which the task
+ * brief names as the allowed exception), lands on the same "No workspaces
+ * you can open" state an outsider gets, and reaches `/admin/registration`
+ * from the chrome — which renders regardless of what the content pane
+ * shows, because it lives in `AppShell`, not on any one screen.
+ */
+test('the seeded operator reaches registration settings by clicking the chrome entry, never by typing the URL', async ({ page }) => {
+  await gotoAndWaitForHydration(page, '/login');
+
+  await page.getByLabel('Email').fill(fixtures.superRootEmail);
+  await page.getByLabel('Password', { exact: true }).fill(fixtures.onboardingPassword);
+  await page.getByRole('button', { name: /^sign in$/i }).click();
+
+  await expect(page.getByRole('heading', { name: 'No workspaces you can open' })).toBeVisible({ timeout: 30000 });
+
+  // The chrome entry this task adds beside the theme toggle. It renders
+  // for every caller — no `is_super_root` signal reaches the client today
+  // — so `/admin/registration`'s own "This is the instance operator's"
+  // state is what would gate a non-operator, not this link's visibility.
+  await page.getByRole('link', { name: 'Registration settings' }).click();
+
+  await expect(page.getByRole('heading', { level: 1, name: 'Registration' })).toBeVisible({ timeout: 30000 });
+  await expect(page).toHaveURL(/\/admin\/registration$/);
 });
 
 test('/workspaces/ with no id lands on the list rather than the framework 404', async ({ page, context }) => {
