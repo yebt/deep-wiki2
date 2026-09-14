@@ -3,6 +3,8 @@ export type PageReadStatus = 'idle' | 'loading' | 'success' | 'not-found' | 'for
 export interface PageReadResponse {
   readonly html: string;
   readonly title: string;
+  /** The workspace the page belongs to — what the read screen opens the workspace-scoped presence stream with (editing-presence spec). */
+  readonly workspaceId: string;
 }
 
 export type PageReadFetcher = (nodeId: string) => Promise<PageReadResponse>;
@@ -11,6 +13,8 @@ export interface UsePageReadResult {
   readonly status: Ref<PageReadStatus>;
   readonly html: Ref<string>;
   readonly title: Ref<string>;
+  /** `null` until a successful response names it. */
+  readonly workspaceId: Ref<string | null>;
   readonly message: Ref<string>;
   readonly load: () => Promise<void>;
 }
@@ -47,6 +51,7 @@ export function usePageRead(nodeId: string, fetcher?: PageReadFetcher): UsePageR
   const status = ref<PageReadStatus>('idle');
   const html = ref('');
   const title = ref('');
+  const workspaceId = ref<string | null>(null);
   const message = ref('');
 
   async function load(): Promise<void> {
@@ -57,6 +62,7 @@ export function usePageRead(nodeId: string, fetcher?: PageReadFetcher): UsePageR
       const response = await get(nodeId);
       html.value = response.html;
       title.value = response.title;
+      workspaceId.value = response.workspaceId;
       status.value = 'success';
       message.value = '';
     } catch (error) {
@@ -74,5 +80,5 @@ export function usePageRead(nodeId: string, fetcher?: PageReadFetcher): UsePageR
     }
   }
 
-  return { status, html, title, message, load };
+  return { status, html, title, workspaceId, message, load };
 }

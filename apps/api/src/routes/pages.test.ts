@@ -119,6 +119,22 @@ describe('GET /pages/:id', () => {
     expect(body.html).toContain('Hello');
     expect(body.title).toBe('A Page');
   });
+
+  // The read screen opens the workspace-scoped presence stream and has no
+  // side-effect-free way to learn the workspace id otherwise: the only other
+  // route carrying it is `GET /pages/:id/edit-session`, which acquires the
+  // edit lock. The value is already on the row this handler reads.
+  test('the read response names the workspace the page belongs to', async () => {
+    const fixture = await buildFixture();
+    await savePage(sql, { nodeId: fixture.pageId, workspaceId: fixture.workspaceId, markdown: '# Hello\n', expectedContentHash: null });
+    const app = buildApp();
+
+    const res = await app.request(`/pages/${fixture.pageId}`, { headers: { cookie: fixture.readerCookie } });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { workspaceId?: string };
+    expect(body.workspaceId).toBe(fixture.workspaceId);
+  });
 });
 
 describe('PUT /pages/:id', () => {

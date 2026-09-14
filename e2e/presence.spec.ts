@@ -12,20 +12,14 @@ import { API_URL } from './ports';
  * not one page with two logical "users" — because presence is inherently
  * about what one connection knows that another does not.
  *
- * **Known gap, not covered here (see docs/TODO.md Finding, reported by
- * this task): the read screen (index.vue) cannot open the presence stream
- * at all today.** The stream is workspace-scoped
- * (`GET /workspaces/:workspaceId/presence/stream`), and `GET /pages/:id`
- * — the read screen's only data source — never returns a `workspaceId`.
- * The only endpoint that does (`GET /pages/:id/edit-session`) acquires the
- * soft lock as a side effect and must never be called from a read-only
- * screen just to read a field off it. So there is no honest way to write
- * "a reader sees the editor appear" against real client code — index.vue
- * never starts the stream, by design, until that gap is closed (a
- * `workspaceId` on the read response). What this suite covers instead is
- * the one cross-tab scenario presence actually reaches today: two EDIT
- * sessions, where a displaced editor's presence subscription is what makes
- * a takeover *informed* rather than silent (docs/UI-CHECKLIST.md §4.8).
+ * Two scenarios: the one cross-tab edit case (a displaced editor's
+ * presence subscription is what makes a takeover *informed* rather than
+ * silent — docs/UI-CHECKLIST.md §4.8), and the read screen. Until
+ * 2026-09-14 the read screen could not open the stream at all — the stream
+ * is workspace-scoped and `GET /pages/:id` carried no `workspaceId`; the
+ * only route that did acquires the soft lock as a side effect. The read
+ * response now names the workspace, so "a reader sees who is editing"
+ * runs against real client code below.
  */
 
 test.describe.configure({ mode: 'serial' });
@@ -224,3 +218,34 @@ test('stale presence expires visibly once its heartbeat window lapses, tied to t
   await expect(page.getByRole('status')).toHaveCount(0);
   await context.close();
 });
+
+test('a reader sees who is editing the page, and since when, without acquiring any lock', async ({ page }) => {
+  test.setTimeout(60000);
+  await signIn(page, 'e2e-presence-reader-token');
+
+  const since = new Date().toISOString();
+  await mockPresenceStream(page, { current: { userId: 'user-b', userDisplayName: 'User B', since } });
+  const lockRequests: string[] = [];
+  page.on('request', (request) => {
+    if (/\/edit-session|\/lock/.test(request.url())) lockRequests.push(request.url());
+  });
+  await page.route(`${apiOrigin()}/pages/${PAGE_ID}`, (route) => {
+    if (route.request().method() !== 'GET') return route.fallback();
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ html: '<p>Read by many.</p>', title: 'Presence E2E Page', workspaceId: WORKSPACE_ID }),
+    });
+  });
+
+  await page.goto(`/pages/${PAGE_ID}`);
+  await expect(page.getByRole('heading', { level: 1, name: 'Presence E2E Page' })).toBeVisible({ timeout: 30000 });
+
+  // §4.8: who, and since when — named, with the exact instant preserved.
+  await expect(page.getByRole('status')).toContainText('User B is editing since', { timeout: 10000 });
+  await expect(page.getByRole('status').locator('time')).toHaveAttribute('datetime', since);
+  // The read screen learned the workspace from the read response alone:
+  // no edit-session probe, no lock, no heartbeat.
+  expect(lockRequests).toEqual([]);
+});
+

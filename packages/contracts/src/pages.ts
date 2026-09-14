@@ -21,6 +21,8 @@ export type SavePageResponse = z.infer<typeof SavePageResponseSchema>;
 export const ReadPageResponseSchema = z.object({
   html: z.string(),
   title: z.string(),
+  /** The read screen opens the workspace-scoped presence stream with this (editing-presence spec). The only other route that carries it, `GET /pages/:id/edit-session`, acquires the edit lock as a side effect and must never be called just to read a field off it. */
+  workspaceId: z.string(),
 });
 export type ReadPageResponse = z.infer<typeof ReadPageResponseSchema>;
 

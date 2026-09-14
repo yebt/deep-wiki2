@@ -17,6 +17,19 @@ describe('usePageRead', () => {
     expect(fetcher).toHaveBeenCalledWith('page-1');
   });
 
+  // The read screen starts the workspace-scoped presence stream from this
+  // value, and nothing else on a read-only screen can supply it without a
+  // side effect (the edit-session route acquires the lock).
+  test('exposes the workspace id the read response carries', async () => {
+    const fetcher = vi.fn(async () => ({ html: '<p>Hello</p>', title: 'Hello', workspaceId: 'ws-1' }));
+    const { workspaceId, load } = usePageRead('page-1', fetcher);
+
+    expect(workspaceId.value).toBeNull();
+    await load();
+
+    expect(workspaceId.value).toBe('ws-1');
+  });
+
   test('a 403 response resolves to the permission-denied state, not a generic error', async () => {
     const fetcher = vi.fn(async () => {
       throw { response: { status: 403 } };

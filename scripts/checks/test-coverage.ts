@@ -143,10 +143,6 @@ export const ALLOW_LIST: readonly Exemption[] = [
     reason: 'Coverage debt: the permissions write path has no test of its own.',
   },
   {
-    file: 'packages/contracts/src/pages.ts',
-    reason: 'Coverage debt: the page request/response schemas have no test of their own.',
-  },
-  {
     file: 'packages/contracts/src/comments.ts',
     reason:
       'Coverage debt, same shape as pages.ts above: the comment request/response schemas are exercised ' +

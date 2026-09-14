@@ -25,26 +25,22 @@
 const route = useRoute();
 const nodeId = route.params.id as string;
 
-const { status, html, title, message, load } = usePageRead(nodeId);
+const { status, html, title, workspaceId, message, load } = usePageRead(nodeId);
 
 /**
  * editing-presence spec / design.md Decision 5 ("Presence and SSE"): "who
  * is editing this page, and since when" (docs/UI-CHECKLIST.md §4.8),
  * surfaced through the same `usePresenceStream` composable edit.vue uses.
  *
- * **Known gap, not worked around here:** the stream is
- * `GET /workspaces/:workspaceId/presence/stream`, workspace-scoped, and
- * this screen has no workspace id to give it. `usePageRead`'s response
- * (`ReadPageResponseSchema`: `{ html, title }`) does not carry one, and no
- * other read-only, side-effect-free endpoint reachable from a read screen
- * does either — the only place the client currently learns a page's
- * workspace id is `GET /pages/:id/edit-session`, which acquires the soft
+ * The stream is `GET /workspaces/:workspaceId/presence/stream`,
+ * workspace-scoped, and until 2026-09-14 this screen had nothing honest to
+ * open it with: the read response carried no workspace id, and the only
+ * other route that did — `GET /pages/:id/edit-session` — acquires the soft
  * lock as a side effect and must never be called from a read-only screen
- * just to read a field off it. So `presence.start()` is never called
- * below; `editors` stays permanently empty and `PresenceIndicator` never
- * renders, which is the correct degradation for "no data", not a bug. The
- * seam is wired so a `workspaceId` added to the read response is a
- * one-line change here — see the reported Finding for what that change is.
+ * just to read a field off it. `ReadPageResponseSchema` now names the
+ * workspace, so the stream starts the moment the id is known and never
+ * before (a stream request against a guessed workspace would be worse than
+ * none).
  *
  * **Cost, since read mode is ~95% of this product's traffic
  * (docs/SPECS.md §5.3):** `usePresenceStream` pauses its connection
@@ -53,9 +49,19 @@ const { status, html, title, message, load } = usePageRead(nodeId);
  * connection (plus the server's own poll-tick over the `presence` view,
  * design.md "Multiple API processes") open per backgrounded read tab. That
  * is the one lever available client-side against the read screen's own
- * traffic share; it would matter the moment the gap above closes.
+ * traffic share.
  */
 const presence = usePresenceStream(nodeId);
+// `immediate: true` for the same reason edit.vue gives: a response that is
+// already resolved the first time this runs must start the stream exactly
+// the way one that resolves a tick later does.
+watch(
+  workspaceId,
+  (value) => {
+    if (value) presence.start(value);
+  },
+  { immediate: true },
+);
 onBeforeUnmount(() => presence.stop());
 
 /**
@@ -88,9 +94,7 @@ useSeoMeta({ title: () => (title.value ? `${title.value} — deep-wiki` : 'deep-
     <template #header-end>
       <!-- editing-presence spec: who is editing this page right now, and
            since when — informational only, never a lock of any kind on
-           this screen (docs/UI-CHECKLIST.md §4.8). See the composable's
-           and this screen's own comments above for why it is currently
-           always empty. -->
+           this screen (docs/UI-CHECKLIST.md §4.8). -->
       <PresenceIndicator :editors="presence.editors.value" class="mr-2" />
       <!-- The way to this page's revision history. Until now `/pages/:id/
            history` was reachable only by typing the URL — a screen nobody

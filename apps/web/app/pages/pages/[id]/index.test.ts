@@ -19,13 +19,14 @@ const PageInApp = defineComponent({
   setup: () => () => h(UApp, null, { default: () => h(ReadPage) }),
 });
 
-function mockRead(overrides: Partial<{ status: string; html: string; title: string; message: string }> = {}) {
+function mockRead(overrides: Partial<{ status: string; html: string; title: string; message: string; workspaceId: string | null }> = {}) {
   const load = vi.fn(async () => {});
   usePageReadMock.mockReturnValue({
     status: ref(overrides.status ?? 'idle'),
     html: ref(overrides.html ?? ''),
     title: ref(overrides.title ?? ''),
     message: ref(overrides.message ?? ''),
+    workspaceId: ref(overrides.workspaceId ?? null),
     load,
   });
   mockPresence();
@@ -178,15 +179,22 @@ describe('read-mode page', () => {
     expect(component.find('[role="status"]').exists()).toBe(false);
   });
 
-  // The known, reported gap: `usePageRead`'s response carries no
-  // `workspaceId`, so this screen has nothing to open the workspace-scoped
-  // presence stream with. Calling `start()` with anything else (or at
-  // all) would be worse than not starting — a stream request against the
-  // wrong workspace, or fabricated data. This asserts the honest
-  // degradation directly, so a future edit cannot silently "fix" this by
-  // starting the stream with a wrong value instead of the real one.
-  test('never starts the presence stream, for lack of a workspace id to start it with', async () => {
-    mockRead({ status: 'success', title: 'A Page', html: '<p>Hello</p>' });
+  // editing-presence spec: the stream is workspace-scoped
+  // (`GET /workspaces/:workspaceId/presence/stream`), and until the read
+  // response carried `workspaceId` this screen had nothing honest to open
+  // it with — the only other source was the edit-session route, which
+  // acquires the lock as a side effect. Now the read response names the
+  // workspace, and the stream starts with exactly that id, once it is known.
+  test('starts the presence stream with the workspace id the read response carries', async () => {
+    mockRead({ status: 'success', title: 'A Page', html: '<p>Hello</p>', workspaceId: 'ws-1' });
+    const start = mockPresence();
+    await mountSuspended(PageInApp);
+
+    expect(start).toHaveBeenCalledWith('ws-1');
+  });
+
+  test('never starts the presence stream before the workspace id is known', async () => {
+    mockRead({ status: 'loading' });
     const start = mockPresence();
     await mountSuspended(PageInApp);
 

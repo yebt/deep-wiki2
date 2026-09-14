@@ -63,7 +63,7 @@ export function createPageRoutes(deps: PageRouteDeps): Hono<{ Variables: Session
     const content = await readPageHtml(deps.sql, { nodeId, workspaceId: node.workspace_id });
     if (!content) return c.json(ErrorResponseSchema.parse({ error: 'not found' }), 404);
 
-    return c.json({ html: content.renderedHtml, title: node.title });
+    return c.json({ html: content.renderedHtml, title: node.title, workspaceId: node.workspace_id });
   });
 
   app.put('/pages/:id', auth, async (c) => {
