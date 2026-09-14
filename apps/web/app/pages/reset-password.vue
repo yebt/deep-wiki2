@@ -65,41 +65,31 @@ async function onSubmit(event: FormSubmitEvent<{ newPassword: string; confirmPas
 
 <template>
   <AuthShell heading="Set a new password">
-    <div v-if="!token" class="flex items-start gap-3 rounded-md bg-error-container p-4">
-      <UIcon name="i-lucide-link-2-off" class="size-5 shrink-0 text-on-error-container" aria-hidden="true" />
-      <div>
-        <p class="text-body-large-emphasized text-on-error-container">This password reset link isn't valid.</p>
-        <p class="text-body-medium text-on-error-container mt-1">
-          Request a new one and use the freshest link from your inbox.
-        </p>
-        <UButton to="/forgot-password" color="error" variant="outline" class="mt-3">
-          Request a new link
-        </UButton>
-      </div>
-    </div>
+    <!-- Every result here is the bar tier (`InlineNotice`). The two that
+         arrive after a submit take the focus the submit control held and
+         are announced — the refused link as an alert (a failure the user
+         did not ask for), the changed password as a status. The no-token
+         state renders on first paint with nothing to take focus from. -->
+    <InlineNotice v-if="!token" tier="bar" tone="error" icon="i-lucide-link-2-off" title="This password reset link isn't valid.">
+      Request a new one and use the freshest link from your inbox.
+      <template #actions>
+        <UButton to="/forgot-password" color="error" variant="outline">Request a new link</UButton>
+      </template>
+    </InlineNotice>
 
-    <div
-      v-else-if="status === 'invalid-or-expired'"
-      class="flex items-start gap-3 rounded-md bg-error-container p-4"
-    >
-      <UIcon name="i-lucide-link-2-off" class="size-5 shrink-0 text-on-error-container" aria-hidden="true" />
-      <div>
-        <p class="text-body-large-emphasized text-on-error-container">{{ message }}</p>
-        <UButton to="/forgot-password" color="error" variant="outline" class="mt-3">
-          Request a new link
-        </UButton>
-      </div>
-    </div>
+    <InlineNotice v-else-if="status === 'invalid-or-expired'" tier="bar" tone="error" icon="i-lucide-link-2-off" :title="message" role="alert" focus>
+      <template #actions>
+        <UButton to="/forgot-password" color="error" variant="outline">Request a new link</UButton>
+      </template>
+    </InlineNotice>
 
-    <div v-else-if="status === 'success'" role="status" aria-live="polite" class="flex items-start gap-3 rounded-md bg-success-container p-4">
-      <UIcon name="i-lucide-circle-check" class="size-5 shrink-0 text-on-success-container" aria-hidden="true" />
-      <div>
-        <p class="text-body-large-emphasized text-on-success-container">{{ message }}</p>
-        <NuxtLink to="/login" class="text-label-large text-primary hover:underline mt-2 inline-block">
+    <InlineNotice v-else-if="status === 'success'" tier="bar" tone="success" icon="i-lucide-circle-check" :title="message" focus>
+      <template #actions>
+        <NuxtLink to="/login" class="inline-flex min-h-6 items-center text-label-large text-primary hover:underline">
           Continue to sign in
         </NuxtLink>
-      </div>
-    </div>
+      </template>
+    </InlineNotice>
 
     <UAuthForm
       v-else
@@ -119,14 +109,14 @@ async function onSubmit(event: FormSubmitEvent<{ newPassword: string; confirmPas
       </template>
 
       <template #validation>
-        <div v-if="status === 'network-error'" role="alert" class="flex items-start gap-3 rounded-md bg-error-container p-4">
-          <UIcon name="i-lucide-circle-alert" class="size-5 shrink-0 text-on-error-container" aria-hidden="true" />
-          <p class="text-body-medium text-on-error-container">{{ message }}</p>
-        </div>
+        <InlineNotice v-if="status === 'network-error'" tier="bar" tone="error" icon="i-lucide-circle-alert" role="alert">
+          {{ message }}
+        </InlineNotice>
       </template>
 
       <template #footer>
-        <NuxtLink to="/login" class="text-label-large text-primary hover:underline">
+        <!-- `min-h-6`: the 24px target floor from the box, not the type (§5). -->
+        <NuxtLink to="/login" class="inline-flex min-h-6 items-center text-label-large text-primary hover:underline">
           Back to sign in
         </NuxtLink>
       </template>

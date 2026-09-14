@@ -1,7 +1,7 @@
 import { UApp } from '#components';
 import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime';
 import { describe, expect, test, vi } from 'vitest';
-import { defineComponent, h, ref } from 'vue';
+import { defineComponent, h, nextTick, ref } from 'vue';
 import AuthSubmit from '../../components/AuthSubmit.vue';
 import AcceptInvitePage from './accept.vue';
 
@@ -38,6 +38,52 @@ describe('invite/accept page', () => {
     expect(component.findAll('h1')).toHaveLength(1);
     expect(component.find('form').exists()).toBe(false);
     expect(component.text()).toMatch(/invalid|invite/i);
+  });
+
+  // The audit (2026-09-14) found `/invite/accept` with no token rendering
+  // zero actions — prose and nothing else. Checklist §3: never a dead end.
+  // `/reset-password` with no token already offers "Request a new link"; an
+  // invitation cannot be re-requested by the invitee, so the way out is the
+  // door someone who already has an account needs: sign in.
+  test('a missing token still offers a way out — sign in — like the reset screen does', async () => {
+    useRouteMock.mockReturnValue({ query: {} });
+    mockAccept();
+    const component = await mountSuspended(PageInApp);
+
+    expect(component.find('a[href="/login"]').exists()).toBe(true);
+  });
+
+  test('a refused invitation is an alert and takes focus from the submit control it replaced', async () => {
+    useRouteMock.mockReturnValue({ query: { token: 'old' } });
+    const status = ref('idle');
+    useAcceptInvitationMock.mockReturnValue({ status, message: ref('This invitation has expired. Ask whoever invited you to send a new one.'), workspaceId: ref(null), accept: vi.fn() });
+    const component = await mountSuspended(PageInApp, { attachTo: document.body });
+    (component.get('button[type="submit"]').element as HTMLButtonElement).focus();
+    expect(document.activeElement?.tagName).toBe('BUTTON');
+
+    status.value = 'expired';
+    await nextTick();
+    await nextTick();
+
+    const alert = component.get('[role="alert"]');
+    expect(alert.text()).toMatch(/expired/i);
+    expect(document.activeElement).toBe(alert.element);
+    component.unmount();
+  });
+
+  test('the joined confirmation takes focus from the submit control it replaced', async () => {
+    useRouteMock.mockReturnValue({ query: { token: 'abc123' } });
+    const status = ref('idle');
+    useAcceptInvitationMock.mockReturnValue({ status, message: ref('You have joined the workspace.'), workspaceId: ref('ws1'), accept: vi.fn() });
+    const component = await mountSuspended(PageInApp, { attachTo: document.body });
+    (component.get('button[type="submit"]').element as HTMLButtonElement).focus();
+
+    status.value = 'success';
+    await nextTick();
+    await nextTick();
+
+    expect(document.activeElement).toBe(component.get('[role="status"]').element);
+    component.unmount();
   });
 
   test('a present token renders the join form: display name and password', async () => {

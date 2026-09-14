@@ -56,13 +56,13 @@ async function onSubmit(event: FormSubmitEvent<{ email: string; password: string
 
 <template>
   <AuthShell heading="Sign in to deep-wiki">
-    <div v-if="status === 'success'" role="status" aria-live="polite" class="flex items-start gap-3 rounded-md bg-success-container p-4">
-      <UIcon name="i-lucide-circle-check" class="size-5 shrink-0 text-on-success-container" aria-hidden="true" />
-      <div>
-        <p class="text-body-large-emphasized text-on-success-container">{{ message }}</p>
-        <p class="text-body-medium text-on-success-container mt-1">Taking you to deep-wiki…</p>
-      </div>
-    </div>
+    <!-- The bar tier (`InlineNotice`), which replaces the form the user just
+         submitted — so it takes the focus that form's submit control held
+         (docs/UI-CHECKLIST.md §5: async state changes are announced, and
+         focus must not fall off the page). -->
+    <InlineNotice v-if="status === 'success'" tier="bar" tone="success" icon="i-lucide-circle-check" :title="message" focus>
+      Taking you to deep-wiki…
+    </InlineNotice>
 
     <UAuthForm
       v-else
@@ -83,18 +83,16 @@ async function onSubmit(event: FormSubmitEvent<{ email: string; password: string
       </template>
 
       <template #validation>
-        <div
-          v-if="status === 'invalid-credentials' || status === 'network-error'"
-          role="alert"
-          class="flex items-start gap-3 rounded-md bg-error-container p-4"
-        >
-          <UIcon name="i-lucide-circle-alert" class="size-5 shrink-0 text-on-error-container" aria-hidden="true" />
-          <p class="text-body-medium text-on-error-container">{{ message }}</p>
-        </div>
+        <InlineNotice v-if="status === 'invalid-credentials' || status === 'network-error'" tier="bar" tone="error" icon="i-lucide-circle-alert" role="alert">
+          {{ message }}
+        </InlineNotice>
       </template>
 
       <template #footer>
-        <NuxtLink to="/forgot-password" class="text-label-large text-primary hover:underline">
+        <!-- `min-h-6` (24px) on a 20px `label-large` line: checklist §5's
+             24x24 target floor, met by the box and not by the type — measured
+             at 19px before (2026-09-14 audit). -->
+        <NuxtLink to="/forgot-password" class="inline-flex min-h-6 items-center text-label-large text-primary hover:underline">
           Forgot your password?
         </NuxtLink>
       </template>

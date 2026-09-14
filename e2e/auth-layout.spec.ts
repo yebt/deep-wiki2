@@ -129,3 +129,46 @@ test.describe('1280x900', () => {
     expect(Math.abs(region.gapAbove - region.gapBelow)).toBeLessThanOrEqual(2);
   });
 });
+
+/**
+ * Pointer targets are at least 24x24 CSS px (docs/UI-CHECKLIST.md §5).
+ * The auth screens' text links — "Forgot your password?", "Back to sign
+ * in", "Continue to sign in" — measured **19px** tall on 2026-09-14: a
+ * bare `label-large` line box. The fix is the box, not the type, so this
+ * measures the rendered box on every link inside the content region,
+ * across every state that has one. happy-dom has no layout engine, so
+ * this file is the owner of that guarantee.
+ */
+test.describe('link targets', () => {
+  test.use({ viewport: { width: 1280, height: 900 } });
+
+  for (const { name, path } of AUTH_PAGES) {
+    test(`${name}: every link in the content region is at least 24px tall`, async ({ page }) => {
+      await goto(page, path);
+
+      // The invitation form with a live token has no link at all — its way
+      // forward is the form — so the count is not asserted here; the
+      // no-token test below is where a way out is the point.
+      const links = page.locator('main a');
+      for (const link of await links.all()) {
+        const box = await link.boundingBox();
+        expect(box, await link.textContent()).not.toBeNull();
+        expect(box!.height, `"${(await link.textContent())?.trim()}" is ${box!.height}px tall`).toBeGreaterThanOrEqual(24);
+        expect(box!.width).toBeGreaterThanOrEqual(24);
+      }
+    });
+  }
+
+  test('the no-token reset and invite states each keep a way out, and it is a 24px target', async ({ page }) => {
+    for (const path of ['/reset-password', '/invite/accept']) {
+      await goto(page, path);
+      const exits = page.locator('main a');
+      expect(await exits.count(), path).toBeGreaterThan(0);
+      for (const exit of await exits.all()) {
+        const box = await exit.boundingBox();
+        expect(box!.height).toBeGreaterThanOrEqual(24);
+      }
+    }
+  });
+});
+

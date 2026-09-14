@@ -1,7 +1,7 @@
 import { UApp } from '#components';
 import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime';
 import { describe, expect, test, vi } from 'vitest';
-import { defineComponent, h, ref } from 'vue';
+import { defineComponent, h, nextTick, ref } from 'vue';
 import AuthSubmit from '../components/AuthSubmit.vue';
 import ForgotPasswordPage from './forgot-password.vue';
 
@@ -53,6 +53,26 @@ describe('forgot-password page', () => {
     const status = component.get('[role="status"]');
     expect(status.text()).toMatch(/if an account exists/i);
     expect(status.text()).not.toMatch(/no account|not found|does not exist/i);
+  });
+
+  // Measured by the 2026-09-14 audit: after submitting, `document.activeElement`
+  // was `BODY`. The form — and the button that had focus — was replaced by the
+  // confirmation, and nothing took focus in its place (checklist §5, "async
+  // state changes are announced"; §3, never a dead end).
+  test('the sent confirmation takes focus from the submit control it replaced', async () => {
+    const status = ref('idle');
+    usePasswordResetRequestMock.mockReturnValue({ status, message: ref('If an account exists for that email, a reset link has been sent.'), requestReset: vi.fn() });
+    const component = await mountSuspended(PageInApp, { attachTo: document.body });
+
+    (component.get('button[type="submit"]').element as HTMLButtonElement).focus();
+    expect(document.activeElement?.tagName).toBe('BUTTON');
+
+    status.value = 'sent';
+    await nextTick();
+    await nextTick();
+
+    expect(document.activeElement).toBe(component.get('[role="status"]').element);
+    component.unmount();
   });
 
   test('a network failure shows a recoverable error, distinct from the sent confirmation', async () => {

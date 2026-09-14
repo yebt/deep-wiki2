@@ -37,15 +37,18 @@ async function onSubmit(event: FormSubmitEvent<{ email: string }>) {
     heading="Reset your password"
     description="Enter the email address on your account and we'll send a link to reset your password."
   >
-    <div v-if="status === 'sent'" role="status" aria-live="polite" class="flex items-start gap-3 rounded-md bg-success-container p-4">
-      <UIcon name="i-lucide-mail-check" class="size-5 shrink-0 text-on-success-container" aria-hidden="true" />
-      <div>
-        <p class="text-body-large-emphasized text-on-success-container">{{ message }}</p>
-        <p class="text-body-medium text-on-success-container mt-1">
-          Check your inbox for the link. It expires after a while, so use it soon.
-        </p>
-      </div>
-    </div>
+    <!-- The bar tier (`InlineNotice`) replaces the form the user just
+         submitted, so it takes the focus the submit control held: measured
+         on 2026-09-14, `document.activeElement` was `BODY` after this
+         submit (docs/UI-CHECKLIST.md §5). -->
+    <InlineNotice v-if="status === 'sent'" tier="bar" tone="success" icon="i-lucide-mail-check" :title="message" focus>
+      Check your inbox for the link. It expires after a while, so use it soon.
+      <template #actions>
+        <NuxtLink to="/login" class="inline-flex min-h-6 items-center text-label-large text-primary hover:underline">
+          Back to sign in
+        </NuxtLink>
+      </template>
+    </InlineNotice>
 
     <UAuthForm
       v-else
@@ -63,14 +66,14 @@ async function onSubmit(event: FormSubmitEvent<{ email: string }>) {
       </template>
 
       <template #validation>
-        <div v-if="status === 'network-error'" role="alert" class="flex items-start gap-3 rounded-md bg-error-container p-4">
-          <UIcon name="i-lucide-circle-alert" class="size-5 shrink-0 text-on-error-container" aria-hidden="true" />
-          <p class="text-body-medium text-on-error-container">{{ message }}</p>
-        </div>
+        <InlineNotice v-if="status === 'network-error'" tier="bar" tone="error" icon="i-lucide-circle-alert" role="alert">
+          {{ message }}
+        </InlineNotice>
       </template>
 
       <template #footer>
-        <NuxtLink to="/login" class="text-label-large text-primary hover:underline">
+        <!-- `min-h-6`: the 24px target floor from the box, not the type (§5). -->
+        <NuxtLink to="/login" class="inline-flex min-h-6 items-center text-label-large text-primary hover:underline">
           Back to sign in
         </NuxtLink>
       </template>

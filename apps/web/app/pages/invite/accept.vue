@@ -71,52 +71,51 @@ async function onSubmit(event: FormSubmitEvent<{ displayName: string; password: 
 
 <template>
   <AuthShell heading="Join your workspace">
-    <div v-if="!token" class="flex items-start gap-3 rounded-md bg-error-container p-4">
-      <UIcon name="i-lucide-link-2-off" class="size-5 shrink-0 text-on-error-container" aria-hidden="true" />
-      <div>
-        <p class="text-body-large-emphasized text-on-error-container">This invitation link isn't valid.</p>
-        <p class="text-body-medium text-on-error-container mt-1">
-          Check that you copied the whole link, or ask whoever invited you to send it again.
-        </p>
-      </div>
-    </div>
+    <!-- Every result here is the bar tier (`InlineNotice`). The three that
+         arrive after a submit (invalid, expired, already used) are alerts
+         and take the focus the submit control held; the joined confirmation
+         is a status and takes it too. Each dead-link state offers a way out
+         (docs/UI-CHECKLIST.md §3, never a dead end): an invitation cannot be
+         re-requested by the invitee, so the door is the one someone who
+         already has an account needs — sign in — the same exit
+         `/reset-password`'s no-token state gives with "Request a new link".
+         Measured on 2026-09-14, this screen with no token rendered zero
+         actions. -->
+    <InlineNotice v-if="!token" tier="bar" tone="error" icon="i-lucide-link-2-off" title="This invitation link isn't valid.">
+      Check that you copied the whole link, or ask whoever invited you to send it again.
+      <template #actions>
+        <UButton to="/login" color="error" variant="outline" icon="i-lucide-log-in">Sign in instead</UButton>
+      </template>
+    </InlineNotice>
 
-    <div v-else-if="status === 'invalid'" class="flex items-start gap-3 rounded-md bg-error-container p-4">
-      <UIcon name="i-lucide-link-2-off" class="size-5 shrink-0 text-on-error-container" aria-hidden="true" />
-      <div>
-        <p class="text-body-large-emphasized text-on-error-container">{{ message }}</p>
-        <p class="text-body-medium text-on-error-container mt-1">
-          Check that you copied the whole link, or ask whoever invited you to send it again.
-        </p>
-      </div>
-    </div>
+    <InlineNotice v-else-if="status === 'invalid'" tier="bar" tone="error" icon="i-lucide-link-2-off" :title="message" role="alert" focus>
+      Check that you copied the whole link, or ask whoever invited you to send it again.
+      <template #actions>
+        <UButton to="/login" color="error" variant="outline" icon="i-lucide-log-in">Sign in instead</UButton>
+      </template>
+    </InlineNotice>
 
-    <div v-else-if="status === 'expired'" class="flex items-start gap-3 rounded-md bg-error-container p-4">
-      <UIcon name="i-lucide-clock-alert" class="size-5 shrink-0 text-on-error-container" aria-hidden="true" />
-      <div>
-        <p class="text-body-large-emphasized text-on-error-container">{{ message }}</p>
-      </div>
-    </div>
+    <InlineNotice v-else-if="status === 'expired'" tier="bar" tone="error" icon="i-lucide-clock-alert" :title="message" role="alert" focus>
+      <template #actions>
+        <UButton to="/login" color="error" variant="outline" icon="i-lucide-log-in">Sign in instead</UButton>
+      </template>
+    </InlineNotice>
 
-    <div v-else-if="status === 'already-used'" class="flex items-start gap-3 rounded-md bg-warning-container p-4">
-      <UIcon name="i-lucide-badge-check" class="size-5 shrink-0 text-on-warning-container" aria-hidden="true" />
-      <div>
-        <p class="text-body-large-emphasized text-on-warning-container">{{ message }}</p>
-        <NuxtLink to="/login" class="text-label-large text-primary hover:underline mt-2 inline-block">
+    <InlineNotice v-else-if="status === 'already-used'" tier="bar" tone="warning" icon="i-lucide-badge-check" :title="message" role="alert" focus>
+      <template #actions>
+        <NuxtLink to="/login" class="inline-flex min-h-6 items-center text-label-large text-primary hover:underline">
           Sign in
         </NuxtLink>
-      </div>
-    </div>
+      </template>
+    </InlineNotice>
 
-    <div v-else-if="status === 'success'" role="status" aria-live="polite" class="flex items-start gap-3 rounded-md bg-success-container p-4">
-      <UIcon name="i-lucide-circle-check" class="size-5 shrink-0 text-on-success-container" aria-hidden="true" />
-      <div>
-        <p class="text-body-large-emphasized text-on-success-container">{{ message }}</p>
-        <NuxtLink to="/login" class="text-label-large text-primary hover:underline mt-2 inline-block">
+    <InlineNotice v-else-if="status === 'success'" tier="bar" tone="success" icon="i-lucide-circle-check" :title="message" focus>
+      <template #actions>
+        <NuxtLink to="/login" class="inline-flex min-h-6 items-center text-label-large text-primary hover:underline">
           Continue to sign in
         </NuxtLink>
-      </div>
-    </div>
+      </template>
+    </InlineNotice>
 
     <UAuthForm
       v-else
@@ -136,10 +135,9 @@ async function onSubmit(event: FormSubmitEvent<{ displayName: string; password: 
       </template>
 
       <template #validation>
-        <div v-if="status === 'network-error'" role="alert" class="flex items-start gap-3 rounded-md bg-error-container p-4">
-          <UIcon name="i-lucide-circle-alert" class="size-5 shrink-0 text-on-error-container" aria-hidden="true" />
-          <p class="text-body-medium text-on-error-container">{{ message }}</p>
-        </div>
+        <InlineNotice v-if="status === 'network-error'" tier="bar" tone="error" icon="i-lucide-circle-alert" role="alert">
+          {{ message }}
+        </InlineNotice>
       </template>
     </UAuthForm>
   </AuthShell>

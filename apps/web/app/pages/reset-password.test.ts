@@ -1,7 +1,7 @@
 import { UApp } from '#components';
 import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime';
 import { describe, expect, test, vi } from 'vitest';
-import { defineComponent, h, ref } from 'vue';
+import { defineComponent, h, nextTick, ref } from 'vue';
 import AuthSubmit from '../components/AuthSubmit.vue';
 import ResetPasswordPage from './reset-password.vue';
 
@@ -58,6 +58,42 @@ describe('reset-password page', () => {
     expect(component.find('form').exists()).toBe(false);
     expect(component.text()).toMatch(/invalid or has expired/i);
     expect(component.find('a[href="/forgot-password"]').exists()).toBe(true);
+  });
+
+  // Both post-submit results arrived with no role and no focus (audit,
+  // 2026-09-14): the refused link is a failure the user did not ask for —
+  // an alert — and it takes focus from the submit it replaced.
+  test('an invalid-or-expired result is an alert and takes focus from the submit control', async () => {
+    useRouteMock.mockReturnValue({ query: { token: 'stale' } });
+    const status = ref('idle');
+    usePasswordResetConfirmMock.mockReturnValue({ status, message: ref('This password reset link is invalid or has expired. Request a new one.'), confirmReset: vi.fn() });
+    const component = await mountSuspended(PageInApp, { attachTo: document.body });
+    (component.get('button[type="submit"]').element as HTMLButtonElement).focus();
+    expect(document.activeElement?.tagName).toBe('BUTTON');
+
+    status.value = 'invalid-or-expired';
+    await nextTick();
+    await nextTick();
+
+    const alert = component.get('[role="alert"]');
+    expect(alert.text()).toMatch(/invalid or has expired/i);
+    expect(document.activeElement).toBe(alert.element);
+    component.unmount();
+  });
+
+  test('the success confirmation takes focus from the submit control it replaced', async () => {
+    useRouteMock.mockReturnValue({ query: { token: 'abc123' } });
+    const status = ref('idle');
+    usePasswordResetConfirmMock.mockReturnValue({ status, message: ref('Your password has been changed.'), confirmReset: vi.fn() });
+    const component = await mountSuspended(PageInApp, { attachTo: document.body });
+    (component.get('button[type="submit"]').element as HTMLButtonElement).focus();
+
+    status.value = 'success';
+    await nextTick();
+    await nextTick();
+
+    expect(document.activeElement).toBe(component.get('[role="status"]').element);
+    component.unmount();
   });
 
   test('a network failure keeps the form visible with a recoverable error banner', async () => {
