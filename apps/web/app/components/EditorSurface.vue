@@ -191,9 +191,10 @@ defineExpose({
       </ul>
     </div>
 
-    <p v-if="mentionMismatch" role="alert" class="mt-2 rounded-md bg-error-container px-3 py-2 text-body-small text-on-error-container">
+    <!-- The chip tier (`InlineNotice`): one line about the editor above it. -->
+    <InlineNotice v-if="mentionMismatch" tier="chip" tone="error" role="alert" class="mt-2">
       {{ mentionMismatch }}
-    </p>
+    </InlineNotice>
 
     <!-- / slash command menu -->
     <div

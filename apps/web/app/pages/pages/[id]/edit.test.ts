@@ -306,6 +306,26 @@ describe('edit-mode page', () => {
     });
   });
 
+  // docs/UI-CHECKLIST.md §4.1: the six save banners were six hand-rolled
+  // `div.rounded-md.px-3.py-2.text-body-small` — the chip tier, copied.
+  // Every one of them is now `InlineNotice tier="chip"`, so a shape change
+  // lands on all of them at once.
+  test('every save banner is the shared chip tier, not a per-state copy', async () => {
+    for (const status of ['stale', 'not-canonical', 'dead-anchor', 'forbidden', 'network-error'] as const) {
+      mockDefaults({ status, message: `Refused: ${status}.`, canonical: 'x', corrected: 'x' });
+      mockSession({
+        status: 'ready',
+        session: { markdown: '# Hi\n', title: 'Hi', workspaceId: 'ws-1', lock: { holderUserId: 'me', acquiredAt: 'x', heartbeatAt: 'x' } },
+      });
+      const component = await mountSuspended(PageInApp, { global: { stubs: { EditorSurface: true } } });
+
+      const chip = component.find('[role="alert"][data-notice-tier="chip"]');
+      expect(chip.exists(), status).toBe(true);
+      expect(chip.text()).toContain(`Refused: ${status}.`);
+      component.unmount();
+    }
+  });
+
   // §3 "Error — fatal": a `stale` conflict offers no document to merge —
   // the banner must carry the reload it names, and Save must not invite a
   // retry that would just 409 again on the same hash (docs/TODO.md

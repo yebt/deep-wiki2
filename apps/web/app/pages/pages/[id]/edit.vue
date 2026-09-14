@@ -316,84 +316,72 @@ useSeoMeta({ title: () => (session.value?.title ? `Editing ${session.value.title
         </span>
       </div>
 
+      <!-- The save banners are the chip tier — `InlineNotice tier="chip"`,
+           the one-line notice about the thing directly below it (its
+           tiers are stated once, in that component). Six hand-rolled
+           copies of the same `div` lived here before; checklist §4.1. -->
       <!-- `stale`: a concurrent save already happened, and the server
            offers no document to merge — the only honest recovery is a
            reload, so the banner carries the action it names, and Save
            itself is disabled meanwhile (`saveDisabledReason`) rather than
            inviting a retry that would just 409 again on the same hash. -->
-      <div
-        v-if="saveStatus === 'stale'"
-        role="alert"
-        class="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-md bg-error-container px-3 py-2 text-body-small text-on-error-container"
-      >
-        <span>{{ saveMessage }}</span>
-        <UButton size="xs" variant="outline" color="error" icon="i-lucide-refresh-cw" @click="reloadForNewerVersion">Reload</UButton>
-      </div>
+      <InlineNotice v-if="saveStatus === 'stale'" tier="chip" tone="error" role="alert" class="mb-4">
+        {{ saveMessage }}
+        <template #actions>
+          <UButton size="xs" variant="outline" color="error" icon="i-lucide-refresh-cw" @click="reloadForNewerVersion">Reload</UButton>
+        </template>
+      </InlineNotice>
       <!-- `not-canonical`: distinct from `stale` above — this is D1's "the
            document is not its own fixed point", not a concurrent-edit
-           conflict, so it must not read as one either. Same container as
-           `stale` and `dead-anchor`; the one addition is the actionable
-           exit docs/UI-CHECKLIST.md §3 requires for a recoverable error —
-           the canonicalised text the server already computed, loaded back
-           the same way `dead-anchor`'s exit loads `corrected`. -->
-      <div
-        v-else-if="saveStatus === 'not-canonical'"
-        role="alert"
-        class="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-md bg-error-container px-3 py-2 text-body-small text-on-error-container"
-      >
-        <span>{{ saveMessage }} Nothing was saved; your edits are still in the editor below.</span>
-        <UButton size="xs" variant="outline" color="error" @click="useCanonicalDocument">Use the canonical document</UButton>
-      </div>
+           conflict, so it must not read as one either. The one addition is
+           the actionable exit docs/UI-CHECKLIST.md §3 requires for a
+           recoverable error — the canonicalised text the server already
+           computed, loaded back the same way `dead-anchor`'s exit loads
+           `corrected`. -->
+      <InlineNotice v-else-if="saveStatus === 'not-canonical'" tier="chip" tone="error" role="alert" class="mb-4">
+        {{ saveMessage }} Nothing was saved; your edits are still in the editor below.
+        <template #actions>
+          <UButton size="xs" variant="outline" color="error" @click="useCanonicalDocument">Use the canonical document</UButton>
+        </template>
+      </InlineNotice>
       <!-- `dead-anchor`: distinct from `stale` above — this is not a
            concurrent-edit conflict, so it must not read as one (the bug
-           this state exists to fix). Same container as `stale`; the one
-           addition is the actionable exit docs/UI-CHECKLIST.md §3 requires
-           for a recoverable error, mirroring how the not-canonical 409
-           offers `canonical` back. -->
-      <div
-        v-else-if="saveStatus === 'dead-anchor'"
-        role="alert"
-        class="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-md bg-error-container px-3 py-2 text-body-small text-on-error-container"
-      >
-        <span>{{ saveMessage }}</span>
-        <UButton size="xs" variant="outline" color="error" @click="useCorrectedDocument">Use the corrected document</UButton>
-      </div>
+           this state exists to fix). The one addition is the actionable
+           exit docs/UI-CHECKLIST.md §3 requires for a recoverable error,
+           mirroring how the not-canonical 409 offers `canonical` back. -->
+      <InlineNotice v-else-if="saveStatus === 'dead-anchor'" tier="chip" tone="error" role="alert" class="mb-4">
+        {{ saveMessage }}
+        <template #actions>
+          <UButton size="xs" variant="outline" color="error" @click="useCorrectedDocument">Use the corrected document</UButton>
+        </template>
+      </InlineNotice>
       <!-- `forbidden`: a fatal error, not a recoverable one — retrying
            cannot succeed once write access is gone. §3: a fatal error
            "preserves any unsaved user input and says explicitly whether
            the work was lost or preserved" — this states both explicitly. -->
-      <div
-        v-else-if="saveStatus === 'forbidden'"
-        role="alert"
-        class="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-md bg-error-container px-3 py-2 text-body-small text-on-error-container"
-      >
-        <span>{{ saveMessage }} Nothing was saved, but your edits are still here in this tab — copy them out before leaving if you need them.</span>
-        <UButton size="xs" variant="outline" color="error" icon="i-lucide-eye" :to="`/pages/${nodeId}`">Open read-only</UButton>
-      </div>
+      <InlineNotice v-else-if="saveStatus === 'forbidden'" tier="chip" tone="error" role="alert" class="mb-4">
+        {{ saveMessage }} Nothing was saved, but your edits are still here in this tab — copy them out before leaving if you need them.
+        <template #actions>
+          <UButton size="xs" variant="outline" color="error" icon="i-lucide-eye" :to="`/pages/${nodeId}`">Open read-only</UButton>
+        </template>
+      </InlineNotice>
       <!-- `network-error`: recoverable — `saveMessage` already states the
            work is preserved; this adds the real next action §3 requires
            ("Retry", never a dead end). -->
-      <div
-        v-else-if="saveStatus === 'network-error'"
-        role="alert"
-        class="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-md bg-error-container px-3 py-2 text-body-small text-on-error-container"
-      >
-        <span>{{ saveMessage }}</span>
-        <UButton size="xs" variant="outline" color="error" icon="i-lucide-refresh-cw" @click="onSave">Retry</UButton>
-      </div>
+      <InlineNotice v-else-if="saveStatus === 'network-error'" tier="chip" tone="error" role="alert" class="mb-4">
+        {{ saveMessage }}
+        <template #actions>
+          <UButton size="xs" variant="outline" color="error" icon="i-lucide-refresh-cw" @click="onSave">Retry</UButton>
+        </template>
+      </InlineNotice>
       <!-- `success`: "Saved." is §3's own example of a confirmation too
            weak to act on ("Saved as revision 12 · 2 min ago" is the bar).
            This names what was saved, and — `showSavedBanner` — stops
            claiming it once the document is dirty again, since a stale
            "Saved." next to unsaved edits is worse than no confirmation. -->
-      <p
-        v-else-if="showSavedBanner"
-        role="status"
-        aria-live="polite"
-        class="mb-4 rounded-md bg-success-container px-3 py-2 text-body-small text-on-success-container"
-      >
+      <InlineNotice v-else-if="showSavedBanner" tier="chip" tone="success" class="mb-4">
         Saved “{{ session?.title }}”.
-      </p>
+      </InlineNotice>
       <EditorSurface
         v-if="session"
         :key="editorRemountKey"
