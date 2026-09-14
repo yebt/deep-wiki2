@@ -16,8 +16,9 @@
  *   action, not this screen's own.
  * - Data needed: the cached HTML this page's last save produced. Nothing
  *   else exists to render before that response arrives.
- * - Non-goals: no editing, no parsing, no comments/AI panel (out of this
- *   batch's scope — see the UI review brief).
+ * - Non-goals: no editing, no parsing, no AI panel. Comments are read,
+ *   replied to and resolved here (tasks.md 10.7); starting a new thread
+ *   is not in this batch.
  * - Empty / overflow: a page with a 12,000-word document is exactly what
  *   the constrained measure and skeleton exist for; there is no
  *   "too much" state beyond normal scrolling.
@@ -81,8 +82,110 @@ onBeforeUnmount(() => presence.stop());
  */
 const offersPageSurfaces = computed(() => status.value !== 'forbidden' && status.value !== 'not-found');
 
+/**
+ * The comment overlay (comment-overlay spec: "The Client Composes
+ * Indicators Onto Unchanged Cached HTML"; tasks.md 10.7 and 10.9). Three
+ * pieces, each owned elsewhere and only wired here:
+ *
+ * - `usePageComments` — one request, `GET /pages/:id/comments`, started
+ *   in `onMounted` beside the page request, never after it. Its own note
+ *   says why the threads and not the indicators endpoint, and what that
+ *   costs on the read path: one small request per page view, a 14-byte
+ *   `{"threads":[]}` for the ~95% of callers who only read (docs/SPECS.md
+ *   §5.3), the thread bodies up front for the ones who can comment.
+ * - `useBlockPlacement` — reads the `data-block-id` attributes back out
+ *   of the rendered article and says where each mark goes and which
+ *   threads have no block on screen to stand beside.
+ * - `CommentGutter` and `CommentThreadPanel` — the marks and the panel.
+ *
+ * The article is `v-html` of the cached response and nothing here writes
+ * into it: the highlight is a separate box drawn *behind* the article
+ * (`-z-10` inside an `isolate` wrapper) at the block's measured top and
+ * height, opaque `secondary-container` — the container fill §5.2 reserves
+ * for exactly a selected/active state, legible under `text-default` in
+ * both themes by construction (§10.1). It follows the panel: opening a
+ * block's threads sets it, closing the panel clears it, so it is
+ * dismissible and never persists (docs/UI-CHECKLIST.md §4.7).
+ *
+ * Two degraded states are surfaced above the article as chip-tier
+ * notices (`InlineNotice`, the third of the three tiers — one line about
+ * the thing directly below it, one action), because neither can have a
+ * mark: an orphaned thread's block is gone (comment-threads spec, "Orphan
+ * Is A First-Class State"), and a thread on a page whose cached render
+ * predates `data-block-id` has a block the HTML does not name yet
+ * (design.md Decision 6, "no anchors known" — the backfill, not an
+ * error). Both chips open the panel on the full list, where the thread
+ * renders with its excerpt and a sentence saying which of the two it is.
+ */
+const comments = usePageComments(nodeId);
+const articleEl = ref<HTMLElement | null>(null);
+const { placed, unplaced } = useBlockPlacement(articleEl, comments.indicators);
+
+const panelOpen = ref(false);
+const focusBlockId = ref<string | null>(null);
+const busy = ref(false);
+const announcement = ref('');
+
+/** Anchored threads with no block on screen: the "no anchors known" count the chip states. */
+const unplacedThreadCount = computed(
+  () => comments.threads.value.filter((thread) => !thread.anchor.orphaned && unplaced.value.includes(thread.anchor.blockId)).length,
+);
+
+function openBlock(blockId: string): void {
+  focusBlockId.value = blockId;
+  panelOpen.value = true;
+}
+
+function openAll(): void {
+  focusBlockId.value = null;
+  panelOpen.value = true;
+}
+
+function onPanelOpen(open: boolean): void {
+  panelOpen.value = open;
+  if (!open) focusBlockId.value = null;
+}
+
+/** "Show in page" from the panel: scroll the block into view and highlight it (§4.7). */
+function locate(blockId: string): void {
+  focusBlockId.value = blockId;
+  articleEl.value?.querySelector(`[data-block-id="${CSS.escape(blockId)}"]`)?.scrollIntoView({ block: 'center' });
+}
+
+/** The highlighted block's box, measured against the same wrapper the marks are placed in. */
+const highlight = computed<{ top: number; height: number } | null>(() => {
+  // `placed` is read so the box re-measures whenever the marks do.
+  void placed.value;
+  const blockId = focusBlockId.value;
+  const root = articleEl.value;
+  if (!blockId || !root) return null;
+  const element = root.querySelector<HTMLElement>(`[data-block-id="${CSS.escape(blockId)}"]`);
+  return element ? { top: element.offsetTop, height: element.offsetHeight } : null;
+});
+
+async function onReply(threadId: string, body: string): Promise<void> {
+  busy.value = true;
+  announcement.value = '';
+  const ok = await comments.reply(threadId, body);
+  busy.value = false;
+  if (ok) announcement.value = 'Reply posted.';
+}
+
+async function onResolve(threadId: string, resolved: boolean): Promise<void> {
+  busy.value = true;
+  announcement.value = '';
+  const ok = await comments.setResolved(threadId, resolved);
+  busy.value = false;
+  if (ok) announcement.value = resolved ? 'Thread resolved.' : 'Thread reopened.';
+}
+
+function plural(count: number, noun: string): string {
+  return `${count} ${noun}${count === 1 ? '' : 's'}`;
+}
+
 onMounted(() => {
   void load();
+  void comments.load();
 });
 
 useHead({ htmlAttrs: { lang: 'en' } });
@@ -240,8 +343,64 @@ useSeoMeta({ title: () => (title.value ? `${title.value} — deep-wiki` : 'deep-
          invoked for this request. -->
     <template v-else>
       <PageHeading :heading="title" />
-      <!-- eslint-disable-next-line vue/no-v-html -- `html` is server-produced by remark-rehype + rehype-sanitize with an explicit allowlist (design.md D12); it is never client-supplied or user-editable at this route. -->
-      <article class="doc-body text-doc-body text-default" v-html="html" />
+
+      <!-- The overlay's degraded states, above the article they are about
+           (see the script's own note). `role="status"` on the two the user
+           navigated into; `alert` on the one that failed. -->
+      <div v-if="comments.orphaned.value.length > 0 || unplacedThreadCount > 0 || comments.status.value === 'network-error'" class="mb-4 space-y-2">
+        <InlineNotice v-if="comments.orphaned.value.length > 0" data-testid="comments-orphaned" tier="chip" tone="warning">
+          {{ plural(comments.orphaned.value.length, 'comment') }} point{{ comments.orphaned.value.length === 1 ? 's' : '' }} at text that is no longer on this page.
+          <template #actions>
+            <UButton size="sm" variant="ghost" color="neutral" icon="i-lucide-message-square" @click="openAll">Show</UButton>
+          </template>
+        </InlineNotice>
+        <InlineNotice v-if="unplacedThreadCount > 0" data-testid="comments-unplaced" tier="chip" tone="warning">
+          {{ plural(unplacedThreadCount, 'comment') }} can't be shown beside {{ unplacedThreadCount === 1 ? 'its' : 'their' }} text until this page is re-rendered.
+          <template #actions>
+            <UButton size="sm" variant="ghost" color="neutral" icon="i-lucide-message-square" @click="openAll">Show</UButton>
+          </template>
+        </InlineNotice>
+        <InlineNotice v-if="comments.status.value === 'network-error'" data-testid="comments-error" tier="chip" tone="error" role="alert">
+          {{ comments.message.value }}
+          <template #actions>
+            <UButton size="sm" variant="ghost" color="neutral" icon="i-lucide-refresh-cw" @click="comments.load">Retry</UButton>
+          </template>
+        </InlineNotice>
+      </div>
+
+      <!-- `relative isolate`: the marks are placed and the highlight is
+           drawn against this box, and `isolate` keeps the highlight's
+           `-z-10` behind the article rather than behind the page. The
+           article gives up 40px of end padding for the marks only below
+           `md` and only while a mark exists — from `md` up they stand in
+           the margin outside the column (see `CommentGutter`). -->
+      <div class="relative isolate">
+        <div
+          v-if="highlight"
+          data-testid="comment-highlight"
+          aria-hidden="true"
+          class="absolute -inset-x-2 -z-10 rounded-md bg-secondary-container"
+          :style="{ top: `${highlight.top}px`, height: `${highlight.height}px` }"
+        />
+        <!-- eslint-disable-next-line vue/no-v-html -- `html` is server-produced by remark-rehype + rehype-sanitize with an explicit allowlist (design.md D12); it is never client-supplied or user-editable at this route. -->
+        <article ref="articleEl" class="doc-body text-doc-body text-default" :class="placed.length > 0 ? 'pe-10 md:pe-0' : undefined" v-html="html" />
+        <CommentGutter :marks="placed" :active-block-id="panelOpen ? focusBlockId : null" @open="openBlock" />
+      </div>
+
+      <CommentThreadPanel
+        :open="panelOpen"
+        :threads="comments.threads.value"
+        :focus-block-id="focusBlockId"
+        :unplaced-block-ids="unplaced"
+        :busy="busy"
+        :write-message="comments.writeMessage.value"
+        :announcement="announcement"
+        @update:open="onPanelOpen"
+        @show-all="focusBlockId = null"
+        @reply="onReply"
+        @resolve="onResolve"
+        @locate="locate"
+      />
     </template>
   </AppShell>
 </template>
