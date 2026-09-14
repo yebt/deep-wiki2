@@ -113,6 +113,13 @@
       "when": 1735689600015,
       "tag": "0015_comment_parent_page_scope",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1735689600016,
+      "tag": "0016_page_blocks_no_resurrection",
+      "breakpoints": true
     }
   ]
 }

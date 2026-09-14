@@ -17,6 +17,7 @@ import {
   collectWikiLinks,
   matchBlocks,
   sliceBlocks,
+  stripBlockAnchors,
   parse,
   type BlockAssignment,
   type BlockSlice,
@@ -117,6 +118,62 @@ async function upsertActiveBlock(
   `;
 }
 
+/** A block id the registry has already retired, with the status that retired it. */
+export interface DeadAnchor {
+  readonly id: string;
+  readonly status: 'superseded' | 'tombstoned';
+}
+
+/**
+ * Raised when the Markdown being saved carries a persisted anchor whose
+ * `page_blocks` row on this same page is already `tombstoned` or
+ * `superseded` — the author pasted a deleted or merged-away paragraph back,
+ * literal ` ^id` and all, which the history and diff screens make an
+ * ordinary thing to do.
+ *
+ * The save is refused rather than absorbed, because every alternative is
+ * silent corruption of the one primitive comments, AI selections, diffs and
+ * RAG chunk provenance all hang off (docs/SPECS.md §3.3):
+ *
+ * - Letting the upsert resurrect the row contradicts markdown-pipeline's
+ *   "A tombstoned ID MUST NOT be reused for a new block" outright, and for a
+ *   `superseded` row it also clears the `superseded_by` pointer that
+ *   `reconcile-comments.ts` walks to migrate a thread onto the surviving
+ *   block — detaching live comment threads, one-way.
+ * - Making the upsert a no-op leaves the document carrying an anchor whose
+ *   row says the block is dead: a new comment on it would be orphaned by
+ *   the next save, silently.
+ * - Rewriting the author's bytes mid-save cannot work from here. `savePage`
+ *   returns a content hash and not the markdown, so the client would hold
+ *   bytes that no longer match the row it is now pinned to, re-submit the
+ *   dead anchor on the next save, and mint a fresh id every time — leaving a
+ *   permanently stale `active` row behind on each pass.
+ *
+ * So this follows `NotCanonicalError`'s shape exactly, the one precedent
+ * this transaction already has for "these bytes cannot be stored as given":
+ * refuse, and hand back the corrected document for the caller to adopt and
+ * re-submit. The correction *removes* the dead anchors rather than minting
+ * replacements, because markdown-pipeline assigns block ids lazily — pasted
+ * text nothing references yet should carry no persisted id until something
+ * asks for one. The author's own bytes are never edited behind their back,
+ * so Markdown stays the source of truth.
+ */
+export class DeadAnchorError extends Error {
+  constructor(
+    readonly nodeId: string,
+    readonly anchors: readonly DeadAnchor[],
+    /** `markdown` with each dead anchor removed — canonical, and safe to re-submit. */
+    readonly corrected: string,
+  ) {
+    super(
+      `page ${nodeId} was not saved: it reintroduces block anchor(s) the registry has already retired — ` +
+        `${anchors.map((anchor) => `${anchor.id} (${anchor.status})`).join(', ')}. ` +
+        'Re-save without those anchors; the corrected document is on this error.',
+    );
+    this.name = 'DeadAnchorError';
+  }
+}
+
 export interface ReconcileBlocksResult {
   readonly assignments: readonly BlockAssignment[];
   readonly mintedIds: ReadonlyArray<{ id: string; slot: number; splitFrom: string }>;
@@ -145,10 +202,21 @@ async function reconcileBlocks(
   const nextBlocks: BlockSlice[] = sliceBlocks(tree, canonicalMarkdown);
   const nextTexts = nextBlocks.map((block) => block.text);
 
-  const existingActive = await tx<{ block_id: string }[]>`
-    SELECT block_id FROM page_blocks WHERE page_id = ${nodeId} AND workspace_id = ${workspaceId} AND status = 'active'
+  // Every row, not only the active ones. Reading `status = 'active'` alone
+  // is what made a retired id invisible to both guards below: `matchBlocks`
+  // never saw it (so it minted against an incomplete exclusion set) and the
+  // first-time-registration loop could not tell "no prior row" from "a row
+  // that says this id is dead".
+  const existingRows = await tx<{ block_id: string; status: string }[]>`
+    SELECT block_id, status FROM page_blocks WHERE page_id = ${nodeId} AND workspace_id = ${workspaceId}
   `;
-  const existingActiveIds = new Set(existingActive.map((row) => row.block_id));
+  const knownIds = new Set(existingRows.map((row) => row.block_id));
+  const existingActiveIds = new Set(existingRows.filter((row) => row.status === 'active').map((row) => row.block_id));
+  const deadStatusById = new Map(
+    existingRows
+      .filter((row): row is { block_id: string; status: 'superseded' | 'tombstoned' } => row.status !== 'active')
+      .map((row) => [row.block_id, row.status] as const),
+  );
 
   let previousRecords: PersistedBlockRecord[] = [];
   if (previousMarkdown !== null && existingActiveIds.size > 0) {
@@ -161,8 +229,33 @@ async function reconcileBlocks(
       .map((id) => ({ id, text: textByAnchor.get(id)! }));
   }
 
-  const { assignments, mintedIds } = matchBlocks(previousRecords, nextTexts);
-  const handledIds = new Set<string>();
+  const { assignments, mintedIds } = matchBlocks(previousRecords, nextTexts, knownIds);
+  // Every id this save already accounts for. Built before the first write
+  // (`matchBlocks` is pure, so nothing has been written yet) because the
+  // refusal below has to run before any statement touches `page_blocks`.
+  const handledIds = new Set<string>([...assignments.map((assignment) => assignment.id), ...mintedIds.map((minted) => minted.id)]);
+
+  // The reintroduction refusal. This is the exact complement of the
+  // first-time-registration loop at the end of this function: an anchor in
+  // the document, with no id this save handled, and — the part that loop
+  // cannot see — a row that already exists and is retired. Throwing here
+  // rolls back `savePage`'s whole transaction, including the `page_content`
+  // write, so a refused save leaves nothing behind.
+  const reintroduced = [
+    ...new Set(
+      nextBlocks
+        .map((block) => block.anchorId)
+        .filter((anchorId): anchorId is string => anchorId !== null && deadStatusById.has(anchorId) && !handledIds.has(anchorId)),
+    ),
+  ];
+  if (reintroduced.length > 0) {
+    throw new DeadAnchorError(
+      nodeId,
+      reintroduced.map((id) => ({ id, status: deadStatusById.get(id)! })),
+      stripBlockAnchors(canonicalMarkdown, new Set(reintroduced)),
+    );
+  }
+
   // `matchBlocks`' pass 3 also pushes each minted id into `assignments`
   // (status 'active', no splitFrom) so callers that only read `assignments`
   // still see it. That entry must NOT be upserted here: doing so would
@@ -174,7 +267,6 @@ async function reconcileBlocks(
 
   for (const assignment of assignments) {
     if (mintedIdSet.has(assignment.id)) continue;
-    handledIds.add(assignment.id);
     if (assignment.status === 'active') {
       await upsertActiveBlock(tx, nodeId, workspaceId, assignment.id, nextTexts[assignment.slot!]!);
     } else if (assignment.status === 'superseded') {
@@ -191,7 +283,6 @@ async function reconcileBlocks(
   }
 
   for (const minted of mintedIds) {
-    handledIds.add(minted.id);
     await upsertActiveBlock(tx, nodeId, workspaceId, minted.id, nextTexts[minted.slot]!, minted.splitFrom);
   }
 

@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, test } from 'bun:test';
 import { deriveBlockId, MATCH_THRESHOLD, matchBlocks, mintBlockId, trigramContainment } from './match-blocks';
 
 // markdown-pipeline: Block Split Assigns The Original ID / Block Merge Keeps
@@ -251,3 +251,55 @@ describe('trigramContainment: boundary behaviour at 0.8', () => {
   });
 });
 
+/**
+ * `previous` holds only the ids the caller is matching against — in
+ * `packages/db` that is the page's `status = 'active'` rows — so a
+ * tombstoned or superseded id is invisible to pass 3's mint. The exclusion
+ * set was therefore incomplete, and the only thing standing between a split
+ * and a resurrected dead id was the 32^10 id space: a probability, not a
+ * mechanism (markdown-pipeline: "A tombstoned ID MUST NOT be reused for a
+ * new block").
+ *
+ * These drive `mintBlockId`'s RNG directly. Filling all ten bytes with `n`
+ * yields the Crockford character at `n % 32` repeated ten times, so the mint
+ * becomes deterministic and the exclusion is actually observable — asserting
+ * that a randomly minted id "happened to differ" would prove nothing.
+ */
+const REAL_GET_RANDOM_VALUES = crypto.getRandomValues.bind(crypto);
+
+afterEach(() => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (crypto as any).getRandomValues = REAL_GET_RANDOM_VALUES;
+});
+
+describe('matchBlocks: minting never reissues a reserved id', () => {
+  const PREVIOUS = [{ id: 'id-0', text: 'Apples and oranges are tasty fruits, and bananas are also delicious.' }];
+  const NEXT = ['Apples and oranges are tasty fruits.', 'Bananas are also delicious.'];
+  const FIRST_CANDIDATE = '0000000000';
+  const SECOND_CANDIDATE = '1111111111';
+
+  function stubMintSequence(fillBytes: readonly number[]): void {
+    let call = 0;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (crypto as any).getRandomValues = (bytes: Uint8Array) => {
+      bytes.fill(fillBytes[Math.min(call, fillBytes.length - 1)]!);
+      call++;
+      return bytes;
+    };
+  }
+
+  test('with no reserved set, a split mints the first candidate the RNG offers', () => {
+    stubMintSequence([0, 1]);
+
+    expect(matchBlocks(PREVIOUS, NEXT).mintedIds[0]!.id).toBe(FIRST_CANDIDATE);
+  });
+
+  test('a reserved id absent from `previous` — a retired one — is skipped', () => {
+    stubMintSequence([0, 1]);
+
+    const result = matchBlocks(PREVIOUS, NEXT, new Set([FIRST_CANDIDATE]));
+
+    expect(result.mintedIds[0]!.id).toBe(SECOND_CANDIDATE);
+    expect(result.assignments.some((assignment) => assignment.id === FIRST_CANDIDATE)).toBe(false);
+  });
+});

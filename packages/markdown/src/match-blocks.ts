@@ -150,6 +150,10 @@ export function deriveBlockId(canonicalBlockText: string, occurrenceIndex: numbe
  *    survives `active`; the rest are `superseded`, pointing at the survivor.
  *    A claimant whose own best score never reaches the threshold is
  *    `tombstoned` instead of superseded.
+ * `reservedIds` are ids pass 3's minting must never produce even though
+ * they are absent from `previous` — on a page, every id the registry has
+ * ever issued, including tombstoned and superseded ones.
+ *
  * 3. A surviving id whose row also scores at or above the threshold against
  *    an otherwise-unclaimed slot is a **split**: that id keeps its original
  *    slot, and each additional unclaimed slot mints a fresh id — the
@@ -157,7 +161,7 @@ export function deriveBlockId(canonicalBlockText: string, occurrenceIndex: numbe
  *    exactly once, and every other fragment gets a fresh identity rather
  *    than sharing the old one.
  */
-export function matchBlocks(previous: PersistedBlockRecord[], next: string[]): MatchBlocksResult {
+export function matchBlocks(previous: PersistedBlockRecord[], next: string[], reservedIds?: ReadonlySet<string>): MatchBlocksResult {
   const previousTrigrams = previous.map((block) => trigrams(block.text));
   const nextTrigrams = next.map((text) => trigrams(text));
 
@@ -228,7 +232,16 @@ export function matchBlocks(previous: PersistedBlockRecord[], next: string[]): M
   // least some content with the original (ruling out an unrelated
   // paragraph that merely happens to land next to a matched one).
   const mintedIds: Array<{ id: string; slot: number; splitFrom: string }> = [];
+  // `previous` holds only the ids this save is *matching against* — in
+  // `packages/db` that is the page's `status = 'active'` rows. A tombstoned
+  // or superseded id is therefore invisible here, so without `reservedIds`
+  // the exclusion set is simply incomplete and the only thing standing
+  // between a split and a resurrected dead id is the 32^10 id space. That
+  // is a probability, not a mechanism (markdown-pipeline: "A tombstoned ID
+  // MUST NOT be reused for a new block"), so callers that know the page's
+  // full id set — every status, not just active — pass it here.
   const mintedSoFar = new Set(previous.map((b) => b.id));
+  if (reservedIds) for (const id of reservedIds) mintedSoFar.add(id);
 
   for (const assignment of assignments) {
     if (assignment.status !== 'active' || assignment.slot === undefined) continue;

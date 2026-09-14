@@ -1,6 +1,6 @@
-import { describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, test } from 'bun:test';
 import { canonicalise } from './index';
-import { mintAnchorAtBlock } from './mint-anchor';
+import { mintAnchorAtBlock, stripBlockAnchors } from './mint-anchor';
 import { sliceBlocks } from './blocks';
 import { parse } from './pipeline';
 
@@ -53,5 +53,101 @@ describe('mintAnchorAtBlock', () => {
 
     expect(result).not.toBeNull();
     expect(result!.blockId).not.toBe('existing1');
+  });
+});
+
+/**
+ * `mintBlockId` fills ten bytes from `crypto.getRandomValues` and maps each
+ * through a 32-character alphabet, so filling every byte with `n` yields the
+ * id `ALPHABET[n % 32]` repeated ten times. Driving it deterministically is
+ * the only way to assert the exclusion set is a *mechanism*: "the id it
+ * happened to mint differed from the one we reserved" is a statement about
+ * a 32^10 space, not about the code.
+ */
+const REAL_GET_RANDOM_VALUES = crypto.getRandomValues.bind(crypto);
+
+function stubMintSequence(fillBytes: readonly number[]): void {
+  let call = 0;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (crypto as any).getRandomValues = (bytes: Uint8Array) => {
+    bytes.fill(fillBytes[Math.min(call, fillBytes.length - 1)]!);
+    call++;
+    return bytes;
+  };
+}
+
+afterEach(() => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (crypto as any).getRandomValues = REAL_GET_RANDOM_VALUES;
+});
+
+describe('mintAnchorAtBlock — reserved ids', () => {
+  const MARKDOWN = 'First paragraph, unanchored.\n';
+  // Byte 0 -> '0', byte 1 -> '1' through the Crockford alphabet.
+  const FIRST_CANDIDATE = '0000000000';
+  const SECOND_CANDIDATE = '1111111111';
+
+  test('without a reserved set it mints the first candidate the RNG offers', () => {
+    stubMintSequence([0, 1]);
+    const [block] = sliceBlocks(parse(MARKDOWN), MARKDOWN);
+
+    expect(mintAnchorAtBlock(MARKDOWN, block!.id)!.blockId).toBe(FIRST_CANDIDATE);
+  });
+
+  test('an id the document cannot show — a page\'s tombstoned id — is skipped when reserved', () => {
+    stubMintSequence([0, 1]);
+    const [block] = sliceBlocks(parse(MARKDOWN), MARKDOWN);
+
+    // The anchors in `MARKDOWN` are the live ids only; a retired id exists
+    // solely in the registry, so without this set the mint is blind to it.
+    const result = mintAnchorAtBlock(MARKDOWN, block!.id, new Set([FIRST_CANDIDATE]));
+
+    expect(result!.blockId).toBe(SECOND_CANDIDATE);
+  });
+});
+
+// The inverse of the mint, used by the save transaction's refusal to hand
+// back a document the author can re-submit.
+describe('stripBlockAnchors', () => {
+  test('removes only the named anchors and leaves every other byte alone', () => {
+    const markdown = 'Alpha paragraph. ^aaa1111111\n\nBeta paragraph. ^bbb2222222\n\nGamma paragraph.\n';
+
+    const stripped = stripBlockAnchors(markdown, new Set(['bbb2222222']));
+
+    expect(stripped).toBe('Alpha paragraph. ^aaa1111111\n\nBeta paragraph.\n\nGamma paragraph.\n');
+  });
+
+  test('removes several anchors at once without disturbing the offsets of the ones before them', () => {
+    const markdown = 'Alpha paragraph. ^aaa1111111\n\nBeta paragraph. ^bbb2222222\n\nGamma paragraph. ^ccc3333333\n';
+
+    const stripped = stripBlockAnchors(markdown, new Set(['aaa1111111', 'ccc3333333']));
+
+    expect(stripped).toBe('Alpha paragraph.\n\nBeta paragraph. ^bbb2222222\n\nGamma paragraph.\n');
+  });
+
+  test('the result is canonical, so the caller can re-save it as-is', () => {
+    // Headings and paragraphs only: `sliceBlocks` walks `tree.children`, so
+    // an anchor on a list item is not a block this function — or the save
+    // transaction it serves — can see at all (docs/TODO.md's finding on the
+    // `buildBlockIndex`/`sliceBlocks` divergence). Stripping exactly the
+    // anchors the save path refuses over is the correct scope.
+    const markdown = '# A heading ^hhh1111111\n\nA paragraph. ^ppp3333333\n';
+
+    const stripped = stripBlockAnchors(markdown, new Set(['hhh1111111', 'ppp3333333']));
+
+    expect(stripped).not.toContain('^');
+    expect(canonicalise(stripped)).toBe(stripped);
+  });
+
+  test('an empty id set returns the markdown unchanged', () => {
+    const markdown = 'Alpha paragraph. ^aaa1111111\n';
+
+    expect(stripBlockAnchors(markdown, new Set())).toBe(markdown);
+  });
+
+  test('an id no block carries leaves the document untouched', () => {
+    const markdown = 'Alpha paragraph. ^aaa1111111\n';
+
+    expect(stripBlockAnchors(markdown, new Set(['zzz9999999']))).toBe(markdown);
   });
 });

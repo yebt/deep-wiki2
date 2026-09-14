@@ -415,6 +415,94 @@ makes conventions portable across projects.
 
 Discoveries and constraints. Newest first.
 
+### 2026-09-14 — A tombstoned block id could be resurrected, and a superseded chain severed, on the only markdown write path
+
+**What happened.** `upsertActiveBlock` in `packages/db/src/content/rebuild-derived.ts` was
+`INSERT … ON CONFLICT (page_id, block_id) DO UPDATE SET status = 'active', superseded_by = NULL`
+with no `WHERE`. The composite primary key did not reject a retired id — it turned the insert into
+a resurrection. The guard in front of it could not see the row: `existingActiveIds` was built from
+`status = 'active'` alone, so to the first-time-registration loop a tombstoned row and no row at
+all looked identical. Path: `PUT /pages/:id` → `savePage()` → `reconcileDerived` →
+`reconcileBlocks` → that loop → that statement, with no probe, validation or branch between the
+document bytes and the write.
+
+**Reproduced, red on `main`, for an assertion reason** (`rebuild-derived.test.ts`, against a
+provisioned Postgres, both fixtures on the *same* page — the conflict is on `(page_id, block_id)`,
+so a two-page fixture exercises nothing):
+
+```
+a tombstoned id stays tombstoned when its anchor is pasted back into the same page
+  Expected: "tombstoned"   Received: "active"
+a superseded id keeps pointing at its survivor when its anchor is pasted back
+  Expected: "superseded"   Received: "active"
+```
+
+The superseded variant is the damaging one: `superseded_by` is exactly the pointer
+`reconcile-comments.ts` walks to migrate a thread onto the surviving block. Clearing it detaches
+the thread, and orphaning is one-way. Pasting an old paragraph back with its literal ` ^id` is an
+ordinary thing to do now that history and diff screens show old revision content verbatim.
+
+**What a returning anchor means — decided: refuse the save, hand back the correction.** Three
+options were on the table. *Resurrect deliberately* contradicts markdown-pipeline's "A tombstoned
+ID MUST NOT be reused for a new block" outright and detaches live comment threads. *Make the
+upsert a silent no-op* (`WHERE status <> 'tombstoned'`) leaves the document carrying an anchor whose
+row says the block is dead — a comment placed on it would be orphaned by the next save, silently.
+*Mint a fresh id and rewrite the markdown inside the save* was the recommended option and it does
+not work from inside `savePage`: the function returns a content hash, not the markdown, so the
+client would keep bytes that no longer match the row it is now pinned to, re-submit the dead anchor
+on the next save, and the server would mint again — every pass leaving a permanently stale
+`active` row behind. Fixing that means changing the `PUT /pages/:id` contract and the editor, and
+the whole point of "markdown is the source of truth" is that the server does not edit the author's
+bytes behind their back. `savePage` already has one precedent for "these bytes cannot be stored as
+given": `NotCanonicalError` refuses and carries the corrected form for the client to adopt.
+`DeadAnchorError` follows that shape exactly — it carries the retired ids with their statuses and
+`corrected`, the same document with the dead anchors *removed*. Removed, not re-minted: block ids
+are assigned lazily, so pasted text nothing references yet should carry no persisted id until a
+comment or citation asks for one. The refusal runs before any `page_blocks` statement and inside
+the transaction, so the `page_content` write rolls back with it. Both the DDL comment on
+`page_blocks` (0008) and the markdown-pipeline requirement now say something true; neither needed
+changing.
+
+**The storage layer now refuses it on its own.** 0008's comment claimed "UNIQUE (page_id,
+block_id) spans every status … so a tombstoned id can never be reused". Uniqueness forbids a second
+row, not a status flip on the existing one. Migration `0016_page_blocks_no_resurrection` adds a
+`BEFORE UPDATE` trigger that raises on `tombstoned → anything else`, `superseded → active`, and
+`superseded_by` being cleared on a superseded row. A guard in one module is not the guarantee that
+comment asserts; the next writer of the table would inherit none of it. Two tests drive raw
+`UPDATE`s at the trigger.
+
+**The mint path was blind to the same ids.** `matchBlocks`' split minting seeded its exclusion set
+from `previous` — active records only — and `mintAnchorAtBlock` from the anchors in the current
+markdown, which are the live ids only. Neither excluded a tombstoned or superseded id, so the only
+protection was the 32^10 id space: a probability, not a mechanism, and with the refusal in place a
+collision would have become a baffling refusal of a legitimate save. Both now take an optional
+`reservedIds` set; `reconcileBlocks` passes the page's full id set, every status. The tests drive
+`crypto.getRandomValues` deterministically so the exclusion is observable — "the id it happened to
+mint differed" would have proved nothing. **Follow-up (apps/api, not this change):** the
+`mintAnchorAtBlock` call in `routes/comments.ts` should pass the page's known ids too, and
+`PUT /pages/:id` should catch `DeadAnchorError` and answer 409 with `corrected`, exactly as it does
+for `NotCanonicalError`. Until it does, a reintroduced dead anchor is a 500 — visible and safe,
+where before it was silent corruption.
+
+**The vacuous guard — a new category, the twenty-second recorded instance.**
+`packages/core/src/content/block-registry.test.ts` asserted "reusing a tombstoned id is rejected"
+against `StubBlockRegistry`, defined in the same file, which satisfied the rule by construction.
+`BlockRegistry` had zero implementers: the interface, a barrel re-export, and that stub. Deleting
+every tombstone protection in `packages/db` left the test green. The category: **a port-contract
+test for a port nothing implements, standing in for a guarantee the real adapter does not
+provide.** It does not state a guarantee; it states the stub. The port, its error type and the test
+are deleted; the guarantee lives where the write happens (the db-backed tests above) and in the
+trigger. `ContentStore` in the same file is in the identical position — a stub-only port with no
+implementer — and is recorded here rather than acted on. **Impact:** a port in `packages/core`
+earns a contract test when an adapter implements it; until then the test is a liability, because
+it reads as coverage of something it cannot reach.
+
+**Seen on the way, not fixed:** `buildBlockIndex` walks the whole tree (`visit`) and indexes an
+anchor on a list item; `sliceBlocks` walks `tree.children` and does not see it. So a list-item
+anchor lands in `page_content.block_index` but never gets a `page_blocks` row, and a comment on it
+would be orphaned on the next save. Out of scope here; the refusal and the trigger are consistent
+with `sliceBlocks`, so neither can fire on an anchor the registry never registered.
+
 ### 2026-09-14 — GATE-2 verified one direction over one producer's inputs, and the product's only real producer is the other one
 
 **What happened.** Open `_x y z_` in the editor, select `y`, press `Mod-b` (the real binding in

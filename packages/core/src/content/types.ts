@@ -50,6 +50,22 @@ export interface ContentStore {
   save(ref: PageContentRef, input: SavePageInput): Promise<Result<PageContent, ContentStoreError>>;
 }
 
+/**
+ * One `page_blocks` row as an entity shape.
+ *
+ * There is deliberately no `BlockRegistry` port beside it. There was one,
+ * with a port-contract test asserting "a tombstoned id is never reused"
+ * against a stub defined in the same file that satisfied the rule by
+ * construction — and no implementer anywhere, so deleting every tombstone
+ * protection in `packages/db` left that test green. A port-contract test for
+ * a port nothing implements does not state a guarantee; it states the stub.
+ *
+ * That guarantee now lives where the write actually happens: refused before
+ * anything is written by `packages/db/src/content/rebuild-derived.ts`'s
+ * `DeadAnchorError`, and made terminal in the storage layer by migration
+ * `0016_page_blocks_no_resurrection`. If `page_blocks` ever does need a port,
+ * it can be reintroduced with a real adapter behind it.
+ */
 export interface PersistedBlock {
   readonly id: BlockId;
   readonly status: BlockStatus;
@@ -58,13 +74,3 @@ export interface PersistedBlock {
   readonly excerpt: string;
 }
 
-export interface BlockRegistryError {
-  readonly reason: 'tombstoned_id_reused';
-  readonly id: BlockId;
-}
-
-/** The port `packages/db` implements for `page_blocks` — UNIQUE (page_id, block_id) spans every status, so a tombstoned id is never reused. */
-export interface BlockRegistry {
-  listByPage(ref: PageContentRef): Promise<Result<readonly PersistedBlock[], BlockRegistryError>>;
-  reconcile(ref: PageContentRef, blocks: readonly PersistedBlock[]): Promise<Result<void, BlockRegistryError>>;
-}

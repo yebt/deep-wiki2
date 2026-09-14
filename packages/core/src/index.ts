@@ -32,8 +32,6 @@ export {
 export type {
   BlockId,
   BlockIndexEntry,
-  BlockRegistry,
-  BlockRegistryError,
   BlockStatus,
   ContentStore,
   ContentStoreError,

@@ -33,6 +33,20 @@ describe('after migrate: hand-written objects exist', () => {
     expect(rows).toHaveLength(1);
   });
 
+  // 0008's comment on `page_blocks` claims a tombstoned id "can never be
+  // reused for a new block", but UNIQUE (page_id, block_id) only forbids a
+  // second row — it does not stop `ON CONFLICT ... DO UPDATE SET status =
+  // 'active'` from flipping the existing one. 0016 adds the mechanism that
+  // comment was already asserting; without it, deleting every tombstone
+  // check in `packages/db` would leave the suite green.
+  test('the page_blocks_forbid_resurrection trigger exists on page_blocks', async () => {
+    const rows = await sql<{ tgname: string }[]>`
+      SELECT tgname FROM pg_trigger
+      WHERE tgrelid = 'page_blocks'::regclass AND tgname = 'page_blocks_forbid_resurrection_trigger'
+    `;
+    expect(rows).toHaveLength(1);
+  });
+
   test('the parent-iff-not-workspace CHECK constraint exists', async () => {
     const rows = await sql<{ conname: string }[]>`
       SELECT conname FROM pg_constraint
@@ -516,6 +530,39 @@ describe('0008_page_content down migration', () => {
         SELECT typname FROM pg_type WHERE typname = 'block_status'
       `;
       expect(enumType).toHaveLength(0);
+    } finally {
+      await rollbackSql.end({ timeout: 1 }).catch(() => {});
+      await rollback.drop();
+    }
+  });
+});
+
+/**
+ * 0016 only adds a trigger and its function on an existing table. It
+ * creates no table and no foreign key into an earlier migration's table,
+ * so — like 0015 — it adds no new rollback-ordering dependency: 0008's
+ * down still drops `page_blocks`, and a table's triggers go with it.
+ */
+describe('0016_page_blocks_no_resurrection down migration', () => {
+  test('reverses cleanly: the trigger and its function are both gone', async () => {
+    const rollback = await provisionTestDatabase();
+    const rollbackSql = postgres(rollback.url, { max: 1 });
+    try {
+      const downSql = await Bun.file(
+        new URL('./down/0016_page_blocks_no_resurrection.down.sql', import.meta.url),
+      ).text();
+      await rollbackSql.unsafe(downSql);
+
+      const triggers = await rollbackSql<{ tgname: string }[]>`
+        SELECT tgname FROM pg_trigger
+        WHERE tgrelid = 'page_blocks'::regclass AND tgname = 'page_blocks_forbid_resurrection_trigger'
+      `;
+      expect(triggers).toHaveLength(0);
+
+      const functions = await rollbackSql<{ proname: string }[]>`
+        SELECT proname FROM pg_proc WHERE proname = 'page_blocks_forbid_resurrection'
+      `;
+      expect(functions).toHaveLength(0);
     } finally {
       await rollbackSql.end({ timeout: 1 }).catch(() => {});
       await rollback.drop();

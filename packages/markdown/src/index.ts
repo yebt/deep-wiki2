@@ -35,7 +35,7 @@ export {
 } from './match-blocks';
 export type { BlockAssignment, BlockAssignmentStatus, MatchBlocksResult, PersistedBlockRecord } from './match-blocks';
 export { diffBlocks } from './diff-blocks';
-export { mintAnchorAtBlock } from './mint-anchor';
+export { mintAnchorAtBlock, stripBlockAnchors } from './mint-anchor';
 export type { MintAnchorResult } from './mint-anchor';
 export { CURRENT_PIPELINE_VERSION, render } from './render';
 export { PINNED_OPTIONS, canonicalise, parse, stringify } from './pipeline';

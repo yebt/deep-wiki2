@@ -51,6 +51,10 @@ export { isWorkspaceMember, listWorkspaceMemberCandidates } from './permissions/
 export type { IsWorkspaceMemberInput, ListWorkspaceMemberCandidatesInput, UserCandidate } from './permissions/candidates';
 export { NotCanonicalError, savePage, StaleContentError } from './content/save-page';
 export type { SavePageInput as SavePageDbInput, SavePageResult } from './content/save-page';
+// `savePage`'s two refusal paths that a caller is expected to turn into a
+// 409 rather than a 500: `NotCanonicalError` above, and this one.
+export { ChainCompressionError, DeadAnchorError } from './content/rebuild-derived';
+export type { DeadAnchor } from './content/rebuild-derived';
 export { readPageHtml, readPageMarkdown } from './content/read-page';
 export type { PageContentRef, PageHtml, PageMarkdown } from './content/read-page';
 export { backfillOneRow, backfillRender } from './content/backfill-render';

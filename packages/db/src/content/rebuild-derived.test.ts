@@ -1,7 +1,8 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import postgres from 'postgres';
 import { provisionTestDatabase, type ProvisionedTestDatabase } from '../../testing/provision';
-import { ChainCompressionError } from './rebuild-derived';
+import { canonicalise } from '@deep-wiki/markdown';
+import { ChainCompressionError, DeadAnchorError } from './rebuild-derived';
 import { savePage } from './save-page';
 
 let db: ProvisionedTestDatabase;
@@ -186,3 +187,194 @@ describe('reconcileDerived — chain compression', () => {
   });
 });
 
+
+// markdown-pipeline: "Block Delete Tombstones The ID" — "A tombstoned ID
+// MUST NOT be reused for a new block". The port-contract test in
+// `packages/core/src/content/block-registry.test.ts` asserts this rule
+// against a stub that `packages/db` does not implement, so it can never
+// observe the real upsert. These fixtures go through `savePage` against a
+// real Postgres, and every one of them reintroduces the dead anchor on the
+// SAME page: the conflict this rule turns on is `(page_id, block_id)`, so a
+// fixture spanning two pages would exercise nothing.
+describe('reconcileDerived — a dead anchor reintroduced into the Markdown', () => {
+  const WITH_ANCHOR = 'Apples and oranges are tasty fruits, and bananas are also delicious. ^abc1234567\n';
+  const FILLER = 'Zebras migrate north through dusty savannah every summer without exception.\n';
+
+  async function currentHash(nodeId: string): Promise<string> {
+    const [row] = await sql<{ content_hash: string }[]>`SELECT content_hash FROM page_content WHERE node_id = ${nodeId}`;
+    return row!.content_hash;
+  }
+
+  async function statusOf(nodeId: string, blockId: string) {
+    const [row] = await sql<{ status: string; superseded_by: string | null }[]>`
+      SELECT status, superseded_by FROM page_blocks WHERE page_id = ${nodeId} AND block_id = ${blockId}
+    `;
+    return row;
+  }
+
+  test('a tombstoned id stays tombstoned when its anchor is pasted back into the same page', async () => {
+    const { workspaceId, nodeId } = await seedPageNode();
+
+    await savePage(sql, { nodeId, workspaceId, markdown: `${WITH_ANCHOR}\n${FILLER}`, expectedContentHash: null });
+    // Delete the anchored paragraph: matchBlocks scores it against nothing
+    // it recognises, so the id is tombstoned.
+    await savePage(sql, { nodeId, workspaceId, markdown: FILLER, expectedContentHash: await currentHash(nodeId) });
+    expect((await statusOf(nodeId, 'abc1234567'))!.status).toBe('tombstoned');
+
+    // The author pastes the paragraph back, literal ` ^abc1234567` and all
+    // — entirely plausible now that history and diff screens show old
+    // revision content verbatim.
+    const hashBefore = await currentHash(nodeId);
+    const reintroduced = `${FILLER}\n${WITH_ANCHOR}`;
+    let refusal: DeadAnchorError | undefined;
+    try {
+      await savePage(sql, { nodeId, workspaceId, markdown: reintroduced, expectedContentHash: hashBefore });
+    } catch (error) {
+      refusal = error as DeadAnchorError;
+    }
+
+    expect(refusal).toBeInstanceOf(DeadAnchorError);
+    expect(refusal!.anchors).toEqual([{ id: 'abc1234567', status: 'tombstoned' }]);
+
+    // Asserting only that the save was refused would prove nothing about
+    // the row it exists to protect.
+    expect((await statusOf(nodeId, 'abc1234567'))!.status).toBe('tombstoned');
+    // `reconcileDerived` runs inside `savePage`'s transaction, so the
+    // refusal has to roll the content write back with it.
+    expect(await currentHash(nodeId)).toBe(hashBefore);
+  });
+
+  test('the refusal hands back a canonical document the author can re-save', async () => {
+    const { workspaceId, nodeId } = await seedPageNode();
+
+    await savePage(sql, { nodeId, workspaceId, markdown: `${WITH_ANCHOR}\n${FILLER}`, expectedContentHash: null });
+    await savePage(sql, { nodeId, workspaceId, markdown: FILLER, expectedContentHash: await currentHash(nodeId) });
+
+    const reintroduced = `${FILLER}\n${WITH_ANCHOR}`;
+    const refusal = (await savePage(sql, {
+      nodeId,
+      workspaceId,
+      markdown: reintroduced,
+      expectedContentHash: await currentHash(nodeId),
+    }).catch((error: unknown) => error)) as DeadAnchorError;
+
+    // The correction drops the dead anchor and nothing else: the author's
+    // prose survives byte for byte, only the retired ` ^id` is gone. Block
+    // ids are assigned lazily, so pasted text nothing references yet
+    // carries no persisted id at all.
+    expect(refusal.corrected).toBe(reintroduced.replace(' ^abc1234567', ''));
+    expect(refusal.corrected).toContain('Apples and oranges are tasty fruits');
+    // A correction `savePage` would itself reject as non-canonical would be
+    // no correction at all.
+    expect(canonicalise(refusal.corrected)).toBe(refusal.corrected);
+
+    const accepted = await savePage(sql, {
+      nodeId,
+      workspaceId,
+      markdown: refusal.corrected,
+      expectedContentHash: await currentHash(nodeId),
+    });
+    expect(accepted.contentHash).toBeTruthy();
+    expect((await statusOf(nodeId, 'abc1234567'))!.status).toBe('tombstoned');
+  });
+
+  test('a superseded id keeps pointing at its survivor when its anchor is pasted back', async () => {
+    const { workspaceId, nodeId } = await seedPageNode();
+
+    const separate = 'Apples and oranges are tasty fruits. ^aaa1111111\n\nBananas and mangoes are also delicious. ^bbb2222222\n';
+    const merged = 'Apples and oranges are tasty fruits. Bananas and mangoes are also delicious. ^aaa1111111\n';
+
+    await savePage(sql, { nodeId, workspaceId, markdown: separate, expectedContentHash: null });
+    await savePage(sql, { nodeId, workspaceId, markdown: merged, expectedContentHash: await currentHash(nodeId) });
+
+    const afterMerge = await statusOf(nodeId, 'bbb2222222');
+    expect(afterMerge!.status).toBe('superseded');
+    expect(afterMerge!.superseded_by).toBe('aaa1111111');
+
+    // `FILLER` sits between the two so `matchBlocks`' split pass has no
+    // adjacent unclaimed slot to mint into — this fixture is about the
+    // first-time-registration path and nothing else.
+    const refusal = (await savePage(sql, {
+      nodeId,
+      workspaceId,
+      markdown: `${merged}\n${FILLER}\nBananas and mangoes are also delicious. ^bbb2222222\n`,
+      expectedContentHash: await currentHash(nodeId),
+    }).catch((error: unknown) => error)) as DeadAnchorError;
+
+    expect(refusal).toBeInstanceOf(DeadAnchorError);
+    expect(refusal.anchors).toEqual([{ id: 'bbb2222222', status: 'superseded' }]);
+
+    const afterPaste = await statusOf(nodeId, 'bbb2222222');
+    // `superseded_by` is exactly the pointer `reconcile-comments.ts` walks
+    // to migrate a thread onto the surviving block. Clearing it detaches
+    // the thread, and orphaning is one-way.
+    expect(afterPaste!.status).toBe('superseded');
+    expect(afterPaste!.superseded_by).toBe('aaa1111111');
+  });
+});
+
+// The application guard above lives in one module. This one asserts the
+// storage layer refuses the same thing on its own (migration 0016), so
+// deleting every tombstone check in `packages/db` cannot leave the suite
+// green — which is exactly what the `BlockRegistry` port-contract test used
+// to allow.
+describe('page_blocks — retirement is terminal in the database itself', () => {
+  async function seedRetiredBlock(status: 'superseded' | 'tombstoned') {
+    const { workspaceId, nodeId } = await seedPageNode();
+    await savePage(sql, { nodeId, workspaceId, markdown: 'A page with no anchors at all.\n', expectedContentHash: null });
+    if (status === 'superseded') {
+      await sql`
+        INSERT INTO page_blocks (page_id, workspace_id, block_id, status, content_hash, excerpt)
+        VALUES (${nodeId}, ${workspaceId}, 'survivor00', 'active', 'hash', 'excerpt')
+      `;
+    }
+    await sql`
+      INSERT INTO page_blocks (page_id, workspace_id, block_id, status, superseded_by, content_hash, excerpt)
+      VALUES (
+        ${nodeId}, ${workspaceId}, 'retired000', ${status},
+        ${status === 'superseded' ? 'survivor00' : null}, 'hash', 'excerpt'
+      )
+    `;
+    return { workspaceId, nodeId };
+  }
+
+  test('a raw UPDATE cannot flip a tombstoned row back to active', async () => {
+    const { nodeId } = await seedRetiredBlock('tombstoned');
+
+    // Wrapped in a native Promise: a bare postgres.js tagged-template query
+    // is a lazy thenable, and `expect(query).rejects` spins the runner on it
+    // until the timeout instead of executing it (docs/TODO.md, 2026-09-08).
+    await expect(
+      (async () => {
+        await sql`UPDATE page_blocks SET status = 'active' WHERE page_id = ${nodeId} AND block_id = 'retired000'`;
+      })(),
+    ).rejects.toThrow(/tombstoned/);
+
+    const [row] = await sql<{ status: string }[]>`
+      SELECT status FROM page_blocks WHERE page_id = ${nodeId} AND block_id = 'retired000'
+    `;
+    expect(row!.status).toBe('tombstoned');
+  });
+
+  test('a raw UPDATE cannot revive a superseded row or clear its survivor pointer', async () => {
+    const { nodeId } = await seedRetiredBlock('superseded');
+
+    await expect(
+      (async () => {
+        await sql`UPDATE page_blocks SET status = 'active', superseded_by = NULL WHERE page_id = ${nodeId} AND block_id = 'retired000'`;
+      })(),
+    ).rejects.toThrow(/superseded/);
+
+    await expect(
+      (async () => {
+        await sql`UPDATE page_blocks SET superseded_by = NULL WHERE page_id = ${nodeId} AND block_id = 'retired000'`;
+      })(),
+    ).rejects.toThrow(/superseded_by cannot be cleared/);
+
+    const [row] = await sql<{ status: string; superseded_by: string | null }[]>`
+      SELECT status, superseded_by FROM page_blocks WHERE page_id = ${nodeId} AND block_id = 'retired000'
+    `;
+    expect(row!.status).toBe('superseded');
+    expect(row!.superseded_by).toBe('survivor00');
+  });
+});
