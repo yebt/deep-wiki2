@@ -100,9 +100,45 @@ const columnClass = computed(() => COLUMNS[props.column]);
              sits to the left of the theme toggle every screen shares, and
              takes §7.2's 32px chrome height. -->
         <slot name="header-end" />
-        <!-- The only icon-only control in the chrome. docs/UI-CHECKLIST.md
-             §4.3 requires both an accessible name and a tooltip, because
-             the same glyph is ambiguous across icon packs.
+        <!--
+          `/admin/registration` was reachable only by typing the URL
+          (docs/TODO.md, "a screen nobody can navigate to is not shipped").
+          It belongs in the chrome, not on any one screen, because the
+          caller it is for — the Super Root — may be looking at any
+          workspace when they need it.
+
+          Meant to be gated on `is_super_root`, which lives on the users
+          table and is checked server-side in
+          `apps/api/src/routes/admin.ts`'s `requireSuperRoot` — but nothing
+          in any response this client already holds carries that flag, and
+          there is no `GET /me`-shaped endpoint to ask instead (confirmed
+          by reading `apps/api/src/index.ts`'s route table, not assumed).
+          Adding that field is outside this task's file ownership (`apps/api`
+          belongs to a concurrent agent); see docs/TODO.md for the gap.
+
+          So this renders for **every** caller — a deliberate fallback, not
+          a permission check. `/admin/registration` already answers a
+          non-operator with its own honest "This is the instance operator's"
+          state, so the cost is the dead end docs/UI-CHECKLIST.md §3 names:
+          a control a non-operator can see and click, that ends in a
+          refusal rather than never being offered.
+        -->
+        <UTooltip text="Registration settings">
+          <UButton
+            size="sm"
+            variant="ghost"
+            color="neutral"
+            icon="i-lucide-shield"
+            square
+            aria-label="Registration settings"
+            to="/admin/registration"
+          />
+        </UTooltip>
+        <!-- The only icon-only *button* in the chrome (the registration
+             entry above is an icon-only link with the same contract).
+             docs/UI-CHECKLIST.md §4.3 requires both an accessible name and
+             a tooltip, because the same glyph is ambiguous across icon
+             packs.
              `size="sm"`: `UColorModeButton` forwards to the `button` theme
              and inherits its `md` default — 40px, §7.2's *content-area*
              height. Left alone it rendered 40px next to 32px chrome

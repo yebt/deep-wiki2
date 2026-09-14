@@ -155,19 +155,41 @@ describe('AppShell', () => {
     test('the brand is the way back from any screen, so it is a link and not a label', async () => {
       const component = await mountShell();
 
-      const brand = component.get('header a');
-      expect(brand.attributes('href')).toBe('/');
+      const brand = component.get('header a[href="/"]');
       expect(brand.text()).toContain('deep-wiki');
     });
 
-    test('the only icon-only control in the chrome carries an accessible name', async () => {
+    test('the only icon-only controls in the chrome carry an accessible name', async () => {
       const component = await mountShell();
 
-      const named = component
-        .findAll('header button')
-        .filter((button) => (button.text() || button.attributes('aria-label') || '').length > 0);
-      expect(named).toHaveLength(component.findAll('header button').length);
-      expect(named.some((button) => button.attributes('aria-label') === 'Toggle color theme')).toBe(true);
+      const icons = [...component.findAll('header button'), ...component.findAll('header a')].filter(
+        (el) => el.attributes('href') !== '/',
+      );
+      const named = icons.filter((el) => (el.text() || el.attributes('aria-label') || '').length > 0);
+      expect(named).toHaveLength(icons.length);
+      expect(named.some((el) => el.attributes('aria-label') === 'Toggle color theme')).toBe(true);
+      expect(named.some((el) => el.attributes('aria-label') === 'Registration settings')).toBe(true);
+    });
+
+    /*
+     * `/admin/registration` was reachable only by typing the URL
+     * (docs/TODO.md). Nothing in any response the client already has —
+     * not the login/session cookie exchange, not any workspace or tree
+     * response — surfaces `is_super_root`, and there is no `GET
+     * /me`-shaped endpoint to ask instead (confirmed by reading
+     * `apps/api/src/routes/admin.ts`'s own `requireSuperRoot`, which
+     * checks the users table directly and answers a non-operator with a
+     * plain 403, never a client-visible flag). So this is a deliberate
+     * fallback, not a permission check: the entry renders for every
+     * caller, in the chrome every screen shares, and
+     * `/admin/registration`'s own existing "This is the instance
+     * operator's" state is what actually gates a non-operator.
+     */
+    test('offers a persistent entry point to registration settings, in the chrome every screen shares', async () => {
+      const component = await mountShell();
+
+      const link = component.get('header a[href="/admin/registration"]');
+      expect(link.attributes('aria-label')).toBe('Registration settings');
     });
 
     test('the header renders no control that does nothing — no route mounts a mobile menu yet', async () => {
