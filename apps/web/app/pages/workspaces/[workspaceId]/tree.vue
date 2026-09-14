@@ -187,6 +187,33 @@ function onActivate(nodeId: string): void {
  * competes with `NavigationTreeActions`' own primary action for
  * attention.
  */
+/**
+ * A way to reach `/workspaces/:id/members` — until now typeable but not
+ * clickable from anywhere in the product (docs/TODO.md, "a screen nobody
+ * can navigate to is not shipped", third occurrence).
+ *
+ * The link is meant to be `manage`-gated: a caller who cannot manage this
+ * workspace's members should not see an invitation to try. Investigated
+ * and confirmed absent: neither `GET /workspaces/:id/tree`
+ * (`apps/api/src/routes/tree.ts`) nor `GET /workspaces`
+ * (`apps/web/app/composables/useWorkspaces.ts` — `{ id, name, slug }` only)
+ * carries the caller's permission set on the workspace root, and there is
+ * no `GET /me`-shaped endpoint anywhere in `apps/api/src/routes` to ask
+ * instead — confirmed by reading the route table in `apps/api/src/index.ts`,
+ * not assumed. Adding that field is outside this task's file ownership
+ * (`apps/api` belongs to a concurrent agent); see docs/TODO.md for the gap
+ * this leaves.
+ *
+ * So this renders for **every** caller who can open this tree at all —
+ * a deliberate fallback, not a permission check, and it is not written
+ * to look like one. `/workspaces/:id/members` already answers a caller
+ * without `manage` with its own honest "Nothing to manage here" state
+ * (`members.vue`), so a non-manager who clicks this link lands on a
+ * coherent screen rather than a broken one — but they do see, and can
+ * click, a control that ends in a refusal. That dead end
+ * (docs/UI-CHECKLIST.md §3) is the fallback's real cost, and it stands
+ * until the API can hand the client the fact this control actually needs.
+ */
 const bookNodes = computed<TreeNode[]>(() => {
   const out: TreeNode[] = [];
   const walk = (list: readonly TreeNode[]): void => {
@@ -211,20 +238,34 @@ useSeoMeta({ title: 'Navigation tree — deep-wiki' });
 
 <template>
   <AppShell>
-    <template v-if="bookNodes.length > 0" #header-end>
+    <template #header-end>
       <div class="flex flex-wrap items-center gap-2">
-        <span class="text-body-small text-muted">Book history:</span>
+        <!-- See the comment above `bookNodes`: rendered for every caller,
+             not gated on `manage` — no signal for it reaches this screen
+             today. -->
         <UButton
-          v-for="book in bookNodes"
-          :key="book.id"
           size="sm"
           variant="ghost"
           color="neutral"
-          icon="i-lucide-history"
-          :to="`/books/${book.id}/history`"
+          icon="i-lucide-users"
+          :to="`/workspaces/${workspaceId}/members`"
         >
-          {{ book.title }}
+          Members
         </UButton>
+        <template v-if="bookNodes.length > 0">
+          <span class="text-body-small text-muted">Book history:</span>
+          <UButton
+            v-for="book in bookNodes"
+            :key="book.id"
+            size="sm"
+            variant="ghost"
+            color="neutral"
+            icon="i-lucide-history"
+            :to="`/books/${book.id}/history`"
+          >
+            {{ book.title }}
+          </UButton>
+        </template>
       </div>
     </template>
 

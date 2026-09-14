@@ -291,4 +291,28 @@ describe('navigation tree page', () => {
       expect(component.text()).not.toMatch(/book history/i);
     });
   });
+
+  /*
+   * `/workspaces/:id/members` was reachable only by typing the URL
+   * (docs/TODO.md). There is no `manage`-on-the-root signal in any
+   * response this screen already has (`useTree`'s tree, or `useWorkspaces`'
+   * `{ id, name, slug }` list) and no `GET /me`-shaped endpoint to ask
+   * instead, so this is a deliberate fallback rather than a permission
+   * check: the link renders for every caller who can open this tree at
+   * all, and `members.vue`'s own honest "Nothing to manage here" state is
+   * what actually gates a non-manager. This test says exactly that — it
+   * asserts the link renders across every tree status, not that anyone is
+   * hidden from it, because nothing here hides anyone.
+   */
+  describe('reaching workspace members', () => {
+    test('renders a link to this workspace’s members screen for every caller who can open the tree, whatever the tree’s own status', async () => {
+      for (const status of ['loading', 'success', 'forbidden', 'not-found', 'network-error']) {
+        mockTree({ status, nodes: [] });
+        const component = await mountSuspended(PageInApp);
+
+        const link = component.get('a[href="/workspaces/ws-1/members"]');
+        expect(link.text()).toMatch(/members/i);
+      }
+    });
+  });
 });
