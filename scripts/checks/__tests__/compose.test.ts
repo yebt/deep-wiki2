@@ -90,3 +90,40 @@ describe('COMPOSE_FILES', () => {
     }
   });
 });
+
+// `type: bind` is optional in the long form — Compose infers it from a host
+// path — so keying the SELinux rule off `type === 'bind'` let the whole rule
+// be skipped by deleting one line.
+describe('checkCompose — long-form mounts without an explicit type', () => {
+  test('fails an unlabelled long-form bind mount that omits type: bind', () => {
+    const result = checkCompose(join(FIXTURES_DIR, 'compose-longform-no-type.yaml'));
+
+    expect(result.ok).toBe(false);
+    expect(result.errors.some((e) => e.includes(':z') && e.includes('./infra/postgres/init'))).toBe(true);
+  });
+
+  test('passes a labelled long-form bind mount whether or not type: bind is spelled out', () => {
+    const result = checkCompose(join(FIXTURES_DIR, 'compose-longform-labelled.yaml'));
+
+    expect(result.ok).toBe(true);
+    expect(result.errors).toEqual([]);
+  });
+});
+
+// Both are accepted by the Compose specification and both break the target
+// this check exists for: a rootless podman stack.
+describe('checkCompose — keys that are fatal under rootless podman', () => {
+  test('fails a service that asks for privileged: true', () => {
+    const result = checkCompose(join(FIXTURES_DIR, 'compose-privileged.yaml'));
+
+    expect(result.ok).toBe(false);
+    expect(result.errors.some((e) => e.includes('privileged'))).toBe(true);
+  });
+
+  test('fails a service that asks for network_mode: host', () => {
+    const result = checkCompose(join(FIXTURES_DIR, 'compose-network-mode-host.yaml'));
+
+    expect(result.ok).toBe(false);
+    expect(result.errors.some((e) => e.includes('network_mode'))).toBe(true);
+  });
+});

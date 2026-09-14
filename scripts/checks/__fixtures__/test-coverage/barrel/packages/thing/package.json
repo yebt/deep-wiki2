@@ -1,1 +1,1 @@
-{ "name": "@fixture/barrel-thing", "private": true }
+{"name": "@fixture/barrel-thing", "private": true, "scripts": {"test": "bun test"}}

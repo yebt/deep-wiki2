@@ -1,1 +1,1 @@
-{ "name": "@deep-wiki/thing", "private": true }
+{"name": "@deep-wiki/thing", "private": true, "scripts": {"test": "bun test"}}

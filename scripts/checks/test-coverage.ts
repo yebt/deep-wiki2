@@ -173,11 +173,27 @@ export const ALLOW_LIST: readonly Exemption[] = [
       'Operational entry point (bun run backfill:render), mirroring migrate.ts/seed.ts above. Its own ' +
       'src/content/backfill-render.ts is directly tested; only the argv/exit-code shell is untested.',
   },
+  {
+    file: 'e2e/global-setup.ts',
+    reason:
+      "Playwright's own globalSetup hook, loaded by path from playwright.config.ts exactly as a tool loads " +
+      'its config — the same shape as X3, but it carries real provisioning logic, so it is written down here ' +
+      'rather than exempted by name. It runs on every `bun run e2e` and fails that run loudly if the ' +
+      'database, apps/api or the seed do not come up; nothing under `bun test` can stand in for that.',
+  },
+  {
+    file: 'e2e/seed.bun.ts',
+    reason:
+      'The e2e seed, spawned as a `bun` child process by e2e/global-setup.ts (never imported), so no test ' +
+      'can name it. It is exercised on every `bun run e2e` — every spec depends on the rows it writes — ' +
+      'and its guts are packages/db, which is tested directly. Coverage debt only for the argv shell.',
+  },
 ];
 
 const SOURCE_EXTENSIONS = new Set(['.ts', '.tsx', '.vue', '.js', '.mjs', '.astro']);
 const TEST_FILE_PATTERN = /\.(test|spec)\.(ts|tsx|js|jsx|mjs)$/;
 const ASSERTION_PATTERN = /\b(expect|assert)\s*\(/;
+const ASSERTION_PATTERN_GLOBAL = /\b(expect|assert)\s*\(/g;
 /** X4: generated, vendored or build output — nothing here is authored source. */
 const SKIP_DIRS = new Set([
   'node_modules',
@@ -196,11 +212,52 @@ const SKIP_DIRS = new Set([
  * process environment) and must be tested like any other.
  */
 const CONFIG_FILE_PATTERN = /^[\w.-]+\.config\.(ts|mts|cts|js|mjs|cjs)$/;
+/**
+ * A `test` script that actually starts a runner. `"echo no tests"` and
+ * `"exit 0"` are the two spellings that make a member green for saying
+ * nothing, and both used to pass.
+ */
+const TEST_RUNNER_PATTERN = /\bbun\s+test\b|\bvitest\b/;
 /** Extensions a Bun transpiler can classify. `.vue`/`.astro` always have runtime behaviour. */
 const TRANSPILABLE = new Set(['.ts', '.tsx', '.js', '.mjs']);
 
 const WORKSPACE_SCOPE = '@deep-wiki/';
 const RESOLUTION_SUFFIXES = ['', '.ts', '.tsx', '.vue', '.js', '.mjs', '/index.ts', '/index.vue', '/index.js'];
+
+/**
+ * Source roots outside the workspace members. `apps/*` and `packages/*`
+ * were the whole world here, which put `scripts/` — the thirteen
+ * structural checks that gate every commit, this one included — and `e2e/`
+ * outside the gate they exist to enforce. They are authored TypeScript
+ * with the same claim on a test as anything under `packages/`; the only
+ * thing that made them invisible was that they carry no `package.json`.
+ */
+const EXTRA_SOURCE_ROOTS = ['scripts', 'e2e'];
+
+/**
+ * Path aliases, and the bases each one may resolve against, in order.
+ *
+ * A specifier is a path however it is spelled. `resolveSpecifier`
+ * understood exactly two spellings — relative, and a `@deep-wiki/*`
+ * workspace entry — so every alias form fell through to "not a module in
+ * this repository". That cost twice over: an aliased import from a test
+ * credited nothing (E1/E2 could not see it), and an aliased import from
+ * source left its target looking like a file no module imports, which is
+ * X3's *entire* definition of tool configuration. `~/utils/retry.config`
+ * was therefore exempt while `./utils/retry.config` was correctly
+ * reported. apps/web writes `~/` today, so this was live, not theoretical.
+ *
+ * `~~/` and `@@/` name the package root; `~/` and `@/` name its source
+ * directory, which is `app/` under Nuxt 4, `src/` elsewhere, and the
+ * package root itself in a flat package. First base that resolves to a
+ * real file wins, and a specifier that resolves to nothing stays nothing.
+ */
+const PATH_ALIASES: readonly { readonly prefix: string; readonly bases: readonly string[] }[] = [
+  { prefix: '~~/', bases: [''] },
+  { prefix: '@@/', bases: [''] },
+  { prefix: '~/', bases: ['app', 'src', ''] },
+  { prefix: '@/', bases: ['app', 'src', ''] },
+];
 
 // ── Pure classifiers ───────────────────────────────────────────────────
 
@@ -222,6 +279,245 @@ export function hasAssertion(code: string): boolean {
 
 export function isConfigFile(path: string): boolean {
   return CONFIG_FILE_PATTERN.test(basename(path));
+}
+
+// ── "does an assertion EXECUTE" ────────────────────────────────────────
+//
+// `hasAssertion` answers "is there an `expect(` in this file's code", and
+// the whole gate used to rest on that answer. `bun test` runs zero
+// assertions over a `test.skip` body and zero over a function nothing
+// calls, so both spellings certified a module while proving nothing about
+// it — and both hid the file carrying them from the assertion-free rule,
+// exactly as the commented-out `expect(` did before it. The question the
+// gate actually means to ask is whether a test *reaches* an assertion.
+//
+// This is a static approximation, and it is deliberately the conservative
+// one: an assertion counts unless the file's own structure shows it cannot
+// run. Two structures show that, and they are the two that occur:
+//
+//   - it sits inside a registration `bun test` will not execute
+//     (`test.skip`, `it.skip`, `describe.skip`, `test.todo`, `xit`,
+//     `xdescribe`, `xtest`), or inside a hook in a file where every test
+//     is skipped;
+//   - it sits in the body of a *named* function — `function f() {…}`,
+//     `const f = () => {…}` — whose name nothing executing ever mentions.
+//
+// Anything else counts: a bare assertion in a test callback, in a
+// `describe` body, at module scope, or inside an anonymous callback. A
+// name mentioned anywhere that runs makes its function reachable, and
+// reachability is transitive, so a helper chain is credited the way the
+// runtime credits it.
+
+/** Registrars whose callback is a test body `bun test` executes. */
+const TEST_REGISTRARS = new Set(['test', 'it', 'bench']);
+/** Registrars that run only because some test in the same file runs. */
+const HOOK_REGISTRARS = new Set(['beforeAll', 'beforeEach', 'afterAll', 'afterEach']);
+/**
+ * A registration call. The lookbehind is what keeps `RE.test(s)` — which
+ * every one of these check scripts writes — from reading as a test.
+ */
+const REGISTRAR_CALL =
+  /(?<![.\w$])(x?)(test|it|bench|describe|suite|beforeAll|beforeEach|afterAll|afterEach)((?:\.[A-Za-z_$][\w$]*)*)\s*\(/g;
+/** Only the unconditional forms. `.skipIf(cond)` may well run, so it counts. */
+const SKIPPING_MODIFIERS = new Set(['skip', 'todo']);
+const IDENTIFIER = /[A-Za-z_$][\w$]*/g;
+const NAMED_FUNCTION_DECLARATION = /(?<![.\w$])function\s*\*?\s*([A-Za-z_$][\w$]*)/g;
+const NAMED_FUNCTION_BINDING = /(?<![.\w$])(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*/g;
+
+interface Span {
+  readonly start: number;
+  readonly end: number;
+}
+
+/** Index just past the delimiter matching the one opening at `open`. */
+function matchDelimiter(code: string, open: number, closeChar: string): number {
+  const openChar = code[open]!;
+  let depth = 0;
+  for (let i = open; i < code.length; i += 1) {
+    if (code[i] === openChar) depth += 1;
+    else if (code[i] === closeChar) {
+      depth -= 1;
+      if (depth === 0) return i + 1;
+    }
+  }
+  return code.length;
+}
+
+function inAnySpan(spans: readonly Span[], index: number): boolean {
+  return spans.some((s) => index >= s.start && index < s.end);
+}
+
+/** The identifiers appearing in `text`, as a set. */
+function identifiersIn(text: string): Set<string> {
+  return new Set(text.match(IDENTIFIER) ?? []);
+}
+
+/** `code` with every one of `spans` replaced by spaces, so positions hold. */
+function blankSpans(code: string, spans: readonly Span[]): string {
+  if (spans.length === 0) return code;
+  const ordered = [...spans].sort((a, b) => a.start - b.start);
+  let out = '';
+  let cursor = 0;
+  for (const span of ordered) {
+    const start = Math.max(cursor, span.start, 0);
+    const end = Math.min(span.end, code.length);
+    if (end <= start) continue;
+    out += code.slice(cursor, start) + ' '.repeat(end - start);
+    cursor = end;
+  }
+  return out + code.slice(cursor);
+}
+
+interface Registration {
+  /** The whole call, arguments included. */
+  readonly span: Span;
+  readonly name: string;
+  readonly skipped: boolean;
+}
+
+/**
+ * Every registration call in the file, with the span of its own call
+ * (chained call groups included, so `test.each([…])('n', fn)` covers both).
+ */
+function scanRegistrations(code: string): Registration[] {
+  const found: Registration[] = [];
+  for (const match of code.matchAll(REGISTRAR_CALL)) {
+    const [whole, xPrefix, name, chain] = match;
+    const openParen = match.index + whole.length - 1;
+    let end = matchDelimiter(code, openParen, ')');
+    // `test.each([…])(…)` and `describe.each(…)(…)`: the arguments that
+    // matter live in the second call group.
+    while (code.slice(end).match(/^\s*\(/)) {
+      end = matchDelimiter(code, end + code.slice(end).indexOf('('), ')');
+    }
+    const modifiers = (chain ?? '').split('.').filter(Boolean);
+    found.push({
+      span: { start: match.index, end },
+      name: name!,
+      skipped: xPrefix === 'x' || modifiers.some((m) => SKIPPING_MODIFIERS.has(m)),
+    });
+  }
+  return found;
+}
+
+/**
+ * The end of the function body starting at or after `from`, or `null` when
+ * what follows is not a function at all. A `{` at parenthesis depth zero
+ * opens a block body; a `;` before one ends a concise arrow body.
+ */
+function functionBodyEnd(code: string, from: number, kind: 'declaration' | 'binding'): number | null {
+  let i = from;
+  while (i < code.length && /\s/.test(code[i]!)) i += 1;
+
+  if (kind === 'binding') {
+    if (code.startsWith('async', i)) i += 5;
+    while (i < code.length && /\s/.test(code[i]!)) i += 1;
+
+    const isFunctionKeyword = /^function(?![\w$])/.test(code.slice(i, i + 12));
+    const isParenthesised = code[i] === '(';
+    const singleParam = /^[A-Za-z_$][\w$]*\s*=>/.test(code.slice(i, i + 64));
+    if (!isFunctionKeyword && !isParenthesised && !singleParam) return null;
+
+    // A parenthesised head is an arrow function only when a `=>` follows
+    // it; without that test `const total = (a + b);` would read as one and
+    // its body would swallow whatever came next.
+    if (isParenthesised) {
+      const afterParams = matchDelimiter(code, i, ')');
+      if (!/^\s*(?::[^=;]*)?=>/.test(code.slice(afterParams, afterParams + 96))) return null;
+    }
+  }
+
+  let parens = 0;
+  for (let j = i; j < code.length; j += 1) {
+    const c = code[j]!;
+    if (c === '(') parens += 1;
+    else if (c === ')') parens -= 1;
+    else if (parens === 0) {
+      if (c === '{') return matchDelimiter(code, j, '}');
+      if (c === ';') return j;
+    }
+  }
+  return code.length;
+}
+
+/** Every named function-like declaration in the file, by name. */
+function namedFunctionSpans(code: string): Map<string, Span[]> {
+  const byName = new Map<string, Span[]>();
+  const add = (name: string, span: Span): void => {
+    const list = byName.get(name) ?? [];
+    list.push(span);
+    byName.set(name, list);
+  };
+
+  for (const match of code.matchAll(NAMED_FUNCTION_DECLARATION)) {
+    const end = functionBodyEnd(code, match.index + match[0].length, 'declaration');
+    if (end !== null) add(match[1]!, { start: match.index, end });
+  }
+  for (const match of code.matchAll(NAMED_FUNCTION_BINDING)) {
+    const end = functionBodyEnd(code, match.index + match[0].length, 'binding');
+    if (end !== null) add(match[1]!, { start: match.index, end });
+  }
+  return byName;
+}
+
+/**
+ * True when at least one `expect(`/`assert(` in this file is reached by
+ * something `bun test` executes. See the block comment above for what
+ * "reached" means and why it is measured this way.
+ */
+export function hasExecutingAssertion(code: string): boolean {
+  const stripped = stripCommentsAndStrings(code);
+  if (!ASSERTION_PATTERN.test(stripped)) return false;
+
+  const registrations = scanRegistrations(stripped);
+  const dead: Span[] = registrations.filter((r) => r.skipped).map((r) => r.span);
+  const liveTests = registrations.filter(
+    (r) => TEST_REGISTRARS.has(r.name) && !r.skipped && !inAnySpan(dead, r.span.start),
+  );
+  // A hook body runs only because a test does. When every test in the file
+  // is skipped, `beforeEach(() => expect(…))` runs as little as they do.
+  if (liveTests.length === 0) {
+    for (const registration of registrations) {
+      if (HOOK_REGISTRARS.has(registration.name)) dead.push(registration.span);
+    }
+  }
+
+  const functions = namedFunctionSpans(stripped);
+  const allFunctionSpans = [...functions.values()].flat();
+
+  // Reachability: seed with every name mentioned outside a function body
+  // and outside dead code — that is, everything the module executes on its
+  // own — then follow the names those functions mention, transitively.
+  const reachable = new Set<string>();
+  const queue = [...identifiersIn(blankSpans(stripped, [...dead, ...allFunctionSpans]))].filter((n) =>
+    functions.has(n),
+  );
+  while (queue.length > 0) {
+    const name = queue.pop()!;
+    if (reachable.has(name)) continue;
+    reachable.add(name);
+    for (const span of functions.get(name) ?? []) {
+      if (inAnySpan(dead, span.start)) continue;
+      const body = blankSpans(
+        stripped.slice(span.start, span.end),
+        dead.map((d) => ({ start: d.start - span.start, end: d.end - span.start })),
+      );
+      for (const mentioned of identifiersIn(body)) {
+        if (functions.has(mentioned) && !reachable.has(mentioned)) queue.push(mentioned);
+      }
+    }
+  }
+
+  const unreachableSpans = [...functions]
+    .filter(([name]) => !reachable.has(name))
+    .flatMap(([, spans]) => spans);
+
+  for (const match of stripped.matchAll(ASSERTION_PATTERN_GLOBAL)) {
+    if (inAnySpan(dead, match.index)) continue;
+    if (inAnySpan(unreachableSpans, match.index)) continue;
+    return true;
+  }
+  return false;
 }
 
 /**
@@ -536,6 +832,47 @@ function resolveFile(base: string): string | null {
   return null;
 }
 
+/** The nearest ancestor of `file` holding a `package.json`, bounded by `root`. */
+function packageRootOf(file: string, root: string): string | null {
+  let dir = dirname(file);
+  for (;;) {
+    if (existsSync(join(dir, 'package.json'))) return dir;
+    const parent = dirname(dir);
+    if (parent === dir || dir.length <= root.length) return null;
+    dir = parent;
+  }
+}
+
+/**
+ * A `#…` specifier, resolved the way Node resolves it: through the
+ * `imports` map of the nearest `package.json`, exact keys and one `*`
+ * wildcard. Nothing else — `#app`, `#components` and `#imports` are Nuxt's
+ * virtual modules, and no file in this repository answers to them.
+ * Guessing a directory for them would be worse than useless: `#app` would
+ * land on `apps/web/app/app.vue` and credit a component nobody imported.
+ */
+function resolveSubpathImport(pkgRoot: string, specifier: string, manifest: Record<string, unknown>): string | null {
+  const imports = manifest.imports;
+  if (typeof imports !== 'object' || imports === null) return null;
+
+  for (const [pattern, rawTarget] of Object.entries(imports as Record<string, unknown>)) {
+    const target = typeof rawTarget === 'string' ? rawTarget : null;
+    if (!target) continue;
+    if (!pattern.includes('*')) {
+      if (pattern === specifier) return resolveFile(resolve(pkgRoot, target));
+      continue;
+    }
+    const [head, tail = ''] = pattern.split('*');
+    if (!specifier.startsWith(head!) || !specifier.endsWith(tail) || specifier.length < head!.length + tail.length) {
+      continue;
+    }
+    const filled = specifier.slice(head!.length, specifier.length - tail.length);
+    const hit = resolveFile(resolve(pkgRoot, target.replace('*', filled)));
+    if (hit) return hit;
+  }
+  return null;
+}
+
 /** Map of `@deep-wiki/<pkg>[/<subpath>]` -> absolute entry file, from each manifest's `exports`. */
 function workspaceEntryPoints(memberDirs: readonly string[]): Map<string, string> {
   const entries = new Map<string, string>();
@@ -578,7 +915,8 @@ export function checkTestCoverage(
   const root = resolve(rootArg);
   const errors: string[] = [];
   const memberDirs = findMemberDirs(root);
-  const allFiles = memberDirs.flatMap((dir) => walk(dir));
+  const scanRoots = [...memberDirs, ...EXTRA_SOURCE_ROOTS.map((dir) => join(root, dir))];
+  const allFiles = scanRoots.flatMap((dir) => walk(dir));
   const testFiles = allFiles.filter(isTestFile);
   const sourceFiles = allFiles.filter((f) => !isTestFile(f));
   const entryPoints = workspaceEntryPoints(memberDirs);
@@ -606,10 +944,52 @@ export function checkTestCoverage(
 
   const rel = (file: string): string => relative(root, file).split('\\').join('/');
 
+  const packageRoots = new Map<string, string | null>();
+  const packageRootFor = (file: string): string | null => {
+    const dir = dirname(file);
+    let cached = packageRoots.get(dir);
+    if (cached === undefined) {
+      cached = packageRootOf(file, root);
+      packageRoots.set(dir, cached);
+    }
+    return cached;
+  };
+
+  const manifests = new Map<string, Record<string, unknown>>();
+  const manifestOf = (pkgRoot: string): Record<string, unknown> => {
+    let cached = manifests.get(pkgRoot);
+    if (!cached) {
+      try {
+        cached = JSON.parse(readFileSync(join(pkgRoot, 'package.json'), 'utf8')) as Record<string, unknown>;
+      } catch {
+        cached = {};
+      }
+      manifests.set(pkgRoot, cached);
+    }
+    return cached;
+  };
+
   /** Resolve a specifier written inside `fromFile` to a file in this repository. */
   const resolveSpecifier = (fromFile: string, specifier: string): string | null => {
     if (specifier.startsWith('.')) return resolveFile(resolve(dirname(fromFile), specifier));
     if (specifier.startsWith(WORKSPACE_SCOPE)) return entryPoints.get(specifier) ?? null;
+
+    // An alias is a path (see PATH_ALIASES). Resolved here so the config
+    // exemption cannot be bought by changing how an import is spelled.
+    // Everything else is a bare package name from node_modules, and is
+    // rejected before the walk up to a package root: that walk used to run
+    // for `vue` and `zod` too, once per import in the repository.
+    const alias = PATH_ALIASES.find((a) => specifier.startsWith(a.prefix));
+    if (!alias && !specifier.startsWith('#')) return null;
+
+    const pkgRoot = packageRootFor(fromFile);
+    if (!pkgRoot) return null;
+    if (!alias) return resolveSubpathImport(pkgRoot, specifier, manifestOf(pkgRoot));
+    const rest = specifier.slice(alias.prefix.length);
+    for (const base of alias.bases) {
+      const hit = resolveFile(join(pkgRoot, base, rest));
+      if (hit) return hit;
+    }
     return null;
   };
 
@@ -646,12 +1026,23 @@ export function checkTestCoverage(
     }
   };
 
+  const executes = new Map<string, boolean>();
+  const executesAnAssertion = (testFile: string): boolean => {
+    let cached = executes.get(testFile);
+    if (cached === undefined) {
+      cached = hasExecutingAssertion(sourceOf(testFile));
+      executes.set(testFile, cached);
+    }
+    return cached;
+  };
+
   for (const testFile of testFiles) {
     const code = sourceOf(testFile);
-    if (!hasAssertion(code)) {
+    if (!executesAnAssertion(testFile)) {
       errors.push(
-        `${rel(testFile)}: test file contains no assertion (no expect()/assert() call) — an ` +
-          `assertion-free test is not coverage, and this file counts as evidence for nothing`,
+        `${rel(testFile)}: test file runs no assertion (no expect()/assert() call a test reaches) — ` +
+          `a skipped test and an assertion nothing calls are not coverage, and this file counts as ` +
+          `evidence for nothing`,
       );
       continue;
     }
@@ -664,7 +1055,7 @@ export function checkTestCoverage(
   // E3: a named test file beside the source (or in its `__tests__/`).
   const assertingTestsByDir = new Map<string, string[]>();
   for (const testFile of testFiles) {
-    if (!hasAssertion(sourceOf(testFile))) continue;
+    if (!executesAnAssertion(testFile)) continue;
     const dir = dirname(testFile);
     const list = assertingTestsByDir.get(dir) ?? [];
     list.push(testFile);
@@ -708,6 +1099,38 @@ export function checkTestCoverage(
       `${relPath}: no test names this file. Give it a sibling <name>.test.ts, import it from a test, ` +
         `or add it to ALLOW_LIST in scripts/checks/test-coverage.ts with a reason.`,
     );
+  }
+
+  // The member-level rule, restored. `CLAUDE.md` and `.githooks/pre-commit`
+  // have both promised since Phase 0 that `bun run check` fails when "a
+  // workspace member has no executing test". The per-file rewrite replaced
+  // the mechanism and kept the sentence, so a member could declare
+  // `"test": "echo no tests"` and ship green — the file-level rule says
+  // nothing about a member whose files all happen to be exempt, and
+  // nothing at all about whether `bun run -F <member> test` runs a runner.
+  // A documented guarantee nobody enforces is worse than no guarantee,
+  // because people plan around it.
+  for (const memberDir of memberDirs) {
+    const relMember = rel(memberDir);
+    const manifest = manifestOf(memberDir);
+    const scripts = (manifest.scripts ?? {}) as Record<string, unknown>;
+    const testScript = typeof scripts.test === 'string' ? scripts.test : null;
+
+    if (!testScript) {
+      errors.push(`${relMember}: package.json declares no \`test\` script — every workspace member must run tests`);
+    } else if (!TEST_RUNNER_PATTERN.test(testScript)) {
+      errors.push(
+        `${relMember}: its \`test\` script (${JSON.stringify(testScript)}) invokes no test runner — ` +
+          `it must run \`bun test\` or \`vitest\`, or the member is green for having said nothing`,
+      );
+    }
+
+    const memberTests = testFiles.filter((f) => f.startsWith(`${memberDir}/`));
+    if (!memberTests.some(executesAnAssertion)) {
+      errors.push(
+        `${relMember}: contains no test file that runs an assertion — the member has no executing test`,
+      );
+    }
   }
 
   errors.push(...checkAllowList(root, allowList, (file) => status(join(root, file))));

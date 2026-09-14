@@ -60,3 +60,59 @@ describe('checkBundleIsolation', () => {
     expect(result.errors.some((e) => e.includes('node:crypto') || e.includes('crypto'))).toBe(true);
   });
 });
+
+// The closure must not stop at a workspace-package boundary. These four
+// cover the ways a forbidden module reached the "." export while the walk
+// only followed specifiers starting with ".".
+describe('checkBundleIsolation — the closure crosses every edge it can resolve', () => {
+  // The recorded regression, verbatim: packages/editor importing the
+  // @deep-wiki/markdown BARREL instead of @deep-wiki/markdown/pipeline
+  // transitively reaches node:crypto (packages/markdown/src/pipeline.ts's
+  // own doc comment). A walk that stops at the workspace boundary calls
+  // that clean.
+  test('fails when the "." export reaches node:crypto THROUGH a @deep-wiki workspace package barrel', () => {
+    const result = checkBundleIsolation(join(FIXTURES_DIR, 'violating-workspace-barrel-closure'));
+
+    expect(result.ok).toBe(false);
+    expect(result.errors.some((e) => e.includes('node:crypto'))).toBe(true);
+  });
+
+  test('a forbidden import behind an extensionless relative edge resolving to .vue is still reached', () => {
+    const result = checkBundleIsolation(join(FIXTURES_DIR, 'violating-hidden-vue-edge'));
+
+    expect(result.ok).toBe(false);
+    expect(result.errors.some((e) => e.includes('prosemirror-view'))).toBe(true);
+  });
+
+  test('a forbidden import behind an extensionless relative edge resolving to .mts is still reached', () => {
+    const result = checkBundleIsolation(join(FIXTURES_DIR, 'violating-hidden-mts-edge'));
+
+    expect(result.ok).toBe(false);
+    expect(result.errors.some((e) => e.includes('@milkdown/core'))).toBe(true);
+  });
+
+  // A dropped edge is a hole, not a pass: an unresolvable relative
+  // specifier must fail loudly rather than silently truncating the walk.
+  test('an unresolvable relative specifier is a reported ERROR, never a silently dropped edge', () => {
+    const result = checkBundleIsolation(join(FIXTURES_DIR, 'violating-unresolvable-relative'));
+
+    expect(result.ok).toBe(false);
+    expect(result.errors.some((e) => e.includes('./ghost'))).toBe(true);
+  });
+});
+
+describe('checkBundleIsolation — every static form of the mount import', () => {
+  test('fails when an apps/web file statically RE-EXPORTS from @deep-wiki/editor/mount', () => {
+    const result = checkBundleIsolation(join(FIXTURES_DIR, 'violating-eager-mount-reexport'));
+
+    expect(result.ok).toBe(false);
+    expect(result.errors.some((e) => e.includes('@deep-wiki/editor/mount'))).toBe(true);
+  });
+
+  test('fails when an apps/web file has a bare side-effect import of @deep-wiki/editor/mount', () => {
+    const result = checkBundleIsolation(join(FIXTURES_DIR, 'violating-eager-mount-side-effect'));
+
+    expect(result.ok).toBe(false);
+    expect(result.errors.some((e) => e.includes('@deep-wiki/editor/mount'))).toBe(true);
+  });
+});

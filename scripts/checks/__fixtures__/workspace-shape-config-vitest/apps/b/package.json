@@ -1,0 +1,4 @@
+{
+  "name": "fixture-config-b",
+  "scripts": { "test": "vitest run" }
+}

@@ -11,10 +11,13 @@
  *   2. No `path LIKE` predicate (or a `.like()` call) may appear outside
  *      `packages/db/src/nodes/subtree.ts`, the one module allowed to write
  *      a `path` prefix predicate.
- *   3. No pattern literal may start with a leading wildcard (`%foo`) — a
- *      leading wildcard defeats `text_pattern_ops` sargability. A bare
- *      `'%'` used to build a trailing-wildcard pattern (`prefix || '%'`)
- *      is not itself a leading-wildcard literal and is not flagged.
+ *   3. No pattern may start with a leading wildcard (`%foo`) — a leading
+ *      wildcard defeats `text_pattern_ops` sargability. All three spellings
+ *      of the same pattern count: the literal (`'%foo'`, `'%foo%'`), the
+ *      concatenation (`'%' + term`, `'%' || term`), and the template literal
+ *      (`` `%${term}%` ``). A bare `'%'` used to build a *trailing*-wildcard
+ *      pattern (`prefix || '%'`, `prefix + '%'`, `` `${prefix}%` ``) puts the
+ *      wildcard last, is sargable, and is not flagged.
  *   4. No `lower(path)` / `upper(path)` call anywhere — a function-wrapped
  *      column is never sargable, and the path CHECK constraint already
  *      guarantees lowercase-only content, so this call could only ever be
@@ -32,6 +35,25 @@
  * resolver's, the subtree query's, or the save transaction's real SQL
  * behaviour (the truth table, the EXPLAIN cost proof, the replace-wholesale
  * assertions) legitimately embeds these exact patterns.
+ *
+ * ## Two spellings of every rule
+ *
+ * Rules 1, 2 and 6 are written against SQL verb text, because that is how
+ * `packages/db` writes its queries today — tagged `sql` templates. But the
+ * schema in `packages/db/src/schema.ts` is Drizzle, so every one of these
+ * queries has a second, equivalent spelling through the query builder:
+ * `db.select().from(permissions)`, `db.insert(links).values(...)`,
+ * `db.update(pageTags).set(...)`, `db.delete(links)`,
+ * `.where(ilike(nodes.path, ...))`. A rule that only reads SQL keywords
+ * says nothing about the builder form, so the boundary it claims to hold
+ * would be one refactor away from being unenforced. Each of those rules
+ * therefore carries a second pattern matching the builder call, and a
+ * violation in either spelling is the same violation.
+ *
+ * The builder patterns match the *table identifier* (`permissions`, `links`,
+ * `pageTags`), never a bare `.update(` or `.delete(`, which are also
+ * `createHash().update()` and `Set.delete()` and appear all over the
+ * repository.
  */
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
@@ -46,12 +68,46 @@ const SOURCE_FILE_PATTERN = /\.ts$/;
 const TEST_FILE_PATTERN = /\.(test|spec)\.ts$/;
 
 const PERMISSIONS_TABLE_PATTERN = /\b(FROM|JOIN|INTO|UPDATE)\s+permissions\b/i;
-const PATH_LIKE_PATTERN = /\bpath\s+LIKE\b|\.like\(/i;
-const LEADING_WILDCARD_PATTERN = /(['"`])%[^%'"`]+\1/;
-const LOWER_UPPER_PATH_PATTERN = /\b(lower|upper)\s*\(\s*path\s*\)/i;
-const LINKS_WRITE_PATTERN = /\b(INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+(links|page_tags)\b/i;
+/** `db.select().from(permissions)`, `db.insert(permissions)`, `.innerJoin(permissions, …)`. */
+const PERMISSIONS_BUILDER_PATTERN =
+  /\.(from|join|innerJoin|leftJoin|rightJoin|fullJoin|crossJoin|insert|update|delete)\s*\(\s*permissions\s*[,)]/i;
 
-const DENYLISTED_FIELDS = [
+const PATH_LIKE_PATTERN = /\bpath\s+LIKE\b|\.like\(/i;
+/** `like(nodes.path, …)`, `ilike(path, …)`, `notLike(nodes.path, …)`. */
+const PATH_LIKE_BUILDER_PATTERN = /\b(?:not)?i?like\s*\(\s*(?:[A-Za-z_$][\w$]*\.)?path\s*[,)]/i;
+
+/**
+ * A string or template literal that *opens* with a wildcard. The negative
+ * lookahead is what keeps a bare `'%'` legal: in `prefix || '%'` the
+ * character after the `%` is the closing quote, so the literal carries no
+ * pattern of its own and the wildcard it contributes lands last.
+ */
+const LEADING_WILDCARD_PATTERN = /(['"`])%(?!\1)/;
+/**
+ * The assembled spelling: a bare wildcard literal immediately concatenated
+ * onto something else (`'%' + term`, `'%' || term`). Whether it is *leading*
+ * depends on what precedes it — `term + '%' + suffix` puts the wildcard in
+ * the middle, which stays sargable on the prefix — so the match position is
+ * checked against the preceding text rather than baked into the regex.
+ */
+const CONCATENATED_WILDCARD_PATTERN = /(['"`])%\1\s*(?:\+|\|\|)/g;
+
+const LOWER_UPPER_PATH_PATTERN = /\b(lower|upper)\s*\(\s*path\s*\)/i;
+
+const LINKS_WRITE_PATTERN = /\b(INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+(links|page_tags)\b/i;
+/** `db.insert(links)`, `db.update(pageTags)`, `db.delete(links)`. */
+const LINKS_WRITE_BUILDER_PATTERN = /\.(insert|update|delete)\s*\(\s*(links|pageTags|page_tags)\s*[,)]/i;
+
+/**
+ * Every denylisted field, in both of the spellings this repository uses for
+ * one value: the database column is `snake_case`, and the contracts layer
+ * that mirrors it into a response schema is `camelCase`. A denylist written
+ * in one spelling only stops the layer it was written for — and rule 5 reads
+ * `packages/contracts`, which is the camelCase side, so snake_case alone was
+ * the wrong half. `camelCase()` derives the second spelling rather than
+ * asking anyone to remember to add it.
+ */
+const DENYLISTED_FIELD_ROOTS = [
   'password_hash',
   'token_hash',
   'session_token',
@@ -62,12 +118,29 @@ const DENYLISTED_FIELDS = [
   'DATABASE_URL',
 ];
 
+function camelCase(field: string): string {
+  const [head, ...rest] = field.toLowerCase().split('_');
+  return (head ?? '') + rest.map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join('');
+}
+
+const DENYLISTED_FIELDS = [
+  ...new Set(DENYLISTED_FIELD_ROOTS.flatMap((field) => [field, camelCase(field)])),
+];
+
 /**
  * This check's own source and test necessarily contain the exact text
  * patterns it searches for — in doc comments, regex literals, and
  * assertion strings describing the violating fixtures. Fixture-based
  * tests already exercise its real behaviour, so self-matches here would
  * be pure noise, not a finding.
+ *
+ * The exemption grew with the rules: the doc comments above now spell out
+ * the Drizzle builder forms (`db.insert(links)`, `ilike(nodes.path, …)`)
+ * and every leading-wildcard spelling (`'%foo'`, `'%' + term`, and the
+ * template-literal one), so this file matches more of its own rules than
+ * it used to. It is still the same exemption for the same reason, and it
+ * is still the narrowest one available: two files, by name, and the
+ * fixtures under `__fixtures__/` are what actually prove the rules.
  */
 const SELF_FILES = new Set(['query-boundaries.ts', 'query-boundaries.test.ts']);
 
@@ -110,7 +183,7 @@ function checkPermissionsSinglePath(root: string, errors: string[]): void {
 
   for (const file of files) {
     const content = readFileSync(file, 'utf8');
-    if (PERMISSIONS_TABLE_PATTERN.test(content)) {
+    if (PERMISSIONS_TABLE_PATTERN.test(content) || PERMISSIONS_BUILDER_PATTERN.test(content)) {
       errors.push(
         `${relative(root, file)}: references the permissions table outside packages/db/src/permissions/ — ` +
           `can() must be the single decision point`,
@@ -127,7 +200,7 @@ function checkPathLikeBoundary(root: string, errors: string[]): void {
 
   for (const file of files) {
     const content = readFileSync(file, 'utf8');
-    if (PATH_LIKE_PATTERN.test(content)) {
+    if (PATH_LIKE_PATTERN.test(content) || PATH_LIKE_BUILDER_PATTERN.test(content)) {
       errors.push(
         `${relative(root, file)}: contains a path LIKE predicate outside packages/db/src/nodes/subtree.ts, ` +
           `the one module allowed to write a path prefix predicate`,
@@ -136,12 +209,27 @@ function checkPathLikeBoundary(root: string, errors: string[]): void {
   }
 }
 
+/**
+ * True when a bare wildcard literal is concatenated onto something that
+ * follows it, and nothing concatenates onto it from the left. `'%' + term`
+ * opens with the wildcard; `term + '%' + suffix` does not, and a pattern
+ * whose wildcard is not first still uses the index.
+ */
+function hasConcatenatedLeadingWildcard(content: string): boolean {
+  for (const match of content.matchAll(CONCATENATED_WILDCARD_PATTERN)) {
+    const before = content.slice(0, match.index).trimEnd();
+    if (before.endsWith('+') || before.endsWith('||')) continue;
+    return true;
+  }
+  return false;
+}
+
 function checkLeadingWildcard(root: string, errors: string[]): void {
   const files = findFiles(root, SOURCE_FILE_PATTERN).filter((f) => !isSelfFile(f));
 
   for (const file of files) {
     const content = readFileSync(file, 'utf8');
-    if (LEADING_WILDCARD_PATTERN.test(content)) {
+    if (LEADING_WILDCARD_PATTERN.test(content) || hasConcatenatedLeadingWildcard(content)) {
       errors.push(`${relative(root, file)}: contains a pattern literal with a leading wildcard (%...), which defeats text_pattern_ops sargability`);
     }
   }
@@ -183,7 +271,7 @@ function checkLinksWriteBoundary(root: string, errors: string[]): void {
 
   for (const file of files) {
     const content = readFileSync(file, 'utf8');
-    if (LINKS_WRITE_PATTERN.test(content)) {
+    if (LINKS_WRITE_PATTERN.test(content) || LINKS_WRITE_BUILDER_PATTERN.test(content)) {
       errors.push(
         `${relative(root, file)}: writes to links/page_tags outside packages/db/src/content/ — ` +
           `derived rows are replaced wholesale by the save transaction, never patched elsewhere`,

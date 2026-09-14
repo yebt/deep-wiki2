@@ -23,10 +23,6 @@ describe('checkFile', () => {
     ).toEqual([]);
   });
 
-  test('packages/editor may reach for prosemirror-markdown — it owns the ProseMirror side of the round trip', () => {
-    expect(checkFile('packages/editor/src/schema.ts', "import { x } from 'prosemirror-markdown';")).toEqual([]);
-  });
-
   // Closes the exact gap render.ts fell through: PARSER_OWNERS above governs
   // who may import the raw remark/unified building blocks at all, not
   // whether a second, divergent processor is built with them once inside.
@@ -70,6 +66,85 @@ describe('checkFile', () => {
 
   test('packages/editor may import Milkdown — it owns the ProseMirror side', () => {
     expect(checkFile('packages/editor/src/editor.ts', "import { Editor } from '@milkdown/core';")).toEqual([]);
+  });
+
+  // ── The four evasions an audit proved by construction ────────────────
+  //
+  // Every one of these was run against the check before the fix and PASSED.
+
+  // `remark` is not a parser-adjacent helper; the meta-package *is*
+  // `unified().use(remarkParse).use(remarkStringify)`. One import is a
+  // complete second pipeline, and the denylist named only its two halves.
+  test('the `remark` meta-package is a whole second pipeline in one import', () => {
+    const errors = checkFile('apps/web/app/pages/x.vue', "import { remark } from 'remark';");
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain('remark');
+  });
+
+  // Both are installed in this repository today (mdast-util-to-markdown as a
+  // direct dependency of packages/markdown, mdast-util-from-markdown
+  // transitively, hoisted and importable). Together they are a full
+  // markdown round trip carrying none of the shared pipeline's GFM,
+  // frontmatter, wiki-link, tag or block-anchor extensions — the exact
+  // divergence GATE-2 exists to pin down.
+  test('mdast-util-from-markdown/to-markdown outside an owner are a full round trip with none of the extensions', () => {
+    const errors = checkFile(
+      'apps/api/src/render.ts',
+      "import { fromMarkdown } from 'mdast-util-from-markdown';\nimport { toMarkdown } from 'mdast-util-to-markdown';",
+    );
+
+    expect(errors).toHaveLength(2);
+    expect(errors.some((e) => e.includes('mdast-util-from-markdown'))).toBe(true);
+    expect(errors.some((e) => e.includes('mdast-util-to-markdown'))).toBe(true);
+  });
+
+  // packages/markdown's own extension handlers legitimately build on
+  // mdast-util-to-markdown's `defaultHandlers`: they ARE the shared
+  // pipeline's serialiser extensions, not a second one.
+  test('packages/markdown may still build its own serialiser extensions on mdast-util-to-markdown', () => {
+    expect(
+      checkFile(
+        'packages/markdown/src/extensions/list-marker.ts',
+        "import { defaultHandlers, type Handle } from 'mdast-util-to-markdown';",
+      ),
+    ).toEqual([]);
+  });
+
+  // The denylist compared against `'x` and `"x` only, so the third quote
+  // character JavaScript has walked straight past it.
+  test('a backtick-quoted dynamic import is an import too', () => {
+    const errors = checkFile('apps/web/app/pages/edit.vue', 'const e = await import(`@milkdown/core`);');
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain('@milkdown/');
+  });
+
+  // Reversed deliberately. `prosemirror-markdown` ships
+  // `defaultMarkdownParser` and `defaultMarkdownSerializer` — a complete
+  // second markdown parser — and it was blessed inside packages/editor, the
+  // one package whose entire job is markdown<->ProseMirror conversion, with
+  // no justification written down anywhere. Unlike the `prosemirror-model`
+  // exemption in bundle-isolation.ts, which carries its reasoning and a
+  // reversal condition, this one carried nothing. packages/editor does not
+  // depend on it (see its package.json) and converts through
+  // packages/markdown's mdast instead, so the blessing was not paying for
+  // anything either.
+  test('prosemirror-markdown is forbidden even inside packages/editor — it ships a complete second parser', () => {
+    const errors = checkFile(
+      'packages/editor/src/schema.ts',
+      "import { defaultMarkdownParser } from 'prosemirror-markdown';",
+    );
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain('prosemirror-markdown');
+  });
+
+  // Naming it in prose is how the reasoning above gets written down at all.
+  test('naming prosemirror-markdown in a doc comment is not importing it', () => {
+    expect(
+      checkFile('packages/editor/src/schema.ts', '// `prosemirror-markdown` has for the identical reason.'),
+    ).toEqual([]);
   });
 
   test('ordinary code with no parser import passes', () => {

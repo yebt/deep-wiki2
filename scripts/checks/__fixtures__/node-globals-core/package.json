@@ -1,0 +1,6 @@
+{
+  "name": "@fixture/node-globals-core",
+  "private": true,
+  "type": "module",
+  "dependencies": {}
+}

@@ -1,1 +1,1 @@
-{ "name": "@fixture/bare-config-thing", "private": true }
+{"name": "@fixture/bare-config-thing", "private": true, "scripts": {"test": "bun test"}}

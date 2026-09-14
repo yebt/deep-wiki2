@@ -1923,6 +1923,162 @@ Fix: what changed, with the commit or PR reference.
 Impact: what else this touches, or "contained".
 ```
 
+### 2026-09-09 — Every structural check had a hole, and each one was proved by construction
+
+Symptom: none observed in use. An audit constructed one violation per check and ran the
+check against it. Every check returned ok. Twenty instances of tests passing for the wrong
+reason were already on record here; these are the gates that were supposed to catch that.
+
+Cause: not one bug but one recurring shape — a rule written against a *spelling* rather
+than against the property it means. Enumerated, with the fix for each:
+
+**`core-purity`** — three ways into the framework-free package.
+`import { type Root, type Content } from 'mdast'` passed: `scanImports()` elides an inline
+`type` specifier exactly as it elides `import type … from`, and the supplementary backstop
+regex demanded the `type` keyword *before* the clause, so both mechanisms were blind to the
+same line. `process.env.HOME` and `Buffer.from('a')` passed with no import at all — "not
+even a Node built-in" was enforced only against import specifiers, and the globals that make
+the built-in unnecessary are ambient. And `src/helper.mts` importing `hono` passed because
+`SOURCE_FILE_PATTERN` read only `.ts`/`.tsx`, so the file was never opened. Fixed: the
+backstop no longer asks whether an import is type-only, it sweeps every static
+`import`/`export … from` specifier; a `FORBIDDEN_GLOBALS` sweep runs over comment- and
+string-stripped code (every occurrence of `Bun`, `process`, `crypto`, `window`, `module` in
+`packages/core` today is prose in a doc comment, so telling prose from code is the whole
+job); and every extension Bun, tsc and Node execute is read.
+
+**`single-parser`** — four. `import { remark } from 'remark'` passed: the denylist named
+`remark-parse` and `remark-stringify` but not the meta-package that *is* both of them.
+`mdast-util-from-markdown` + `mdast-util-to-markdown` passed in a non-owner file, and both
+are installed here — together a full round trip with none of this repository's GFM,
+frontmatter, wiki-link, tag or block-anchor extensions. `` import(`@milkdown/core`) ``
+passed because the matcher compared each specifier against `'x` and `"x`, missing the third
+quote character JavaScript has. Fixed by extracting specifiers instead of string-matching
+the raw text — which also stops a package named in a doc comment from counting as an import,
+and that is how the reasoning in these files gets written down at all.
+
+The fourth was not a regex. `single-parser.test.ts:29` **blessed** `prosemirror-markdown`
+inside `packages/editor` — a package that ships `defaultMarkdownParser` and
+`defaultMarkdownSerializer`, a complete second markdown parser, in the one package whose
+entire job is markdown↔ProseMirror conversion — and **no justification was written down**.
+Compare `bundle-isolation.ts`'s `prosemirror-model` exemption, which carries its reasoning
+and a stated reversal condition. The blessing was also not paying for anything:
+`packages/editor/package.json` does not depend on `prosemirror-markdown`, and
+`src/to-markdown.ts` converts through `packages/markdown`'s mdast. **Decision: the blessing
+is removed**, `prosemirror-markdown` is forbidden everywhere via a new `FORBIDDEN_EVERYWHERE`
+list with no owner exemption, and the reasoning and reversal condition are recorded in the
+module header. The old test is replaced by its inverse, marked as a deliberate reversal.
+
+**`single-source` (`LEGAL_PARENT_TYPES`)** — the only structural invariant that ran neither
+in `bun run check` nor in `.githooks/pre-commit`, because it was a test inside
+`packages/db` and therefore needed a Postgres. Placement caused both of its holes, and both
+were measured rather than argued. Its textual scan read one directory non-recursively:
+planting a second copy at `apps/api/src/routes/tree.ts` — exactly where a "the client needs
+the table too" copy lands — its own regex matches the copy (`true`) while the scan reports
+`offenders = []`, because it never reads the file. And its semantic assertion was
+`legalParentTypesUsedBy()[c].includes(p)` against `isLegalParentType(c, p)`, where the
+accessor *returns* `LEGAL_PARENT_TYPES` and the predicate *reads* it: one object read twice,
+`X.includes(p) === X.includes(p)`. Rewriting `LEGAL_PARENT_TYPES.page` to every node type
+leaves its 25-iteration loop reporting `mismatches = 0`.
+
+Fixed as `scripts/checks/single-source.ts`, in `bun run check` with the rest: a recursive
+scan over every workspace member, and a semantic half stated as *properties* the table must
+have — one entry per node type, every named parent a real type, an unparented root, no type
+legal under every type, no cycles — rather than as a second literal of the table, which
+would be the checked defect wearing a hat. The `packages/db` test is owned elsewhere and is
+left as it stands; it is now redundant rather than load-bearing.
+
+**`bundle-isolation`** — the import closure stopped at every workspace-package boundary, so
+reverting the exact regression its own doc comment records (`@deep-wiki/markdown/pipeline` →
+`@deep-wiki/markdown`, transitively reaching `node:crypto`) returned ok. A static
+`export … from '@deep-wiki/editor/mount'` and a bare `import '@deep-wiki/editor/mount'` were
+both invisible. And extensionless relative edges resolving to `.vue`/`.mts` were **silently
+dropped** rather than erroring — a resolution failure that drops an edge is worse than one
+that fails loudly, because the dropped edge is exactly where a forbidden import hides.
+
+**`test-coverage`** — `test.skip('…', () => { expect(…) })` and a top-level
+`function neverCalled() { expect(…) }` both counted as full coverage while `bun test` ran
+zero assertions over that tree. An aliased import (`~/utils/retry.config`) made a real
+module read as exempt tool configuration, while the same file imported relatively was
+correctly reported — `apps/web` uses `~/` 9 times and `#` 88 times today. And the
+member-level rule that `CLAUDE.md` and `.githooks/pre-commit:6` both advertise — "a
+workspace member has no executing test" — **no longer existed**: the per-member rewrite
+dropped it, so `"test": "echo no tests"` passed. Restored rather than documented away.
+
+**`routes-mounted`** — `routes-mounted.ts:39` still said "A bare mention is enough", so a
+factory named only inside a `// TODO:` comment counted as mounted: precisely the artefact a
+developer leaves *because* the module is not wired. `readdirSync` was non-recursive, so
+`routes/admin/users.ts` was never read at all. And `export const createXRoutes = …` missed
+the factory regex.
+
+**`diff-input-purity`** — the rule was per file, so splitting defeated it entirely:
+`anchors.ts` reads `block_index`, `diff.ts` calls `diffBlocks(loadAnchors(a), …)`, neither
+trips. `import { diffBlocks as diff }` defeated the call regex on its own.
+
+**`query-boundaries`** — `DENYLISTED_FIELDS` was snake_case only, so a contracts schema
+declaring `passwordHash`/`sessionToken`/`resetToken` passed the layer where those names are
+actually spelled. Rules matching SQL verb text missed every Drizzle builder call.
+`'%' + term + '%'` defeated the leading-wildcard rule.
+
+**`env-consistency`** — a missing or portless half **silently disabled** the rule, so a
+`DATABASE_URL` with no port beside `POSTGRES_HOST_PORT=25432` returned ok — the header's own
+worst-case scenario, and the check was quiet about it. And `APP_URL` was compared on port
+only, leaving the host — what CORS and mailed reset links actually depend on — unchecked.
+`env-consistency.test.ts` pinned both open as intended behaviour; both pinning tests are
+reversed deliberately and say so.
+
+**`workspace-shape`** — four evasions at once: `vitest` under `peerDependencies`; a
+`vitest.config.ts` with no declared dependency (Bun hoists it, so it runs); `pnpm-lock.yaml`
+inside a *member* directory; and `package-lock.json`/`yarn.lock`, not banned at all despite
+"Never pnpm. Never npm."
+
+**`compose`** — omitting `type: bind` from a long-form volume (still a valid bind mount)
+skipped the SELinux rule entirely, so deleting one line disabled it. `privileged: true` and
+`network_mode: host`, both fatal under rootless podman, were in no banned list.
+
+**`env-example`** — "must never contain a secret" had **no mechanism at all**. See the
+separate entry below for what was chosen and what it honestly cannot see.
+
+Fix: each hole closed under strict TDD — the fixture was written first, run against the
+unmodified check, and observed to pass (that is, to fail the new test) before anything was
+changed. Fixtures are kept permanently under `scripts/checks/__fixtures__/`.
+
+Impact: no real file in `apps/` or `packages/` needed changing; every strengthened check is
+green against real source. `bun run check` gained `single-source.ts`; `verify` gained
+`check:bundle`. `CLAUDE.md`'s check list and `.githooks/pre-commit`'s header were corrected
+to describe what now runs.
+
+---
+
+### 2026-09-09 — Two structural checks were reachable from no locally-runnable gate
+
+Symptom: `bun run scripts/checks/bundle-isolation-build.ts apps/web` exits 1 —
+`no "pages/pages/[id]/index.vue" entry in the build's client chunk graph`. Nobody had
+noticed. It is layer 3 of "read mode never reaches the ProseMirror bundle", the only layer
+that inspects a real build's chunk graph, and it had never executed against a real build.
+
+Cause: `compose-smoke.ts` and `bundle-isolation-build.ts` had one caller between them —
+`.github/workflows/ci.yml` — and this repository has no git remote, so that workflow has
+never run and cannot. Expanding the root scripts, `verify` was `check` + `env-consistency` +
+`lint` + `typecheck` + `test` + the GATE-2 round trip + `e2e`, and neither check appeared
+anywhere in it. This is exactly the defect `e2e-wiring.test.ts` was written to close for
+`e2e/`, left unclosed for the checks themselves. The immediate cause of the red exit was a
+`.output` stale since 2026-09-04, from before the read route existed — but a stale build is
+what "nothing runs it" looks like from the outside.
+
+Fix: `scripts/checks/__tests__/checks-wiring.test.ts` enumerates `scripts/checks/*.ts` with
+`readdirSync` — never a hand-maintained list, because the unreachable check is precisely the
+one nobody remembers to add to a list — and asserts three things per check: a root script
+names its path; `verify` transitively reaches it, unless it is in a `PREREQUISITE_GATES`
+table that names both the prerequisite and the committed command that does run it; and it
+has an executing test of its own. `compose-smoke.ts` is the one entry: it asserts against
+live Mailpit and Kroki endpoints and cannot run in a gate that starts no containers.
+`check:bundle` now builds `apps/web` before inspecting its chunk graph — a gate that skips
+is a gate that does not exist — and `verify` runs `check:bundle`.
+
+Impact: adding a check to `scripts/checks/` without wiring it now fails the suite.
+
+---
+
 ### 2026-09-09 — `SMTP_SECURE=false` in env.example arrived as `true`
 
 Symptom: not observed in use — found by a test-quality audit of `packages/contracts`, which

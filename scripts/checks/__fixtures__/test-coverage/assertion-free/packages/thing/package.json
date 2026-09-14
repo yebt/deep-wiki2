@@ -1,1 +1,1 @@
-{ "name": "@fixture/assertion-free-thing", "private": true }
+{"name": "@fixture/assertion-free-thing", "private": true, "scripts": {"test": "bun test"}}

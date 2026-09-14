@@ -53,6 +53,44 @@
  * This check reads it out of the file (text, never executed) and requires
  * `APP_URL` to name the same port. Two servers may not be given one port
  * either, so the declared web port is also required to differ from `PORT`.
+ *
+ * ## The host, not only the port
+ *
+ * `APP_URL` was compared on its port alone until 2026-09-09, so
+ * `http://example.com:3001` passed. The port was never the whole fact. An
+ * origin is scheme + host + port, and it is the *origin* that
+ * `cors({ origin: APP_URL })` allowlists and the *host* that the
+ * `/reset-password` and `/invite/accept` links carry into somebody's inbox.
+ * A right port on a wrong host fails exactly the way a wrong port does — the
+ * browser refuses the credentialed request and the screen blames the
+ * connection — and it additionally mails real people a link to a machine that
+ * is not theirs. So when `APP_URL` spells a port out, its host must be
+ * `localhost`: that is what `nuxt dev` prints and what the developer opens.
+ *
+ * `127.0.0.1` is refused with the rest. It is the same machine and a
+ * *different origin*: browsers compare origins as text, so a page served from
+ * `http://localhost:3001` and an allowlist entry of `http://127.0.0.1:3001`
+ * produce the same CORS refusal as any other mismatch.
+ *
+ * ## Half a pair is a drift, not a configuration
+ *
+ * Each entry in `PAIRS` is one fact written twice. Until 2026-09-09 a
+ * missing or portless half made the rule `continue` — so a `DATABASE_URL`
+ * with no port at all, sitting beside `POSTGRES_HOST_PORT=25432`, returned
+ * ok. That is precisely the worst case the top of this header describes, and
+ * the check was silent about it. Both halves present, or neither: half is now
+ * an error.
+ *
+ * A portless consumed value is an error too, because portless does not mean
+ * "no port" — it means the scheme's default, and that default is the exact
+ * number the published half exists to move. `postgres://u:p@localhost/db` is
+ * 5432; `http://localhost` is 80. Neither has a legitimate reading here: if a
+ * deployment really is reaching a service on the default port through a
+ * reverse proxy, then it is not running the compose stack either, and its
+ * `POSTGRES_HOST_PORT` / `PORT` are absent — which is the "neither" case and
+ * passes untouched. The portless exemption above is `APP_URL`'s alone; it was
+ * written for a deployed origin behind a proxy and it does not generalise to
+ * a connection string.
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -84,6 +122,22 @@ export function portOfUrl(url: string): string | undefined {
     return undefined;
   }
 }
+
+function hostOfUrl(url: string): string | undefined {
+  try {
+    return new URL(url).hostname || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The host `apps/web` is reached on in development. `nuxt dev` binds the
+ * loopback interface and prints `localhost`, and an origin is compared as
+ * text, so this is the only host an `APP_URL` that spells a dev-server port
+ * out can name.
+ */
+const WEB_DEV_HOST = 'localhost';
 
 /** Pairs of (published host port var, the var that must agree with it, how it is expressed). */
 const PAIRS: readonly { publish: string; consume: string; kind: 'url' | 'port'; hint: string }[] = [
@@ -135,10 +189,35 @@ export function checkEnvConsistency(
   for (const pair of PAIRS) {
     const published = env.get(pair.publish);
     const consumed = env.get(pair.consume);
-    if (!published || !consumed) continue;
+
+    // Neither half written is not this rule's business: the pair describes
+    // the local compose stack, and a deployment that does not run it declares
+    // neither side.
+    if (!published && !consumed) continue;
+
+    if (!published || !consumed) {
+      const [present, absent] = published ? [pair.publish, pair.consume] : [pair.consume, pair.publish];
+      errors.push(
+        `${present}=${published || consumed} is set, but ${absent} is not set at all. ` +
+          `These two are the same fact written twice — one says where the service listens or is ` +
+          `published, the other says where to reach it — so half of it is a drift that has already ` +
+          `happened, not a configuration. Whichever side is missing falls back to a default nobody ` +
+          `chose, and the connection then lands on whatever owns that port. Write both, or neither.`,
+      );
+      continue;
+    }
 
     const actual = pair.kind === 'url' ? portOfUrl(consumed) : consumed;
-    if (!actual) continue;
+    if (!actual) {
+      errors.push(
+        `${pair.publish}=${published} but ${pair.consume}=${consumed} declares no port at all. ` +
+          `That is not "no port": it is the scheme's default — 5432 for postgres, 80 or 443 for ` +
+          `http — which is the very number ${pair.publish} exists to move. Nothing published on ` +
+          `${published} is ever reached, and the connection lands on whatever already owns the ` +
+          `default. Spell the port out: ${pair.hint} must read ${published}.`,
+      );
+      continue;
+    }
 
     if (actual !== published) {
       errors.push(
@@ -158,6 +237,22 @@ export function checkEnvConsistency(
     // Only an origin that spells a port out can disagree with one.
     const appUrl = env.get('APP_URL');
     const appUrlPort = appUrl ? portOfUrl(appUrl) : undefined;
+    const appUrlHost = appUrl ? hostOfUrl(appUrl) : undefined;
+
+    // The host is checked on the same terms as the port, and only when a port
+    // is spelled out — a portless APP_URL is the deployed case above.
+    if (appUrlPort !== undefined && appUrlHost !== undefined && appUrlHost !== WEB_DEV_HOST) {
+      errors.push(
+        `APP_URL names the host ${appUrlHost}, but apps/web is served from ${WEB_DEV_HOST} in ` +
+          `development. An origin is scheme + host + port, and this one is wrong on the host: ` +
+          `${SESSION_SYMPTOM} ` +
+          `The mailed /reset-password and /invite/accept links carry this host too, so they will ` +
+          `point at ${appUrlHost} rather than at the machine the developer is running. ` +
+          `(${appUrlHost} and ${WEB_DEV_HOST} may even be the same machine — 127.0.0.1 is — and it ` +
+          `changes nothing: the browser compares origins as text.) ` +
+          `Set APP_URL to http://${WEB_DEV_HOST}:${webDevPort}.`,
+      );
+    }
 
     if (appUrlPort !== undefined && appUrlPort !== String(webDevPort)) {
       errors.push(

@@ -1,0 +1,5 @@
+name: fixture-network-mode-host
+services:
+  kroki:
+    image: yuzutech/kroki
+    network_mode: host

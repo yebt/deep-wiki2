@@ -11,11 +11,23 @@
  *      `defineAsyncComponent()`) is allowed, so the eager Milkdown chunk
  *      never reaches the read-mode bundle by accident.
  *
- * Walks relative imports with `Bun.Transpiler().scanImports()`, exactly as
- * `core-purity.ts` does — no bundler, no `node_modules` resolution: a
- * non-relative specifier is either flagged (forbidden) or left alone
- * (assumed fine; `single-parser.ts` and this repository's own dependency
- * graph cover what it can legitimately pull in beyond that).
+ * Walks imports with `Bun.Transpiler().scanImports()`, exactly as
+ * `core-purity.ts` does — no bundler, no `node_modules` resolution. It
+ * follows two kinds of edge: relative specifiers, and `@deep-wiki/*`
+ * workspace specifiers resolved through the target package's own
+ * `package.json` `exports` map. Stopping at the workspace boundary was a
+ * real hole: `packages/editor` importing `@deep-wiki/markdown` (the
+ * barrel) instead of `@deep-wiki/markdown/pipeline` reaches `node:crypto`
+ * through `block-index.ts`/`match-blocks.ts`, and a boundary-stopping walk
+ * calls that clean. Anything else non-relative is either flagged
+ * (forbidden) or left alone (a real `node_modules` dependency; assumed
+ * fine — `single-parser.ts` and this repository's own dependency graph
+ * cover what it can legitimately pull in beyond that).
+ *
+ * A relative specifier that resolves to NO file is a reported error, not a
+ * skipped edge: a truncated closure proves nothing, and hiding a forbidden
+ * import behind an edge the walker cannot follow is exactly the failure
+ * this layer exists to prevent.
  *
  * **Why `prosemirror-model` is allowed (design.md D21).** The design's own
  * prose described this layer's denylist as "milkdown, @milkdown/*,
@@ -45,8 +57,17 @@ export interface BundleIsolationResult {
   errors: string[];
 }
 
-const RELATIVE_EXTENSIONS = ['.ts', '.tsx'];
+/**
+ * Every extension a relative specifier in this repository can legitimately
+ * resolve to. Narrower than this and the closure DROPS the edge — and a
+ * dropped edge is a hole, not a pass: `./thing` next to a `thing.vue` or a
+ * `thing.mts` used to end the walk silently, which is exactly where a
+ * forbidden import would hide.
+ */
+const RELATIVE_EXTENSIONS = ['.ts', '.tsx', '.mts', '.cts', '.vue', '.js', '.jsx', '.mjs', '.cjs'];
 const SOURCE_EXTENSIONS = new Set(['.ts', '.tsx', '.vue', '.js', '.mjs']);
+/** Workspace globs from the root package.json — the only places a `@deep-wiki/*` package can live. */
+const WORKSPACE_DIRS = ['packages', 'apps'];
 const SKIP_DIRS = new Set(['node_modules', 'dist', '.nuxt', '.output', '.git', 'drizzle', '__fixtures__']);
 
 /**
@@ -72,17 +93,88 @@ function resolveRelativeImport(fromFile: string, specifier: string): string | un
   return candidates.find((candidate) => existsSync(candidate) && statSync(candidate).isFile());
 }
 
-function scanImportsOf(file: string): string[] {
-  const code = readFileSync(file, 'utf8');
-  const transpiler = new Bun.Transpiler({ loader: extname(file) === '.tsx' ? 'tsx' : 'ts' });
-  return transpiler.scanImports(code).map((imp) => imp.path);
+/**
+ * Maps every workspace package NAME to its directory, by reading the
+ * `name` out of each `packages/*` and `apps/*` package.json. Built once
+ * per run so the closure can keep walking across a `@deep-wiki/*` edge
+ * instead of stopping at the package boundary.
+ */
+function workspacePackageDirs(root: string): Map<string, string> {
+  const byName = new Map<string, string>();
+  for (const group of WORKSPACE_DIRS) {
+    const groupDir = join(root, group);
+    if (!existsSync(groupDir) || !statSync(groupDir).isDirectory()) continue;
+    for (const entry of readdirSync(groupDir)) {
+      const manifest = join(groupDir, entry, 'package.json');
+      if (!existsSync(manifest)) continue;
+      try {
+        const name: unknown = (JSON.parse(readFileSync(manifest, 'utf8')) as { name?: unknown }).name;
+        if (typeof name === 'string') byName.set(name, join(groupDir, entry));
+      } catch {
+        // A malformed manifest is workspace-shape.ts's problem, not this check's.
+      }
+    }
+  }
+  return byName;
 }
 
-/** Walks the "." export's transitive closure over relative imports only, flagging any forbidden non-relative specifier it reaches. */
+type ExportsField = string | { [key: string]: ExportsField } | undefined;
+
+/** Follows a package.json `exports` value (string, or conditions object) down to its first string target. */
+function firstExportTarget(value: ExportsField): string | undefined {
+  if (typeof value === 'string') return value;
+  if (!value || typeof value !== 'object') return undefined;
+  for (const key of ['import', 'module', 'browser', 'default', 'require']) {
+    const resolved = firstExportTarget(value[key]);
+    if (resolved) return resolved;
+  }
+  return undefined;
+}
+
+/**
+ * Resolves `@deep-wiki/markdown` / `@deep-wiki/markdown/pipeline` to the
+ * file its package.json `exports` map points at. Returns `undefined` for a
+ * specifier that names no workspace package (a real node_modules
+ * dependency — left alone, exactly as before).
+ */
+function resolveWorkspaceImport(specifier: string, packages: Map<string, string>): string | undefined {
+  const segments = specifier.split('/');
+  for (const candidateLength of [2, 1]) {
+    const name = segments.slice(0, candidateLength).join('/');
+    const dir = packages.get(name);
+    if (!dir) continue;
+    const rest = segments.slice(candidateLength).join('/');
+    const subpath = rest ? `./${rest}` : '.';
+    const manifest = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')) as { exports?: ExportsField };
+    const exportsField = manifest.exports;
+    const entry = typeof exportsField === 'string' ? (subpath === '.' ? exportsField : undefined) : firstExportTarget(exportsField?.[subpath]);
+    if (!entry) return undefined;
+    const file = join(dir, entry);
+    return existsSync(file) && statSync(file).isFile() ? file : undefined;
+  }
+  return undefined;
+}
+
+const VUE_SCRIPT_BLOCK = /<script\b[^>]*>([\s\S]*?)<\/script>/g;
+
+/** A `.vue` SFC is not valid TypeScript — scan the code inside its `<script>` blocks instead. */
+function scannableCode(file: string): string {
+  const code = readFileSync(file, 'utf8');
+  if (extname(file) !== '.vue') return code;
+  return [...code.matchAll(VUE_SCRIPT_BLOCK)].map((match) => match[1]).join('\n');
+}
+
+function scanImportsOf(file: string): string[] {
+  const transpiler = new Bun.Transpiler({ loader: extname(file) === '.tsx' || extname(file) === '.jsx' ? 'tsx' : 'ts' });
+  return transpiler.scanImports(scannableCode(file)).map((imp) => imp.path);
+}
+
+/** Walks the "." export's transitive closure over relative AND `@deep-wiki/*` workspace edges, flagging any forbidden specifier it reaches. */
 function checkEditorClosure(root: string, errors: string[]): void {
   const entry = join(root, 'packages', 'editor', 'src', 'index.ts');
   if (!existsSync(entry)) return; // no packages/editor in this fixture/root
 
+  const packages = workspacePackageDirs(root);
   const visited = new Set<string>();
   const queue = [entry];
 
@@ -94,7 +186,25 @@ function checkEditorClosure(root: string, errors: string[]): void {
     for (const specifier of scanImportsOf(file)) {
       if (specifier.startsWith('.')) {
         const resolved = resolveRelativeImport(file, specifier);
-        if (resolved) queue.push(resolved);
+        if (resolved) {
+          queue.push(resolved);
+        } else {
+          // Never drop the edge: an unresolvable relative specifier is a
+          // truncated closure, and a truncated closure is precisely where
+          // a forbidden import hides. Fail loudly instead.
+          errors.push(
+            `${relative(root, file)}: relative import "${specifier}" resolves to no file — the "." export's closure cannot be ` +
+              'walked past it, so this check cannot prove read mode stays free of the Milkdown/ProseMirror editing surface',
+          );
+        }
+        continue;
+      }
+      // Keep walking across a workspace-package boundary: importing a
+      // package's barrel instead of its narrow subpath export is how
+      // node:crypto reached this closure once already (see above).
+      const workspaceEntry = resolveWorkspaceImport(specifier, packages);
+      if (workspaceEntry) {
+        queue.push(workspaceEntry);
         continue;
       }
       if (isForbiddenEditingSurface(specifier)) {
@@ -123,7 +233,15 @@ function findSourceFiles(dir: string): string[] {
   return found;
 }
 
-const EAGER_MOUNT_IMPORT_PATTERN = /\bimport\s+(?:type\s+)?[^;()]*\bfrom\s+['"]@deep-wiki\/editor\/mount['"]/;
+/**
+ * Every STATIC form that pulls the mount entry into a chunk eagerly:
+ * `import … from`, `export … from` (a re-export is just as eager as an
+ * import), and a bare side-effect `import '…'` with no binding at all.
+ * Only a dynamic `import(...)` — the parenthesis this pattern refuses to
+ * match — is allowed.
+ */
+const EAGER_MOUNT_IMPORT_PATTERN =
+  /(?:\b(?:import|export)\s+(?:type\s+)?[^;()]*\bfrom\s*|\bimport\s*)['"]@deep-wiki\/editor\/mount['"]/;
 
 /** No `apps/web` file may statically import `@deep-wiki/editor/mount` — only a dynamic `import()` is allowed. */
 function checkNoEagerMountImport(root: string, errors: string[]): void {

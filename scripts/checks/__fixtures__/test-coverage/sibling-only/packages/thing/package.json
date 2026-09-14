@@ -1,1 +1,1 @@
-{ "name": "@fixture/sibling-thing", "private": true }
+{"name": "@fixture/sibling-thing", "private": true, "scripts": {"test": "bun test"}}

@@ -1,0 +1,5 @@
+name: fixture-privileged
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    privileged: true

@@ -1,0 +1,21 @@
+# The same long form, correctly labelled, with and without an explicit
+# `type:`. Both are bind mounts; both are fine.
+name: fixture-longform-labelled
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    volumes:
+      - source: ./infra/postgres/init
+        target: /docker-entrypoint-initdb.d
+        bind:
+          selinux: z
+      - type: bind
+        source: ./infra/postgres/conf
+        target: /etc/postgresql
+        bind:
+          selinux: Z
+      - type: volume
+        source: pgdata
+        target: /var/lib/postgresql/data
+volumes:
+  pgdata:

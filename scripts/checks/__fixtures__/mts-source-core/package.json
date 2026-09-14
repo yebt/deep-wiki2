@@ -1,0 +1,6 @@
+{
+  "name": "@fixture/mts-source-core",
+  "private": true,
+  "type": "module",
+  "dependencies": {}
+}

@@ -74,3 +74,64 @@ describe('declared dependencies of every kind', () => {
     expect(checkManifest({}).ok).toBe(true);
   });
 });
+
+// ── The three live evasions an audit proved by construction ─────────────
+//
+// Each fixture below was run against the check *before* the fix and passed.
+// A check test that constructs a violation the check already caught proves
+// nothing; these three are the ones it did not catch.
+
+describe('inline `type` specifiers (the gap between scanImports and the backstop regex)', () => {
+  // `scanImports()` elides `import { type Root } from 'mdast'` exactly as it
+  // elides `import type { Root } from 'mdast'` (measured). The supplementary
+  // regex only matched the second form, because it requires the `type`
+  // keyword before the clause. Both mechanisms were blind to the first.
+  test('rejects `import { type X } from` a non-relative specifier', () => {
+    const result = checkCorePurity(join(FIXTURES_DIR, 'inline-type-import-core'));
+
+    expect(result.ok).toBe(false);
+    expect(result.errors.some((e) => e.includes('mdast'))).toBe(true);
+    expect(result.errors.some((e) => e.includes('src/index.ts'))).toBe(true);
+  });
+});
+
+describe('ambient runtime globals (an import is not the only way in)', () => {
+  // "packages/core must import nothing, not even a Node built-in" was
+  // enforced only against import specifiers. `process.env` and `Buffer` need
+  // no import: they are ambient. A domain layer that reads the environment
+  // is bound to a runtime just as surely as one that imports `node:process`.
+  test('rejects `process.env` with no import at all', () => {
+    const result = checkCorePurity(join(FIXTURES_DIR, 'node-globals-core'));
+
+    expect(result.ok).toBe(false);
+    expect(result.errors.some((e) => e.includes('process'))).toBe(true);
+  });
+
+  test('rejects `Buffer` with no import at all', () => {
+    const result = checkCorePurity(join(FIXTURES_DIR, 'node-globals-core'));
+
+    expect(result.errors.some((e) => e.includes('Buffer'))).toBe(true);
+  });
+
+  test('a global named only inside a comment or a string is not a use', () => {
+    // Every real occurrence of these identifiers in packages/core today is
+    // prose in a doc comment (`Bun.password`, "process topology"). A check
+    // that cannot tell prose from code would have to be turned off.
+    const result = checkCorePurity(join(FIXTURES_DIR, 'clean-core'));
+
+    expect(result.ok).toBe(true);
+  });
+});
+
+describe('source extensions beyond .ts/.tsx', () => {
+  // `.mts` is executed by Bun, tsc and Node alike. SOURCE_FILE_PATTERN read
+  // only `.ts`/`.tsx`, so a `.mts` file importing a framework was never
+  // opened — the file did not exist as far as this check was concerned.
+  test('rejects a framework import inside a .mts file', () => {
+    const result = checkCorePurity(join(FIXTURES_DIR, 'mts-source-core'));
+
+    expect(result.ok).toBe(false);
+    expect(result.errors.some((e) => e.includes('hono'))).toBe(true);
+    expect(result.errors.some((e) => e.includes('src/helper.mts'))).toBe(true);
+  });
+});

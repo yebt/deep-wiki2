@@ -54,4 +54,51 @@ describe('checkQueryBoundaries', () => {
     expect(result.ok).toBe(false);
     expect(result.errors.some((e) => e.includes('leaky-links.ts') && e.includes('links'))).toBe(true);
   });
+
+  // A response schema is written in the contracts layer's camelCase, not the
+  // database's snake_case. Both spellings name the same secret.
+  test('fails when a zod response schema declares a denylisted field in camelCase', () => {
+    const result = checkQueryBoundaries(join(FIXTURES_DIR, 'violating-secret-response-schema-camelcase'));
+
+    expect(result.ok).toBe(false);
+    expect(result.errors.some((e) => e.includes('user.ts') && e.includes('passwordHash'))).toBe(true);
+    expect(result.errors.some((e) => e.includes('user.ts') && e.includes('sessionToken'))).toBe(true);
+    expect(result.errors.some((e) => e.includes('user.ts') && e.includes('resetToken'))).toBe(true);
+  });
+
+  // The same query, expressed through Drizzle's builder instead of SQL text.
+  test('fails when the permissions table is read through a Drizzle builder call', () => {
+    const result = checkQueryBoundaries(join(FIXTURES_DIR, 'violating-permissions-drizzle'));
+
+    expect(result.ok).toBe(false);
+    expect(result.errors.some((e) => e.includes('leaky-drizzle.ts') && e.includes('permissions'))).toBe(true);
+  });
+
+  test('fails when a path LIKE predicate is expressed as a Drizzle ilike() call', () => {
+    const result = checkQueryBoundaries(join(FIXTURES_DIR, 'violating-path-like-drizzle'));
+
+    expect(result.ok).toBe(false);
+    expect(result.errors.some((e) => e.includes('leaky-subtree-drizzle.ts') && e.includes('LIKE'))).toBe(true);
+  });
+
+  test('fails when links or page_tags are written through a Drizzle builder call', () => {
+    const result = checkQueryBoundaries(join(FIXTURES_DIR, 'violating-links-write-drizzle'));
+
+    expect(result.ok).toBe(false);
+    expect(result.errors.some((e) => e.includes('leaky-links-drizzle.ts') && e.includes('links'))).toBe(true);
+  });
+
+  test('fails when a leading wildcard is assembled by concatenation', () => {
+    const result = checkQueryBoundaries(join(FIXTURES_DIR, 'violating-leading-wildcard-concat'));
+
+    expect(result.ok).toBe(false);
+    expect(result.errors.some((e) => e.includes('search.ts') && e.includes('leading wildcard'))).toBe(true);
+  });
+
+  test('fails when a leading wildcard is built in a template literal', () => {
+    const result = checkQueryBoundaries(join(FIXTURES_DIR, 'violating-leading-wildcard-template'));
+
+    expect(result.ok).toBe(false);
+    expect(result.errors.some((e) => e.includes('search.ts') && e.includes('leading wildcard'))).toBe(true);
+  });
 });

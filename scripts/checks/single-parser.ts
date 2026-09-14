@@ -10,6 +10,33 @@
  * pin down — and nothing would have failed.
  *
  * A rule with no mechanism is advice.
+ *
+ * ── Four evasions this check used to pass, closed here ─────────────────
+ *
+ *  1. `import { remark } from 'remark'`. The denylist named `remark-parse`
+ *     and `remark-stringify` but not the meta-package that *is* both of
+ *     them: `remark` is literally `unified().use(remarkParse)
+ *     .use(remarkStringify)`. One import, a complete second pipeline.
+ *
+ *  2. `mdast-util-from-markdown` + `mdast-util-to-markdown`. Both are
+ *     installed here (the second directly, the first transitively and
+ *     therefore hoisted and importable), and together they are a full
+ *     markdown round trip carrying none of the shared pipeline's GFM,
+ *     frontmatter, wiki-link, tag or block-anchor extensions. They stay
+ *     legal inside `PARSER_OWNERS`, because `packages/markdown`'s own
+ *     serialiser extensions are built on `mdast-util-to-markdown`'s
+ *     `defaultHandlers` — those ARE the shared pipeline, not a second one.
+ *
+ *  3. `` import(`@milkdown/core`) ``. The denylist compared each specifier
+ *     against `'x` and `"x`, so the third quote character JavaScript has
+ *     walked past it. Specifiers are extracted now, not string-matched.
+ *
+ *  4. `prosemirror-markdown` was BLESSED inside `packages/editor` by this
+ *     check's own test, with no justification written down anywhere — in
+ *     the one package whose entire job is markdown<->ProseMirror
+ *     conversion, for a package that ships `defaultMarkdownParser` and
+ *     `defaultMarkdownSerializer`: a complete second markdown parser.
+ *     See `FORBIDDEN_EVERYWHERE`.
  */
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { extname, join, relative } from 'node:path';
@@ -19,10 +46,14 @@ export interface SingleParserResult {
   errors: string[];
 }
 
-/** Packages whose presence in a source file means a second markdown parser. */
+/**
+ * Packages whose presence in a NON-OWNER source file means a second markdown
+ * parser. An entry ending in `/` is a scope/prefix match; every other entry
+ * matches the specifier exactly, or as the root of a subpath import
+ * (`markdown-it/lib/token`).
+ */
 const FORBIDDEN_SPECIFIERS: readonly string[] = [
   '@tiptap/',
-  'prosemirror-markdown',
   'markdown-it',
   'marked',
   'showdown',
@@ -30,6 +61,15 @@ const FORBIDDEN_SPECIFIERS: readonly string[] = [
   'micromark', // only via packages/markdown's own pipeline
   'remark-parse',
   'remark-stringify',
+  // The meta-package IS `unified().use(remarkParse).use(remarkStringify)`.
+  // Naming only its two halves let one import reconstitute the whole thing.
+  'remark',
+  // A complete round trip on their own, with none of this repository's GFM,
+  // frontmatter, wiki-link, tag or block-anchor extensions. Legal inside
+  // PARSER_OWNERS: packages/markdown's serialiser extensions are built on
+  // mdast-util-to-markdown's `defaultHandlers` and are the shared pipeline.
+  'mdast-util-from-markdown',
+  'mdast-util-to-markdown',
   // Milkdown is the ProseMirror editor this project will build on. It is
   // legitimate inside packages/editor and nowhere else: it carries its own
   // markdown serialiser, so a stray import elsewhere is a second parser by
@@ -37,6 +77,31 @@ const FORBIDDEN_SPECIFIERS: readonly string[] = [
   '@milkdown/',
   'milkdown',
 ];
+
+/**
+ * Forbidden **everywhere**, `PARSER_OWNERS` included.
+ *
+ * `prosemirror-markdown` ships `defaultMarkdownParser` and
+ * `defaultMarkdownSerializer`: a complete markdown parser and serialiser,
+ * built on markdown-it, with its own commonmark-flavoured opinions about
+ * every edge case GATE-2 pins down. Inside `packages/editor` — the one
+ * package whose entire job is markdown<->ProseMirror conversion — it is not
+ * a helper, it is the competing implementation of that package's whole
+ * reason to exist, and the divergence would be invisible until a round trip
+ * silently rewrote a user's file.
+ *
+ * It was previously blessed there by this check's own test, with no
+ * justification recorded anywhere. Compare `bundle-isolation.ts`'s
+ * `prosemirror-model` exemption, which carries its reasoning and a stated
+ * reversal condition; this one carried nothing, and nothing was paying for
+ * it either: `packages/editor/package.json` does not depend on
+ * `prosemirror-markdown`, and `src/to-markdown.ts` converts through
+ * `packages/markdown`'s mdast instead.
+ *
+ * **Reversal condition**: only if `packages/markdown` is retired as the
+ * single pipeline, which CLAUDE.md lists as non-negotiable.
+ */
+const FORBIDDEN_EVERYWHERE: readonly string[] = ['prosemirror-markdown'];
 
 /** Component and composable names from @nuxt/ui's own editor surface. */
 const FORBIDDEN_UI_EDITOR = /\bU(Editor|EditorToolbar|EditorBubbleMenu)\b|useEditorMenu/;
@@ -92,13 +157,54 @@ export function collectSourceFiles(root: string, acc: string[] = []): string[] {
   return acc;
 }
 
+/**
+ * Every module specifier the file names: `from '…'`, `import '…'`,
+ * `import('…')` and `require('…')`, in **all three** quote characters.
+ * Matching the specifier itself rather than searching the raw text for
+ * `'markdown-it` is what closes the backtick hole — and it stops a package
+ * name mentioned in a doc comment from counting as an import, which is how
+ * the reasoning in this file gets written down at all.
+ */
+const SPECIFIER_PATTERN = /(?:\bfrom|\bimport|\brequire)\s*\(?\s*['"`]([^'"`\n]+)['"`]/g;
+
+export function specifiersIn(contents: string): string[] {
+  const found: string[] = [];
+  for (const match of contents.matchAll(SPECIFIER_PATTERN)) {
+    if (match[1]) found.push(match[1]);
+  }
+  return found;
+}
+
+/**
+ * An entry ending in `/` is a scope/prefix match (`@milkdown/`); every other
+ * entry matches exactly, or as the root of a subpath import
+ * (`markdown-it/lib/token`). Prefix-matching a bare name would make
+ * `remark` swallow `remark-gfm`, which packages/markdown legitimately uses.
+ */
+function matchesDenylistEntry(specifier: string, entry: string): boolean {
+  if (entry.endsWith('/')) return specifier.startsWith(entry);
+  return specifier === entry || specifier.startsWith(`${entry}/`);
+}
+
 export function checkFile(relPath: string, contents: string): string[] {
   const errors: string[] = [];
   const owned = PARSER_OWNERS.some((owner) => relPath.startsWith(owner));
+  const specifiers = specifiersIn(contents);
+
+  for (const entry of FORBIDDEN_EVERYWHERE) {
+    if (specifiers.some((specifier) => matchesDenylistEntry(specifier, entry))) {
+      errors.push(
+        `${relPath} reaches for \`${entry}\`, which ships a complete second markdown parser and ` +
+          `serialiser (defaultMarkdownParser/defaultMarkdownSerializer). packages/markdown is the ` +
+          `single pipeline (CLAUDE.md), and this rule has no owner exemption — see FORBIDDEN_EVERYWHERE.`,
+      );
+    }
+  }
 
   if (!owned) {
-    for (const specifier of FORBIDDEN_SPECIFIERS) {
-      if (contents.includes(`'${specifier}`) || contents.includes(`"${specifier}`)) {
+    for (const entry of FORBIDDEN_SPECIFIERS) {
+      if (specifiers.some((specifier) => matchesDenylistEntry(specifier, entry))) {
+        const specifier = entry;
         errors.push(
           `${relPath} reaches for \`${specifier}\`. packages/markdown is the single markdown ` +
             `pipeline (CLAUDE.md); a second parser diverges on the edge cases GATE-2 pins down.`,
@@ -111,7 +217,7 @@ export function checkFile(relPath: string, contents: string): string[] {
     // here builds a second, divergent processor inside an already-allowed
     // package — the exact bug class the block above cannot see.
     for (const specifier of PIPELINE_CONSTRUCTION_SPECIFIERS) {
-      if (contents.includes(`'${specifier}`) || contents.includes(`"${specifier}`)) {
+      if (specifiers.some((found) => matchesDenylistEntry(found, specifier))) {
         errors.push(
           `${relPath} imports \`${specifier}\` directly, constructing its own markdown processor. Only ` +
             `${SOLE_PIPELINE_OWNER} may build the shared parse/stringify pipeline — every other file, including ` +

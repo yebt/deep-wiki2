@@ -1,0 +1,4 @@
+{
+  "name": "fixture-peer-b",
+  "peerDependencies": { "vitest": "^2.0.0" }
+}

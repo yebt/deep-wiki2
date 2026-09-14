@@ -48,6 +48,7 @@ import {
   checkTestCoverage,
   erasesToNothing,
   hasAssertion,
+  hasExecutingAssertion,
   isBarrel,
   isConfigFile,
   scanImportRecords,
@@ -375,5 +376,176 @@ describe('import scanning', () => {
     expect(map.named.get('a')).toBe('./ab');
     expect(map.named.get('bee')).toBe('./ab');
     expect(map.wildcards).toEqual(['./rest']);
+  });
+});
+
+// ── Hole 1 ────────────────────────────────────────────────────────────
+// `hasAssertion` answered "does an `expect(` appear in this file's code",
+// and the whole gate was built on that answer. But `bun test` runs zero
+// assertions over a `test.skip` body and zero over a function nothing
+// calls, so both spellings certified a module while proving nothing about
+// it — and both hid the carrying test file from the assertion-free rule.
+// The question has to be "does an assertion in this file EXECUTE".
+describe('an assertion counts only when a test actually executes it', () => {
+  test('a skipped or todo test is evidence for nothing, and is an error in its own right', () => {
+    const result = check('skipped-test');
+    const joined = result.errors.join('\n');
+
+    expect(result.ok).toBe(false);
+    // `test.skip`, `test.todo` and `describe.skip` each carry a real
+    // `expect(` that `bun test` never reaches.
+    expect(joined).toContain('skipped.test.ts');
+    expect(joined).toContain('postponed.test.ts');
+    expect(joined).toContain('described.test.ts');
+    expect(joined).toContain('packages/thing/src/skipped.ts');
+    expect(joined).toContain('packages/thing/src/postponed.ts');
+    expect(joined).toContain('packages/thing/src/described.ts');
+    // The one live test still covers its own subject, and is not flagged.
+    expect(joined).not.toContain('live');
+    expect(result.errors).toHaveLength(6);
+  });
+
+  test('an assertion no test callback reaches is evidence for nothing', () => {
+    const result = check('unreachable-assertion');
+    const joined = result.errors.join('\n');
+
+    expect(result.ok).toBe(false);
+    expect(joined).toContain('orphan.test.ts');
+    expect(joined).toContain('packages/thing/src/orphan.ts');
+    // A helper the test DOES call is still executed, and still counts.
+    expect(joined).not.toContain('reached');
+    expect(result.errors).toHaveLength(2);
+  });
+
+  test('hasExecutingAssertion reads reachability, not presence', () => {
+    expect(hasExecutingAssertion('test("t", () => { expect(1).toBe(1); });')).toBe(true);
+    expect(hasExecutingAssertion('it("t", () => { assert(1); });')).toBe(true);
+    expect(hasExecutingAssertion('test.only("t", () => { expect(1).toBe(1); });')).toBe(true);
+    expect(hasExecutingAssertion('test.each([1])("t", (n) => { expect(n).toBe(1); });')).toBe(true);
+
+    // Every skipped spelling.
+    expect(hasExecutingAssertion('test.skip("t", () => { expect(1).toBe(1); });')).toBe(false);
+    expect(hasExecutingAssertion('it.skip("t", () => { expect(1).toBe(1); });')).toBe(false);
+    expect(hasExecutingAssertion('test.todo("t", () => { expect(1).toBe(1); });')).toBe(false);
+    expect(hasExecutingAssertion('xit("t", () => { expect(1).toBe(1); });')).toBe(false);
+    expect(hasExecutingAssertion('xtest("t", () => { expect(1).toBe(1); });')).toBe(false);
+    expect(
+      hasExecutingAssertion('describe.skip("s", () => { test("t", () => { expect(1).toBe(1); }); });'),
+    ).toBe(false);
+    expect(
+      hasExecutingAssertion('xdescribe("s", () => { test("t", () => { expect(1).toBe(1); }); });'),
+    ).toBe(false);
+    // A live test inside a live suite beside a skipped one still counts.
+    expect(
+      hasExecutingAssertion(
+        'describe("s", () => { test.skip("a", () => { expect(1).toBe(1); }); test("b", () => { expect(2).toBe(2); }); });',
+      ),
+    ).toBe(true);
+
+    // Reachability through a named helper.
+    expect(
+      hasExecutingAssertion('function h() { expect(1).toBe(1); }\ntest("t", () => { h(); });'),
+    ).toBe(true);
+    expect(
+      hasExecutingAssertion('const h = () => { expect(1).toBe(1); };\ntest("t", () => { h(); });'),
+    ).toBe(true);
+    // Two hops.
+    expect(
+      hasExecutingAssertion(
+        'function a() { expect(1).toBe(1); }\nfunction b() { a(); }\ntest("t", () => { b(); });',
+      ),
+    ).toBe(true);
+    // Nothing calls it.
+    expect(
+      hasExecutingAssertion('function h() { expect(1).toBe(1); }\ntest("t", () => {});'),
+    ).toBe(false);
+    // Called only from a skipped test.
+    expect(
+      hasExecutingAssertion('function h() { expect(1).toBe(1); }\ntest.skip("t", () => { h(); });'),
+    ).toBe(false);
+    // A `beforeEach` hook runs, but only when some test does.
+    expect(
+      hasExecutingAssertion('beforeEach(() => { expect(1).toBe(1); });\ntest("t", () => {});'),
+    ).toBe(true);
+    expect(
+      hasExecutingAssertion('beforeEach(() => { expect(1).toBe(1); });\ntest.skip("t", () => {});'),
+    ).toBe(false);
+    // `.test(` on a regular expression is not a test registration.
+    expect(hasExecutingAssertion('const ok = /a/.test("a");\ntest("t", () => { expect(ok).toBe(true); });')).toBe(
+      true,
+    );
+  });
+});
+
+// ── Hole 2 ────────────────────────────────────────────────────────────
+// `resolveSpecifier` understood exactly two shapes: a relative path and a
+// `@deep-wiki/*` workspace entry. Every alias form fell through to `null`,
+// so an aliased import was not an import at all — it credited nothing, and,
+// worse, it left a `*.config.ts` full of real logic looking like something
+// no module imports, which is precisely X3's definition of tool
+// configuration. apps/web writes `~/` and `#` today, so this was live.
+describe('an alias is a path, not an escape hatch', () => {
+  test('a *.config.ts imported through an alias is still a module', () => {
+    const result = check('aliased-config');
+
+    expect(result.ok).toBe(false);
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0]).toContain('packages/thing/src/retry.config.ts');
+    // The one nothing imports, by any spelling, keeps its exemption.
+    expect(result.errors.join('\n')).not.toContain('tool.config.ts');
+  });
+
+  test('every alias form is evidence exactly as a relative path is', () => {
+    expect(check('alias-evidence')).toEqual({ ok: true, errors: [] });
+  });
+});
+
+// ── Hole 3 ────────────────────────────────────────────────────────────
+// CLAUDE.md and .githooks/pre-commit both promise that `bun run check`
+// fails when "a workspace member has no executing test". The per-file
+// rewrite dropped the mechanism and kept the sentence: a member could
+// declare `"test": "echo no tests"` and ship. A documented guarantee
+// nobody enforces is worse than no guarantee, because people plan around
+// it.
+describe('every workspace member declares a test runner and runs at least one test', () => {
+  test('a `test` script that invokes no test runner is an error', () => {
+    const result = check('no-test-script');
+
+    expect(result.ok).toBe(false);
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0]).toContain('packages/thing');
+    expect(result.errors[0]).toContain('invokes no test runner');
+  });
+
+  test('a member whose files are all exempt still needs one executing test', () => {
+    const result = check('no-executing-test');
+
+    expect(result.ok).toBe(false);
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0]).toContain('packages/thing');
+    expect(result.errors[0]).toContain('no test file');
+  });
+
+  test('every real workspace member satisfies the rule', () => {
+    const memberErrors = checkTestCoverage(ROOT).errors.filter((e) => /^(apps|packages)\/[^/]+: /.test(e));
+
+    expect(memberErrors).toEqual([]);
+  });
+});
+
+// ── Hole 4 ────────────────────────────────────────────────────────────
+// `apps/` and `packages/` were the whole world, so `scripts/` — thirteen
+// structural checks that gate every commit — and `e2e/` were outside the
+// gate that they themselves are part of enforcing.
+describe('authored source outside apps/ and packages/ is inside the gate', () => {
+  test('scripts/ and e2e/ are walked like any other source root', () => {
+    const result = check('wider-roots');
+    const joined = result.errors.join('\n');
+
+    expect(result.ok).toBe(false);
+    expect(joined).toContain('scripts/orphan.ts');
+    expect(joined).toContain('e2e/probe.spec.ts');
+    expect(joined).not.toContain('scripts/covered.ts');
+    expect(result.errors).toHaveLength(2);
   });
 });

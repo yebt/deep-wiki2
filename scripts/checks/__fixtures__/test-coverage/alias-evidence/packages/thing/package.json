@@ -1,0 +1,6 @@
+{
+  "name": "@deep-wiki/thing",
+  "private": true,
+  "imports": { "#lib/*": "./src/lib/*.ts" },
+  "scripts": { "test": "bun test" }
+}

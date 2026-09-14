@@ -1,9 +1,11 @@
 import { describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
-import { checkEnvExample } from '../env-example';
+import { checkEnvExample, checkTemplateSecrets, isSecretShapedKey, parseTemplateValues } from '../env-example';
 
 const FIXTURES_DIR = join(import.meta.dir, '..', '__fixtures__');
+const REPO_ROOT = join(import.meta.dir, '..', '..', '..');
 const REQUIRED_KEYS = ['NODE_ENV', 'PORT', 'DATABASE_URL'];
 
 describe('checkEnvExample', () => {
@@ -76,5 +78,76 @@ describe('checkEnvExample — defaults agreement', () => {
 
     expect(result.ok).toBe(true);
     expect(result.errors).toEqual([]);
+  });
+});
+
+// CLAUDE.md: env.example "must never contain a secret". Until now that
+// sentence had no mechanism behind it at all — nothing in this file
+// distinguished the intended placeholder `POSTGRES_PASSWORD=deepwiki` from a
+// pasted production credential. The rule below is a convention check, not a
+// secret detector; see the module header for exactly what it cannot see.
+describe('checkEnvExample — no secret in the committed template', () => {
+  test('fails a secret-shaped key holding a value that is not an obvious placeholder', () => {
+    const result = checkEnvExample(
+      join(FIXTURES_DIR, 'env-example-pasted-secret', 'template.env'),
+      REQUIRED_KEYS,
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.errors.some((e) => e.includes('POSTGRES_PASSWORD'))).toBe(true);
+  });
+
+  test('fails a credential embedded in a URL, whose key name gives nothing away', () => {
+    const result = checkEnvExample(
+      join(FIXTURES_DIR, 'env-example-secret-in-url', 'template.env'),
+      REQUIRED_KEYS,
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.errors.some((e) => e.includes('DATABASE_URL'))).toBe(true);
+  });
+
+  test('fails a value shaped like a known credential under any key name', () => {
+    const result = checkEnvExample(
+      join(FIXTURES_DIR, 'env-example-credential-shape', 'template.env'),
+      REQUIRED_KEYS,
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.errors.some((e) => e.includes('AI_PROVIDER_CONFIG'))).toBe(true);
+  });
+
+  test('passes every placeholder shape the real env.example uses', () => {
+    const result = checkEnvExample(
+      join(FIXTURES_DIR, 'env-example-placeholders', 'template.env'),
+      REQUIRED_KEYS,
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.errors).toEqual([]);
+  });
+});
+
+describe('checkTemplateSecrets — the committed env.example', () => {
+  test('the real env.example satisfies the placeholder convention', () => {
+    const content = readFileSync(join(REPO_ROOT, 'env.example'), 'utf8');
+
+    expect(checkTemplateSecrets(parseTemplateValues(content))).toEqual([]);
+  });
+});
+
+// The line that made a match-anywhere rule wrong: PASSWORD_RESET_TTL_MINUTES
+// holds the number 30, and the real env.example has held it all along.
+describe('isSecretShapedKey', () => {
+  test('a key whose last segment is a secret word holds a credential', () => {
+    expect(isSecretShapedKey('POSTGRES_PASSWORD')).toBe(true);
+    expect(isSecretShapedKey('BLOB_STORE_S3_SECRET_ACCESS_KEY')).toBe(true);
+    expect(isSecretShapedKey('BLOB_STORE_S3_ACCESS_KEY_ID')).toBe(true);
+  });
+
+  test('a key that merely mentions credentials does not', () => {
+    expect(isSecretShapedKey('PASSWORD_RESET_TTL_MINUTES')).toBe(false);
+    expect(isSecretShapedKey('MINIO_ROOT_USER')).toBe(false);
+    expect(isSecretShapedKey('MONKEY_PATCH')).toBe(false);
   });
 });

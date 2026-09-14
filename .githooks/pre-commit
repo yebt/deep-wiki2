@@ -3,9 +3,10 @@
 #
 # Only `bun run check` lives here: it takes well under a second and it is the
 # gate that catches architectural violations — a framework import in
-# packages/core, a package with no real test, a second test runner spreading,
-# an env template that drifted from the schema, a compose file that would
-# break under podman.
+# packages/core, a package with no real test, a source file no test names, a
+# second test runner spreading, a route module nobody mounts, a second
+# markdown parser, a second copy of the node-hierarchy table, an env template
+# that drifted from the schema, a compose file that would break under podman.
 #
 # The slower gates (lint, typecheck, test — roughly 76s together) are not run
 # here on purpose: a pre-commit hook that costs over a minute gets bypassed

@@ -1,0 +1,12 @@
+# A long-form mount with no `type:` key. Compose infers `bind` from the host
+# path, so this really is a bind mount — and it carries no SELinux label.
+name: fixture-longform-no-type
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    ports:
+      - "5432:5432"
+    volumes:
+      - source: ./infra/postgres/init
+        target: /docker-entrypoint-initdb.d
+        read_only: true

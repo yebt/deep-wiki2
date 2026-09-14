@@ -1,1 +1,1 @@
-{ "name": "@fixture/namespace-thing", "private": true }
+{"name": "@fixture/namespace-thing", "private": true, "scripts": {"test": "bun test"}}
