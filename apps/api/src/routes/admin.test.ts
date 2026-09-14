@@ -93,6 +93,43 @@ describe('POST /auth/register (registration-policy)', () => {
     expect(await countUsersByEmail(email)).toBe(0);
   });
 
+  /**
+   * The boundary of the disclosure decision recorded in `admin.ts` and in
+   * `docs/TODO.md`'s Open Question: in the two modes that gate
+   * registration, the answer is identical whether or not the address is
+   * already registered, because the mode check returns before the address
+   * is ever looked up. This guard passes today; it exists so that a later
+   * refactor that moves the existence check earlier — the natural shape of
+   * "validate everything, then decide" — is caught as the regression it
+   * would be, in `closed` and `invitation_only` at least.
+   */
+  test('closed and invitation_only answer identically for a registered and an unknown address', async () => {
+    for (const mode of ['closed', 'invitation_only'] as const) {
+      await resetInstanceSettings();
+      await sql`UPDATE instance_settings SET registration_mode = ${mode} WHERE id = 1`;
+      const app = buildApp();
+
+      const registeredEmail = `${crypto.randomUUID()}@example.com`;
+      await sql`
+        INSERT INTO users (email, password_hash, display_name)
+        VALUES (${registeredEmail}, ${await hasher.hash('irrelevant-password')}, 'Existing User')
+      `;
+
+      const attempt = (email: string) =>
+        app.request('/auth/register', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ email, password: 'a-strong-password' }),
+        });
+
+      const existingRes = await attempt(registeredEmail);
+      const unknownRes = await attempt(`${crypto.randomUUID()}@example.com`);
+
+      expect(existingRes.status).toBe(unknownRes.status);
+      expect(await existingRes.text()).toBe(await unknownRes.text());
+    }
+  });
+
   test('registration from an allowed domain succeeds when open with an allowlist', async () => {
     await resetInstanceSettings();
     const superRoot = await insertSuperRoot();

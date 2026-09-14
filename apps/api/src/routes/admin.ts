@@ -106,6 +106,21 @@ export function createAdminRoutes(deps: AdminRouteDeps): Hono<{ Variables: Sessi
       }
     }
 
+    // Known, deliberate, and bounded to `open`: this 409 discloses that an
+    // account exists for the submitted address — the same question
+    // `/auth/password-reset` refuses to answer. It is reachable only in
+    // `open` mode, because `closed` and `invitation_only` both return
+    // above without ever looking the address up, so the two modes that
+    // gate registration disclose nothing.
+    //
+    // Closing it on `open` too means replacing the immediate 201 with a
+    // generic acknowledgement plus a verification mail — a product-shaped
+    // change spanning a token table, a confirm route and the sign-up
+    // screen, and it makes every sign-up depend on a working relay. That
+    // trade-off is written up as an Open Question in `docs/TODO.md`
+    // ("Registration answers the question password reset refuses");
+    // wording this message vaguely would change nothing, since 409
+    // against 201 is the oracle.
     const existing = await findUserByEmail(deps.sql, email);
     if (existing) {
       return c.json(ErrorResponseSchema.parse({ error: 'an account already exists for this email address' }), 409);

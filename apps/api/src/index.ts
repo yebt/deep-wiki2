@@ -5,6 +5,7 @@ import { cors } from 'hono/cors';
 import postgres from 'postgres';
 import { Argon2idPasswordHasher } from './adapters/crypto/argon2id-password-hasher';
 import { createBlobStore } from './adapters/blob';
+import { BackgroundMailDispatcher } from './adapters/mail/background-mail-dispatcher';
 import { SmtpMailSender } from './adapters/mail/smtp-mail-sender';
 import { loadConfig } from './config';
 import { InMemoryPresenceBroadcaster } from './presence/broadcaster';
@@ -77,6 +78,9 @@ function computeSmtpConfigHash(env: {
 
 const DEFAULT_MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 
+/** How long a shutdown waits for mail already handed off to leave. */
+const SHUTDOWN_MAIL_DRAIN_MS = 2_000;
+
 // Config and every real adapter are only constructed (and can only fail
 // fast) when this module is run as the actual server entry point — not
 // merely imported, e.g. by tests exercising `app` directly against an
@@ -102,6 +106,10 @@ if (import.meta.main) {
     password: config.SMTP_PASSWORD,
     from: config.MAIL_FROM!,
   });
+  // Password reset hands its mail off rather than awaiting it, so the
+  // SMTP round trip never lands inside a response that must not disclose
+  // whether the account exists (see `background-mail-dispatcher.ts`).
+  const mailDispatcher = new BackgroundMailDispatcher(mailSender);
   const passwordHasher = new Argon2idPasswordHasher();
   const blobStore = createBlobStore(config);
   const smtpConfigHash = computeSmtpConfigHash(config);
@@ -118,7 +126,7 @@ if (import.meta.main) {
       passwordHasher,
       sessionIdleTimeoutMinutes: config.SESSION_IDLE_TIMEOUT_MINUTES,
       sessionAbsoluteTimeoutDays: config.SESSION_ABSOLUTE_TIMEOUT_DAYS,
-      mailSender,
+      mailDispatcher,
       passwordResetTtlMinutes: config.PASSWORD_RESET_TTL_MINUTES,
       appUrl: config.APP_URL,
     }),
@@ -205,7 +213,12 @@ if (import.meta.main) {
   for (const signal of ['SIGTERM', 'SIGINT'] as const) {
     process.on(signal, () => {
       presenceStreamRegistry.closeAll();
-      process.exit(0);
+      // Mail already accepted for delivery is given a bounded moment to
+      // leave; a hand-off must not become a silent drop at shutdown, and
+      // an unreachable relay must not hold the process open either.
+      const drained = mailDispatcher.whenIdle();
+      const deadline = new Promise((resolve) => setTimeout(resolve, SHUTDOWN_MAIL_DRAIN_MS));
+      void Promise.race([drained, deadline]).then(() => process.exit(0));
     });
   }
 }

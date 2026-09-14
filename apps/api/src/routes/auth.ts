@@ -8,7 +8,7 @@
  * — the single source of truth for this route's wire shape, shared with
  * `apps/web`.
  */
-import type { MailSender, PasswordHasher } from '@deep-wiki/core';
+import type { PasswordHasher } from '@deep-wiki/core';
 import { normalizeEmail } from '@deep-wiki/core';
 import {
   ErrorResponseSchema,
@@ -28,6 +28,7 @@ import {
 } from '@deep-wiki/db';
 import { Hono } from 'hono';
 import type postgres from 'postgres';
+import type { MailDispatcher } from '../adapters/mail/background-mail-dispatcher';
 import { setSessionCookie } from '../middleware/session';
 
 export interface Logger {
@@ -53,7 +54,13 @@ export interface AuthRouteDeps {
   readonly passwordHasher: PasswordHasher;
   readonly sessionIdleTimeoutMinutes: number;
   readonly sessionAbsoluteTimeoutDays: number;
-  readonly mailSender: MailSender;
+  /**
+   * Deliberately a dispatcher and not a `MailSender`: `dispatch` returns
+   * `void`, so this route physically cannot put the SMTP round trip on
+   * the critical path of a response whose whole purpose is to disclose
+   * nothing (see `background-mail-dispatcher.ts`).
+   */
+  readonly mailDispatcher: MailDispatcher;
   readonly passwordResetTtlMinutes: number;
   readonly appUrl: string;
   readonly logger?: Logger;
@@ -100,8 +107,21 @@ export function createAuthRoutes(deps: AuthRouteDeps): Hono {
     const passwordMatches = await deps.passwordHasher.verify(hashToVerify, password);
     const succeeded = user !== null && passwordMatches;
 
-    // Log only the outcome — never `password` or `passwordHash`.
-    logger.info('login_attempt', { email, outcome: succeeded ? 'success' : 'failure' });
+    // Log the outcome, and on success the user id — never `password`,
+    // never `passwordHash`, and deliberately never the submitted address.
+    // The address is attacker-controlled on every failure: logging it
+    // turns stdout, and whatever aggregator it is shipped to, into an
+    // unbounded store of third-party email addresses harvested from a
+    // public endpoint, in exchange for telemetry nothing reads. What
+    // abuse detection actually needs is a rate limit (a known gap in
+    // `docs/TODO.md`), which keys on the caller, not on a retained
+    // plaintext address. On success the id is enough to correlate with
+    // the session that follows, and it is already the application's own
+    // identifier rather than personal data in the clear.
+    logger.info('login_attempt', {
+      outcome: succeeded ? 'success' : 'failure',
+      ...(succeeded && user ? { userId: user.id } : {}),
+    });
 
     if (!succeeded || !user) {
       return c.json(ErrorResponseSchema.parse({ error: 'invalid credentials' }), 401);
@@ -129,14 +149,21 @@ export function createAuthRoutes(deps: AuthRouteDeps): Hono {
     if (user) {
       const { token } = await createPasswordReset(deps.sql, user.id, deps.passwordResetTtlMinutes);
       const resetLink = `${deps.appUrl}/reset-password?token=${token}`;
-      await deps.mailSender.send({
+      // Handed off, never awaited. The send's outcome was already
+      // discarded here, but awaiting it put the SMTP round trip inside
+      // the request — measured at 13.6 ms against a local Mailpit and up
+      // to the transport's 5 s timeout against a dead relay, while the
+      // miss branch below costs 0.0898 ms. A failure is not lost: the
+      // dispatcher logs `mail_dispatch_failed` for an operator.
+      deps.mailDispatcher.dispatch('password_reset', {
         to: email,
         subject: 'Reset your password',
         body: `Use this link to reset your password: ${resetLink}\nThis link expires in ${deps.passwordResetTtlMinutes} minutes.`,
       });
     } else {
-      // Account non-disclosure: an equivalent dummy hash so latency does
-      // not become the oracle the response body refuses to be.
+      // Account non-disclosure: the same crypto and DB round trip the hit
+      // branch pays, so what remains of the difference is one INSERT
+      // rather than a network conversation with a mail server.
       await simulatePasswordResetWork(deps.sql);
     }
 

@@ -49,7 +49,18 @@ const DUMMY_USER_ID = '00000000-0000-0000-0000-000000000000';
  * Pays the same crypto and DB-round-trip cost as `createPasswordReset()`
  * without persisting anything, so the password-reset request route can
  * perform "an equivalent dummy hash" on a miss (design.md — "Account
- * non-disclosure") and keep the two response paths' latency comparable.
+ * non-disclosure").
+ *
+ * What it equalises is stated narrowly on purpose: one SHA-256 and one
+ * transaction. It never modelled the mail the hit branch sends, and the
+ * route used to `await` that send inside the request — 13.6 ms against a
+ * local Mailpit, up to a 5 s transport timeout against a dead relay,
+ * against the 0.0898 ms this function costs. That is why the route now
+ * hands mail to a dispatcher instead of awaiting it
+ * (`apps/api/src/adapters/mail/background-mail-dispatcher.ts`): this
+ * function can only equalise the work it can see. What it still does not
+ * equalise is the hit branch's `INSERT`, a sub-millisecond difference
+ * that closing would take a fixed response deadline, not a dummy.
  */
 export async function simulatePasswordResetWork(sql: postgres.Sql): Promise<void> {
   hashToken(generateToken());

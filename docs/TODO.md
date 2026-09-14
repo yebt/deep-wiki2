@@ -805,14 +805,19 @@ recipient so an operator can still answer "the reset mail never arrived", and ca
 become the unhandled rejection that takes a process down. `SIGTERM`/`SIGINT` drain it for up
 to two seconds so a hand-off does not become a silent drop at shutdown.
 
-The replacement tests are one causal and one temporal, because neither alone is honest. The
-causal one gates the transport on a promise the test releases only *after* racing the
-response: a handler that awaits the send cannot win that race at any machine speed, and the
-one that does not always wins it immediately. The temporal one *injects* 250 ms into the
-transport instead of mocking it away, and asserts a one-sided bound far outside what two DB
-round trips cost. Neither proves constant time; they prove the mail transport is not on the
-response's causal path. The residue is one `INSERT`, sub-millisecond, and closing that needs
-a fixed response deadline rather than a dummy — recorded, not silently implied.
+The replacement is structural first. The primary test drives *both* paths against a transport
+whose send is never allowed to finish while the requests are in flight, and asserts both
+respond — and that the hit path did hand the message off while the miss path never touched the
+sender. It is an assertion about what the handler waits on, not about how long anything took:
+a handler that awaits the send cannot respond at any machine speed, and one that does not
+responds regardless of what the transport is doing. What it proves is that the mail transport
+is off the response's causal path for the account that exists, exactly as it is for the one
+that does not. What it does not prove is constant time — the residue is one `INSERT` against
+one `DELETE`, sub-millisecond, and closing that needs a fixed response deadline rather than a
+dummy. A second, temporal test *injects* 250 ms into the transport and bounds the known path's
+excess over the unknown path's median; it is named `secondary:` and its comment says it is
+corroboration and not the guarantee, because an absolute-bound version of it failed at 205 ms
+with the fix in place, under a load average of 59. A wall-clock test measures the host.
 
 **The rule.** A guarantee about a response is a guarantee about everything the handler does
 before sending it. When a test asserts that two paths are indistinguishable, ask what each
