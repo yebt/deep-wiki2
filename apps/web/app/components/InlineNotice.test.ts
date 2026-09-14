@@ -13,7 +13,9 @@ import InlineNotice from './InlineNotice.vue';
  * one component).
  */
 
-function inApp(props: Record<string, unknown>, slots: Record<string, () => unknown> = {}) {
+type NoticeProps = InstanceType<typeof InlineNotice>['$props'];
+
+function inApp(props: NoticeProps, slots: Record<string, () => unknown> = {}) {
   return defineComponent({
     name: 'NoticeInApp',
     setup: () => () => h(UApp, null, { default: () => h(InlineNotice, props, slots) }),

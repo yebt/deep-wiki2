@@ -82,6 +82,22 @@ function movedDirection(fromSlot: number, toSlot: number): 'up' | 'down' {
   return toSlot > fromSlot ? 'down' : 'up';
 }
 
+/**
+ * The 2026-09-14 audit read this screen as "a highlighter pass over
+ * source, not a document" and laid out three directions: (a) render each
+ * block as `doc-body` prose with a left rule and a badge; (b) keep the
+ * slabs, fix the invisible badge, and show the before-text under a
+ * modified block; (c) a "moved from here" ghost at the old position.
+ * (b) is taken here as the cheapest honest improvement: the badge is a
+ * `UBadge variant="soft"` on a row painted the very same container token,
+ * and measured **1.00:1** — fixed at the system level (`app.config.ts`,
+ * `TONAL_BOUNDARY`: every tonal chip and button carries an `outline`-role
+ * ring), so the badge now reads as a chip on any ground. The before-text
+ * half of (b) needs `apps/api/src/routes/attach-block-text.ts`, the diff
+ * response contract and `usePageDiff.ts` to carry a `before` text for
+ * `modified`, which this pass does not own; it is recorded as a follow-up.
+ * (a) and (c) remain the owner's call.
+ */
 const ROW_CLASS: Record<Exclude<Kind, 'unchanged'>, string> = {
   added: 'bg-success-container',
   removed: 'bg-error-container',
@@ -170,13 +186,19 @@ useSeoMeta({ title: 'Page diff — deep-wiki' });
 
     <!-- Absence and denial share this ONE state, the same non-disclosure
          precedent history.vue and read mode already follow. -->
+    <!-- The copy is `error.vue`'s reviewed paragraph, verbatim, and the two
+         doors are the ones it gives (§3, never a dead end). -->
     <PageNotice
       v-else-if="status === 'not-found'"
       icon="i-lucide-file-question"
       heading="This page does not exist"
       :level="2"
     >
-      It may have been moved or deleted, or the link may be wrong.
+      It may have been moved or deleted, or it may be somewhere you don't have access to — deep-wiki deliberately doesn't say which, so that a page you can't see is indistinguishable from one that was never there.
+      <template #actions>
+        <UButton icon="i-lucide-library-big" variant="solid" color="primary" to="/workspaces">Your workspaces</UButton>
+        <UButton icon="i-lucide-log-in" variant="ghost" color="neutral" to="/login">Sign in</UButton>
+      </template>
     </PageNotice>
 
     <PageNotice

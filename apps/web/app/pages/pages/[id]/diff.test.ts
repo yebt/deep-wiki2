@@ -72,6 +72,21 @@ describe('page-diff screen', () => {
     expect(component.text()).toMatch(/does not exist/i);
   });
 
+
+  // docs/UI-CHECKLIST.md §3, "never a dead end": the denied and not-found
+  // notices were prose with no link (audit, 2026-09-14) while `error.vue`
+  // offers "Your workspaces" and "Sign in". They now give the same two
+  // doors; the copy that keeps absence and denial indistinguishable is
+  // `error.vue`'s reviewed paragraph, verbatim, so one copy exists.
+  test('the not-found notice offers the workspaces list and sign-in, with the error screen’s copy', async () => {
+    mockDiff({ status: 'not-found' });
+    const component = await mountSuspended(PageInApp);
+
+    expect(component.find('main a[href="/workspaces"]').exists()).toBe(true);
+    expect(component.find('main a[href="/login"]').exists()).toBe(true);
+    expect(component.text()).toMatch(/deliberately doesn't say which/);
+  });
+
   test('renders a recoverable error state with a retry action that reloads', async () => {
     const load = mockDiff({ status: 'network-error', message: 'Cannot reach the server.' });
     const component = await mountSuspended(PageInApp);

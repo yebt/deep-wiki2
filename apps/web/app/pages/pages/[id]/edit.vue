@@ -182,8 +182,13 @@ useSeoMeta({ title: () => (session.value?.title ? `Editing ${session.value.title
 <template>
   <AppShell>
     <template #header-end>
+      <!-- One chrome for one destination: this and the history screen's
+           app-bar control both lead to `/pages/:id`, and used to be
+           "Read" (eye) here and "Back to page" (arrow-left) there. The
+           eye is what every "Open read-only" exit already uses for read
+           mode, so it is the one (checklist §4.1). -->
       <UButton v-if="status === 'ready'" icon="i-lucide-eye" variant="ghost" color="neutral" size="sm" :to="`/pages/${nodeId}`">
-        Read
+        Read page
       </UButton>
       <!-- `aria-disabled`, never `disabled` (docs/UI-CHECKLIST.md §3, §5 —
            the same rule `AuthSubmit.vue` and the `refused` panel's
@@ -219,15 +224,25 @@ useSeoMeta({ title: () => (session.value?.title ? `Editing ${session.value.title
       <USkeleton class="mt-6 h-48 w-full" />
     </div>
 
+    <!-- Never a dead end (§3): read-only is the nearest door, and the two
+         `error.vue` gives — the workspaces list and sign-in — follow at the
+         quieter Text emphasis so one action stays primary (§2). The
+         not-found copy is `error.vue`'s reviewed paragraph, verbatim. -->
     <PageNotice v-else-if="status === 'forbidden'" icon="i-lucide-lock" heading="You don't have access to edit this page">
       Ask a workspace admin for write access, or open it read-only.
       <template #actions>
         <UButton variant="outline" icon="i-lucide-eye" :to="`/pages/${nodeId}`">Open read-only</UButton>
+        <UButton icon="i-lucide-library-big" variant="ghost" color="neutral" to="/workspaces">Your workspaces</UButton>
+        <UButton icon="i-lucide-log-in" variant="ghost" color="neutral" to="/login">Sign in</UButton>
       </template>
     </PageNotice>
 
     <PageNotice v-else-if="status === 'not-found'" icon="i-lucide-file-question" heading="This page does not exist">
-      It may have been moved or deleted.
+      It may have been moved or deleted, or it may be somewhere you don't have access to — deep-wiki deliberately doesn't say which, so that a page you can't see is indistinguishable from one that was never there.
+      <template #actions>
+        <UButton icon="i-lucide-library-big" variant="solid" color="primary" to="/workspaces">Your workspaces</UButton>
+        <UButton icon="i-lucide-log-in" variant="ghost" color="neutral" to="/login">Sign in</UButton>
+      </template>
     </PageNotice>
 
     <!-- document-modes: "Take Over" And "Open Read-Only" Are Always Both

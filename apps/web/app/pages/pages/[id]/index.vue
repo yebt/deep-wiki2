@@ -192,16 +192,31 @@ useSeoMeta({ title: () => (title.value ? `${title.value} — deep-wiki` : 'deep-
       </div>
     </div>
 
+    <!-- Both notices carry the two doors `error.vue` gives — the workspaces
+         list, where every signed-in subject's content starts, and sign-in,
+         the quieter second door that never asserts which one the visitor
+         needs (docs/UI-CHECKLIST.md §3, never a dead end; measured on
+         2026-09-14 these were prose with no link). The not-found copy is
+         `error.vue`'s reviewed paragraph, verbatim: one copy, and one that
+         says out loud that it does not disclose. -->
     <PageNotice
       v-else-if="status === 'forbidden'"
       icon="i-lucide-lock"
       heading="You don't have access to this page"
     >
       Ask a workspace admin to grant you access, or go back to a page you can already read.
+      <template #actions>
+        <UButton icon="i-lucide-library-big" variant="solid" color="primary" to="/workspaces">Your workspaces</UButton>
+        <UButton icon="i-lucide-log-in" variant="ghost" color="neutral" to="/login">Sign in</UButton>
+      </template>
     </PageNotice>
 
     <PageNotice v-else-if="status === 'not-found'" icon="i-lucide-file-question" heading="This page does not exist">
-      It may have been moved or deleted.
+      It may have been moved or deleted, or it may be somewhere you don't have access to — deep-wiki deliberately doesn't say which, so that a page you can't see is indistinguishable from one that was never there.
+      <template #actions>
+        <UButton icon="i-lucide-library-big" variant="solid" color="primary" to="/workspaces">Your workspaces</UButton>
+        <UButton icon="i-lucide-log-in" variant="ghost" color="neutral" to="/login">Sign in</UButton>
+      </template>
     </PageNotice>
 
     <PageNotice

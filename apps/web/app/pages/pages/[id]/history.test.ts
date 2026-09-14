@@ -147,6 +147,29 @@ describe('page-history screen', () => {
     expect(component.findAll('li')).toHaveLength(0);
   });
 
+
+  // docs/UI-CHECKLIST.md §3, "never a dead end": the denied and not-found
+  // notices were prose with no link (audit, 2026-09-14) while `error.vue`
+  // offers "Your workspaces" and "Sign in". They now give the same two
+  // doors; the copy that keeps absence and denial indistinguishable is
+  // `error.vue`'s reviewed paragraph, verbatim, so one copy exists.
+  test('the not-found notice offers the workspaces list and sign-in, with the error screen’s copy', async () => {
+    mockHistory({ status: 'not-found' });
+    const component = await mountSuspended(PageInApp);
+
+    expect(component.find('main a[href="/workspaces"]').exists()).toBe(true);
+    expect(component.find('main a[href="/login"]').exists()).toBe(true);
+    expect(component.text()).toMatch(/deliberately doesn't say which/);
+  });
+
+  test('the app bar’s way to the page is "Read page" with the eye, the same chrome edit mode uses', async () => {
+    mockHistory({ status: 'success' });
+    const component = await mountSuspended(PageInApp);
+
+    const back = component.get('header a[href="/pages/page-1"]');
+    expect(back.text()).toBe('Read page');
+  });
+
   test('the empty state names the object and offers a path forward, distinct from not-found', async () => {
     mockHistory({ status: 'success', revisions: [] });
     const component = await mountSuspended(PageInApp);

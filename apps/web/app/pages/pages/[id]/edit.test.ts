@@ -94,6 +94,49 @@ describe('edit-mode page', () => {
     expect(component.find('a[href="/pages/page-1"]').exists()).toBe(true);
   });
 
+
+  // docs/UI-CHECKLIST.md §3, "never a dead end": the denied and not-found
+  // notices were prose with no link (audit, 2026-09-14) while `error.vue`
+  // offers "Your workspaces" and "Sign in". They now give the same two
+  // doors; the copy that keeps absence and denial indistinguishable is
+  // `error.vue`'s reviewed paragraph, verbatim, so one copy exists.
+  test('the denied and not-found notices each offer the workspaces list and sign-in, like the error screen', async () => {
+    for (const status of ['forbidden', 'not-found'] as const) {
+      mockDefaults();
+      mockSession({ status });
+      const component = await mountSuspended(PageInApp);
+
+      expect(component.find('main a[href="/workspaces"]').exists(), status).toBe(true);
+      expect(component.find('main a[href="/login"]').exists(), status).toBe(true);
+      component.unmount();
+    }
+  });
+
+  test('the not-found copy is the error screen’s, which says out loud that it does not disclose', async () => {
+    mockDefaults();
+    mockSession({ status: 'not-found' });
+    const component = await mountSuspended(PageInApp);
+
+    expect(component.text()).toMatch(/deliberately doesn't say which/);
+  });
+
+  // One chrome for one destination: edit mode and the history screen both
+  // link back to `/pages/:id` and used to do so as "Read" (eye) and "Back
+  // to page" (arrow-left). The eye is what every "Open read-only" exit
+  // already uses for read mode, so that is the one.
+  test('the app bar’s way back to read mode is "Read page" with the eye, the same chrome history uses', async () => {
+    mockDefaults();
+    mockSession({
+      status: 'ready',
+      session: { markdown: '# Hi\n', title: 'Hi', workspaceId: 'ws-1', lock: { holderUserId: 'me', acquiredAt: 'x', heartbeatAt: 'x' } },
+    });
+    const component = await mountSuspended(PageInApp, { global: { stubs: { EditorSurface: true } } });
+
+    const back = component.get('header a[href="/pages/page-1"]');
+    expect(back.text()).toBe('Read page');
+    expect(back.find('[class*="i-lucide-eye"], .iconify').exists()).toBe(true);
+  });
+
   test('renders both "Open read-only" and "Take over editing" simultaneously when locked', async () => {
     mockDefaults();
     mockSession({

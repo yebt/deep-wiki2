@@ -82,9 +82,35 @@ describe('read-mode page', () => {
     const component = await mountSuspended(PageInApp);
 
     expect(component.text()).toMatch(/does not exist/i);
-    expect(component.text()).not.toMatch(/don't have access/i);
+    // Distinct from the denied heading — the not-found paragraph itself
+    // mentions access, deliberately, because it does not disclose.
+    expect(component.text()).not.toMatch(/You don't have access to this page/);
     expect(component.find('a[href*="/edit"]').exists()).toBe(false);
     expect(component.find('a[href*="/history"]').exists()).toBe(false);
+  });
+
+
+  // docs/UI-CHECKLIST.md §3, "never a dead end": the denied and not-found
+  // notices were prose with no link (audit, 2026-09-14) while `error.vue`
+  // offers "Your workspaces" and "Sign in". They now give the same two
+  // doors; the copy that keeps absence and denial indistinguishable is
+  // `error.vue`'s reviewed paragraph, verbatim, so one copy exists.
+  test('the denied and not-found notices each offer the workspaces list and sign-in, like the error screen', async () => {
+    for (const status of ['forbidden', 'not-found'] as const) {
+      mockRead({ status });
+      const component = await mountSuspended(PageInApp);
+
+      expect(component.find('main a[href="/workspaces"]').exists(), status).toBe(true);
+      expect(component.find('main a[href="/login"]').exists(), status).toBe(true);
+      component.unmount();
+    }
+  });
+
+  test('the not-found copy is the error screen’s, which says out loud that it does not disclose', async () => {
+    mockRead({ status: 'not-found' });
+    const component = await mountSuspended(PageInApp);
+
+    expect(component.text()).toMatch(/deliberately doesn't say which/);
   });
 
   test('renders a recoverable error state with a retry action that reloads', async () => {

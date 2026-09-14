@@ -3,7 +3,7 @@ import { usePageRead } from './usePageRead';
 
 describe('usePageRead', () => {
   test('starts idle and moves through loading to success with the cached HTML and title', async () => {
-    const fetcher = vi.fn(async () => ({ html: '<p>Hello</p>', title: 'Hello' }));
+    const fetcher = vi.fn(async () => ({ html: '<p>Hello</p>', title: 'Hello', workspaceId: 'ws-1' }));
     const { status, html, title, load } = usePageRead('page-1', fetcher);
 
     expect(status.value).toBe('idle');
@@ -69,7 +69,7 @@ describe('usePageRead', () => {
     const fetcher = vi.fn(async () => {
       attempt += 1;
       if (attempt === 1) throw new Error('fetch failed');
-      return { html: '<p>Recovered</p>', title: 'Recovered' };
+      return { html: '<p>Recovered</p>', title: 'Recovered', workspaceId: 'ws-1' };
     });
     const { status, html, load } = usePageRead('page-1', fetcher);
 

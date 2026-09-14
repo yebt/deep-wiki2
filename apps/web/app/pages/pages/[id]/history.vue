@@ -71,8 +71,11 @@ useSeoMeta({ title: 'Revision history — deep-wiki' });
 <template>
   <AppShell>
     <template #header-end>
-      <UButton icon="i-lucide-arrow-left" variant="ghost" color="neutral" size="sm" :to="`/pages/${nodeId}`">
-        Back to page
+      <!-- The same control edit mode carries for the same destination:
+           "Read page" with the eye, never a second chrome for `/pages/:id`
+           (checklist §4.1). -->
+      <UButton icon="i-lucide-eye" variant="ghost" color="neutral" size="sm" :to="`/pages/${nodeId}`">
+        Read page
       </UButton>
     </template>
 
@@ -124,7 +127,11 @@ useSeoMeta({ title: 'Revision history — deep-wiki' });
       heading="This page does not exist"
       :level="2"
     >
-      It may have been moved or deleted, or the link may be wrong.
+      It may have been moved or deleted, or it may be somewhere you don't have access to — deep-wiki deliberately doesn't say which, so that a page you can't see is indistinguishable from one that was never there.
+      <template #actions>
+        <UButton icon="i-lucide-library-big" variant="solid" color="primary" to="/workspaces">Your workspaces</UButton>
+        <UButton icon="i-lucide-log-in" variant="ghost" color="neutral" to="/login">Sign in</UButton>
+      </template>
     </PageNotice>
 
     <PageNotice
