@@ -1,8 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { Root } from 'mdast';
-import type { Node } from 'unist';
-import { visit } from 'unist-util-visit';
 import { findBlockAnchor } from './extensions/block-anchor';
+import { topLevelBlocks } from './blocks';
 
 export interface BlockIndexEntry {
   /** Byte offset of the owning block's start in the source it was parsed from. */
@@ -21,24 +20,31 @@ export type BlockIndex = Record<string, BlockIndexEntry>;
  * was parsed from: `block_id → {start, end, hash}`, one entry per persisted
  * anchor. Rebuilt every save; never itself an anchor (docs/SPECS.md §3.3).
  * (markdown-pipeline: Block Index And In-Text Anchors Stay In Sync)
+ *
+ * Walks `topLevelBlocks()` — the same traversal `sliceBlocks()` uses —
+ * rather than recursing into every descendant. It used not to: recursing
+ * with `visit()` found anchors nested below the top level (a `^id` on a
+ * list item, for instance) that `sliceBlocks()` could never see, so such an
+ * anchor was indexed here but never got a `page_blocks` row. See
+ * `topLevelBlocks()`'s doc comment in `./blocks` for the full account.
  */
 export function buildBlockIndex(tree: Root, source: string): BlockIndex {
   const index: BlockIndex = {};
 
-  visit(tree, (node: Node) => {
+  for (const node of topLevelBlocks(tree)) {
     const anchor = findBlockAnchor(node);
-    if (!anchor) return;
+    if (!anchor) continue;
 
-    const start = (node as Node & { position?: { start: { offset: number } } }).position?.start.offset;
-    const end = (node as Node & { position?: { end: { offset: number } } }).position?.end.offset;
-    if (start === undefined || end === undefined) return;
+    const start = node.position?.start.offset;
+    const end = node.position?.end.offset;
+    if (start === undefined || end === undefined) continue;
 
     index[anchor.id] = {
       start,
       end,
       hash: createHash('sha256').update(source.slice(start, end)).digest('hex').slice(0, 12),
     };
-  });
+  }
 
   return index;
 }
