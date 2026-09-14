@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
-import { expect, test, type BrowserContext } from '@playwright/test';
+import { expect, test, type BrowserContext, type Page } from '@playwright/test';
+import { boundaryContrast } from './contrast';
 
 /**
  * Read mode (document-modes spec: "Read Mode Serves Pre-Rendered HTML
@@ -67,3 +68,33 @@ test('an outsider with no read grant sees a coherent permission-denied state, no
   // No inert "Edit" link offering an action the next screen would only refuse.
   await expect(page.getByRole('link', { name: 'Edit' })).toHaveCount(0);
 });
+
+/**
+ * Nuxt's colour mode is class-driven (`.dark` on `<html>`, docs/DESIGN-SYSTEM.md
+ * §0) and persisted under `nuxt-color-mode`; setting it before hydration
+ * is what the header's toggle does, without a round trip through the UI.
+ */
+async function useTheme(page: Page, theme: 'light' | 'dark'): Promise<void> {
+  await page.addInitScript((value) => localStorage.setItem('nuxt-color-mode', value), theme);
+}
+
+for (const theme of ['light', 'dark'] as const) {
+  // The 2026-09-14 audit measured the app bar's "Edit" at 1.09:1 against
+  // the bar behind it: `variant="soft"` is `primary-container` (tone 90),
+  // the bar is `bg-elevated` (tone 94), and a fill four tones from its
+  // ground has no visible edge. §5 fixes the boundary of an interactive
+  // control at 3:1, in every theme. A control that passes only in one is a
+  // §4.2 failure as well.
+  test(`the app bar's Edit control has a boundary of at least 3:1 against the bar, in the ${theme} theme`, async ({ page, context }) => {
+    await signInAs(context, fixtures.readerSessionToken);
+    await useTheme(page, theme);
+
+    await page.goto(`/pages/${fixtures.readPageId}`);
+    const edit = page.getByRole('link', { name: 'Edit' });
+    await expect(edit).toBeVisible({ timeout: 30000 });
+    await expect(page.locator('html')).toHaveClass(theme === 'dark' ? /dark/ : /light/);
+
+    expect(await boundaryContrast(edit)).toBeGreaterThanOrEqual(3);
+  });
+}
+

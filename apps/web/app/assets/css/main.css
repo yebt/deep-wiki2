@@ -21,8 +21,7 @@
  * project-side equivalent, and it is the complete list. */
 @source inline("{hover:,active:,}bg-{primary,secondary,success,info,warning,error}-container");
 @source inline("text-on-{primary,secondary,success,info,warning,error}-container");
-@source inline("ring-{primary,secondary,success,info,warning,error}-300");
-@source inline("dark:ring-{primary,secondary,success,info,warning,error}-600");
+@source inline("ring-{primary,secondary,success,info,warning,error}");
 
 /* ─────────────────────────────────────────────────────────────
    1. TONAL PALETTES  (DESIGN-SYSTEM §1.1, §1.4)

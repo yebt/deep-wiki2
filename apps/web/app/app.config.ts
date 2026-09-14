@@ -60,6 +60,52 @@ const STATE_LAYER = [
 ].join(' ');
 
 /**
+ * What `soft` (M3's Filled tonal) means on a container — decided once,
+ * here, after the 2026-09-14 audit measured it three times on three
+ * surfaces and found it invisible on all of them:
+ *
+ *   "Start editing" on a `PageNotice`        1.02:1   (§9.4's Filled card, tone 90)
+ *   "Edit" on the app bar                    1.09:1   (`bg-elevated`, tone 94)
+ *   a diff badge on its own `*-container` row 1.00:1  (the very same token)
+ *
+ * The cause is structural, not a wrong token: the tonal fill is
+ * `<color>-container` at tone 90 light / 30 dark (§1.2), and the surfaces
+ * a wiki actually puts its controls on sit at tones 90–94 / 17–24 (§1.4).
+ * A fill a few tones from its ground has no edge, and there is no rung
+ * above `bg-emphasized` to escape to (§1.4 forbids a sixth surface level)
+ * — the same "invisible by construction" collision §9.5 records for the
+ * filled text field on the Filled card, arriving one component later.
+ * Checklist §5 fixes the boundary of an interactive control at 3:1 and
+ * wins on conflict (§0), so M3's outline-less tonal button is the rule
+ * that yields.
+ *
+ * **Ruling: tonal carries its boundary in the `outline` role** — a 1px
+ * inset ring in the accent colour itself (`ring-<color>`), the ground-
+ * independent boundary §9.5 gives the outlined text field and §9.1 gives
+ * the Outlined button. It is not a shade step (`ring-<color>-300` /
+ * `-600`, what `subtle` used to draw, measured 1.77:1 / 1.50:1 against the
+ * fill) and not a tone step of the fill (tone 80 on tone 90 is 1.33:1, and
+ * anything darker fails the label). Measured from the tone tables in
+ * `main.css` with the accent at tone 40 light / 70 dark: the ring is
+ * ≥ 4.47:1 against the fill and ≥ 4.77:1 against every surface rung, in
+ * both themes, for every chromatic alias — while the label stays the
+ * `on-container` pair at ≥ 7.3:1. `e2e/read.spec.ts` measures the app
+ * bar's "Edit" in the running browser in both themes, so this cannot
+ * regress by a token rename.
+ *
+ * Applies to `UButton` and `UBadge` alike: M3's chip is *outlined* by
+ * default (§9.7 maps `UBadge` to the chip), so the ring on a badge is
+ * M3's own shape, and it is what lets a diff badge read as a chip on a
+ * row painted the same colour.
+ *
+ * A tonal control therefore never needs a surface-aware call site: it is
+ * legible on every rung, and a screen chooses `soft` for emphasis, never
+ * for ground.
+ */
+const TONAL_BOUNDARY = 'ring ring-inset';
+const tonalFill = (color: string) => `bg-${color}-container text-on-${color}-container ${TONAL_BOUNDARY} ring-${color}`;
+
+/**
  * Neutralises Nuxt UI's alpha-modulated hover/active fills so the state
  * layer above is the only thing that moves. Each entry restates the rest
  * fill at full opacity for both interactive states; tailwind-merge keeps
@@ -82,16 +128,19 @@ const buttonCompoundVariants = [
       class: `ring ring-inset ring-${color} hover:bg-transparent active:bg-transparent`,
     },
     // M3 Filled tonal: the opaque container tokens, never `bg-${color}/10`
-    // over an unknown background (§9.1, §12.8).
+    // over an unknown background (§9.1, §12.8) — plus the `outline`-role
+    // boundary `TONAL_BOUNDARY` explains. `subtle` is Nuxt UI's
+    // "soft plus a ring"; with the ring now part of what tonal *means*,
+    // the two variants are one treatment.
     {
       color,
       variant: 'soft' as const,
-      class: `bg-${color}-container text-on-${color}-container hover:bg-${color}-container active:bg-${color}-container`,
+      class: `${tonalFill(color)} hover:bg-${color}-container active:bg-${color}-container`,
     },
     {
       color,
       variant: 'subtle' as const,
-      class: `bg-${color}-container text-on-${color}-container ring ring-inset ring-${color}-300 dark:ring-${color}-600 hover:bg-${color}-container active:bg-${color}-container`,
+      class: `${tonalFill(color)} hover:bg-${color}-container active:bg-${color}-container`,
     },
     // M3 Text button.
     {
@@ -122,19 +171,11 @@ const buttonCompoundVariants = [
  */
 const FIELD_INSET = { base: 'px-4', leading: 'ps-4', trailing: 'pe-4' } as const;
 
-/** Badges are M3 chips: a labelled container, never an alpha tint (§9.7). */
+/** Badges are M3 chips: a labelled container, never an alpha tint (§9.7), with the same `outline`-role boundary as a tonal button — see `TONAL_BOUNDARY`. */
 const badgeCompoundVariants = [
   ...CHROMATIC.flatMap((color) => [
-    {
-      color,
-      variant: 'soft' as const,
-      class: `bg-${color}-container text-on-${color}-container`,
-    },
-    {
-      color,
-      variant: 'subtle' as const,
-      class: `bg-${color}-container text-on-${color}-container ring ring-inset ring-${color}-300 dark:ring-${color}-600`,
-    },
+    { color, variant: 'soft' as const, class: tonalFill(color) },
+    { color, variant: 'subtle' as const, class: tonalFill(color) },
   ]),
 ];
 
