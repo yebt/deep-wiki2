@@ -8,11 +8,26 @@
  * (`packages/db/src/nodes/move.ts`) — one concurrency pattern, not two.
  */
 import type postgres from 'postgres';
+import { insertGrants } from '../permissions/grants';
 
 export class PlanLimitExceededError extends Error {
+  /** Carried as fields, not only in the message: a route names the limit
+   * to the user in its own words rather than parsing this sentence. */
+  readonly planName: string;
+  readonly maxWorkspaces: number;
+
   constructor(planName: string, maxWorkspaces: number) {
     super(`plan "${planName}" allows at most ${maxWorkspaces} workspace(s); the limit has been reached`);
     this.name = 'PlanLimitExceededError';
+    this.planName = planName;
+    this.maxWorkspaces = maxWorkspaces;
+  }
+}
+
+export class NoPlanAssignedError extends Error {
+  constructor(ownerId: string) {
+    super(`user ${ownerId} has no plan assigned; cannot bound workspace creation`);
+    this.name = 'NoPlanAssignedError';
   }
 }
 
@@ -38,7 +53,7 @@ export async function createWorkspace(sql: postgres.Sql, input: CreateWorkspaceI
     `;
 
     if (!owner) {
-      throw new Error(`user ${input.ownerId} has no plan assigned; cannot bound workspace creation`);
+      throw new NoPlanAssignedError(input.ownerId);
     }
 
     const countRows = await tx<{ count: number }[]>`
@@ -61,6 +76,13 @@ export async function createWorkspace(sql: postgres.Sql, input: CreateWorkspaceI
       VALUES (${workspace!.id}, NULL, 'workspace', '', 0, ${input.slug}, ${input.name})
       RETURNING id
     `;
+
+    // The creator is the workspace's admin. "Admin" is not a role in this
+    // model (docs/SPECS.md §2, §4): it is `manage` on the root node, which
+    // inherits down the whole tree through the resolver's ancestor walk,
+    // and it is written here — inside the same transaction — so a
+    // workspace can never exist without someone who may manage it.
+    await insertGrants(tx, workspace!.id, 'user', input.ownerId, [{ resourceId: root!.id, action: 'manage', effect: 'allow' }]);
 
     return { workspaceId: workspace!.id, rootNodeId: root!.id };
   });

@@ -11,6 +11,8 @@ import type postgres from 'postgres';
 import { insertGrants } from '../permissions/grants';
 import type { StartingGrant } from '../schema';
 
+type SqlExecutor = postgres.Sql | postgres.TransactionSql;
+
 function hashToken(token: string): string {
   return createHash('sha256').update(token).digest('hex');
 }
@@ -91,6 +93,38 @@ export async function findInvitationByToken(sql: postgres.Sql, token: string): P
     expiresAt: row.expires_at,
     acceptedAt: row.accepted_at,
   };
+}
+
+export interface PendingInvitation {
+  readonly id: string;
+  readonly email: string;
+  readonly startingGrants: readonly StartingGrant[];
+  readonly createdAt: Date;
+  readonly expiresAt: Date;
+}
+
+/**
+ * The invitations a workspace admin is still waiting on: unaccepted and
+ * unexpired, newest first. `token_hash` is never selected — the token is
+ * the invitee's secret, it exists only in the mail that carried it, and a
+ * listing has no business with even its hash.
+ */
+export async function listPendingInvitations(sql: SqlExecutor, workspaceId: string): Promise<PendingInvitation[]> {
+  const rows = await sql<{ id: string; email: string; starting_grants: StartingGrant[]; created_at: Date; expires_at: Date }[]>`
+    SELECT id, email, starting_grants, created_at, expires_at
+      FROM invitations
+     WHERE workspace_id = ${workspaceId}
+       AND accepted_at IS NULL
+       AND expires_at > now()
+     ORDER BY created_at DESC, id DESC
+  `;
+  return rows.map((row) => ({
+    id: row.id,
+    email: row.email,
+    startingGrants: row.starting_grants,
+    createdAt: row.created_at,
+    expiresAt: row.expires_at,
+  }));
 }
 
 export interface AcceptInvitationInput {

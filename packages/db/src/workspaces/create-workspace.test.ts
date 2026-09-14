@@ -1,7 +1,8 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import postgres from 'postgres';
 import { provisionTestDatabase, type ProvisionedTestDatabase } from '../../testing/provision';
-import { createWorkspace, PlanLimitExceededError } from './create-workspace';
+import { can } from '../permissions/queries';
+import { createWorkspace, NoPlanAssignedError, PlanLimitExceededError } from './create-workspace';
 
 let db: ProvisionedTestDatabase;
 let sql: postgres.Sql;
@@ -62,6 +63,52 @@ describe('createWorkspace — plan limits bound workspace creation (D12)', () =>
 
     const count = await sql`SELECT id FROM workspaces WHERE owner_id = ${ownerId}`;
     expect(count).toHaveLength(1);
+  });
+
+  /**
+   * The creator is the workspace's admin, and "admin" is not a role: it is
+   * `manage` on the root node, resolved by the same `can()` every route
+   * uses. Until this held, `seed.ts` was the only place that grant was
+   * written, so a workspace created by any other caller had no admin.
+   */
+  test('the creator can manage the new workspace root immediately after creation', async () => {
+    const ownerId = await seedUserWithPlan(1);
+
+    const { workspaceId, rootNodeId } = await createWorkspace(sql, { ownerId, name: 'Acme', slug: `acme-${crypto.randomUUID()}` });
+
+    const allowed = await can(sql, { subjectType: 'user', subjectId: ownerId, resourceId: rootNodeId, action: 'manage' });
+    expect(allowed).toBe(true);
+    // Not vacuous: the same resolver denies a subject who holds nothing.
+    const [stranger] = await sql<{ id: string }[]>`
+      INSERT INTO users (email, password_hash, display_name)
+      VALUES (${`stranger-${crypto.randomUUID()}@example.com`}, 'hash', 'Stranger') RETURNING id
+    `;
+    expect(await can(sql, { subjectType: 'user', subjectId: stranger!.id, resourceId: rootNodeId, action: 'manage' })).toBe(false);
+    void workspaceId;
+  });
+
+  /**
+   * `users.plan_id` is nullable, and self-registration and invitation
+   * acceptance both leave it null. Such a user is bounded by no plan and
+   * may create nothing — which is a state a route has to name, not a
+   * generic 500.
+   */
+  test('a user with no plan assigned is refused with a named error, and nothing is created', async () => {
+    const [user] = await sql<{ id: string }[]>`
+      INSERT INTO users (email, password_hash, display_name)
+      VALUES (${`planless-${crypto.randomUUID()}@example.com`}, 'hash', 'Planless') RETURNING id
+    `;
+
+    let error: unknown;
+    try {
+      await createWorkspace(sql, { ownerId: user!.id, name: 'Acme', slug: `acme-${crypto.randomUUID()}` });
+    } catch (e) {
+      error = e;
+    }
+
+    expect(error).toBeInstanceOf(NoPlanAssignedError);
+    const count = await sql`SELECT id FROM workspaces WHERE owner_id = ${user!.id}`;
+    expect(count).toHaveLength(0);
   });
 
   test('concurrent creations at the limit boundary serialise instead of both succeeding', async () => {

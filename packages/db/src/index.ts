@@ -26,16 +26,19 @@ export {
   setRegistrationMode,
 } from './auth/instance-settings';
 export type { InstanceSettings, RegistrationMode, SetRegistrationModeResult } from './auth/instance-settings';
-export { acceptInvitation, createInvitation, findInvitationByToken } from './auth/invitations';
+export { acceptInvitation, createInvitation, findInvitationByToken, listPendingInvitations } from './auth/invitations';
 export type {
   AcceptInvitationInput,
   AcceptInvitationResult,
   CreatedInvitation,
   CreateInvitationInput,
   InvitationRecord,
+  PendingInvitation,
 } from './auth/invitations';
-export { createWorkspace, PlanLimitExceededError } from './workspaces/create-workspace';
+export { createWorkspace, NoPlanAssignedError, PlanLimitExceededError } from './workspaces/create-workspace';
 export type { CreatedWorkspace, CreateWorkspaceInput } from './workspaces/create-workspace';
+export { listWorkspaceMembers, WORKSPACE_MEMBERS_LIMIT } from './workspaces/list-members';
+export type { WorkspaceMember } from './workspaces/list-members';
 export { listReadableWorkspaces } from './workspaces/list-readable-workspaces';
 export type { ListReadableWorkspacesInput, WorkspaceSummary } from './workspaces/list-readable-workspaces';
 export { readableWorkspaceIds } from './permissions/readable-workspaces';

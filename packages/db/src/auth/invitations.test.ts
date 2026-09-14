@@ -12,7 +12,7 @@ import { can, type PasswordHasher } from '@deep-wiki/core';
 import postgres from 'postgres';
 import { provisionTestDatabase, type ProvisionedTestDatabase } from '../../testing/provision';
 import { createGrantLookup } from '../permissions/queries';
-import { acceptInvitation, createInvitation, findInvitationByToken } from './invitations';
+import { acceptInvitation, createInvitation, findInvitationByToken, listPendingInvitations } from './invitations';
 
 // A trivial in-memory hasher — this DB-layer suite only needs
 // `acceptInvitation()` to be able to create a new user's password hash;
@@ -165,5 +165,51 @@ describe('acceptInvitation', () => {
     const result = await acceptInvitation(sql, 'never-issued', { password: 'x', displayName: 'X' }, stubPasswordHasher);
 
     expect(result.outcome).toBe('invalid');
+  });
+});
+
+/**
+ * The members screen's "pending" list. The fixture deliberately holds one
+ * of each kind an invitation can be — pending, accepted, expired, and one
+ * pending in a *different* workspace — so "the list contains the pending
+ * one" is a statement about the filter, not about a query that returned
+ * everything it found.
+ */
+describe('listPendingInvitations', () => {
+  test('returns only unaccepted, unexpired invitations of the given workspace, newest first, and never a token', async () => {
+    const { workspaceId, bookId } = await insertWorkspaceWithBook();
+    const other = await insertWorkspaceWithBook();
+    const olderEmail = `older-${crypto.randomUUID()}@example.com`;
+    const newerEmail = `newer-${crypto.randomUUID()}@example.com`;
+    const acceptedEmail = `accepted-${crypto.randomUUID()}@example.com`;
+    const expiredEmail = `expired-${crypto.randomUUID()}@example.com`;
+    const elsewhereEmail = `elsewhere-${crypto.randomUUID()}@example.com`;
+    const grants = [{ resourceId: bookId, action: 'read' as const, effect: 'allow' as const }];
+
+    await createInvitation(sql, { workspaceId, email: olderEmail, startingGrants: grants, ttlDays: 7 });
+    // `created_at` defaults to now(); push the first one into the past so
+    // the ordering assertion is not decided by which insert won a race.
+    await sql`UPDATE invitations SET created_at = now() - interval '1 hour' WHERE email = ${olderEmail}`;
+    const { token: newerToken } = await createInvitation(sql, { workspaceId, email: newerEmail, startingGrants: grants, ttlDays: 7 });
+    const { token: acceptedToken } = await createInvitation(sql, { workspaceId, email: acceptedEmail, startingGrants: grants, ttlDays: 7 });
+    await acceptInvitation(sql, acceptedToken, { password: 'pw', displayName: 'Accepted' }, stubPasswordHasher);
+    await createInvitation(sql, { workspaceId, email: expiredEmail, startingGrants: grants, ttlDays: 7 });
+    await sql`UPDATE invitations SET expires_at = now() - interval '1 minute' WHERE email = ${expiredEmail}`;
+    await createInvitation(sql, {
+      workspaceId: other.workspaceId,
+      email: elsewhereEmail,
+      startingGrants: [{ resourceId: other.bookId, action: 'read', effect: 'allow' }],
+      ttlDays: 7,
+    });
+
+    const pending = await listPendingInvitations(sql, workspaceId);
+
+    expect(pending.map((i) => i.email)).toEqual([newerEmail, olderEmail]);
+    expect(pending[0]!.startingGrants).toEqual(grants);
+    expect(pending[0]!.expiresAt.getTime()).toBeGreaterThan(Date.now());
+    // The token is the invitee's secret and is stored only hashed; neither
+    // it nor its hash may ever come back through a listing.
+    expect(JSON.stringify(pending)).not.toContain(newerToken);
+    expect(Object.keys(pending[0]!)).not.toContain('tokenHash');
   });
 });
