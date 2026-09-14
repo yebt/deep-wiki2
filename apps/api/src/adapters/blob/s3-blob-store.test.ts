@@ -1,20 +1,24 @@
 /**
  * S3-compatible `BlobStore` adapter (blob-storage spec):
- *  - satisfies the same `BlobStore` port as the filesystem adapter, with
- *    no storage-specific type leaking into `packages/core` (compile-time
- *    check below)
+ *  - satisfies the same `BlobStore` port as the filesystem adapter, and
+ *    the same key policy — `describeBlobStoreKeyContract` below
  *  - a misconfigured adapter fails startup naming the missing config,
  *    for both drivers (Adapter Selection by Environment)
  *  - the same photo bytes round-trip through each adapter independently
+ *
+ * The port conformance used to be stated as `const _typeContract:
+ * BlobStore = new S3BlobStore(...)`, which the compiler checks and no test
+ * run can fail; the shared contract suite exercises all three methods
+ * through the port at runtime and replaces it.
  */
 import { beforeAll, describe, expect, test } from 'bun:test';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { BlobStore } from '@deep-wiki/core';
 import { createBlobStore } from './index';
 import { FsBlobStore } from './fs-blob-store';
 import { S3BlobStore } from './s3-blob-store';
+import { describeBlobStoreKeyContract } from './blob-store-key-contract';
 import {
   ensureMinioBucket,
   ensureTestServices,
@@ -25,16 +29,22 @@ import {
   MINIO_TEST_BUCKET,
 } from '../../../testing/services';
 
-// Compile-time contract proof: S3BlobStore must satisfy BlobStore exactly
-// as declared in packages/core, with no S3-specific type required by the
-// port itself.
-const _typeContract: BlobStore = new S3BlobStore({
-  endpoint: MINIO_ENDPOINT,
-  bucket: MINIO_TEST_BUCKET,
-  accessKeyId: MINIO_ACCESS_KEY_ID,
-  secretAccessKey: MINIO_SECRET_ACCESS_KEY,
-});
-void _typeContract;
+// The same key contract the filesystem adapter runs. The endpoint is
+// deliberately unroutable: any key that reaches the network proves the
+// adapter did not reject it, so the contract cannot be satisfied by
+// MinIO's opinion of the key instead of the adapter's, and it needs no
+// running service to be meaningful.
+describeBlobStoreKeyContract(
+  'S3BlobStore',
+  () =>
+    new S3BlobStore({
+      endpoint: 'http://127.0.0.1:1',
+      region: MINIO_REGION,
+      bucket: MINIO_TEST_BUCKET,
+      accessKeyId: MINIO_ACCESS_KEY_ID,
+      secretAccessKey: MINIO_SECRET_ACCESS_KEY,
+    }),
+);
 
 describe('createBlobStore — adapter selection by environment', () => {
   test('a misconfigured filesystem driver fails startup naming BLOB_STORE_FS_ROOT', () => {

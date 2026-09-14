@@ -76,7 +76,17 @@ export interface CreateReplyInput {
   readonly body: string;
 }
 
-/** A reply joins the existing thread (comment-threads spec) — no anchor of its own, enforced by `comments_root_has_anchor`. */
+/**
+ * A reply joins the existing thread (comment-threads spec) — no anchor of
+ * its own, enforced by `comments_root_has_anchor`.
+ *
+ * `pageId` here is not advisory: `comments_parent_fk` is keyed on
+ * `(parent_id, page_id, workspace_id)` (0015), so a reply whose page
+ * disagrees with its parent's has no referenced row and is rejected by the
+ * database. That is deliberate — `listCommentIndicators` below, and any
+ * future thread-read endpoint, attribute a reply to its *root's* page, a
+ * narrower scope than the tenant the old two-column key constrained.
+ */
 export async function createReply(sql: SqlExecutor, input: CreateReplyInput): Promise<CreatedComment> {
   const [row] = await sql<{ id: string }[]>`
     INSERT INTO comments (workspace_id, page_id, parent_id, author_id, body)

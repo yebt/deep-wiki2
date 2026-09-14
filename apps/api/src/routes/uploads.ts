@@ -14,6 +14,7 @@
  */
 import type { BlobStore } from '@deep-wiki/core';
 import { ErrorResponseSchema, UploadAvatarResponseSchema } from '@deep-wiki/contracts';
+import { isWorkspaceMember } from '@deep-wiki/db';
 import { Hono } from 'hono';
 import type postgres from 'postgres';
 import sharp from 'sharp';
@@ -27,6 +28,7 @@ export interface UploadRouteDeps {
 }
 
 const AVATAR_SIZE_PX = 256;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 type SniffedImageType = 'png' | 'jpeg' | 'webp';
 
 /**
@@ -92,6 +94,27 @@ export function createUploadRoutes(deps: UploadRouteDeps): Hono<{ Variables: Ses
     }
     if (!(file instanceof File)) {
       return c.json(ErrorResponseSchema.parse({ error: 'file is required' }), 400);
+    }
+
+    // `workspaceId` is caller-supplied and lands verbatim in the blob key
+    // below, so it decides which tenant's storage prefix these bytes go
+    // under. `FsBlobStore.#resolveKey` bounds the damage — it rejects
+    // `..`, backslashes, nulls and absolute paths, then re-checks the
+    // resolved path against its root — but `S3BlobStore` applies no key
+    // policy at all, and containment was never the point: an
+    // authenticated caller must not be able to write into a workspace it
+    // does not belong to, whatever the store does with the key
+    // afterwards. Checked before the size, sniff and `sharp` work, which
+    // an unauthorised caller has no business making us do.
+    //
+    // A malformed id is answered the same way as a real workspace the
+    // caller is not in: `workspace_id` is a uuid column, so anything else
+    // would be a Postgres cast error rather than a miss, and there is
+    // nothing to disclose by distinguishing the two.
+    const member =
+      UUID_PATTERN.test(workspaceId) && (await isWorkspaceMember(deps.sql, { workspaceId, userId: session.userId }));
+    if (!member) {
+      return c.json(ErrorResponseSchema.parse({ error: 'forbidden' }), 403);
     }
 
     // Enforced before any BlobStore call, and before the (relatively

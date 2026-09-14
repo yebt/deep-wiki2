@@ -367,6 +367,71 @@ describe('POST /pages/:id/comments — anchor minting', () => {
   });
 });
 
+// A reply's `parentId` arrives in the request body while its page comes
+// from the URL, and nothing reconciled the two: the route gated
+// `can('comment')` on the URL's page only, and `comments_parent_fk` keyed
+// on (parent_id, workspace_id) pinned the tenant, not the page. The parent
+// here is rooted on a *second* page in the same workspace that the caller
+// has no grant on at all — a same-page parent would exercise nothing.
+describe('POST /pages/:id/comments — a reply may not join a thread rooted on another page', () => {
+  test('a reply naming a parent rooted on a page the caller cannot read is refused', async () => {
+    const fixture = await buildFixture();
+    await sql`
+      INSERT INTO page_content (node_id, workspace_id, markdown, content_hash)
+      VALUES (${fixture.pageId}, ${fixture.workspaceId}, 'Page A text. ^blockp\n', 'hash')
+    `;
+    await sql`
+      INSERT INTO page_blocks (page_id, workspace_id, block_id, status, content_hash, excerpt)
+      VALUES (${fixture.pageId}, ${fixture.workspaceId}, 'blockp', 'active', 'h', 'excerpt')
+    `;
+
+    const [rootNode] = await sql<{ id: string }[]>`
+      SELECT id FROM nodes WHERE workspace_id = ${fixture.workspaceId} AND type = 'workspace'
+    `;
+    const [otherPage] = await sql<{ id: string }[]>`
+      INSERT INTO nodes (workspace_id, parent_id, type, path, position, slug, title)
+      VALUES (${fixture.workspaceId}, ${rootNode!.id}, 'page', '', 1, ${`other-${crypto.randomUUID()}`}, 'Other Page')
+      RETURNING id
+    `;
+    await sql`
+      INSERT INTO page_content (node_id, workspace_id, markdown, content_hash)
+      VALUES (${otherPage!.id}, ${fixture.workspaceId}, 'Page B text. ^blockq\n', 'hash-b')
+    `;
+    await sql`
+      INSERT INTO page_blocks (page_id, workspace_id, block_id, status, content_hash, excerpt)
+      VALUES (${otherPage!.id}, ${fixture.workspaceId}, 'blockq', 'active', 'h', 'excerpt')
+    `;
+    const [rootOnOtherPage] = await sql<{ id: string }[]>`
+      INSERT INTO comments (workspace_id, page_id, author_id, body, block_id, offset_start, offset_end, quote, quote_hash, status)
+      VALUES (${fixture.workspaceId}, ${otherPage!.id}, ${fixture.mentionedReaderUserId}, 'root on B', 'blockq', 0, 4, 'Page', 'h', 'anchored')
+      RETURNING id
+    `;
+
+    // The caller may comment on page A and has no grant whatsoever on page B.
+    const canReadOther = await can(sql, {
+      subjectType: 'user',
+      subjectId: fixture.commenterUserId,
+      resourceId: otherPage!.id,
+      action: 'read',
+    });
+    expect(canReadOther).toBe(false);
+
+    const app = buildApp();
+    const res = await app.request(`/pages/${fixture.pageId}/comments`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie: fixture.commenterCookie },
+      body: JSON.stringify({ parentId: rootOnOtherPage!.id, body: 'injected into a thread I cannot see' }),
+    });
+
+    // Storage first: nothing may have been written into page B's thread.
+    const replies = await sql<{ id: string }[]>`SELECT id FROM comments WHERE parent_id = ${rootOnOtherPage!.id}`;
+    expect(replies).toHaveLength(0);
+
+    // Indistinguishable from a parentId that names nothing at all.
+    expect(res.status).toBe(404);
+  });
+});
+
 describe('POST /pages/:id/comments — mentions', () => {
   test('a mentioned user without read on the page receives no notification', async () => {
     const fixture = await buildFixture();

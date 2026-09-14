@@ -8,15 +8,14 @@
  * matrix — "Documentation-like paths").
  */
 import { mkdir } from 'node:fs/promises';
-import { dirname, isAbsolute, resolve, sep } from 'node:path';
+import { dirname, resolve, sep } from 'node:path';
 import type { BlobStore, BlobStoreError, PutObjectInput, Result } from '@deep-wiki/core';
 import { err, ok } from '@deep-wiki/core';
+import { INVALID_BLOB_KEY_REASON, validateBlobKey } from './blob-key';
 
 export interface FsBlobStoreConfig {
   readonly root: string;
 }
-
-const REJECTED_KEY_PATTERN = /\.\.|\\|\0/;
 
 export class FsBlobStore implements BlobStore {
   readonly #root: string;
@@ -26,13 +25,15 @@ export class FsBlobStore implements BlobStore {
   }
 
   #resolveKey(key: string): Result<string, BlobStoreError> {
-    if (!key || isAbsolute(key) || REJECTED_KEY_PATTERN.test(key)) {
-      return err({ reason: 'invalid blob key' });
-    }
+    // The character policy is shared with the S3 adapter; the resolution
+    // check below is this adapter's own, and stays — reasoning about
+    // characters and reasoning about the resolved path fail differently.
+    const validated = validateBlobKey(key);
+    if (!validated.ok) return validated;
 
     const resolved = resolve(this.#root, key);
     if (resolved !== this.#root && !resolved.startsWith(this.#root + sep)) {
-      return err({ reason: 'invalid blob key' });
+      return err({ reason: INVALID_BLOB_KEY_REASON });
     }
 
     return ok(resolved);

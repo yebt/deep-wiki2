@@ -46,6 +46,8 @@ async function readJsonBody(request: Request): Promise<Record<string, unknown>> 
   }
 }
 
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 function quoteHashOf(text: string): string {
   return createHash('sha256').update(text).digest('hex').slice(0, 12);
 }
@@ -127,6 +129,29 @@ export function createCommentRoutes(deps: CommentRouteDeps): Hono<{ Variables: S
     let created: { id: string; blockId?: string };
 
     if (parsed.data.parentId) {
+      // The page comes from the URL and the parent from the body, and the
+      // gate above only asked about the URL's page. `comments_parent_fk`
+      // (0015) makes a cross-page reply unrepresentable, so this lookup
+      // cannot be the only guard and is not trying to be — it exists so a
+      // parent that does not belong to this page produces the ordinary
+      // "not found" answer instead of a constraint violation surfacing as
+      // a 500. Scoping it by `page_id` *and* `workspace_id` also makes a
+      // parent on another page indistinguishable from a `parentId` that
+      // names nothing at all: the caller learns nothing about a thread on
+      // a page they cannot read.
+      // `parentId` is `z.string()` in the shared contract, so a
+      // non-uuid value would make the comparison below a Postgres cast
+      // error rather than a miss; it is simply "no such parent here".
+      if (!UUID_PATTERN.test(parsed.data.parentId)) return notFound(c);
+
+      const [parent] = await deps.sql<{ id: string }[]>`
+        SELECT id FROM comments
+         WHERE id = ${parsed.data.parentId}
+           AND page_id = ${pageId}
+           AND workspace_id = ${node.workspace_id}
+      `;
+      if (!parent) return notFound(c);
+
       const reply = await createReply(deps.sql, {
         workspaceId: node.workspace_id,
         pageId,

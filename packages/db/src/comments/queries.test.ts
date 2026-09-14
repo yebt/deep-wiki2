@@ -81,6 +81,46 @@ describe('comment queries', () => {
     expect(indicators).toEqual([{ blockId: 'blocka', count: 2 }]);
   });
 
+  // A reply carries its own `page_id` alongside `parent_id`, and nothing
+  // reconciled the two: `comments_parent_fk` was keyed on
+  // `(parent_id, workspace_id)`, which pins the *tenant* and says nothing
+  // about the *page*. A reply written with `page_id = A` and a parent
+  // rooted on page B inserted cleanly, and `listCommentIndicators` — whose
+  // join has no page predicate on the reply side — counted it against
+  // page B, a page its author may never have been allowed to read. The
+  // parent deliberately lives on a *different* page here; a same-page
+  // parent exercises nothing.
+  test('a reply cannot join a thread rooted on a different page', async () => {
+    const { workspaceId, rootId } = await seedWorkspace();
+    const pageA = await seedPage(workspaceId, rootId);
+    const pageB = await seedPage(workspaceId, rootId);
+    await savePage(sql, { nodeId: pageA, workspaceId, markdown: 'Page A text. ^blockx\n', expectedContentHash: null });
+    await savePage(sql, { nodeId: pageB, workspaceId, markdown: 'Page B text. ^blocky\n', expectedContentHash: null });
+    const authorId = await seedUser();
+
+    const rootOnB = await createRootComment(sql, {
+      workspaceId,
+      pageId: pageB,
+      authorId,
+      body: 'root on B',
+      blockId: 'blocky',
+      offsetStart: 0,
+      offsetEnd: 4,
+      quote: 'Page',
+      quoteHash: 'h',
+    });
+
+    expect(await listCommentIndicators(sql, { pageId: pageB })).toEqual([{ blockId: 'blocky', count: 1 }]);
+
+    await expect(
+      createReply(sql, { workspaceId, pageId: pageA, parentId: rootOnB.id, authorId, body: 'injected' }),
+    ).rejects.toThrow();
+
+    // Page B's indicator count must not have moved: the row is not merely
+    // unqueried, it was never writable.
+    expect(await listCommentIndicators(sql, { pageId: pageB })).toEqual([{ blockId: 'blocky', count: 1 }]);
+  });
+
   test('listCommentIndicators excludes orphaned threads', async () => {
     const { workspaceId, rootId } = await seedWorkspace();
     const pageId = await seedPage(workspaceId, rootId);

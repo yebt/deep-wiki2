@@ -235,6 +235,32 @@ describe('after migrate: hand-written objects exist', () => {
     expect(check).toHaveLength(1);
   });
 
+  // 0015: `comments_parent_fk` originally keyed on (parent_id,
+  // workspace_id), which constrains the tenant while every reader of the
+  // thread depends on the narrower page scope the key never mentioned.
+  // The fix is the column list itself — a reply naming a parent on
+  // another page has no referenced row to match.
+  test('comments_parent_fk carries page_id, not workspace_id alone', async () => {
+    const [row] = await sql<{ columns: string[]; referenced: string[] }[]>`
+      SELECT
+        ARRAY(
+          SELECT a.attname::text FROM unnest(c.conkey) WITH ORDINALITY AS k(attnum, ord)
+          JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.attnum
+          ORDER BY k.ord
+        ) AS columns,
+        ARRAY(
+          SELECT a.attname::text FROM unnest(c.confkey) WITH ORDINALITY AS k(attnum, ord)
+          JOIN pg_attribute a ON a.attrelid = c.confrelid AND a.attnum = k.attnum
+          ORDER BY k.ord
+        ) AS referenced
+      FROM pg_constraint c
+      WHERE c.conrelid = 'comments'::regclass AND c.conname = 'comments_parent_fk' AND c.contype = 'f'
+    `;
+    expect(row).toBeDefined();
+    expect([...row!.columns].sort()).toEqual(['page_id', 'parent_id', 'workspace_id']);
+    expect([...row!.referenced].sort()).toEqual(['id', 'page_id', 'workspace_id']);
+  });
+
   // editing-presence spec: "Presence Table Tenant Isolation By Composite
   // Foreign Key" — closed here in its strongest form, a view has no rows
   // to be cross-tenant, and it selects straight from page_locks (which
@@ -262,6 +288,45 @@ describe('after migrate: hand-written objects exist', () => {
  * cleanly once every later down has already dropped what depends on it —
  * the same dependency order the up migrations establish, in reverse.
  */
+describe('0015_comment_parent_page_scope down migration', () => {
+  // 0015 only re-keys an existing constraint on `comments`; it creates no
+  // table and no foreign key into an earlier migration's table, so it adds
+  // no new rollback-ordering dependency — 0013's down still drops the whole
+  // table on its own.
+  test('reverses cleanly: comments_parent_fk is back to (parent_id, workspace_id)', async () => {
+    const rollback = await provisionTestDatabase();
+    const rollbackSql = postgres(rollback.url, { max: 1 });
+    try {
+      const downSql = await Bun.file(
+        new URL('./down/0015_comment_parent_page_scope.down.sql', import.meta.url),
+      ).text();
+      await rollbackSql.unsafe(downSql);
+
+      const [row] = await rollbackSql<{ columns: string[] }[]>`
+        SELECT ARRAY(
+          SELECT a.attname::text FROM unnest(c.conkey) AS k(attnum)
+          JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.attnum
+        ) AS columns
+        FROM pg_constraint c
+        WHERE c.conrelid = 'comments'::regclass AND c.conname = 'comments_parent_fk' AND c.contype = 'f'
+      `;
+      expect([...row!.columns].sort()).toEqual(['parent_id', 'workspace_id']);
+
+      const unique = await rollbackSql<{ conname: string }[]>`
+        SELECT conname FROM pg_constraint
+        WHERE conrelid = 'comments'::regclass AND conname = 'comments_id_page_workspace_unique'
+      `;
+      expect(unique).toHaveLength(0);
+    } finally {
+      await rollbackSql.end({ timeout: 1 }).catch(() => {});
+      await rollback.drop();
+    }
+    // Provision + connect + re-add the constraint + drop lands within a few
+    // milliseconds of bun's 5s default on a loaded machine; the explicit
+    // budget keeps a slow run from reporting as a rollback failure.
+  }, 20_000);
+});
+
 describe('0014_presence_view down migration', () => {
   test('reverses cleanly: the presence view is gone', async () => {
     const rollback = await provisionTestDatabase();
