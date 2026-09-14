@@ -41,3 +41,63 @@ export const SetThreadResolvedRequestSchema = z.object({
   resolved: z.boolean(),
 });
 export type SetThreadResolvedRequest = z.infer<typeof SetThreadResolvedRequestSchema>;
+
+/**
+ * `GET /pages/:id/comments` response (comment-threads spec: "Threads And
+ * Resolution State"; comment-overlay spec's gutter/thread panel). Author is
+ * shaped down to id and display name only — never an email address, matching
+ * `RevisionSummarySchema`'s own author shape.
+ */
+export const CommentAuthorSchema = z.object({
+  id: z.string().nullable(),
+  displayName: z.string().nullable(),
+});
+export type CommentAuthor = z.infer<typeof CommentAuthorSchema>;
+
+export const CommentReplySchema = z.object({
+  id: z.string(),
+  body: z.string(),
+  author: CommentAuthorSchema,
+  createdAt: z.string(),
+});
+export type CommentReply = z.infer<typeof CommentReplySchema>;
+
+/**
+ * A root comment always carries an anchor — `comments_root_has_anchor`
+ * makes the alternative unrepresentable — so these fields are required, not
+ * nullable. An orphaned thread still carries the excerpt it was captured
+ * with (comment-threads spec: "Orphan Is A First-Class State"); `orphaned`
+ * is the flag a thread panel renders that state from.
+ */
+export const CommentAnchorSchema = z.object({
+  blockId: z.string(),
+  offsetStart: z.number().int().nonnegative(),
+  offsetEnd: z.number().int().nonnegative(),
+  quote: z.string(),
+  orphaned: z.boolean(),
+});
+export type CommentAnchor = z.infer<typeof CommentAnchorSchema>;
+
+export const CommentThreadSchema = z.object({
+  id: z.string(),
+  body: z.string(),
+  author: CommentAuthorSchema,
+  createdAt: z.string(),
+  anchor: CommentAnchorSchema,
+  resolved: z.boolean(),
+  resolvedAt: z.string().nullable(),
+  /** Ordered by creation time (comment-threads spec: "A reply joins the existing thread"). */
+  replies: z.array(CommentReplySchema),
+});
+export type CommentThread = z.infer<typeof CommentThreadSchema>;
+
+/**
+ * Deliberately the same shape for a subject with `read` but not `comment`
+ * as for a page with zero threads — `{ threads: [] }` — matching
+ * `CommentIndicatorsResponseSchema`'s own non-disclosure guarantee so the
+ * two endpoints never disagree about what a comment-less caller sees.
+ */
+export const PageCommentsResponseSchema = z.object({
+  threads: z.array(CommentThreadSchema),
+});
+export type PageCommentsResponse = z.infer<typeof PageCommentsResponseSchema>;

@@ -9,6 +9,12 @@
  * immediately preceding `since`, or `null` when the page has none) against
  * `latestRevisionId` (that page's most recent revision) — "each page's
  * page-level diff since the revision immediately preceding that date."
+ *
+ * Three queries total regardless of how many pages changed — the touched-page
+ * list, then one `DISTINCT ON` batch each for "the baseline per page" and
+ * "the latest per page" — rather than the two-per-page loop this replaced
+ * (an N+1 recorded by the audit referenced in the versioning-and-collaboration
+ * design doc's book-diff section).
  */
 import type postgres from 'postgres';
 
@@ -38,27 +44,34 @@ export async function listChangedPagesSince(
        AND c.book_id = ${input.bookId}
        AND pr.created_at > ${input.since}
   `;
+  if (touchedPages.length === 0) return [];
+  const pageIds = touchedPages.map((row) => row.page_id);
 
-  const results: ChangedPageSummary[] = [];
-  // One book-level diff request touches a handful of changed pages at
-  // most (the scale this feature targets — see design.md Decision 7,
-  // "Numbers, not adjectives"); a per-page baseline/latest lookup here
-  // trades a few extra indexed queries for a query that stays readable as
-  // a plain "immediately preceding" / "most recent" pair.
-  for (const row of touchedPages) {
-    const [baseline] = await sql<{ id: string }[]>`
-      SELECT id FROM page_revision
-       WHERE page_id = ${row.page_id} AND workspace_id = ${input.workspaceId} AND created_at <= ${input.since}
-       ORDER BY created_at DESC
-       LIMIT 1
-    `;
-    const [latest] = await sql<{ id: string }[]>`
-      SELECT id FROM page_revision
-       WHERE page_id = ${row.page_id} AND workspace_id = ${input.workspaceId}
-       ORDER BY created_at DESC
-       LIMIT 1
-    `;
-    results.push({ pageId: row.page_id, baselineRevisionId: baseline?.id ?? null, latestRevisionId: latest!.id });
-  }
-  return results;
+  // "The revision immediately preceding `since`, per page" and "the most
+  // recent revision, per page" are each exactly one row per page — a
+  // `DISTINCT ON (page_id)` batch answers both in one statement apiece,
+  // for every touched page at once.
+  const [baselines, latests] = await Promise.all([
+    sql<{ page_id: string; id: string }[]>`
+      SELECT DISTINCT ON (page_id) page_id, id
+        FROM page_revision
+       WHERE workspace_id = ${input.workspaceId} AND page_id = ANY(${pageIds}) AND created_at <= ${input.since}
+       ORDER BY page_id, created_at DESC
+    `,
+    sql<{ page_id: string; id: string }[]>`
+      SELECT DISTINCT ON (page_id) page_id, id
+        FROM page_revision
+       WHERE workspace_id = ${input.workspaceId} AND page_id = ANY(${pageIds})
+       ORDER BY page_id, created_at DESC
+    `,
+  ]);
+
+  const baselineByPage = new Map(baselines.map((row) => [row.page_id, row.id]));
+  const latestByPage = new Map(latests.map((row) => [row.page_id, row.id]));
+
+  return pageIds.map((pageId) => ({
+    pageId,
+    baselineRevisionId: baselineByPage.get(pageId) ?? null,
+    latestRevisionId: latestByPage.get(pageId)!,
+  }));
 }

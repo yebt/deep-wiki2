@@ -8,6 +8,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { createSession, savePage } from '@deep-wiki/db';
 import { provisionTestDatabase, type ProvisionedTestDatabase } from '@deep-wiki/db/testing/provision';
 import postgres from 'postgres';
+import { expectNoDisclosure } from '../../testing/expect-no-disclosure';
 import { SESSION_COOKIE_NAME } from '../middleware/session';
 import { createRevisionRoutes } from './revisions';
 
@@ -117,5 +118,159 @@ describe('GET /pages/:id/history', () => {
     expect(deniedRes.status).toBe(404);
     expect(missingRes.status).toBe(404);
     expect(await deniedRes.json()).toEqual(await missingRes.json());
+  });
+});
+
+// changesets spec: "Book-Level History Is One Query" — the input the
+// book-level diff screen needs.
+describe('GET /books/:id/history', () => {
+  const WINDOW_MINUTES = 30;
+
+  async function seedBookFixture() {
+    const owner = await seedUser('Owner');
+    const reader = await seedUser('Reader');
+    const outsider = await seedUser('Outsider');
+    const [ws] = await sql<{ id: string }[]>`
+      INSERT INTO workspaces (owner_id, name, slug) VALUES (${owner}, 'WS', ${`ws-${crypto.randomUUID()}`}) RETURNING id
+    `;
+    const [root] = await sql<{ id: string }[]>`
+      INSERT INTO nodes (workspace_id, parent_id, type, path, position, slug, title)
+      VALUES (${ws!.id}, NULL, 'workspace', '', 0, 'root', 'Root') RETURNING id
+    `;
+    const [book] = await sql<{ id: string }[]>`
+      INSERT INTO nodes (workspace_id, parent_id, type, path, position, slug, title)
+      VALUES (${ws!.id}, ${root!.id}, 'book', '', 0, ${`book-${crypto.randomUUID()}`}, 'Book') RETURNING id
+    `;
+    const [chapter] = await sql<{ id: string }[]>`
+      INSERT INTO nodes (workspace_id, parent_id, type, path, position, slug, title)
+      VALUES (${ws!.id}, ${book!.id}, 'chapter', '', 0, ${`chapter-${crypto.randomUUID()}`}, 'Chapter') RETURNING id
+    `;
+    // Nested at least one level below the book — direct-children-only would
+    // pass a shallower fixture by accident.
+    const [nestedPage] = await sql<{ id: string }[]>`
+      INSERT INTO nodes (workspace_id, parent_id, type, path, position, slug, title)
+      VALUES (${ws!.id}, ${chapter!.id}, 'page', '', 0, ${`page-${crypto.randomUUID()}`}, 'Nested Page') RETURNING id
+    `;
+    await sql`
+      INSERT INTO permissions (workspace_id, subject_type, subject_id, resource_id, action, effect)
+      VALUES (${ws!.id}, 'user', ${reader}, ${book!.id}, 'read', 'allow')
+    `;
+
+    return {
+      workspaceId: ws!.id,
+      bookId: book!.id,
+      chapterId: chapter!.id,
+      nestedPageId: nestedPage!.id,
+      authorId: owner,
+      readerId: reader,
+      readerCookie: await cookieFor(reader),
+      outsiderCookie: await cookieFor(outsider),
+    };
+  }
+
+  function buildApp() {
+    return createRevisionRoutes({ sql, sessionIdleTimeoutMinutes: 30 });
+  }
+
+  test('includes a changeset with a revision from a page nested under a chapter', async () => {
+    const fixture = await seedBookFixture();
+    await savePage(sql, {
+      nodeId: fixture.nestedPageId,
+      workspaceId: fixture.workspaceId,
+      markdown: '# Nested\n',
+      expectedContentHash: null,
+      updatedBy: fixture.authorId,
+      changesetWindowMinutes: WINDOW_MINUTES,
+    });
+
+    const app = buildApp();
+    const res = await app.request(`/books/${fixture.bookId}/history`, { headers: { cookie: fixture.readerCookie } });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      changesets: { id: string; authorDisplayName: string | null; message: string | null; revisions: { pageId: string }[] }[];
+    };
+    expect(body.changesets).toHaveLength(1);
+    expect(body.changesets[0]!.authorDisplayName).toBe('Owner');
+    expect(body.changesets[0]!.message).toBeNull();
+    expect(body.changesets[0]!.revisions.map((r) => r.pageId)).toEqual([fixture.nestedPageId]);
+  });
+
+  // A reader who can read the book but not one page inside it must not see
+  // that page's revisions — matching how `tree.ts` drops unreadable
+  // descendants rather than marking them.
+  test('a page inside the book the reader cannot read is dropped from the response, not merely unmarked', async () => {
+    const fixture = await seedBookFixture();
+    const [hiddenPage] = await sql<{ id: string }[]>`
+      INSERT INTO nodes (workspace_id, parent_id, type, path, position, slug, title)
+      VALUES (${fixture.workspaceId}, ${fixture.chapterId}, 'page', '', 1, ${`hidden-${crypto.randomUUID()}`}, 'Hidden Page') RETURNING id
+    `;
+    // The reader inherits `read` on every descendant from the book-level
+    // grant in `seedBookFixture` — this explicit, closer DENY overrides it
+    // for `hiddenPage` alone.
+    await sql`
+      INSERT INTO permissions (workspace_id, subject_type, subject_id, resource_id, action, effect)
+      VALUES (${fixture.workspaceId}, 'user', ${fixture.readerId}, ${hiddenPage!.id}, 'read', 'deny')
+    `;
+
+    await savePage(sql, {
+      nodeId: fixture.nestedPageId,
+      workspaceId: fixture.workspaceId,
+      markdown: '# Visible\n',
+      expectedContentHash: null,
+      updatedBy: fixture.authorId,
+      changesetWindowMinutes: WINDOW_MINUTES,
+    });
+    const savedHidden = await savePage(sql, {
+      nodeId: hiddenPage!.id,
+      workspaceId: fixture.workspaceId,
+      markdown: '# Secret\n',
+      expectedContentHash: null,
+      updatedBy: fixture.authorId,
+      changesetWindowMinutes: WINDOW_MINUTES,
+    });
+    void savedHidden;
+
+    const app = buildApp();
+    const res = await app.request(`/books/${fixture.bookId}/history`, { headers: { cookie: fixture.readerCookie } });
+
+    expect(res.status).toBe(200);
+    const bodyText = await res.text();
+    const body = JSON.parse(bodyText) as { changesets: { revisions: { pageId: string }[] }[] };
+    const allPageIds = body.changesets.flatMap((c) => c.revisions.map((r) => r.pageId));
+    expect(allPageIds).toContain(fixture.nestedPageId);
+    expect(allPageIds).not.toContain(hiddenPage!.id);
+    expectNoDisclosure(bodyText, { id: hiddenPage!.id }, res.headers);
+  });
+
+  test('a subject with no read grant on the book receives the same 404 as a nonexistent book', async () => {
+    const fixture = await seedBookFixture();
+    await savePage(sql, {
+      nodeId: fixture.nestedPageId,
+      workspaceId: fixture.workspaceId,
+      markdown: '# One\n',
+      expectedContentHash: null,
+      updatedBy: fixture.authorId,
+      changesetWindowMinutes: WINDOW_MINUTES,
+    });
+
+    const app = buildApp();
+    const denied = await app.request(`/books/${fixture.bookId}/history`, { headers: { cookie: fixture.outsiderCookie } });
+    const missing = await app.request(`/books/${crypto.randomUUID()}/history`, { headers: { cookie: fixture.outsiderCookie } });
+
+    expect(denied.status).toBe(404);
+    expect(missing.status).toBe(404);
+    expect(await denied.json()).toEqual(await missing.json());
+  });
+
+  test('a book with no changesets returns an empty list rather than an error', async () => {
+    const fixture = await seedBookFixture();
+    const app = buildApp();
+
+    const res = await app.request(`/books/${fixture.bookId}/history`, { headers: { cookie: fixture.readerCookie } });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { changesets: unknown[] };
+    expect(body.changesets).toEqual([]);
   });
 });

@@ -83,25 +83,47 @@ export type {
 } from './pages';
 
 export {
+  CommentAnchorSchema,
+  CommentAuthorSchema,
   CommentIndicatorSchema,
   CommentIndicatorsResponseSchema,
+  CommentReplySchema,
+  CommentThreadSchema,
   CreateCommentRequestSchema,
   CreateCommentResponseSchema,
+  PageCommentsResponseSchema,
   SetThreadResolvedRequestSchema,
 } from './comments';
 export type {
+  CommentAnchor,
+  CommentAuthor,
   CommentIndicator,
   CommentIndicatorsResponse,
+  CommentReply,
+  CommentThread,
   CreateCommentRequest,
   CreateCommentResponse,
+  PageCommentsResponse,
   SetThreadResolvedRequest,
 } from './comments';
 
 export { PresenceEventSchema } from './presence';
 export type { PresenceEventPayload } from './presence';
 
-export { PageHistoryResponseSchema, RevisionSummarySchema } from './revisions';
-export type { PageHistoryResponse, RevisionSummaryPayload } from './revisions';
+export {
+  BookChangesetSchema,
+  BookHistoryResponseSchema,
+  ChangesetRevisionSchema,
+  PageHistoryResponseSchema,
+  RevisionSummarySchema,
+} from './revisions';
+export type {
+  BookChangesetPayload,
+  BookHistoryResponse,
+  ChangesetRevisionPayload,
+  PageHistoryResponse,
+  RevisionSummaryPayload,
+} from './revisions';
 
 export { DiffBlockChangeSchema, PageDiffResponseSchema, RevisionMetaSchema } from './diff';
 export type { DiffBlockChangePayload, PageDiffResponse, RevisionMetaPayload } from './diff';

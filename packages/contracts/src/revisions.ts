@@ -20,3 +20,34 @@ export const PageHistoryResponseSchema = z.object({
   revisions: z.array(RevisionSummarySchema),
 });
 export type PageHistoryResponse = z.infer<typeof PageHistoryResponseSchema>;
+
+/**
+ * `GET /books/:id/history` response (changesets spec: "Book-Level History
+ * Is One Query"). One entry per changeset, newest first, each carrying the
+ * revisions it groups — the input the book-level diff screen needs.
+ * `message` is nullable: no code path writes it yet (design.md "Changeset
+ * Carries An Optional Message" adds the column with no UI to set it in this
+ * change).
+ */
+export const ChangesetRevisionSchema = z.object({
+  id: z.string(),
+  pageId: z.string(),
+  createdAt: z.string(),
+});
+export type ChangesetRevisionPayload = z.infer<typeof ChangesetRevisionSchema>;
+
+export const BookChangesetSchema = z.object({
+  id: z.string(),
+  authorId: z.string().nullable(),
+  authorDisplayName: z.string().nullable(),
+  message: z.string().nullable(),
+  windowStart: z.string(),
+  windowEnd: z.string(),
+  revisions: z.array(ChangesetRevisionSchema),
+});
+export type BookChangesetPayload = z.infer<typeof BookChangesetSchema>;
+
+export const BookHistoryResponseSchema = z.object({
+  changesets: z.array(BookChangesetSchema),
+});
+export type BookHistoryResponse = z.infer<typeof BookHistoryResponseSchema>;

@@ -432,6 +432,177 @@ describe('POST /pages/:id/comments — a reply may not join a thread rooted on a
   });
 });
 
+// comment-threads spec: "Threads And Resolution State" / comment-overlay's
+// thread panel. Gated by can('comment') — the same gate the indicators
+// endpoint uses — so the two must agree about what a read-but-not-comment
+// subject sees.
+describe('GET /pages/:id/comments', () => {
+  test('a subject with comment sees a root thread with its nested replies, ordered by creation', async () => {
+    const fixture = await buildFixture();
+    await sql`
+      INSERT INTO page_content (node_id, workspace_id, markdown, content_hash)
+      VALUES (${fixture.pageId}, ${fixture.workspaceId}, 'Some text. ^blocki\n', 'hash')
+    `;
+    await sql`
+      INSERT INTO page_blocks (page_id, workspace_id, block_id, status, content_hash, excerpt)
+      VALUES (${fixture.pageId}, ${fixture.workspaceId}, 'blocki', 'active', 'h', 'excerpt')
+    `;
+    const app = buildApp();
+
+    const createRes = await app.request(`/pages/${fixture.pageId}/comments`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie: fixture.commenterCookie },
+      body: JSON.stringify({ blockId: 'blocki', offsetStart: 0, offsetEnd: 4, quote: 'Some', body: 'root body' }),
+    });
+    const created = (await createRes.json()) as { id: string };
+
+    await app.request(`/pages/${fixture.pageId}/comments`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie: fixture.commenterCookie },
+      body: JSON.stringify({ parentId: created.id, body: 'a reply' }),
+    });
+
+    const res = await app.request(`/pages/${fixture.pageId}/comments`, { headers: { cookie: fixture.commenterCookie } });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      threads: {
+        id: string;
+        body: string;
+        anchor: { blockId: string; offsetStart: number; offsetEnd: number; quote: string; orphaned: boolean };
+        resolved: boolean;
+        replies: { body: string }[];
+      }[];
+    };
+    expect(body.threads).toHaveLength(1);
+    expect(body.threads[0]!.id).toBe(created.id);
+    expect(body.threads[0]!.body).toBe('root body');
+    expect(body.threads[0]!.anchor).toEqual({ blockId: 'blocki', quote: 'Some', orphaned: false, offsetStart: 0, offsetEnd: 4 });
+    expect(body.threads[0]!.resolved).toBe(false);
+    expect(body.threads[0]!.replies).toHaveLength(1);
+    expect(body.threads[0]!.replies[0]!.body).toBe('a reply');
+  });
+
+  // The trap: a thread with no replies must still surface, and its
+  // `replies` array must be empty rather than absent or the thread dropped.
+  test('a root thread with no replies is returned with an empty replies array', async () => {
+    const fixture = await buildFixture();
+    await sql`
+      INSERT INTO page_content (node_id, workspace_id, markdown, content_hash)
+      VALUES (${fixture.pageId}, ${fixture.workspaceId}, 'Some text. ^blockj\n', 'hash')
+    `;
+    await sql`
+      INSERT INTO page_blocks (page_id, workspace_id, block_id, status, content_hash, excerpt)
+      VALUES (${fixture.pageId}, ${fixture.workspaceId}, 'blockj', 'active', 'h', 'excerpt')
+    `;
+    await sql`
+      INSERT INTO comments (workspace_id, page_id, body, block_id, offset_start, offset_end, quote, quote_hash, status)
+      VALUES (${fixture.workspaceId}, ${fixture.pageId}, 'lonely', 'blockj', 0, 4, 'Some', 'h', 'anchored')
+    `;
+    const app = buildApp();
+
+    const res = await app.request(`/pages/${fixture.pageId}/comments`, { headers: { cookie: fixture.commenterCookie } });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { threads: { replies: unknown[] }[] };
+    expect(body.threads).toHaveLength(1);
+    expect(body.threads[0]!.replies).toEqual([]);
+  });
+
+  // read-but-not-comment must agree with the indicators endpoint: both
+  // answer `{ ...: [] }`, never a read-only view of real thread data.
+  test('a subject with read but not comment sees the same empty shape as a page with zero threads', async () => {
+    const fixture = await buildFixture();
+    await sql`
+      INSERT INTO page_content (node_id, workspace_id, markdown, content_hash)
+      VALUES (${fixture.pageId}, ${fixture.workspaceId}, 'Some text. ^blockk\n', 'hash')
+    `;
+    await sql`
+      INSERT INTO page_blocks (page_id, workspace_id, block_id, status, content_hash, excerpt)
+      VALUES (${fixture.pageId}, ${fixture.workspaceId}, 'blockk', 'active', 'h', 'excerpt')
+    `;
+    const [comment] = await sql<{ id: string }[]>`
+      INSERT INTO comments (workspace_id, page_id, body, block_id, offset_start, offset_end, quote, quote_hash, status)
+      VALUES (${fixture.workspaceId}, ${fixture.pageId}, 'a secret comment body', 'blockk', 0, 4, 'Some', 'h', 'anchored')
+      RETURNING id
+    `;
+    const app = buildApp();
+
+    const res = await app.request(`/pages/${fixture.pageId}/comments`, { headers: { cookie: fixture.readerCookie } });
+
+    expect(res.status).toBe(200);
+    const bodyText = await res.text();
+    expect(JSON.parse(bodyText)).toEqual({ threads: [] });
+    expectNoDisclosure(JSON.parse(bodyText), { id: comment!.id, values: ['blockk', 'a secret comment body'] }, res.headers);
+  });
+
+  test('a subject with no read grant receives the same 404 as a nonexistent page', async () => {
+    const fixture = await buildFixture();
+    await sql`
+      INSERT INTO page_content (node_id, workspace_id, markdown, content_hash)
+      VALUES (${fixture.pageId}, ${fixture.workspaceId}, 'Some text.\n', 'hash')
+    `;
+    const app = buildApp();
+
+    const missing = await app.request(`/pages/${crypto.randomUUID()}/comments`, { headers: { cookie: fixture.outsiderCookie } });
+    const denied = await app.request(`/pages/${fixture.pageId}/comments`, { headers: { cookie: fixture.outsiderCookie } });
+
+    expect(denied.status).toBe(404);
+    expect(missing.status).toBe(404);
+    expect(await denied.json()).toEqual(await missing.json());
+  });
+
+  test('a resolved thread reports resolved:true and a non-null resolvedAt', async () => {
+    const fixture = await buildFixture();
+    await sql`
+      INSERT INTO page_content (node_id, workspace_id, markdown, content_hash)
+      VALUES (${fixture.pageId}, ${fixture.workspaceId}, 'Some text. ^blockm\n', 'hash')
+    `;
+    await sql`
+      INSERT INTO page_blocks (page_id, workspace_id, block_id, status, content_hash, excerpt)
+      VALUES (${fixture.pageId}, ${fixture.workspaceId}, 'blockm', 'active', 'h', 'excerpt')
+    `;
+    const [thread] = await sql<{ id: string }[]>`
+      INSERT INTO comments (workspace_id, page_id, body, block_id, offset_start, offset_end, quote, quote_hash, status)
+      VALUES (${fixture.workspaceId}, ${fixture.pageId}, 'root', 'blockm', 0, 4, 'Some', 'h', 'anchored')
+      RETURNING id
+    `;
+    await sql`UPDATE comments SET resolved_at = now() WHERE id = ${thread!.id}`;
+    const app = buildApp();
+
+    const res = await app.request(`/pages/${fixture.pageId}/comments`, { headers: { cookie: fixture.commenterCookie } });
+
+    const body = (await res.json()) as { threads: { resolved: boolean; resolvedAt: string | null }[] };
+    expect(body.threads[0]!.resolved).toBe(true);
+    expect(body.threads[0]!.resolvedAt).not.toBeNull();
+  });
+
+  test('an orphaned thread reports its anchor.orphaned as true and still carries its captured quote', async () => {
+    const fixture = await buildFixture();
+    await sql`
+      INSERT INTO page_content (node_id, workspace_id, markdown, content_hash)
+      VALUES (${fixture.pageId}, ${fixture.workspaceId}, 'Some text. ^blockn\n', 'hash')
+    `;
+    await sql`
+      INSERT INTO page_blocks (page_id, workspace_id, block_id, status, content_hash, excerpt)
+      VALUES (${fixture.pageId}, ${fixture.workspaceId}, 'blockn', 'active', 'h', 'excerpt')
+    `;
+    const [thread] = await sql<{ id: string }[]>`
+      INSERT INTO comments (workspace_id, page_id, body, block_id, offset_start, offset_end, quote, quote_hash, status)
+      VALUES (${fixture.workspaceId}, ${fixture.pageId}, 'root', 'blockn', 0, 4, 'Some', 'h', 'orphaned')
+      RETURNING id
+    `;
+    void thread;
+    const app = buildApp();
+
+    const res = await app.request(`/pages/${fixture.pageId}/comments`, { headers: { cookie: fixture.commenterCookie } });
+
+    const body = (await res.json()) as { threads: { anchor: { orphaned: boolean; quote: string } }[] };
+    expect(body.threads[0]!.anchor.orphaned).toBe(true);
+    expect(body.threads[0]!.anchor.quote).toBe('Some');
+  });
+});
+
 describe('POST /pages/:id/comments — mentions', () => {
   test('a mentioned user without read on the page receives no notification', async () => {
     const fixture = await buildFixture();

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { PageHistoryResponseSchema, RevisionSummarySchema } from './revisions';
+import { BookHistoryResponseSchema, PageHistoryResponseSchema, RevisionSummarySchema } from './revisions';
 
 describe('RevisionSummarySchema', () => {
   test('parses a revision summary, author id/name and changeset all nullable', () => {
@@ -72,5 +72,48 @@ describe('PageHistoryResponseSchema', () => {
       ['revisions', 0, 'createdAt'],
       ['revisions', 0, 'changesetId'],
     ]);
+  });
+});
+
+describe('BookHistoryResponseSchema', () => {
+  // changesets spec: "Changeset Carries An Optional Message" — no code path
+  // writes it yet, so a null message must parse cleanly rather than being
+  // required.
+  test('parses a changeset with a null message and its grouped revisions', () => {
+    const parsed = BookHistoryResponseSchema.parse({
+      changesets: [
+        {
+          id: 'cs-1',
+          authorId: 'user-1',
+          authorDisplayName: 'Owner',
+          message: null,
+          windowStart: '2026-01-01T00:00:00.000Z',
+          windowEnd: '2026-01-01T00:10:00.000Z',
+          revisions: [{ id: 'rev-1', pageId: 'page-1', createdAt: '2026-01-01T00:10:00.000Z' }],
+        },
+      ],
+    });
+
+    expect(parsed.changesets[0]!.message).toBeNull();
+    expect(parsed.changesets[0]!.revisions).toHaveLength(1);
+  });
+
+  test('rejects a changeset missing its revisions', () => {
+    const result = BookHistoryResponseSchema.safeParse({
+      changesets: [
+        {
+          id: 'cs-1',
+          authorId: null,
+          authorDisplayName: null,
+          message: null,
+          windowStart: '2026-01-01T00:00:00.000Z',
+          windowEnd: '2026-01-01T00:00:00.000Z',
+        },
+      ],
+    });
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.path)).toEqual([['changesets', 0, 'revisions']]);
   });
 });

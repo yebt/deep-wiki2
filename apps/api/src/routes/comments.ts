@@ -14,6 +14,7 @@ import {
   createReply,
   createRootComment,
   listCommentIndicators,
+  listCommentThreads,
   readPageMarkdown,
   savePage,
   setThreadResolved,
@@ -24,6 +25,7 @@ import {
   CreateCommentRequestSchema,
   CreateCommentResponseSchema,
   ErrorResponseSchema,
+  PageCommentsResponseSchema,
   SetThreadResolvedRequestSchema,
 } from '@deep-wiki/contracts';
 import { mintAnchorAtBlock } from '@deep-wiki/markdown';
@@ -100,6 +102,55 @@ export function createCommentRoutes(deps: CommentRouteDeps): Hono<{ Variables: S
 
     const indicators = await listCommentIndicators(deps.sql, { pageId });
     return c.json(CommentIndicatorsResponseSchema.parse({ indicators }));
+  });
+
+  // comment-threads: "Threads And Resolution State" / comment-overlay's
+  // thread panel. Gated by can('comment') — the same gate the indicators
+  // endpoint above uses — so a subject with read but not comment sees the
+  // identical `{ threads: [] }` shape a page with zero threads would
+  // produce, rather than a read-only view that would disagree with what
+  // the indicators endpoint already tells that subject (nothing).
+  app.get('/pages/:id/comments', auth, async (c) => {
+    const pageId = c.req.param('id');
+    const session = c.get('session');
+
+    const [node] = await deps.sql<NodeRow[]>`SELECT workspace_id FROM nodes WHERE id = ${pageId}`;
+    const canRead =
+      node !== undefined &&
+      (await can(deps.sql, { subjectType: 'user', subjectId: session.userId, resourceId: pageId, action: 'read' }));
+    if (!node || !canRead) return notFound(c);
+
+    const canComment = await can(deps.sql, { subjectType: 'user', subjectId: session.userId, resourceId: pageId, action: 'comment' });
+    if (!canComment) {
+      return c.json(PageCommentsResponseSchema.parse({ threads: [] }));
+    }
+
+    const threads = await listCommentThreads(deps.sql, { pageId });
+    return c.json(
+      PageCommentsResponseSchema.parse({
+        threads: threads.map((thread) => ({
+          id: thread.id,
+          body: thread.body,
+          author: { id: thread.authorId, displayName: thread.authorDisplayName },
+          createdAt: thread.createdAt.toISOString(),
+          anchor: {
+            blockId: thread.blockId,
+            offsetStart: thread.offsetStart,
+            offsetEnd: thread.offsetEnd,
+            quote: thread.quote,
+            orphaned: thread.orphaned,
+          },
+          resolved: thread.resolved,
+          resolvedAt: thread.resolvedAt ? thread.resolvedAt.toISOString() : null,
+          replies: thread.replies.map((reply) => ({
+            id: reply.id,
+            body: reply.body,
+            author: { id: reply.authorId, displayName: reply.authorDisplayName },
+            createdAt: reply.createdAt.toISOString(),
+          })),
+        })),
+      }),
+    );
   });
 
   // comment-overlay: "A Comment On An Unanchored Block Mints And Persists

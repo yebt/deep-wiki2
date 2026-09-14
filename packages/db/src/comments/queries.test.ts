@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import postgres from 'postgres';
 import { provisionTestDatabase, type ProvisionedTestDatabase } from '../../testing/provision';
 import { savePage } from '../content/save-page';
-import { createReply, createRootComment, listCommentIndicators, setThreadResolved } from './queries';
+import { createReply, createRootComment, listCommentIndicators, listCommentThreads, setThreadResolved } from './queries';
 
 let db: ProvisionedTestDatabase;
 let sql: postgres.Sql;
@@ -194,5 +194,198 @@ describe('comment queries', () => {
 
     const [row] = await sql<{ resolved_at: Date | null }[]>`SELECT resolved_at FROM comments WHERE id = ${root.id}`;
     expect(row!.resolved_at).not.toBeNull();
+  });
+});
+
+// comment-threads spec: "Threads And Resolution State" / comment-overlay's
+// thread panel — the reader `comments_thread_idx ON (parent_id, created_at)`
+// was built for.
+describe('listCommentThreads', () => {
+  // Deliberately a root with zero replies: an implementation that only
+  // returns something when a JOIN against a reply row succeeds (e.g. an
+  // INNER JOIN instead of LEFT JOIN) would pass every other test here and
+  // still drop every unreplied thread — the common case — silently.
+  test('a root with no replies is still returned, with an empty replies array', async () => {
+    const { workspaceId, rootId } = await seedWorkspace();
+    const pageId = await seedPage(workspaceId, rootId);
+    await savePage(sql, { nodeId: pageId, workspaceId, markdown: 'Some text. ^blocke\n', expectedContentHash: null });
+    const authorId = await seedUser();
+    const root = await createRootComment(sql, {
+      workspaceId,
+      pageId,
+      authorId,
+      body: 'lonely root',
+      blockId: 'blocke',
+      offsetStart: 0,
+      offsetEnd: 4,
+      quote: 'Some',
+      quoteHash: 'h',
+    });
+
+    const threads = await listCommentThreads(sql, { pageId });
+
+    expect(threads).toHaveLength(1);
+    expect(threads[0]!.id).toBe(root.id);
+    expect(threads[0]!.replies).toEqual([]);
+  });
+
+  test('replies nest under their root, ordered by creation time', async () => {
+    const { workspaceId, rootId } = await seedWorkspace();
+    const pageId = await seedPage(workspaceId, rootId);
+    await savePage(sql, { nodeId: pageId, workspaceId, markdown: 'Some text. ^blockf\n', expectedContentHash: null });
+    const authorId = await seedUser();
+    const root = await createRootComment(sql, {
+      workspaceId,
+      pageId,
+      authorId,
+      body: 'root',
+      blockId: 'blockf',
+      offsetStart: 0,
+      offsetEnd: 4,
+      quote: 'Some',
+      quoteHash: 'h',
+    });
+    const first = await createReply(sql, { workspaceId, pageId, parentId: root.id, authorId, body: 'first reply' });
+    const second = await createReply(sql, { workspaceId, pageId, parentId: root.id, authorId, body: 'second reply' });
+
+    const threads = await listCommentThreads(sql, { pageId });
+
+    expect(threads).toHaveLength(1);
+    expect(threads[0]!.replies.map((reply) => reply.id)).toEqual([first.id, second.id]);
+    expect(threads[0]!.replies.map((reply) => reply.body)).toEqual(['first reply', 'second reply']);
+  });
+
+  test('carries the author display name, not just the id', async () => {
+    const { workspaceId, rootId } = await seedWorkspace();
+    const pageId = await seedPage(workspaceId, rootId);
+    await savePage(sql, { nodeId: pageId, workspaceId, markdown: 'Some text. ^blockg\n', expectedContentHash: null });
+    const authorId = await seedUser();
+    await createRootComment(sql, {
+      workspaceId,
+      pageId,
+      authorId,
+      body: 'root',
+      blockId: 'blockg',
+      offsetStart: 0,
+      offsetEnd: 4,
+      quote: 'Some',
+      quoteHash: 'h',
+    });
+
+    const [thread] = await listCommentThreads(sql, { pageId });
+
+    expect(thread!.authorId).toBe(authorId);
+    expect(thread!.authorDisplayName).toBe('Author');
+  });
+
+  test('an anchored thread reports orphaned:false and carries its anchor', async () => {
+    const { workspaceId, rootId } = await seedWorkspace();
+    const pageId = await seedPage(workspaceId, rootId);
+    await savePage(sql, { nodeId: pageId, workspaceId, markdown: 'Some text. ^blockh\n', expectedContentHash: null });
+    const authorId = await seedUser();
+    await createRootComment(sql, {
+      workspaceId,
+      pageId,
+      authorId,
+      body: 'root',
+      blockId: 'blockh',
+      offsetStart: 0,
+      offsetEnd: 4,
+      quote: 'Some',
+      quoteHash: 'h',
+    });
+
+    const [thread] = await listCommentThreads(sql, { pageId });
+
+    expect(thread!.orphaned).toBe(false);
+    expect(thread!.blockId).toBe('blockh');
+    expect(thread!.quote).toBe('Some');
+  });
+
+  // comment-threads spec: "Orphan Is A First-Class State" — an orphaned
+  // thread still carries its captured excerpt (quote), not a hole where the
+  // anchor used to be.
+  test('an orphaned thread reports orphaned:true and still carries its captured excerpt', async () => {
+    const { workspaceId, rootId } = await seedWorkspace();
+    const pageId = await seedPage(workspaceId, rootId);
+    await savePage(sql, { nodeId: pageId, workspaceId, markdown: 'Some text. ^blocki\n', expectedContentHash: null });
+    const authorId = await seedUser();
+    const root = await createRootComment(sql, {
+      workspaceId,
+      pageId,
+      authorId,
+      body: 'root',
+      blockId: 'blocki',
+      offsetStart: 0,
+      offsetEnd: 4,
+      quote: 'Some',
+      quoteHash: 'h',
+    });
+    await sql`UPDATE comments SET status = 'orphaned' WHERE id = ${root.id}`;
+
+    const [thread] = await listCommentThreads(sql, { pageId });
+
+    expect(thread!.orphaned).toBe(true);
+    expect(thread!.quote).toBe('Some');
+  });
+
+  test('resolution state is carried on the thread', async () => {
+    const { workspaceId, rootId } = await seedWorkspace();
+    const pageId = await seedPage(workspaceId, rootId);
+    await savePage(sql, { nodeId: pageId, workspaceId, markdown: 'Some text. ^blockj\n', expectedContentHash: null });
+    const authorId = await seedUser();
+    const root = await createRootComment(sql, {
+      workspaceId,
+      pageId,
+      authorId,
+      body: 'root',
+      blockId: 'blockj',
+      offsetStart: 0,
+      offsetEnd: 4,
+      quote: 'Some',
+      quoteHash: 'h',
+    });
+    await setThreadResolved(sql, { threadId: root.id, workspaceId, resolved: true, resolvedBy: authorId });
+
+    const [thread] = await listCommentThreads(sql, { pageId });
+
+    expect(thread!.resolved).toBe(true);
+    expect(thread!.resolvedAt).not.toBeNull();
+  });
+
+  // Threads live on the queried page only — a root on a different page must
+  // never appear, mirroring listCommentIndicators's own page scoping.
+  test('a thread on a different page is not returned', async () => {
+    const { workspaceId, rootId } = await seedWorkspace();
+    const pageA = await seedPage(workspaceId, rootId);
+    const pageB = await seedPage(workspaceId, rootId);
+    await savePage(sql, { nodeId: pageA, workspaceId, markdown: 'Page A. ^blockk\n', expectedContentHash: null });
+    await savePage(sql, { nodeId: pageB, workspaceId, markdown: 'Page B. ^blockl\n', expectedContentHash: null });
+    const authorId = await seedUser();
+    await createRootComment(sql, {
+      workspaceId,
+      pageId: pageB,
+      authorId,
+      body: 'root on B',
+      blockId: 'blockl',
+      offsetStart: 0,
+      offsetEnd: 6,
+      quote: 'Page B',
+      quoteHash: 'h',
+    });
+
+    const threads = await listCommentThreads(sql, { pageId: pageA });
+
+    expect(threads).toEqual([]);
+  });
+
+  test('a page with no threads returns an empty array', async () => {
+    const { workspaceId, rootId } = await seedWorkspace();
+    const pageId = await seedPage(workspaceId, rootId);
+    await savePage(sql, { nodeId: pageId, workspaceId, markdown: 'Some text.\n', expectedContentHash: null });
+
+    const threads = await listCommentThreads(sql, { pageId });
+
+    expect(threads).toEqual([]);
   });
 });
