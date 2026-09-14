@@ -1,12 +1,64 @@
+import type { Root as HastRoot } from 'hast';
 import { toHtml } from 'hast-util-to-html';
 import type { Handler } from 'mdast-util-to-hast';
-import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
+import rehypeRaw from 'rehype-raw';
+import rehypeSanitize, { defaultSchema, type Options as SanitizeSchema } from 'rehype-sanitize';
 import remarkRehype from 'remark-rehype';
 import { unified } from 'unified';
+import { visit } from 'unist-util-visit';
 import { findBlockAnchor } from './extensions/block-anchor';
 import type { TagNode } from './extensions/tag';
 import type { WikiLinkNode } from './extensions/wiki-link';
 import { parse } from './pipeline';
+
+/**
+ * The `id` values this schema is willing to emit: exactly the shapes
+ * `mdast-util-to-hast`'s own footnote handlers mint — `user-content-fn-*`
+ * and `user-content-fnref-*` under their default clobber prefix
+ * (`footnote-reference.js`), plus the literal `footnote-label` the
+ * footnote section's heading carries as the target of every reference's
+ * `aria-describedby` (`footer.js`). Stated as an allowlist rather than as
+ * a bare `'id'` allowance so that "an author cannot name an element" is a
+ * property the sanitiser enforces, not one that merely happens to hold.
+ *
+ * `footnote-label` is listed explicitly because omitting it is silent: the
+ * `id` disappears, the `aria-describedby` pointing at it stays, and every
+ * footnote reference is left describing nothing. `render.test.ts` asserts
+ * both halves of that pair.
+ */
+const MACHINE_MINTED_IDS = [/^user-content-fn(?:ref)?-/, 'footnote-label'] as const;
+
+/**
+ * `data-block-id` carries a persisted block anchor's id, whose grammar is
+ * `[0-9A-Za-z]+` (`extensions/block-anchor.ts`'s `TRAILING_ANCHOR`).
+ * Pinned to that grammar for the same reason as `MACHINE_MINTED_IDS`: the
+ * attribute exists for `render()`'s own transform below, and raw HTML now
+ * reaches the same rule.
+ */
+const BLOCK_ANCHOR_ID = /^[0-9A-Za-z]+$/;
+
+/**
+ * Elements removed **with their children** rather than unwrapped. The
+ * default schema strips only `script`; everything else it disallows keeps
+ * its children, which is right for prose containers and wrong for these —
+ * their child text is stylesheet source, graphics/notation markup, or
+ * inert template content, never something a reader was meant to read as
+ * words. Stripping them also removes the parser-differential surface the
+ * classic `<math><mtext><table><mglyph><style>` mXSS sequence needs.
+ */
+const STRIPPED_TAGS = [
+  ...(defaultSchema.strip ?? []),
+  'embed',
+  'iframe',
+  'math',
+  'noscript',
+  'object',
+  'style',
+  'svg',
+  'template',
+  'textarea',
+  'title',
+];
 
 /**
  * The URL-scheme allowlist for `link`/`image` targets (`href`/`src`),
@@ -15,9 +67,19 @@ import { parse } from './pipeline';
  * carries the same principle for the parser rule). `javascript:` and
  * `data:` are excluded outright: neither is a legitimate target for
  * content a workspace member writes.
+ *
+ * Every allowance below is now **author-reachable**: `rehype-raw` parses
+ * the raw HTML a document carries verbatim (SPECS §5.1, bucket B) into
+ * real elements, so this schema — not the accident of `raw` nodes being
+ * dropped — is the only thing standing between stored Markdown and a
+ * reader's DOM (`apps/web/app/pages/pages/[id]/index.vue` injects the
+ * cached result with `v-html`). Three allowances that were previously
+ * reachable only by this file's own handlers are therefore narrowed to
+ * exactly what those handlers emit.
  */
-const SANITIZE_SCHEMA = {
+const SANITIZE_SCHEMA: SanitizeSchema = {
   ...defaultSchema,
+  strip: STRIPPED_TAGS,
   protocols: {
     ...defaultSchema.protocols,
     href: ['http', 'https', 'mailto'],
@@ -27,13 +89,22 @@ const SANITIZE_SCHEMA = {
     ...defaultSchema.attributes,
     // `wikiLinkHandler`/`tagHandler` below carry their class on a plain
     // `<span>`, which the default schema does not otherwise allow a
-    // `className` on.
-    span: [...(defaultSchema.attributes?.span ?? []), 'className'],
+    // `className` on. Narrowed to those two literal class names: an open
+    // `className` here would let raw HTML dress any span as a wiki-link
+    // or a tag, or borrow an application class from the read screen.
+    span: [...(defaultSchema.attributes?.span ?? []), ['className', 'wiki-link', 'tag']],
     // versioning-and-collaboration design.md Decision 6: `dataBlockId`
     // must survive sanitisation on any element, not just one tag — the
     // transform below applies it to whichever block-level element a
     // persisted anchor happens to land on.
-    '*': [...(defaultSchema.attributes?.['*'] ?? []), 'dataBlockId'],
+    //
+    // `id` and `name` are dropped from the default `'*'` list and `id` is
+    // re-admitted only under `MACHINE_MINTED_IDS`: see `clobberPrefix`.
+    '*': [
+      ...(defaultSchema.attributes?.['*'] ?? []).filter((property) => property !== 'id' && property !== 'name'),
+      ['id', ...MACHINE_MINTED_IDS],
+      ['dataBlockId', BLOCK_ANCHOR_ID],
+    ],
   },
   // `mdast-util-to-hast`'s footnote handlers already apply their own
   // `user-content-` clobber prefix (default) to build matching `id`/`href`
@@ -42,6 +113,31 @@ const SANITIZE_SCHEMA = {
   // own default prefix enabled here would re-prefix just the `id` half of
   // each pair, breaking the `href="#..."` link to it. Disabling it here
   // keeps the single prefix `remark-rehype` already applied consistently.
+  //
+  // That much is unchanged. What changed is *why disabling it is safe*.
+  // It used to be safe only incidentally: raw HTML was the one route to an
+  // author-chosen `id`, and raw HTML was silently dropped, so nothing
+  // unprefixed could exist to disable prefixing for. `rehype-raw` retires
+  // that accident. The reasoning is now positive rather than residual:
+  // `name` is not allowed on any element, and `id` is allowed only when it
+  // is one of `MACHINE_MINTED_IDS` — the exact shapes `remark-rehype`
+  // minted one step earlier. Every one of those contains a `-` or is the
+  // literal `footnote-label`, so none is a valid JavaScript identifier and
+  // none can become a `window.<name>` handle through named access. Author
+  // HTML therefore plants no DOM-clobbering surface in a page the reader
+  // renders with `v-html`, and `name` — the `document.currentScript` and
+  // form-scoped-named-access route — is gone outright.
+  //
+  // The residual this leaves is deliberate and bounded, not overlooked.
+  // `rehype-raw` reserializes and reparses the whole document, which
+  // erases node identity, so the sanitiser cannot tell a machine-minted
+  // `id` from an author-written one of the same shape: an author *can*
+  // write `<div id="user-content-fn-1">` and duplicate a footnote's jump
+  // target. That has no script consequence — it retargets an in-page
+  // anchor inside a document whose entire text the same author already
+  // controls — so it does not justify the per-render nonce that exact
+  // provenance would cost. `render.test.ts` pins the boundary in both
+  // directions: no other `id` shape survives, and this one does.
   clobberPrefix: '',
 };
 
@@ -104,8 +200,39 @@ const blockAnchorHandler: Handler = () => undefined;
  * (`0008_page_content.sql:27`) and was never actually written by any
  * code path before this constant existed — 2 is therefore the first
  * value any save has ever truthfully written.
+ *
+ * 3: `rehype-raw` joined the pipeline, so a document's raw HTML renders
+ * instead of being dropped (docs/TODO.md Finding, 2026-09-09). This is
+ * exactly the case the constant exists for and the one the bump is easiest
+ * to forget: the Markdown of an affected page did not change, so
+ * `content_hash` is identical and every already-cached `rendered_html`
+ * still holds the empty gap the fix removes. Without the bump the fix
+ * reaches only pages saved after it ships, and the author who reported a
+ * blank runbook still sees a blank runbook.
+ * `backfillStaleRenders` (`packages/db/src/content/backfill-render.ts`)
+ * re-renders every row with `pipeline_version < CURRENT_PIPELINE_VERSION`,
+ * which is what carries the fix to the existing corpus.
  */
-export const CURRENT_PIPELINE_VERSION = 2;
+export const CURRENT_PIPELINE_VERSION = 3;
+
+/**
+ * Removes a `className` that sanitisation emptied rather than removed.
+ * `hast-util-sanitize` filters a class *list* value-by-value, so a `<span>`
+ * whose classes all fail `SANITIZE_SCHEMA`'s allowlist keeps the property
+ * with an empty array behind it, and `hast-util-to-html` faithfully writes
+ * that out as `class=""`. Now that raw HTML reaches the allowlist, that is
+ * the ordinary outcome for any authored `<span class="...">` — so without
+ * this the cached read-mode HTML would carry an empty attribute on every
+ * one of them.
+ */
+function dropEmptiedClassName() {
+  return (tree: HastRoot): undefined => {
+    visit(tree, 'element', (node) => {
+      const className = node.properties?.className;
+      if (Array.isArray(className) && className.length === 0) delete node.properties.className;
+    });
+  };
+}
 
 const renderTransform = unified()
   .use(remarkRehype, {
@@ -116,7 +243,16 @@ const renderTransform = unified()
       blockAnchor: blockAnchorHandler,
     },
   })
-  .use(rehypeSanitize, SANITIZE_SCHEMA);
+  // `allowDangerousHtml` above turns each mdast `html` node into a hast
+  // `raw` node — a string of unparsed HTML. `rehypeSanitize` handles only
+  // `root`, `element`, `text`, comment and doctype nodes, so without this
+  // plugin it dropped every `raw` node wholesale and a document's raw HTML
+  // (bucket B, "Verbatim", SPECS §5.1) rendered as an empty gap. `rehype-raw`
+  // reparses those strings into real elements so the allowlist below can vet
+  // them; it must run *before* the sanitiser, never after.
+  .use(rehypeRaw)
+  .use(rehypeSanitize, SANITIZE_SCHEMA)
+  .use(dropEmptiedClassName);
 
 /**
  * Renders canonical Markdown to sanitised HTML for the read-mode cache.

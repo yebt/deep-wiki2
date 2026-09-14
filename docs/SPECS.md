@@ -300,6 +300,24 @@ no claim about markdown a future `remark` version parses differently — a depen
 that changes parsing surfaces as a failing fixture test, never as a silently rewritten
 document.
 
+**The buckets describe the editor's round trip, and only that.** They are a statement about
+`markdown → ProseMirror → markdown`, which is what GATE-2 measures. Read mode is a second,
+independent pipeline — `render()` (`packages/markdown/src/render.ts`), the `markdown → HTML`
+path §5.3 caches and serves — and a construct's bucket says nothing on its own about what a
+reader sees. **Both obligations bind every bucket:** a construct the editor accepts must also
+reach the reader. The two pipelines can agree on the bytes and disagree on the rendering, and
+a passing GATE-2 will not notice, because GATE-2 never calls `render()`. It happened: raw HTML
+is Verbatim, the probe opened edit mode, the corpus round-tripped byte-identical, and every
+reader saw an empty gap where a `<details>` runbook had been written (docs/TODO.md Finding,
+2026-09-09). Anything added to the Verbatim or Modelled bucket therefore needs a render-side
+test naming the visible output, not only a round-trip fixture.
+
+Raw HTML reaching the reader also makes `render()`'s sanitiser allowlist load-bearing rather
+than theoretical — it is the whole boundary between stored bytes and a reader's DOM, since
+read mode injects the cached HTML with `v-html`. That allowlist is the security decision
+recorded in design.md D12 and asserted in `packages/markdown/src/render.test.ts`; **Verbatim
+means the *markdown* survives byte-identical, never that arbitrary HTML executes.**
+
 ### 5.2 Editor capabilities
 
 - **Typora-like live preview** — WYSIWYG rendering in place, not a split pane

@@ -653,6 +653,14 @@ any script consequence, so the per-render nonce that exact provenance would cost
 `render.test.ts` pins that boundary in both directions — no other `id` shape or class survives,
 and these do — so widening it cannot pass unnoticed.
 
+**The bump that carries the fix to pages that already exist.** `CURRENT_PIPELINE_VERSION` goes
+2 → 3. This is the case that constant was created for and the easiest one to forget: the Markdown
+of an affected page does not change, so `content_hash` is byte-identical and every already-cached
+`rendered_html` still holds the empty gap. Without the bump the fix would reach only pages saved
+after it ships — and the author who reported a blank runbook would still see a blank runbook.
+`backfillStaleRenders` re-renders every row with `pipeline_version < CURRENT_PIPELINE_VERSION`,
+which is the mechanism that carries it to the existing corpus.
+
 **A silent regression the narrowing itself introduced, caught only by adding the test.** Pinning
 `id` to `/^user-content-fn(?:ref)?-/` alone drops `id="footnote-label"` from the footnote
 section's heading while leaving every reference's `aria-describedby="footnote-label"` pointing at
