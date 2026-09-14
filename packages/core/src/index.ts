@@ -33,8 +33,6 @@ export type {
   BlockId,
   BlockIndexEntry,
   BlockStatus,
-  ContentStore,
-  ContentStoreError,
   PageContent,
   PageContentRef,
   PersistedBlock,

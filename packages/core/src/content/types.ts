@@ -1,5 +1,3 @@
-import type { Result } from '../result';
-
 /**
  * Content entity types built from primitives (design.md "Where the pure
  * logic lives" — D19: no mdast type ever crosses into `packages/core`).
@@ -40,15 +38,21 @@ export interface SavePageInput {
   readonly expectedContentHash: string | null;
 }
 
-export interface ContentStoreError {
-  readonly reason: 'not_found' | 'stale' | 'not_canonical';
-}
-
-/** The port `packages/db` implements for reading/writing a page's canonical content. */
-export interface ContentStore {
-  read(ref: PageContentRef): Promise<Result<PageContent, ContentStoreError>>;
-  save(ref: PageContentRef, input: SavePageInput): Promise<Result<PageContent, ContentStoreError>>;
-}
+/**
+ * There is deliberately no `ContentStore` port beside these types. There
+ * was one — `read`/`save` against `PageContentRef`/`SavePageInput`,
+ * returning a `Result<PageContent, ContentStoreError>` — with a
+ * port-contract test asserting optimistic-concurrency behaviour against a
+ * `StubContentStore` defined in the same test file, and no implementer
+ * anywhere: `packages/db`'s real content read/write path
+ * (`content/save-page.ts`, `content/read-page.ts`) declares its own
+ * `SavePageInput`/`PageContentRef` shapes and never imports this one. A
+ * port-contract test for a port nothing implements does not state a
+ * guarantee; it states the stub — the identical defect `BlockRegistry` was
+ * deleted for in `92eec4c`. If `packages/core` ever does gate content
+ * reads/writes behind a port, it can be reintroduced with a real adapter
+ * behind it.
+ */
 
 /**
  * One `page_blocks` row as an entity shape.
