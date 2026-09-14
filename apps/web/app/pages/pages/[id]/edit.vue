@@ -24,12 +24,30 @@ const nodeId = route.params.id as string;
 
 const { status, session, refusal, message, load, takeOver } = useEditSession(nodeId);
 const heartbeat = useLockHeartbeat(nodeId);
-const { status: saveStatus, contentHash, message: saveMessage, save } = useSavePage(nodeId);
+const { status: saveStatus, contentHash, corrected, message: saveMessage, save } = useSavePage(nodeId);
 
 const currentMarkdown = ref('');
 const savedContentHash = ref<string | null>(null);
 const isDirty = ref(false);
 const takeOverConfirmOpen = ref(false);
+// Bumped to force `EditorSurface` to remount with `currentMarkdown` as its
+// initial doc — it only reads its `markdown` prop once, on mount (see its
+// own header comment) — after the author accepts the corrected document
+// offered back on a `dead-anchor` refusal.
+const editorRemountKey = ref(0);
+
+// document-modes / page-content spec: `DeadAnchorError`'s refusal (docs/TODO.md
+// Findings, commit 40f9844) hands back the submitted document with the
+// retired anchor(s) stripped. Loading it replaces the editor's content —
+// the same corrective action `PageNotice`'s "not in canonical form" exit
+// would take with `canonical` — and marks the buffer dirty so Save is
+// re-enabled to retry.
+function useCorrectedDocument(): void {
+  if (corrected.value === null) return;
+  currentMarkdown.value = corrected.value;
+  isDirty.value = true;
+  editorRemountKey.value += 1;
+}
 
 onMounted(() => {
   void load();
@@ -194,6 +212,20 @@ useSeoMeta({ title: () => (session.value?.title ? `Editing ${session.value.title
       <p v-if="saveStatus === 'stale'" role="alert" class="mb-4 rounded-md bg-error-container px-3 py-2 text-body-small text-on-error-container">
         {{ saveMessage }}
       </p>
+      <!-- `dead-anchor`: distinct from `stale` above — this is not a
+           concurrent-edit conflict, so it must not read as one (the bug
+           this state exists to fix). Same container as `stale`; the one
+           addition is the actionable exit docs/UI-CHECKLIST.md §3 requires
+           for a recoverable error, mirroring how the not-canonical 409
+           offers `canonical` back. -->
+      <div
+        v-else-if="saveStatus === 'dead-anchor'"
+        role="alert"
+        class="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-md bg-error-container px-3 py-2 text-body-small text-on-error-container"
+      >
+        <span>{{ saveMessage }}</span>
+        <UButton size="xs" variant="outline" color="error" @click="useCorrectedDocument">Use the corrected document</UButton>
+      </div>
       <p
         v-else-if="saveStatus === 'success'"
         role="status"
@@ -204,7 +236,8 @@ useSeoMeta({ title: () => (session.value?.title ? `Editing ${session.value.title
       </p>
       <EditorSurface
         v-if="session"
-        :markdown="session.markdown"
+        :key="editorRemountKey"
+        :markdown="currentMarkdown"
         :workspace-id="session.workspaceId"
         :page-id="nodeId"
         @update="onEditorUpdate"

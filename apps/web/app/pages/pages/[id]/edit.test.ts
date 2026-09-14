@@ -40,9 +40,17 @@ function mockSession(overrides: {
   return { load, takeOver };
 }
 
-function mockDefaults() {
+function mockDefaults(saveOverrides: { status?: string; corrected?: string | null; anchors?: unknown[]; message?: string } = {}) {
   useLockHeartbeatMock.mockReturnValue({ status: ref('idle'), start: vi.fn(async () => {}), stop: vi.fn() });
-  useSavePageMock.mockReturnValue({ status: ref('idle'), contentHash: ref('hash-1'), canonical: ref(null), message: ref(''), save: vi.fn(async () => {}) });
+  useSavePageMock.mockReturnValue({
+    status: ref(saveOverrides.status ?? 'idle'),
+    contentHash: ref('hash-1'),
+    canonical: ref(null),
+    corrected: ref(saveOverrides.corrected ?? null),
+    anchors: ref(saveOverrides.anchors ?? []),
+    message: ref(saveOverrides.message ?? ''),
+    save: vi.fn(async () => {}),
+  });
 }
 
 describe('edit-mode page', () => {
@@ -100,6 +108,29 @@ describe('edit-mode page', () => {
     const normaliseButton = component.get('button[aria-disabled="true"]');
     expect(normaliseButton.text()).toMatch(/normalise/i);
     expect(normaliseButton.attributes('disabled')).toBeUndefined();
+  });
+
+  // Regression for the false "someone else saved a newer version" report on
+  // a reintroduced dead anchor (docs/TODO.md Findings, commit 40f9844): the
+  // save-status banner must name what actually happened and must not read
+  // as the stale-conflict message.
+  test('a dead-anchor save reports what happened and offers the corrected document, not the stale message', async () => {
+    mockDefaults({
+      status: 'dead-anchor',
+      corrected: 'Zebras migrate north through dusty savannah every summer.\n',
+      anchors: [{ id: 'abc1234567', status: 'tombstoned' }],
+      message: 'The pasted content carries an anchor for a block that was deleted or merged, so nothing was saved. Use the corrected document, with that anchor removed, to continue.',
+    });
+    mockSession({
+      status: 'ready',
+      session: { markdown: '# Hi\n', title: 'Hi', workspaceId: 'ws-1', lock: { holderUserId: 'me', acquiredAt: 'x', heartbeatAt: 'x' } },
+    });
+    const component = await mountSuspended(PageInApp, { global: { stubs: { EditorSurface: true } } });
+
+    expect(component.text()).toMatch(/deleted or merged/i);
+    expect(component.text()).not.toMatch(/someone else saved a newer version/i);
+    const offerButton = component.findAll('button').find((button) => /corrected document/i.test(button.text()));
+    expect(offerButton).toBeDefined();
   });
 
   test('renders the page title as the one h1 once ready, with the editor surface handed the right props', async () => {

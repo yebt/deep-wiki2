@@ -41,6 +41,31 @@ describe('useSavePage', () => {
     expect(canonical.value).toBe('# Hi\n\n');
   });
 
+  // Regression: commit 40f9844 made `PUT /pages/:id` answer 409 with
+  // `{ error: 'dead anchor', corrected, anchors }` instead of a 500 when a
+  // save reintroduces a retired block anchor. Before this fix, the guard
+  // below only checked `typeof body.canonical === 'string'` — this fixture
+  // has neither `canonical`, so it fell into the same `else` branch as an
+  // actual concurrent-edit conflict and reported `stale`, telling the
+  // author a collaborator raced them when no such collaborator exists.
+  test('a 409 dead-anchor response reports dead-anchor (never stale) and offers the corrected document', async () => {
+    const fetcher = vi.fn(async () => {
+      throw responseError(409, {
+        error: 'dead anchor',
+        corrected: 'Zebras migrate north through dusty savannah every summer.\n',
+        anchors: [{ id: 'abc1234567', status: 'tombstoned' }],
+      });
+    });
+    const { status, corrected, anchors, save } = useSavePage('page-1', fetcher);
+
+    await save('Zebras migrate north through dusty savannah every summer. ^abc1234567\n', 'hash-1');
+
+    expect(status.value).not.toBe('stale');
+    expect(status.value).toBe('dead-anchor');
+    expect(corrected.value).toBe('Zebras migrate north through dusty savannah every summer.\n');
+    expect(anchors.value).toEqual([{ id: 'abc1234567', status: 'tombstoned' }]);
+  });
+
   test('403 maps to forbidden', async () => {
     const fetcher = vi.fn(async () => {
       throw responseError(403);
