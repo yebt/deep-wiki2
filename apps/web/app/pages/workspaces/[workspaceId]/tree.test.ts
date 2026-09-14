@@ -121,16 +121,44 @@ describe('navigation tree page', () => {
       expect(items[1]!.attributes('aria-setsize')).toBe('2');
     });
 
-    test('Enter on a page row opens it, and on a shelf row does nothing', async () => {
+    test('Enter on a page row opens it', async () => {
       mockTree({ status: 'success', nodes: NODES });
       const component = await mountSuspended(PageInApp);
       const items = component.findAll('[role="treeitem"]');
 
-      await items[0]!.trigger('keydown', { key: 'Enter' });
-      expect(navigateToMock).not.toHaveBeenCalled();
-
       await items[1]!.trigger('keydown', { key: 'Enter' });
       expect(navigateToMock).toHaveBeenCalledWith('/pages/page-1');
+    });
+
+    // The judgement call from the 2026-09-14 audit: a shelf, book or chapter
+    // row hover-highlighted and showed a grab cursor but did nothing on
+    // Enter, and `aria-expanded` was always true with nothing to collapse.
+    // Enter now folds the row, which fixes both at once.
+    test('Enter on a shelf row collapses it — its children leave the tree — and Enter again expands it', async () => {
+      mockTree({ status: 'success', nodes: NODES });
+      const component = await mountSuspended(PageInApp);
+
+      await component.findAll('[role="treeitem"]')[0]!.trigger('keydown', { key: 'Enter' });
+      expect(navigateToMock).not.toHaveBeenCalled();
+      expect(component.findAll('[role="treeitem"]')).toHaveLength(1);
+      expect(component.get('[role="treeitem"]').attributes('aria-expanded')).toBe('false');
+
+      await component.get('[role="treeitem"]').trigger('keydown', { key: 'Enter' });
+      expect(component.findAll('[role="treeitem"]')).toHaveLength(3);
+      expect(component.findAll('[role="treeitem"]')[0]!.attributes('aria-expanded')).toBe('true');
+    });
+
+    test('ArrowLeft on an expanded container collapses it, and ArrowRight on a collapsed one expands it, per the ARIA tree pattern', async () => {
+      mockTree({ status: 'success', nodes: NODES });
+      const component = await mountSuspended(PageInApp);
+
+      await component.findAll('[role="treeitem"]')[0]!.trigger('keydown', { key: 'ArrowLeft' });
+      expect(component.findAll('[role="treeitem"]')).toHaveLength(1);
+
+      await component.get('[role="treeitem"]').trigger('keydown', { key: 'ArrowRight' });
+      expect(component.findAll('[role="treeitem"]')).toHaveLength(3);
+      // Still on the shelf: expanding is one step, moving into it is the next.
+      expect(component.findAll('[role="treeitem"]')[0]!.attributes('tabindex')).toBe('0');
     });
 
     test('an arrow key from a nested row moves one row, not back to where it started', async () => {
@@ -220,12 +248,30 @@ describe('navigation tree page', () => {
       }
     });
 
-    test('the tree’s active row is handed to the toolbar, so “new” means “here”', async () => {
+    // Defect 8 of the 2026-09-14 audit: the toolbar acted on the first row
+    // — which held the tab stop by default — so "Rename “Engineering”…"
+    // read before the user had picked anything, and "Select a row first"
+    // was unreachable. The toolbar now acts on the row the user picked,
+    // and that row is the one that shows the fill.
+    test('the toolbar has no selection until the user picks a row; picking one hands it over and marks it', async () => {
       mockTree({ status: 'success', nodes: NODES });
       const component = await mountSuspended(PageInApp);
 
-      expect(component.findComponent(NavigationTreeActions).props('activeId')).toBe('shelf-1');
-      expect(component.findComponent(NavigationTreeActions).props('rootId')).toBe('root-1');
+      const actions = component.findComponent(NavigationTreeActions);
+      expect(actions.props('selectedId')).toBeNull();
+      expect(actions.props('rootId')).toBe('root-1');
+      expect(component.text()).toMatch(/Rename…/);
+      expect(component.text()).not.toMatch(/Rename “Engineering”/);
+      expect(component.findAll('[aria-selected="true"]')).toHaveLength(0);
+
+      await component.findAll('[role="treeitem"]')[0]!.trigger('focus');
+      await nextTick();
+
+      expect(actions.props('selectedId')).toBe('shelf-1');
+      expect(component.text()).toMatch(/Rename “Engineering”/);
+      const selected = component.findAll('[aria-selected="true"]');
+      expect(selected).toHaveLength(1);
+      expect(selected[0]!.attributes('data-node-id')).toBe('shelf-1');
     });
   });
 

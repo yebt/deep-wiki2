@@ -61,6 +61,8 @@ interface NodeProps {
   index: number;
   setSize: number;
   activeId: string | null;
+  selectedId: string | null;
+  collapsedIds: ReadonlySet<string>;
 }
 
 /**
@@ -69,7 +71,17 @@ interface NodeProps {
  * the root row reachable by the same query as its children.
  */
 async function mountNode(overrides: Partial<NodeProps> = {}) {
-  const props: NodeProps = { node: SHELF, depth: 0, parentId: 'root-1', index: 2, setSize: 5, activeId: null, ...overrides };
+  const props: NodeProps = {
+    node: SHELF,
+    depth: 0,
+    parentId: 'root-1',
+    index: 2,
+    setSize: 5,
+    activeId: null,
+    selectedId: null,
+    collapsedIds: new Set(),
+    ...overrides,
+  };
   const wrapper = await mountSuspended(
     defineComponent({
       name: 'TreeHarness',
@@ -280,13 +292,61 @@ describe('NavigationTreeNode', () => {
       expect(component.row.emitted('open')).toEqual([['page-1']]);
     });
 
-    test('clicking a shelf opens nothing — a container is something to reorder, not a place to go', async () => {
+    // A container row used to hover, show a grab cursor and do nothing on
+    // click (audit, 2026-09-14: docs/UI-CHECKLIST.md §6, "no inert
+    // interactions"). It has one thing to do that is not navigation: fold.
+    test('clicking a shelf toggles its expansion — never opens it, never does nothing', async () => {
       const component = await mountNode();
 
       rowOf(component.dom, 'shelf-1').click();
       await nextTick();
 
       expect(component.row.emitted('open')).toBeUndefined();
+      expect(component.row.emitted('toggle')).toEqual([['shelf-1']]);
+    });
+  });
+
+  describe('expansion', () => {
+    test('an expanded container says so and renders its children', async () => {
+      const component = await mountNode();
+
+      expect(itemOf(component.dom, 'shelf-1').getAttribute('aria-expanded')).toBe('true');
+      expect(component.dom.querySelectorAll('[role="treeitem"]')).toHaveLength(3);
+    });
+
+    test('a collapsed container says so and renders no children at all', async () => {
+      const component = await mountNode({ collapsedIds: new Set(['shelf-1']) });
+
+      expect(itemOf(component.dom, 'shelf-1').getAttribute('aria-expanded')).toBe('false');
+      expect(component.dom.querySelectorAll('[role="treeitem"]')).toHaveLength(1);
+    });
+
+    test('a leaf never claims to be expandable', async () => {
+      const component = await mountNode();
+
+      expect(itemOf(component.dom, 'page-1').hasAttribute('aria-expanded')).toBe(false);
+    });
+  });
+
+  describe('selection', () => {
+    // docs/DESIGN-SYSTEM.md §5.2: a container fill on an interactive element
+    // is for exactly one thing, a selected or active state — and the toolbar
+    // above the tree acts on this row, so the user has to be able to see it.
+    test('the selected row is marked for assistive technology and carries the container fill; no other row does', async () => {
+      const component = await mountNode({ selectedId: 'page-1' });
+
+      expect(itemOf(component.dom, 'page-1').getAttribute('aria-selected')).toBe('true');
+      expect(rowOf(component.dom, 'page-1').classList.contains('bg-secondary-container')).toBe(true);
+      expect(itemOf(component.dom, 'shelf-1').getAttribute('aria-selected')).toBe('false');
+      expect(rowOf(component.dom, 'shelf-1').classList.contains('bg-secondary-container')).toBe(false);
+    });
+
+    test('with nothing selected, no row carries the fill', async () => {
+      const component = await mountNode();
+
+      for (const id of ['shelf-1', 'page-1', 'page-2']) {
+        expect(rowOf(component.dom, id).classList.contains('bg-secondary-container'), id).toBe(false);
+      }
     });
   });
 
@@ -300,7 +360,8 @@ describe('NavigationTreeNode', () => {
       expect(shelfRow.textContent).toContain('shelf:');
       expect(shelfRow.textContent).toContain('Engineering');
       expect(component.row.findAllComponents(UIcon).every((icon) => icon.attributes('aria-hidden') === 'true')).toBe(true);
-      expect(component.row.findComponent(UIcon).props('name')).toBe('i-lucide-library');
+      // The type icon, beside the fold chevron every container row now carries.
+      expect(component.row.findAllComponents(UIcon).map((icon) => icon.props('name'))).toContain('i-lucide-library');
       expect(rowOf(component.dom, 'page-1').textContent).toContain('page:');
     });
 

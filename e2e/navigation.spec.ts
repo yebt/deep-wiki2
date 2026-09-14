@@ -19,6 +19,10 @@ import { expect, test, type BrowserContext, type Page } from '@playwright/test';
  */
 
 interface Fixtures {
+  readonly apiUrl: string;
+  readonly bookHistoryShelfTitle: string;
+  readonly bookHistoryBookTitle: string;
+  readonly workspaceId: string;
   readonly readerSessionToken: string;
   readonly outsiderSessionToken: string;
   readonly superRootEmail: string;
@@ -178,4 +182,88 @@ test('/workspaces/ with no id lands on the list rather than the framework 404', 
 
   await expect(page.getByRole('heading', { level: 1, name: 'Workspaces' })).toBeVisible({ timeout: 30000 });
   await expect(page.getByRole('link', { name: /E2E Workspace/ })).toBeVisible({ timeout: 30000 });
+});
+
+/**
+ * §3: the skeleton occupies the loaded box — measured, not assumed. Audit
+ * defect 4 (2026-09-14): the workspace list's skeleton rows sat 24px up
+ * and to the left of the rows that replaced them, because the loaded list
+ * lives inside a filled card under an action row and the skeleton was
+ * three bare bars at the top of the column. happy-dom has no layout, so
+ * this file is the owner: hold the response, measure, release, measure.
+ */
+test('the workspace list skeleton occupies the box the loaded rows take', async ({ page, context }) => {
+  await signInAs(context, fixtures.readerSessionToken);
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route(`${fixtures.apiUrl}/workspaces`, async (route) => {
+    if (route.request().method() !== 'GET') return route.continue();
+    await held;
+    await route.continue();
+  });
+
+  await page.goto('/workspaces');
+  const skeleton = page.getByTestId('workspace-list-skeleton');
+  await expect(skeleton).toBeVisible({ timeout: 30000 });
+  const skeletonRow = (await skeleton.locator('> *').first().boundingBox())!;
+
+  release();
+  const row = page.getByRole('link', { name: /E2E Workspace/ });
+  await expect(row).toBeVisible({ timeout: 30000 });
+  const loadedRow = (await row.boundingBox())!;
+
+  expect(Math.abs(skeletonRow.x - loadedRow.x), `row left: skeleton ${skeletonRow.x}, loaded ${loadedRow.x}`).toBeLessThanOrEqual(1);
+  expect(Math.abs(skeletonRow.y - loadedRow.y), `row top: skeleton ${skeletonRow.y}, loaded ${loadedRow.y}`).toBeLessThanOrEqual(1);
+  expect(Math.abs(skeletonRow.height - loadedRow.height), `row height: skeleton ${skeletonRow.height}, loaded ${loadedRow.height}`).toBeLessThanOrEqual(1);
+});
+
+/**
+ * The tree's toolbar and its rows, after the 2026-09-14 audit: toolbar
+ * controls are §7.2's 32px (they measured 40); the toolbar acts on a row
+ * the user can see — nothing is selected until they pick one, and the
+ * picked row carries the fill (docs/DESIGN-SYSTEM.md §5.2); and a shelf,
+ * book or chapter row folds on Enter and on click instead of doing
+ * nothing while claiming to be expanded.
+ */
+test('the tree toolbar is 32px, acts only on a row the user picked, and container rows fold on Enter', async ({ page, context }) => {
+  await signInAs(context, fixtures.readerSessionToken);
+
+  await page.goto(`/workspaces/${fixtures.workspaceId}/tree`);
+  const shelf = page.getByRole('treeitem', { name: new RegExp(fixtures.bookHistoryShelfTitle) });
+  await expect(shelf).toBeVisible({ timeout: 30000 });
+
+  // §7.2: a toolbar control is 32px, not the content-area 40px.
+  const create = page.getByRole('button', { name: 'New…' });
+  expect((await create.boundingBox())!.height, 'New… height').toBeLessThanOrEqual(33);
+  expect((await create.boundingBox())!.height, 'New… height').toBeGreaterThanOrEqual(31);
+
+  // Nothing is selected yet, and the toolbar says so — reachable by
+  // keyboard, since the control is aria-disabled rather than removed.
+  const rename = page.getByRole('button', { name: /^Rename…$/ });
+  await expect(rename).toHaveAttribute('aria-disabled', 'true');
+  await expect(page.locator('[role="treeitem"][aria-selected="true"]')).toHaveCount(0);
+
+  // Pick the shelf. It is now visibly selected — a container fill that
+  // differs from an unselected row — and the toolbar names it.
+  const shelfRow = shelf.locator('[draggable="true"]').first();
+  const book = page.getByRole('treeitem', { name: new RegExp(fixtures.bookHistoryBookTitle) });
+  const bookRow = book.locator('[draggable="true"]').first();
+  const unselectedFill = await bookRow.evaluate((el) => getComputedStyle(el).backgroundColor);
+  await shelfRow.click();
+  await expect(shelf).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByRole('button', { name: `Rename “${fixtures.bookHistoryShelfTitle}”…` })).toBeVisible();
+  const selectedFill = await shelfRow.evaluate((el) => getComputedStyle(el).backgroundColor);
+  expect(selectedFill).not.toBe(unselectedFill);
+
+  // The click also folded the shelf: its book is gone from the tree and
+  // the shelf says so. Enter unfolds it again.
+  await expect(shelf).toHaveAttribute('aria-expanded', 'false');
+  await expect(book).toHaveCount(0);
+  await shelf.press('Enter');
+  await expect(shelf).toHaveAttribute('aria-expanded', 'true');
+  await expect(book).toBeVisible();
+  await shelf.press('Enter');
+  await expect(book).toHaveCount(0);
 });

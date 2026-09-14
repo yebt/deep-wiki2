@@ -67,19 +67,28 @@ useSeoMeta({ title: 'Workspaces — deep-wiki' });
       description="The wikis you can open. Choosing one shows its navigation tree — every shelf, book, chapter and page you can read."
     />
 
-    <!-- A skeleton, not a spinner: the shape of the answer is known
-         (§3), and it occupies the same 40px rows the list will, so
-         nothing shifts when the response lands. -->
-    <div
-      v-if="status === 'idle' || status === 'loading'"
-      data-testid="workspace-list-skeleton"
-      class="space-y-2"
-      aria-hidden="true"
-    >
-      <USkeleton class="h-10 w-full" />
-      <USkeleton class="h-10 w-5/6" />
-      <USkeleton class="h-10 w-4/6" />
-    </div>
+    <!-- A skeleton, not a spinner: the shape of the answer is known (§3),
+         and it occupies the box the loaded list will — the same action
+         row above it, the same filled card around it, the same 8px inset
+         and the same 40px rows — so nothing shifts when the response
+         lands. It used to be three bare bars at the top of the column
+         while the loaded rows sat under a 56px action row inside a card
+         with 24px of inset: measured 24px up and to the left of where the
+         rows landed (audit defect 4, 2026-09-14). The action row is real
+         rather than a skeleton of itself — it depends on nothing the
+         request returns. -->
+    <template v-if="status === 'idle' || status === 'loading'">
+      <div class="mb-4 flex flex-wrap items-center justify-end gap-3">
+        <UButton to="/workspaces/new" variant="outline" color="neutral" icon="i-lucide-plus">New workspace</UButton>
+      </div>
+      <UCard variant="soft" :ui="{ body: 'p-2 sm:p-2' }">
+        <div data-testid="workspace-list-skeleton" class="space-y-1" aria-hidden="true">
+          <USkeleton class="h-10 w-full" />
+          <USkeleton class="h-10 w-5/6" />
+          <USkeleton class="h-10 w-4/6" />
+        </div>
+      </UCard>
+    </template>
 
     <PageNotice
       v-else-if="status === 'unauthenticated'"
@@ -129,8 +138,11 @@ useSeoMeta({ title: 'Workspaces — deep-wiki' });
            card, which is `UCard variant="soft"` retargeted to
            `bg-emphasized` — the same component and tone as the auth card and
            the navigation tree's own list (docs/DESIGN-SYSTEM.md §9.4). Never
-           `bg-elevated`: that rung belongs to the chrome above it. -->
-      <UCard v-else variant="soft" :ui="{ body: 'p-2' }">
+           `bg-elevated`: that rung belongs to the chrome above it.
+           `p-2 sm:p-2`, both: the body ships `p-4 sm:p-6`, and a lone `p-2`
+           replaced only the first — 24px of inset from `sm` up, measured on
+           2026-09-14 (audit defect 13). -->
+      <UCard v-else variant="soft" :ui="{ body: 'p-2 sm:p-2' }">
         <ul class="space-y-1">
           <li v-for="workspace in workspaces" :key="workspace.id">
             <!-- The row is one 40px tab stop whose visible text is its

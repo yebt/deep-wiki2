@@ -16,11 +16,17 @@
  *
  * ── Where a new node goes ──────────────────────────────────────────────
  *
- * The location is the row the tree's tab stop is on, resolved up to the
- * nearest node that can legally hold children — so "New" means "here",
- * which is how a tree is read. The only other offer is the top level,
- * because a second shelf would otherwise be unreachable once the first
- * one exists. Two radios rather than a picker of every container: the
+ * The location is the row the user picked — the one that shows the
+ * selected fill — resolved up to the nearest node that can legally hold
+ * children — so "New" means "here", which is how a tree is read. The only
+ * other offer is the top level, because a second shelf would otherwise
+ * be unreachable once the first one exists. Until the user has picked a
+ * row there is no "here": the location is the top level, and Rename says
+ * plainly that it needs a row first. Before 2026-09-14 the toolbar acted
+ * on the row that happened to hold the roving tab stop, which defaults
+ * to the first row on load — so "Rename “Engineering”…" read before the
+ * user had touched the tree and the "select a row first" state was
+ * unreachable (audit defect 8). Two radios rather than a picker of every container: the
  * tree itself is the picker, and arrowing to a row is cheaper than
  * finding it again in a list (docs/UI-CHECKLIST.md §4.4 — this is a tool
  * people live in all day, so the chrome stays quiet).
@@ -71,8 +77,8 @@ export type RenameNodeFetcher = (nodeId: string, body: { title: string }) => Pro
 const props = defineProps<{
   nodes: readonly TreeNode[];
   rootId: string | null;
-  /** The row holding the tree's single tab stop — the "here" a new node goes under. */
-  activeId: string | null;
+  /** The row the user picked — the "here" a new node goes under, and the one Rename acts on. `null` until they pick one. */
+  selectedId: string | null;
   /** Injected in tests, exactly as `useTree` takes its fetchers. */
   createFetcher?: CreateNodeFetcher;
   renameFetcher?: RenameNodeFetcher;
@@ -126,7 +132,7 @@ function titleOf(nodeId: string): string {
 
 /** The nearest ancestor-or-self that may legally hold children; the root when there is none. */
 const nearestContainerId = computed(() => {
-  let current = props.activeId;
+  let current = props.selectedId;
   while (current) {
     const entry = index.value.get(current);
     if (!entry) break;
@@ -233,7 +239,7 @@ const renameNameError = ref<string | null>(null);
 const renameFormError = ref<string | null>(null);
 const renameSubmitting = ref(false);
 
-const renameTarget = computed(() => (props.activeId ? (index.value.get(props.activeId)?.node ?? null) : null));
+const renameTarget = computed(() => (props.selectedId ? (index.value.get(props.selectedId)?.node ?? null) : null));
 
 function openRename(): void {
   if (!renameTarget.value) return;
@@ -303,15 +309,18 @@ function applyWriteError(
   <div>
     <!-- 12px between two actions and 16px below them: the 4dp grid
          (DESIGN-SYSTEM §7.3). `flex-wrap` so 320px never scrolls
-         sideways (checklist §6). -->
+         sideways (checklist §6). This is a toolbar, so its controls are
+         §7.2's 32px chrome height (`size="sm"`), not the 40px of a
+         content-area action — measured at 40px on 2026-09-14. -->
     <div class="mb-4 flex flex-wrap items-center gap-3">
-      <UButton icon="i-lucide-plus" data-testid="tree-create-open" @click="openCreate">New…</UButton>
+      <UButton size="sm" icon="i-lucide-plus" data-testid="tree-create-open" @click="openCreate">New…</UButton>
 
       <!-- `aria-disabled`, never `disabled`: the attribute would take the
            control out of the tab order and put its own explanation behind
            a hover a keyboard user cannot perform (checklist §5). -->
       <UTooltip v-if="!renameTarget" text="Select a row in the tree first.">
         <UButton
+          size="sm"
           variant="outline"
           color="neutral"
           icon="i-lucide-pencil-line"
@@ -324,6 +333,7 @@ function applyWriteError(
       </UTooltip>
       <UButton
         v-else
+        size="sm"
         variant="outline"
         color="neutral"
         icon="i-lucide-pencil-line"

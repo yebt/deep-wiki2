@@ -64,7 +64,7 @@ afterEach(() => {
 async function mountActions(
   overrides: {
     nodes?: TreeNode[];
-    activeId?: string | null;
+    selectedId?: string | null;
     createFetcher?: CreateNodeFetcher;
     renameFetcher?: RenameNodeFetcher;
   } = {},
@@ -78,7 +78,7 @@ async function mountActions(
             h(NavigationTreeActions, {
               nodes: overrides.nodes ?? NODES,
               rootId: 'root-1',
-              activeId: overrides.activeId === undefined ? null : overrides.activeId,
+              selectedId: overrides.selectedId === undefined ? null : overrides.selectedId,
               createFetcher: overrides.createFetcher,
               renameFetcher: overrides.renameFetcher,
             }),
@@ -134,7 +134,7 @@ function fetchError(status: number, body: unknown): unknown {
 
 describe('NavigationTreeActions — what may be created, and where', () => {
   test('under a book, exactly the book’s legal children are offered', async () => {
-    const mounted = await mountActions({ activeId: 'book-1' });
+    const mounted = await mountActions({ selectedId: 'book-1' });
     await openCreate(mounted);
 
     expect(radioValues(mounted, 'tree-create-type')).toEqual(legalChildTypes('book'));
@@ -143,7 +143,7 @@ describe('NavigationTreeActions — what may be created, and where', () => {
   });
 
   test('under a chapter, only a page is offered — a different answer from the same table', async () => {
-    const mounted = await mountActions({ activeId: 'chapter-1' });
+    const mounted = await mountActions({ selectedId: 'chapter-1' });
     await openCreate(mounted);
 
     expect(radioValues(mounted, 'tree-create-type')).toEqual(legalChildTypes('chapter'));
@@ -151,7 +151,7 @@ describe('NavigationTreeActions — what may be created, and where', () => {
   });
 
   test('at the top level only a shelf is offered', async () => {
-    const mounted = await mountActions({ nodes: [], activeId: null });
+    const mounted = await mountActions({ nodes: [], selectedId: null });
     await openCreate(mounted);
 
     expect(radioValues(mounted, 'tree-create-type')).toEqual(legalChildTypes('workspace'));
@@ -163,7 +163,7 @@ describe('NavigationTreeActions — what may be created, and where', () => {
   });
 
   test('a page is never a location; the chapter holding it is, and the top level is always reachable', async () => {
-    const mounted = await mountActions({ activeId: 'page-1' });
+    const mounted = await mountActions({ selectedId: 'page-1' });
     await openCreate(mounted);
 
     const locations = radioValues(mounted, 'tree-create-location');
@@ -185,7 +185,7 @@ describe('NavigationTreeActions — creating', () => {
       title: 'Day two',
       position: 1,
     }));
-    const mounted = await mountActions({ activeId: 'chapter-1', createFetcher });
+    const mounted = await mountActions({ selectedId: 'chapter-1', createFetcher });
     await openCreate(mounted);
     await typeAndSubmit(mounted, 'tree-create-title', 'tree-create-submit', 'Day two');
 
@@ -202,7 +202,7 @@ describe('NavigationTreeActions — creating', () => {
       title: 'Day two',
       position: 1,
     }));
-    const mounted = await mountActions({ activeId: 'chapter-1', createFetcher });
+    const mounted = await mountActions({ selectedId: 'chapter-1', createFetcher });
     await openCreate(mounted);
     await typeAndSubmit(mounted, 'tree-create-title', 'tree-create-submit', 'Day two');
 
@@ -216,7 +216,7 @@ describe('NavigationTreeActions — creating', () => {
     const createFetcher = vi.fn(async () => {
       throw fetchError(409, { error: 'a sibling named "Day one" already exists here' });
     });
-    const mounted = await mountActions({ activeId: 'chapter-1', createFetcher });
+    const mounted = await mountActions({ selectedId: 'chapter-1', createFetcher });
     await openCreate(mounted);
     await typeAndSubmit(mounted, 'tree-create-title', 'tree-create-submit', 'Day one');
 
@@ -231,7 +231,7 @@ describe('NavigationTreeActions — creating', () => {
     const createFetcher = vi.fn(async () => {
       throw fetchError(403, { error: 'forbidden' });
     });
-    const mounted = await mountActions({ activeId: 'chapter-1', createFetcher });
+    const mounted = await mountActions({ selectedId: 'chapter-1', createFetcher });
     await openCreate(mounted);
     await typeAndSubmit(mounted, 'tree-create-title', 'tree-create-submit', 'Day two');
 
@@ -248,7 +248,7 @@ describe('NavigationTreeActions — creating', () => {
       // exists to classify, and the one four hand-written guards got wrong.
       throw Object.assign(new Error('fetch failed'), { response: undefined });
     });
-    const mounted = await mountActions({ activeId: 'chapter-1', createFetcher });
+    const mounted = await mountActions({ selectedId: 'chapter-1', createFetcher });
     await openCreate(mounted);
     await typeAndSubmit(mounted, 'tree-create-title', 'tree-create-submit', 'Day two');
 
@@ -260,7 +260,7 @@ describe('NavigationTreeActions — creating', () => {
 
 describe('NavigationTreeActions — renaming', () => {
   test('is aria-disabled with a reason when no row is selected, and stays in the tab order', async () => {
-    const mounted = await mountActions({ activeId: null });
+    const mounted = await mountActions({ selectedId: null });
     const button = byTestId(mounted, 'tree-rename-open')!;
 
     // `aria-disabled`, never the attribute: the attribute removes the
@@ -279,7 +279,7 @@ describe('NavigationTreeActions — renaming', () => {
 
   test('names its target, sends the new title, and reports the change', async () => {
     const renameFetcher = vi.fn(async () => ({ id: 'page-1', slug: 'day-zero', title: 'Day zero' }));
-    const mounted = await mountActions({ activeId: 'page-1', renameFetcher });
+    const mounted = await mountActions({ selectedId: 'page-1', renameFetcher });
     const button = byTestId(mounted, 'tree-rename-open')!;
     expect(button.getAttribute('aria-disabled')).toBeNull();
     expect(button.textContent).toContain('Day one');
@@ -297,7 +297,7 @@ describe('NavigationTreeActions — renaming', () => {
     const renameFetcher = vi.fn(async () => {
       throw fetchError(409, { error: 'a sibling named "Overview" already exists here' });
     });
-    const mounted = await mountActions({ activeId: 'page-1', renameFetcher });
+    const mounted = await mountActions({ selectedId: 'page-1', renameFetcher });
     byTestId(mounted, 'tree-rename-open')!.click();
     await settle();
     await typeAndSubmit(mounted, 'tree-rename-title', 'tree-rename-submit', 'Overview');
@@ -308,7 +308,7 @@ describe('NavigationTreeActions — renaming', () => {
 
 describe('NavigationTreeActions — the tree’s keyboard contract', () => {
   test('nothing here is a tree row, so no new control sits inside one', async () => {
-    const mounted = await mountActions({ activeId: 'page-1' });
+    const mounted = await mountActions({ selectedId: 'page-1' });
 
     expect(mounted.wrapper.find('[role="treeitem"]').exists()).toBe(false);
     expect(mounted.wrapper.find('[role="tree"]').exists()).toBe(false);

@@ -72,7 +72,26 @@ async function onReorder(payload: { draggedId: string; newParentId: string; newI
  * the reason a 400-page book does not become 400 tab stops.
  */
 const activeId = ref<string | null>(null);
+/**
+ * The row the user picked — by focusing it, clicking it or arrowing to
+ * it. Distinct from `activeId`, the roving tab stop, which defaults to
+ * the first row on load so that `Tab` lands somewhere real: a toolbar
+ * that acted on the tab stop read "Rename “Engineering”…" before the user
+ * had touched the tree (audit defect 8, 2026-09-14). Nothing is selected
+ * until the user selects it, and the selected row is the one drawn with
+ * the fill.
+ */
+const selectedId = ref<string | null>(null);
+/** Containers the user folded. Everything starts open, as it always did. */
+const collapsedIds = ref<Set<string>>(new Set());
 const treeEl = ref<HTMLElement | null>(null);
+
+function toggleCollapsed(nodeId: string): void {
+  const next = new Set(collapsedIds.value);
+  if (next.has(nodeId)) next.delete(nodeId);
+  else next.add(nodeId);
+  collapsedIds.value = next;
+}
 
 interface FlatNode {
   readonly node: TreeNode;
@@ -81,13 +100,13 @@ interface FlatNode {
   readonly siblings: readonly TreeNode[];
 }
 
-/** Every row currently visible, in the order the eye reads them — which is the order the arrow keys must move in. */
+/** Every row currently visible — a folded container hides its subtree — in the order the eye reads them, which is the order the arrow keys must move in. */
 const visible = computed<FlatNode[]>(() => {
   const out: FlatNode[] = [];
   const walk = (list: readonly TreeNode[], parentId: string): void => {
     list.forEach((node, index) => {
       out.push({ node, parentId, index, siblings: list });
-      if (node.children.length > 0) walk(node.children, node.id);
+      if (node.children.length > 0 && !collapsedIds.value.has(node.id)) walk(node.children, node.id);
     });
   };
   walk(nodes.value, rootId.value ?? '');
@@ -141,13 +160,18 @@ function onKeydown({ event, node, parentId, index }: { event: KeyboardEvent; nod
       event.preventDefault();
       focusNode(flat[at - 1]?.node.id);
       break;
+    // The ARIA tree pattern: Right unfolds a folded container and otherwise
+    // steps into it; Left folds an open one and otherwise steps out to the
+    // parent.
     case 'ArrowRight':
       event.preventDefault();
-      focusNode(node.children[0]?.id);
+      if (node.children.length > 0 && collapsedIds.value.has(node.id)) toggleCollapsed(node.id);
+      else focusNode(node.children[0]?.id);
       break;
     case 'ArrowLeft':
       event.preventDefault();
-      focusNode(flat.find((v) => v.node.id === parentId)?.node.id);
+      if (node.children.length > 0 && !collapsedIds.value.has(node.id)) toggleCollapsed(node.id);
+      else focusNode(flat.find((v) => v.node.id === parentId)?.node.id);
       break;
     case 'Home':
       event.preventDefault();
@@ -159,19 +183,19 @@ function onKeydown({ event, node, parentId, index }: { event: KeyboardEvent; nod
       break;
     case 'Enter':
     case ' ':
-      if (node.type === 'page') {
-        event.preventDefault();
-        void navigateTo(`/pages/${node.id}`);
-      }
+      event.preventDefault();
+      if (node.type === 'page') void navigateTo(`/pages/${node.id}`);
+      else if (node.children.length > 0) toggleCollapsed(node.id);
       break;
     default:
       break;
   }
 }
 
-/** A row reports itself active when it takes focus — moving the tab stop, never navigating. */
+/** A row reports itself active when it takes focus — moving the tab stop and the selection, never navigating. */
 function onActivate(nodeId: string): void {
   activeId.value = nodeId;
+  selectedId.value = nodeId;
 }
 
 /**
@@ -229,7 +253,15 @@ const bookNodes = computed<TreeNode[]>(() => {
 /** Deliberate activation: a click, or Enter/Space. */
 function onOpen(nodeId: string): void {
   activeId.value = nodeId;
+  selectedId.value = nodeId;
   void navigateTo(`/pages/${nodeId}`);
+}
+
+/** A click on a container row: pick it, and fold or unfold it. */
+function onToggle(nodeId: string): void {
+  activeId.value = nodeId;
+  selectedId.value = nodeId;
+  toggleCollapsed(nodeId);
 }
 
 useHead({ htmlAttrs: { lang: 'en' } });
@@ -322,7 +354,7 @@ useSeoMeta({ title: 'Navigation tree — deep-wiki' });
            would sit on top of `NavigationTreeNode`'s drag-and-drop and its
            `Alt`-arrow reorder, which are this screen's §5 contract and
            whose `keydown` guard was fixed only recently. -->
-      <NavigationTreeActions :nodes="nodes" :root-id="rootId" :active-id="activeId" @changed="onTreeChanged" />
+      <NavigationTreeActions :nodes="nodes" :root-id="rootId" :selected-id="selectedId" @changed="onTreeChanged" />
 
       <!-- First-run empty state, distinct from "nothing readable" — this
            batch has no filter/search on this screen, so there is no
@@ -342,7 +374,7 @@ useSeoMeta({ title: 'Navigation tree — deep-wiki' });
              arrows do the rest, which no visual affordance can say
              (docs/UI-CHECKLIST.md §5). -->
         <p id="tree-keyboard-help" class="text-body-small text-muted mb-2">
-          Arrow keys move through the tree, Enter opens a page, and Alt with the arrow keys moves an item among its siblings.
+          Arrow keys move through the tree, Enter opens a page or folds a shelf, book or chapter, and Alt with the arrow keys moves an item among its siblings.
         </p>
         <!-- §1.4 gives `bg-elevated` to the navigation tree *as a pane*.
              This screen has no panes: the tree is content in a column
@@ -353,7 +385,10 @@ useSeoMeta({ title: 'Navigation tree — deep-wiki' });
              component and tone as the auth card (§9.4). The rows inside
              it keep their own state layer and their `secondary-container`
              drop target, both of which are ground-independent. -->
-        <UCard variant="soft" :ui="{ body: 'p-2' }">
+        <!-- `p-2 sm:p-2`, both: `UCard`'s body is `p-4 sm:p-6`, and a lone
+             `p-2` replaces only the first — measured at 24px of inset from
+             `sm` up on 2026-09-14 (audit defect 13). -->
+        <UCard variant="soft" :ui="{ body: 'p-2 sm:p-2' }">
           <ul
             ref="treeEl"
             role="tree"
@@ -369,9 +404,12 @@ useSeoMeta({ title: 'Navigation tree — deep-wiki' });
               :index="index"
               :set-size="nodes.length"
               :active-id="activeId"
+              :selected-id="selectedId"
+              :collapsed-ids="collapsedIds"
               @reorder="onReorder"
               @activate="onActivate"
               @open="onOpen"
+              @toggle="onToggle"
               @keydown="onKeydown"
             />
           </ul>

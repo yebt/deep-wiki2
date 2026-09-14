@@ -24,10 +24,25 @@
  *   pattern; `tree.vue` owns which item holds it.
  * - **Arrow keys** move between visible rows, `Home`/`End` jump to the
  *   ends, `ArrowLeft`/`ArrowRight` walk to parent and first child.
- * - **`Enter` / `Space`** opens a page — the thing the screen exists for.
+ * - **`Enter` / `Space`** opens a page — the thing the screen exists for —
+ *   and folds a shelf, book or chapter. `ArrowLeft` on an open container
+ *   folds it and `ArrowRight` on a folded one unfolds it, per the ARIA
+ *   tree pattern. Until 2026-09-14 a container row hover-highlighted,
+ *   showed a grab cursor and did nothing on click or Enter, and
+ *   `aria-expanded` was always `true` with nothing to collapse — an inert
+ *   interaction (docs/UI-CHECKLIST.md §6) and a lie to assistive
+ *   technology at once; folding fixes both.
  * - **`Alt` + `ArrowUp` / `ArrowDown` / `ArrowRight`** are the keyboard
  *   equivalents of the three drop zones: move before the previous sibling,
  *   after the next one, or reparent under the previous sibling.
+ *
+ * Two ids, two meanings: `activeId` is the roving tab stop, which the
+ * screen defaults to the first row so `Tab` lands somewhere; `selectedId`
+ * is the row the user actually picked, which the toolbar acts on and
+ * which is the one row drawn with the `secondary-container` fill —
+ * docs/DESIGN-SYSTEM.md §5.2's one sanctioned use of a container fill on
+ * an interactive element. A fill on the tab stop would have marked the
+ * first row as chosen on every load.
  *
  * A drop in the top/bottom quarter of a row reorders among THAT ROW's OWN
  * siblings (before/after it) — hence `parentId`/`index` are required props,
@@ -48,6 +63,10 @@ const props = defineProps<{
   setSize: number;
   /** The id currently holding the tree's single tab stop. */
   activeId: string | null;
+  /** The row the user picked — drawn with the selected fill and handed to the toolbar. */
+  selectedId: string | null;
+  /** Containers the user folded; everything else is open. */
+  collapsedIds: ReadonlySet<string>;
 }>();
 
 const emit = defineEmits<{
@@ -56,6 +75,8 @@ const emit = defineEmits<{
   activate: [nodeId: string];
   /** The user asked to open this row. Only a page has a destination this batch. */
   open: [nodeId: string];
+  /** The user asked to fold or unfold this container. */
+  toggle: [nodeId: string];
   keydown: [payload: { event: KeyboardEvent; node: TreeNode; parentId: string; index: number }];
 }>();
 
@@ -69,8 +90,17 @@ const NODE_ICONS: Record<string, string> = {
 
 const dropIndicator = ref<'before' | 'after' | 'on' | null>(null);
 
-/** Only a page has a destination in this batch; a shelf, book or chapter is a container to reorder, not a place to go. */
+/** Only a page has a destination in this batch; a shelf, book or chapter is a container to fold and to reorder, not a place to go. */
 const isNavigable = computed(() => props.node.type === 'page');
+const isContainer = computed(() => props.node.children.length > 0);
+const isExpanded = computed(() => isContainer.value && !props.collapsedIds.has(props.node.id));
+const isSelected = computed(() => props.selectedId === props.node.id);
+
+/** A click is the row's one activation: a page opens, a container folds. */
+function onClick(): void {
+  if (isNavigable.value) emit('open', props.node.id);
+  else if (isContainer.value) emit('toggle', props.node.id);
+}
 
 function onDragStart(event: DragEvent): void {
   event.dataTransfer?.setData('text/plain', props.node.id);
@@ -139,7 +169,8 @@ function onKeydown(event: KeyboardEvent): void {
     :aria-level="depth + 1"
     :aria-posinset="index + 1"
     :aria-setsize="setSize"
-    :aria-expanded="node.children.length > 0 ? true : undefined"
+    :aria-expanded="isContainer ? isExpanded : undefined"
+    :aria-selected="isSelected"
     :tabindex="activeId === node.id ? 0 : -1"
     class="dw-tree-item"
     @keydown="onKeydown"
@@ -149,16 +180,20 @@ function onKeydown(event: KeyboardEvent): void {
       draggable="true"
       class="dw-tree-row dw-state-layer flex h-10 min-h-10 items-center gap-2 rounded-md text-body-large text-default"
       :class="[
-        isNavigable ? 'cursor-pointer' : 'cursor-grab',
-        // The drop target is the one place a row takes a container fill:
-        // `secondary-container` is M3's selected-state role (§1.2) and it
-        // is opaque, so it reads the same on either theme. Hover and focus
-        // are the `dw-state-layer` above — a `currentColor` overlay —
-        // never a step to another surface rung. The `hover:bg-elevated`
-        // this row used to carry was measurably a no-op: the row sits *on*
-        // `bg-elevated`, so hovering repainted the same tone
-        // (oklch(0.94828) light, oklch(0.28448) dark) over itself (§5.2).
-        dropIndicator === 'on' && 'bg-secondary-container text-on-secondary-container',
+        // Every row does something on click now — open or fold — so every
+        // row is a pointer target; the grab cursor promised a drag and
+        // nothing else, on a row that also wanted to be clicked.
+        'cursor-pointer',
+        // The selected row and the drop target are the two places a row
+        // takes a container fill: `secondary-container` is M3's
+        // selected-state role (§1.2) and it is opaque, so it reads the same
+        // on either theme. Hover and focus are the `dw-state-layer` above —
+        // a `currentColor` overlay — never a step to another surface rung.
+        // The `hover:bg-elevated` this row used to carry was measurably a
+        // no-op: the row sits *on* `bg-elevated`, so hovering repainted the
+        // same tone (oklch(0.94828) light, oklch(0.28448) dark) over itself
+        // (§5.2).
+        (isSelected || dropIndicator === 'on') && 'bg-secondary-container text-on-secondary-container',
         dropIndicator === 'before' && 'border-t-2 border-primary',
         dropIndicator === 'after' && 'border-b-2 border-primary',
       ]"
@@ -167,8 +202,17 @@ function onKeydown(event: KeyboardEvent): void {
       @dragover="onDragOver"
       @dragleave="onDragLeave"
       @drop="onDrop"
-      @click="isNavigable && emit('open', node.id)"
+      @click="onClick"
     >
+      <!-- The fold state is drawn as well as announced: a chevron that
+           turns, beside the type icon, on every container row. -->
+      <UIcon
+        v-if="isContainer"
+        name="i-lucide-chevron-right"
+        class="size-4 shrink-0 text-muted transition-transform duration-200 ease-standard"
+        :class="isExpanded ? 'rotate-90' : undefined"
+        aria-hidden="true"
+      />
       <UIcon :name="NODE_ICONS[node.type] ?? 'i-lucide-file'" class="size-4 shrink-0 text-muted" aria-hidden="true" />
       <!-- The icon carries the node's type, and an icon is never the only
            carrier of meaning (docs/UI-CHECKLIST.md §4.3) — so the
@@ -177,7 +221,7 @@ function onKeydown(event: KeyboardEvent): void {
       <span class="sr-only">{{ node.type }}:</span>
       <span class="truncate" :title="node.title">{{ node.title }}</span>
     </div>
-    <ul v-if="node.children.length > 0" role="group">
+    <ul v-if="isExpanded" role="group">
       <NavigationTreeNode
         v-for="(child, childIndex) in node.children"
         :key="child.id"
@@ -187,9 +231,12 @@ function onKeydown(event: KeyboardEvent): void {
         :index="childIndex"
         :set-size="node.children.length"
         :active-id="activeId"
+        :selected-id="selectedId"
+        :collapsed-ids="collapsedIds"
         @reorder="onChildReorder"
         @activate="emit('activate', $event)"
         @open="emit('open', $event)"
+        @toggle="emit('toggle', $event)"
         @keydown="emit('keydown', $event)"
       />
     </ul>

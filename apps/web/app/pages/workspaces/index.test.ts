@@ -45,6 +45,31 @@ describe('workspaces index screen', () => {
     expect(component.find('[data-testid="workspace-list-skeleton"]').exists()).toBe(true);
   });
 
+  // Audit defect 4 (2026-09-14): the skeleton rows sat 24px up and to the
+  // left of the loaded rows, because the loaded list lives inside a filled
+  // card under the "New workspace" row and the skeleton was three bare bars
+  // at the top of the column. Geometry is `e2e/navigation.spec.ts`'s to
+  // measure; what a unit test can hold is the structure that makes the two
+  // boxes the same: the same card, the same inset, the same row above.
+  // Mounted in the loading state, deliberately — a skeleton test that
+  // mounts already loaded proves nothing about the skeleton.
+  test('the skeleton stands in the same filled card, at the same inset, under the same action row as the loaded list', async () => {
+    mockWorkspaces({ status: 'loading' });
+    const component = await mountSuspended(PageInApp);
+
+    expect(component.find('a[href="/workspaces/new"]').exists()).toBe(true);
+    const skeleton = component.get('[data-testid="workspace-list-skeleton"]');
+    const card = skeleton.element.closest('.bg-emphasized');
+    expect(card).not.toBeNull();
+    expect(card!.querySelector('[data-slot="body"]')!.className).toMatch(/\bp-2\b/);
+    expect(card!.querySelector('[data-slot="body"]')!.className).toMatch(/\bsm:p-2\b/);
+
+    mockWorkspaces({ status: 'success', workspaces: [alpha] });
+    const loaded = await mountSuspended(PageInApp);
+    const loadedCard = loaded.get('a[href="/workspaces/ws-1/tree"]').element.closest('.bg-emphasized');
+    expect(loadedCard!.querySelector('[data-slot="body"]')!.className).toBe(card!.querySelector('[data-slot="body"]')!.className);
+  });
+
   test('each workspace is a link into its own navigation tree', async () => {
     mockWorkspaces({ status: 'success', workspaces: [alpha, bravo] });
     const component = await mountSuspended(PageInApp);
