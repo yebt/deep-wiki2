@@ -6,7 +6,7 @@
  */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { createSession, savePage } from '@deep-wiki/db';
-import { provisionTestDatabase, type ProvisionedTestDatabase } from '@deep-wiki/db/testing/provision';
+import { provisionTestDatabase, TEST_CHANGESET_WINDOW_MINUTES, type ProvisionedTestDatabase } from '@deep-wiki/db/testing/provision';
 import postgres from 'postgres';
 import { expectNoDisclosure } from '../../testing/expect-no-disclosure';
 import { SESSION_COOKIE_NAME } from '../middleware/session';
@@ -64,7 +64,7 @@ describe('GET /pages/:id/backlinks', () => {
     `;
     // No grant on hiddenSource for requester: it stays unreadable.
 
-    await savePage(sql, { nodeId: hiddenSource, workspaceId: ws!.id, markdown: `See [[Target]].\n`, expectedContentHash: null });
+    await savePage(sql, { nodeId: hiddenSource, workspaceId: ws!.id, markdown: `See [[Target]].\n`, expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
 
     const app = buildApp();
     const res = await app.request(`/pages/${target}/backlinks`, { headers: { cookie: await cookieFor(requester) } });
@@ -91,7 +91,7 @@ describe('GET /pages/:id/backlinks', () => {
       INSERT INTO permissions (workspace_id, subject_type, subject_id, resource_id, action, effect)
       VALUES (${ws!.id}, 'user', ${requester}, ${visibleSource}, 'read', 'allow')
     `;
-    await savePage(sql, { nodeId: visibleSource, workspaceId: ws!.id, markdown: `See [[Target2]].\n`, expectedContentHash: null });
+    await savePage(sql, { nodeId: visibleSource, workspaceId: ws!.id, markdown: `See [[Target2]].\n`, expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
 
     const app = buildApp();
     const res = await app.request(`/pages/${target}/backlinks`, { headers: { cookie: await cookieFor(requester) } });

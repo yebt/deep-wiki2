@@ -38,13 +38,22 @@ export interface SavePageInput {
   readonly updatedBy?: string;
   /**
    * `CHANGESET_WINDOW_MINUTES` (design.md Decision 4), threaded in by the
-   * caller — `packages/db` never reads env. Optional so callers that do
-   * not care about changeset grouping (most of this package's own tests,
-   * pages with no book ancestor) are not forced to supply it; omitting it
-   * skips changeset resolution entirely rather than falling back to a
-   * second copy of the number. Route wiring always supplies it.
+   * caller — `packages/db` never reads env, and never falls back to a
+   * second copy of the number.
+   *
+   * Required, deliberately: this used to be optional so callers that do
+   * not care about changeset grouping were not forced to supply it, and
+   * omitting it silently skipped changeset resolution entirely — including
+   * for a book-scoped, authored save, which then grouped nothing and said
+   * nothing (the book-history e2e seed produced zero changesets this way,
+   * caught only by a direct DB query). A caller with no book ancestor and
+   * no interest in changesets still supplies a value — `writeRevision()`
+   * simply never uses it when `resolveBookId()` finds no book, so
+   * threading a harmless positive number costs nothing and closes the
+   * silent-skip class entirely rather than trading it for a second
+   * "do I need this?" branch at every call site.
    */
-  readonly changesetWindowMinutes?: number;
+  readonly changesetWindowMinutes: number;
 }
 
 export interface SavePageResult {

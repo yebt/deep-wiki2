@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import postgres from 'postgres';
-import { provisionTestDatabase, type ProvisionedTestDatabase } from '../../testing/provision';
+import { provisionTestDatabase, TEST_CHANGESET_WINDOW_MINUTES, type ProvisionedTestDatabase } from '../../testing/provision';
 import { canonicalise } from '@deep-wiki/markdown';
 import { ChainCompressionError, DeadAnchorError } from './rebuild-derived';
 import { savePage } from './save-page';
@@ -60,14 +60,14 @@ describe('reconcileDerived — split provenance', () => {
       nodeId,
       workspaceId,
       markdown: 'Apples and oranges are tasty fruits, and bananas are also delicious. ^abc123\n',
-      expectedContentHash: null,
+      expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES,
     });
 
     await savePage(sql, {
       nodeId,
       workspaceId,
       markdown: 'Apples and oranges are tasty fruits.\n\nBananas are also delicious.\n',
-      expectedContentHash: first.contentHash,
+      expectedContentHash: first.contentHash, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES,
     });
 
     const rows = await sql<{ block_id: string; split_from: string | null }[]>`
@@ -95,7 +95,7 @@ describe('reconcileDerived — split provenance', () => {
 describe('reconcileDerived — chain compression', () => {
   async function seedPageWithBlocks(): Promise<{ workspaceId: string; nodeId: string }> {
     const { workspaceId, nodeId } = await seedPageNode();
-    await savePage(sql, { nodeId, workspaceId, markdown: 'A page with no anchors at all.\n', expectedContentHash: null });
+    await savePage(sql, { nodeId, workspaceId, markdown: 'A page with no anchors at all.\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
     return { workspaceId, nodeId };
   }
 
@@ -129,7 +129,7 @@ describe('reconcileDerived — chain compression', () => {
       nodeId,
       workspaceId,
       markdown: 'A page with no anchors at all.\n',
-      expectedContentHash: row!.content_hash,
+      expectedContentHash: row!.content_hash, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES,
     });
 
     const rows = await sql<{ block_id: string; superseded_by: string | null }[]>`
@@ -160,7 +160,7 @@ describe('reconcileDerived — chain compression', () => {
         nodeId,
         workspaceId,
         markdown: 'A page with no anchors at all.\n',
-        expectedContentHash: row!.content_hash,
+        expectedContentHash: row!.content_hash, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES,
       }),
     ).rejects.toThrow(ChainCompressionError);
   });
@@ -181,7 +181,7 @@ describe('reconcileDerived — chain compression', () => {
         nodeId,
         workspaceId,
         markdown: 'A page with no anchors at all.\n',
-        expectedContentHash: row!.content_hash,
+        expectedContentHash: row!.content_hash, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES,
       }),
     ).rejects.toThrow(ChainCompressionError);
   });
@@ -215,10 +215,10 @@ describe('reconcileDerived — a dead anchor reintroduced into the Markdown', ()
   test('a tombstoned id stays tombstoned when its anchor is pasted back into the same page', async () => {
     const { workspaceId, nodeId } = await seedPageNode();
 
-    await savePage(sql, { nodeId, workspaceId, markdown: `${WITH_ANCHOR}\n${FILLER}`, expectedContentHash: null });
+    await savePage(sql, { nodeId, workspaceId, markdown: `${WITH_ANCHOR}\n${FILLER}`, expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
     // Delete the anchored paragraph: matchBlocks scores it against nothing
     // it recognises, so the id is tombstoned.
-    await savePage(sql, { nodeId, workspaceId, markdown: FILLER, expectedContentHash: await currentHash(nodeId) });
+    await savePage(sql, { nodeId, workspaceId, markdown: FILLER, expectedContentHash: await currentHash(nodeId), changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
     expect((await statusOf(nodeId, 'abc1234567'))!.status).toBe('tombstoned');
 
     // The author pastes the paragraph back, literal ` ^abc1234567` and all
@@ -228,7 +228,7 @@ describe('reconcileDerived — a dead anchor reintroduced into the Markdown', ()
     const reintroduced = `${FILLER}\n${WITH_ANCHOR}`;
     let refusal: DeadAnchorError | undefined;
     try {
-      await savePage(sql, { nodeId, workspaceId, markdown: reintroduced, expectedContentHash: hashBefore });
+      await savePage(sql, { nodeId, workspaceId, markdown: reintroduced, expectedContentHash: hashBefore, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
     } catch (error) {
       refusal = error as DeadAnchorError;
     }
@@ -247,15 +247,15 @@ describe('reconcileDerived — a dead anchor reintroduced into the Markdown', ()
   test('the refusal hands back a canonical document the author can re-save', async () => {
     const { workspaceId, nodeId } = await seedPageNode();
 
-    await savePage(sql, { nodeId, workspaceId, markdown: `${WITH_ANCHOR}\n${FILLER}`, expectedContentHash: null });
-    await savePage(sql, { nodeId, workspaceId, markdown: FILLER, expectedContentHash: await currentHash(nodeId) });
+    await savePage(sql, { nodeId, workspaceId, markdown: `${WITH_ANCHOR}\n${FILLER}`, expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
+    await savePage(sql, { nodeId, workspaceId, markdown: FILLER, expectedContentHash: await currentHash(nodeId), changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
 
     const reintroduced = `${FILLER}\n${WITH_ANCHOR}`;
     const refusal = (await savePage(sql, {
       nodeId,
       workspaceId,
       markdown: reintroduced,
-      expectedContentHash: await currentHash(nodeId),
+      expectedContentHash: await currentHash(nodeId), changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES,
     }).catch((error: unknown) => error)) as DeadAnchorError;
 
     // The correction drops the dead anchor and nothing else: the author's
@@ -272,7 +272,7 @@ describe('reconcileDerived — a dead anchor reintroduced into the Markdown', ()
       nodeId,
       workspaceId,
       markdown: refusal.corrected,
-      expectedContentHash: await currentHash(nodeId),
+      expectedContentHash: await currentHash(nodeId), changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES,
     });
     expect(accepted.contentHash).toBeTruthy();
     expect((await statusOf(nodeId, 'abc1234567'))!.status).toBe('tombstoned');
@@ -284,8 +284,8 @@ describe('reconcileDerived — a dead anchor reintroduced into the Markdown', ()
     const separate = 'Apples and oranges are tasty fruits. ^aaa1111111\n\nBananas and mangoes are also delicious. ^bbb2222222\n';
     const merged = 'Apples and oranges are tasty fruits. Bananas and mangoes are also delicious. ^aaa1111111\n';
 
-    await savePage(sql, { nodeId, workspaceId, markdown: separate, expectedContentHash: null });
-    await savePage(sql, { nodeId, workspaceId, markdown: merged, expectedContentHash: await currentHash(nodeId) });
+    await savePage(sql, { nodeId, workspaceId, markdown: separate, expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
+    await savePage(sql, { nodeId, workspaceId, markdown: merged, expectedContentHash: await currentHash(nodeId), changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
 
     const afterMerge = await statusOf(nodeId, 'bbb2222222');
     expect(afterMerge!.status).toBe('superseded');
@@ -298,7 +298,7 @@ describe('reconcileDerived — a dead anchor reintroduced into the Markdown', ()
       nodeId,
       workspaceId,
       markdown: `${merged}\n${FILLER}\nBananas and mangoes are also delicious. ^bbb2222222\n`,
-      expectedContentHash: await currentHash(nodeId),
+      expectedContentHash: await currentHash(nodeId), changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES,
     }).catch((error: unknown) => error)) as DeadAnchorError;
 
     expect(refusal).toBeInstanceOf(DeadAnchorError);
@@ -321,7 +321,7 @@ describe('reconcileDerived — a dead anchor reintroduced into the Markdown', ()
 describe('page_blocks — retirement is terminal in the database itself', () => {
   async function seedRetiredBlock(status: 'superseded' | 'tombstoned') {
     const { workspaceId, nodeId } = await seedPageNode();
-    await savePage(sql, { nodeId, workspaceId, markdown: 'A page with no anchors at all.\n', expectedContentHash: null });
+    await savePage(sql, { nodeId, workspaceId, markdown: 'A page with no anchors at all.\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
     if (status === 'superseded') {
       await sql`
         INSERT INTO page_blocks (page_id, workspace_id, block_id, status, content_hash, excerpt)

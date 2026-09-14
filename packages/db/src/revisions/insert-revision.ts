@@ -18,8 +18,14 @@ export interface WriteRevisionInput {
   readonly contentHash: string;
   readonly blockIndex: BlockIndex;
   readonly updatedBy?: string;
-  /** Omitted entirely to skip changeset resolution (see `SavePageInput.changesetWindowMinutes`). */
-  readonly changesetWindowMinutes?: number;
+  /**
+   * Required (see `SavePageInput.changesetWindowMinutes`): every caller
+   * threads a real value, so a book-scoped, authored save can never
+   * silently skip changeset resolution. Only `updatedBy`'s presence, and
+   * whether the page resolves to a book ancestor, decide whether a
+   * changeset is actually opened/joined.
+   */
+  readonly changesetWindowMinutes: number;
 }
 
 export interface WriteRevisionResult {
@@ -35,7 +41,7 @@ export interface WriteRevisionResult {
 export async function writeRevision(tx: SqlExecutor, input: WriteRevisionInput): Promise<WriteRevisionResult> {
   let changesetId: string | null = null;
 
-  if (input.updatedBy && input.changesetWindowMinutes !== undefined) {
+  if (input.updatedBy) {
     const bookId = await resolveBookId(tx, { nodeId: input.nodeId, workspaceId: input.workspaceId });
     if (bookId) {
       changesetId = await resolveChangeset(tx, {

@@ -62,6 +62,13 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
   const seedOutput = execFileSync('bun', ['run', 'e2e/seed.bun.ts'], {
     cwd: REPO_ROOT,
     encoding: 'utf8',
+    // `savePage()`'s `changesetWindowMinutes` is required now — seed.bun.ts
+    // threads it from this env var rather than hardcoding a number at each
+    // call site. `env.example`'s own value (30) is the only place the
+    // number is meant to exist; this is a copy of that fact for the seed
+    // script's own environment, the same precedent already set below for
+    // the spawned `apps/api` process.
+    env: { ...process.env, CHANGESET_WINDOW_MINUTES: '30' },
   });
   const seed: SeedResult = JSON.parse(seedOutput.trim().split('\n').pop()!);
 

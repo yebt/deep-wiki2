@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import postgres from 'postgres';
-import { provisionTestDatabase, type ProvisionedTestDatabase } from '../../testing/provision';
+import { provisionTestDatabase, TEST_CHANGESET_WINDOW_MINUTES, type ProvisionedTestDatabase } from '../../testing/provision';
 import { savePage } from '../content/save-page';
 
 let db: ProvisionedTestDatabase;
@@ -84,7 +84,7 @@ describe('page_revision — tenant isolation', () => {
     const workspaceA = await seedWorkspace();
     const workspaceB = await seedWorkspace();
     const pageInA = await seedPage(workspaceA.workspaceId, workspaceA.rootId);
-    await savePage(sql, { nodeId: pageInA, workspaceId: workspaceA.workspaceId, markdown: '# A\n', expectedContentHash: null });
+    await savePage(sql, { nodeId: pageInA, workspaceId: workspaceA.workspaceId, markdown: '# A\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
 
     await expect(
       (async () => {
@@ -100,7 +100,7 @@ describe('page_revision — tenant isolation', () => {
     const workspaceA = await seedWorkspace();
     const workspaceB = await seedWorkspace();
     const pageInA = await seedPage(workspaceA.workspaceId, workspaceA.rootId);
-    await savePage(sql, { nodeId: pageInA, workspaceId: workspaceA.workspaceId, markdown: '# A\n', expectedContentHash: null });
+    await savePage(sql, { nodeId: pageInA, workspaceId: workspaceA.workspaceId, markdown: '# A\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
 
     const bookInB = await seedBook(workspaceB.workspaceId, workspaceB.rootId);
     const authorB = await seedUser();
@@ -119,7 +119,7 @@ describe('page_revision — tenant isolation', () => {
   test('a same-tenant page_revision insert succeeds', async () => {
     const workspaceA = await seedWorkspace();
     const pageInA = await seedPage(workspaceA.workspaceId, workspaceA.rootId);
-    await savePage(sql, { nodeId: pageInA, workspaceId: workspaceA.workspaceId, markdown: '# A\n', expectedContentHash: null });
+    await savePage(sql, { nodeId: pageInA, workspaceId: workspaceA.workspaceId, markdown: '# A\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
 
     const rows = await sql`
       INSERT INTO page_revision (workspace_id, page_id, content, content_hash)
@@ -137,7 +137,7 @@ describe('page_revision — immutability', () => {
   test('an UPDATE on an existing page_revision row raises', async () => {
     const workspaceA = await seedWorkspace();
     const pageInA = await seedPage(workspaceA.workspaceId, workspaceA.rootId);
-    await savePage(sql, { nodeId: pageInA, workspaceId: workspaceA.workspaceId, markdown: '# A\n', expectedContentHash: null });
+    await savePage(sql, { nodeId: pageInA, workspaceId: workspaceA.workspaceId, markdown: '# A\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
 
     const [revision] = await sql<{ id: string }[]>`
       INSERT INTO page_revision (workspace_id, page_id, content, content_hash)

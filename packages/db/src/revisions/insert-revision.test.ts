@@ -129,23 +129,45 @@ describe('writeRevision', () => {
     expect(row!.changeset_id).toBeNull();
   });
 
-  test('writes a revision with a null changeset when changesetWindowMinutes is omitted', async () => {
+  // The real bug (versioning-and-collaboration Phase 3 apply log): making
+  // `changesetWindowMinutes` optional meant a book-scoped, authored save
+  // that omitted it silently skipped changeset resolution entirely rather
+  // than erroring — a book-scoped save then grouped nothing and said
+  // nothing, and the book-history e2e seed produced zero changesets this
+  // way, caught only by a direct DB query. `changesetWindowMinutes` is
+  // required in `WriteRevisionInput` now (no `?`), so this omission is a
+  // TypeScript error at every real call site; this test additionally
+  // proves that a caller who bypasses the type system (e.g. untyped JS, or
+  // an `as any` cast) still fails LOUDLY at runtime rather than silently —
+  // `resolveChangeset`'s own SQL template rejects an `undefined` bound
+  // parameter.
+  test('a book-scoped, authored save throws rather than silently skipping changeset resolution when changesetWindowMinutes is missing at runtime', async () => {
     const { workspaceId, rootId } = await seedWorkspace();
     const bookId = await seedBook(workspaceId, rootId);
     const pageId = await seedPageUnder(workspaceId, bookId);
+    const authorId = await seedUser();
     await sql`
       INSERT INTO page_content (node_id, workspace_id, markdown, content_hash)
       VALUES (${pageId}, ${workspaceId}, '# Hi\n', 'hash-3')
     `;
 
-    const result = await writeRevision(sql, {
+    const inputMissingWindow = {
       nodeId: pageId,
       workspaceId,
       content: '# Hi\n',
       contentHash: 'hash-3',
       blockIndex: {},
-    });
+      updatedBy: authorId,
+      // Deliberately absent — simulates a caller that bypasses the type
+      // system. `as never` documents that this is intentionally invalid,
+      // not an accidental omission.
+    } as unknown as Parameters<typeof writeRevision>[1];
 
-    expect(result.changesetId).toBeNull();
+    await expect(writeRevision(sql, inputMissingWindow)).rejects.toThrow();
+
+    const [row] = await sql<{ changeset_id: string | null }[]>`
+      SELECT changeset_id FROM page_revision WHERE page_id = ${pageId}
+    `;
+    expect(row).toBeUndefined();
   });
 });

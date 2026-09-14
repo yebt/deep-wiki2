@@ -15,6 +15,8 @@ import { createRevisionRoutes } from './revisions';
 let db: ProvisionedTestDatabase;
 let sql: postgres.Sql;
 
+const WINDOW_MINUTES = 30;
+
 beforeAll(async () => {
   db = await provisionTestDatabase();
   sql = postgres(db.url, { max: 10 });
@@ -83,14 +85,14 @@ describe('GET /pages/:id/history', () => {
       workspaceId: fixture.workspaceId,
       markdown: '# One\n',
       expectedContentHash: null,
-      updatedBy: fixture.authorId,
+      updatedBy: fixture.authorId, changesetWindowMinutes: WINDOW_MINUTES,
     });
     await savePage(sql, {
       nodeId: fixture.pageId,
       workspaceId: fixture.workspaceId,
       markdown: '# Two\n',
       expectedContentHash: first.contentHash,
-      updatedBy: fixture.authorId,
+      updatedBy: fixture.authorId, changesetWindowMinutes: WINDOW_MINUTES,
     });
 
     const app = buildApp();
@@ -109,7 +111,7 @@ describe('GET /pages/:id/history', () => {
 
   test('a subject with no read grant receives the same 404 as a nonexistent page', async () => {
     const fixture = await buildFixture();
-    await savePage(sql, { nodeId: fixture.pageId, workspaceId: fixture.workspaceId, markdown: '# One\n', expectedContentHash: null, updatedBy: fixture.authorId });
+    await savePage(sql, { nodeId: fixture.pageId, workspaceId: fixture.workspaceId, markdown: '# One\n', expectedContentHash: null, updatedBy: fixture.authorId, changesetWindowMinutes: WINDOW_MINUTES });
 
     const app = buildApp();
     const deniedRes = await app.request(`/pages/${fixture.pageId}/history`, { headers: { cookie: fixture.outsiderCookie } });
@@ -124,8 +126,6 @@ describe('GET /pages/:id/history', () => {
 // changesets spec: "Book-Level History Is One Query" — the input the
 // book-level diff screen needs.
 describe('GET /books/:id/history', () => {
-  const WINDOW_MINUTES = 30;
-
   async function seedBookFixture() {
     const owner = await seedUser('Owner');
     const reader = await seedUser('Reader');

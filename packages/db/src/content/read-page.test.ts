@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import postgres from 'postgres';
-import { provisionTestDatabase, type ProvisionedTestDatabase } from '../../testing/provision';
+import { provisionTestDatabase, TEST_CHANGESET_WINDOW_MINUTES, type ProvisionedTestDatabase } from '../../testing/provision';
 import { readPageHtml, readPageMarkdown } from './read-page';
 import { savePage } from './save-page';
 
@@ -39,7 +39,7 @@ async function seedSavedPage(markdown: string) {
     VALUES (${workspace!.id}, ${root!.id}, 'page', '', 0, ${`page-${crypto.randomUUID()}`}, 'A Page') RETURNING id
   `;
   const ref = { workspaceId: workspace!.id as string, nodeId: page!.id as string };
-  await savePage(sql, { ...ref, markdown, expectedContentHash: null });
+  await savePage(sql, { ...ref, markdown, expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
   return ref;
 }
 

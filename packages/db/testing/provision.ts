@@ -43,6 +43,23 @@ import {
   type HarnessIdentity,
 } from './worktree';
 
+/**
+ * `SavePageInput.changesetWindowMinutes`/`WriteRevisionInput.changesetWindowMinutes`
+ * are required (versioning-and-collaboration Phase 3 apply log's deferred
+ * fix): every `savePage()`/`writeRevision()` caller must thread a real
+ * value now, including the many tests in this package and `apps/api` that
+ * do not care about changeset grouping at all (a page with no book
+ * ancestor never joins one regardless of the value). This is that value —
+ * one arbitrary, positive test constant, imported everywhere a test needs
+ * "a" window, rather than a bare `30` (or some other number) retyped at
+ * every call site. It is deliberately unrelated to `CHANGESET_WINDOW_MINUTES`
+ * in `packages/contracts/src/env.ts` — that is the single source of the
+ * *production* default; `packages/db` never reads env, so its own tests
+ * cannot import that value and do not need to: only its positivity matters
+ * here, never its magnitude.
+ */
+export const TEST_CHANGESET_WINDOW_MINUTES = 30;
+
 export const TEST_DB_PREFIX = 'dw_test_';
 const TEMPLATE_DB_NAME = 'deepwiki_test_template';
 const COMPOSE_DIR = import.meta.dir;

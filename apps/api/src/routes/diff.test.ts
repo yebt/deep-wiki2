@@ -66,13 +66,13 @@ describe('GET /pages/:id/diff', () => {
       VALUES (${ws!.id}, 'user', ${reader}, ${page!.id}, 'read', 'allow')
     `;
 
-    const first = await savePage(sql, { nodeId: page!.id, workspaceId: ws!.id, markdown: 'One paragraph.\n', expectedContentHash: null, updatedBy: owner });
+    const first = await savePage(sql, { nodeId: page!.id, workspaceId: ws!.id, markdown: 'One paragraph.\n', expectedContentHash: null, updatedBy: owner, changesetWindowMinutes: WINDOW_MINUTES });
     const second = await savePage(sql, {
       nodeId: page!.id,
       workspaceId: ws!.id,
       markdown: 'One paragraph.\n\nA brand new paragraph.\n',
       expectedContentHash: first.contentHash,
-      updatedBy: owner,
+      updatedBy: owner, changesetWindowMinutes: WINDOW_MINUTES,
     });
     void second;
 
@@ -145,14 +145,14 @@ describe('GET /pages/:id/diff', () => {
       workspaceId: ws!.id,
       markdown: 'First paragraph about apples.\n\nSecond paragraph about bananas.\n',
       expectedContentHash: null,
-      updatedBy: owner,
+      updatedBy: owner, changesetWindowMinutes: WINDOW_MINUTES,
     });
     await savePage(sql, {
       nodeId: page!.id,
       workspaceId: ws!.id,
       markdown: 'Second paragraph about bananas.\n\nFirst paragraph about apples.\n',
       expectedContentHash: first.contentHash,
-      updatedBy: owner,
+      updatedBy: owner, changesetWindowMinutes: WINDOW_MINUTES,
     });
     const historyRows = await sql<{ id: string }[]>`
       SELECT id FROM page_revision WHERE page_id = ${page!.id} ORDER BY created_at ASC

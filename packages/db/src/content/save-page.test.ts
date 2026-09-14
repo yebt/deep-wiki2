@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import postgres from 'postgres';
-import { provisionTestDatabase, type ProvisionedTestDatabase } from '../../testing/provision';
+import { provisionTestDatabase, TEST_CHANGESET_WINDOW_MINUTES, type ProvisionedTestDatabase } from '../../testing/provision';
 import { CURRENT_PIPELINE_VERSION } from '@deep-wiki/markdown';
 import { NotCanonicalError, savePage, StaleContentError } from './save-page';
 
@@ -57,7 +57,7 @@ describe('savePage', () => {
   test('saving persists the submitted markdown unchanged', async () => {
     const { workspaceId, nodeId } = await seedPageNode();
 
-    await savePage(sql, { nodeId, workspaceId, markdown: '# Hello\n', expectedContentHash: null });
+    await savePage(sql, { nodeId, workspaceId, markdown: '# Hello\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
 
     const [row] = await sql`SELECT markdown FROM page_content WHERE node_id = ${nodeId}`;
     expect(row!.markdown).toBe('# Hello\n');
@@ -65,13 +65,13 @@ describe('savePage', () => {
 
   test('re-saving overwrites with no historical row', async () => {
     const { workspaceId, nodeId } = await seedPageNode();
-    const first = await savePage(sql, { nodeId, workspaceId, markdown: '# First\n', expectedContentHash: null });
+    const first = await savePage(sql, { nodeId, workspaceId, markdown: '# First\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
 
     await savePage(sql, {
       nodeId,
       workspaceId,
       markdown: '# Second\n',
-      expectedContentHash: first.contentHash,
+      expectedContentHash: first.contentHash, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES,
     });
 
     const rows = await sql`SELECT markdown FROM page_content WHERE node_id = ${nodeId}`;
@@ -82,7 +82,7 @@ describe('savePage', () => {
   test('save regenerates rendered_html and block_index from the new content', async () => {
     const { workspaceId, nodeId } = await seedPageNode();
 
-    const result = await savePage(sql, { nodeId, workspaceId, markdown: '# Hi\n', expectedContentHash: null });
+    const result = await savePage(sql, { nodeId, workspaceId, markdown: '# Hi\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
 
     expect(result.renderedHtml).toContain('<h1>');
     expect(result.renderedHtml).toContain('Hi');
@@ -99,16 +99,16 @@ describe('savePage', () => {
     // all — this is a structural guarantee, not a runtime filter. Confirmed
     // here by construction: only `markdown` and the concurrency guard are
     // accepted.
-    const result = await savePage(sql, { nodeId, workspaceId, markdown: 'Body.\n', expectedContentHash: null });
+    const result = await savePage(sql, { nodeId, workspaceId, markdown: 'Body.\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
     expect(Object.keys(result).sort()).toEqual(['blockIndex', 'contentHash', 'renderedHtml']);
   });
 
   test('a stale expected content hash is rejected without writing', async () => {
     const { workspaceId, nodeId } = await seedPageNode();
-    await savePage(sql, { nodeId, workspaceId, markdown: '# First\n', expectedContentHash: null });
+    await savePage(sql, { nodeId, workspaceId, markdown: '# First\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
 
     await expect(
-      savePage(sql, { nodeId, workspaceId, markdown: '# Second\n', expectedContentHash: 'wrong-hash' }),
+      savePage(sql, { nodeId, workspaceId, markdown: '# Second\n', expectedContentHash: 'wrong-hash', changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES, }),
     ).rejects.toThrow(StaleContentError);
 
     const [row] = await sql`SELECT markdown FROM page_content WHERE node_id = ${nodeId}`;
@@ -120,7 +120,7 @@ describe('savePage', () => {
 
     // '*' is not the pinned bullet marker.
     await expect(
-      savePage(sql, { nodeId, workspaceId, markdown: '* one\n* two\n', expectedContentHash: null }),
+      savePage(sql, { nodeId, workspaceId, markdown: '* one\n* two\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES, }),
     ).rejects.toThrow(NotCanonicalError);
   });
 });
@@ -134,7 +134,7 @@ describe('savePage — pipeline_version', () => {
   test('an INSERT save writes the current pipeline version, not the column default', async () => {
     const { workspaceId, nodeId } = await seedPageNode();
 
-    await savePage(sql, { nodeId, workspaceId, markdown: '# Hello\n', expectedContentHash: null });
+    await savePage(sql, { nodeId, workspaceId, markdown: '# Hello\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
 
     const [row] = await sql<{ pipeline_version: number }[]>`
       SELECT pipeline_version FROM page_content WHERE node_id = ${nodeId}
@@ -144,13 +144,13 @@ describe('savePage — pipeline_version', () => {
 
   test('an UPDATE save also writes the current pipeline version', async () => {
     const { workspaceId, nodeId } = await seedPageNode();
-    const first = await savePage(sql, { nodeId, workspaceId, markdown: '# First\n', expectedContentHash: null });
+    const first = await savePage(sql, { nodeId, workspaceId, markdown: '# First\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
 
     await savePage(sql, {
       nodeId,
       workspaceId,
       markdown: '# Second\n',
-      expectedContentHash: first.contentHash,
+      expectedContentHash: first.contentHash, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES,
     });
 
     const [row] = await sql<{ pipeline_version: number }[]>`
@@ -173,7 +173,7 @@ describe('savePage — derived links', () => {
       nodeId,
       workspaceId,
       markdown: 'See [[Target A]] and [[Target B]].\n',
-      expectedContentHash: null,
+      expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES,
     });
 
     let rows = await sql<{ target_page_id: string }[]>`
@@ -185,7 +185,7 @@ describe('savePage — derived links', () => {
       nodeId,
       workspaceId,
       markdown: 'Only [[Target A]] remains.\n',
-      expectedContentHash: first.contentHash,
+      expectedContentHash: first.contentHash, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES,
     });
 
     rows = await sql`SELECT target_page_id FROM links WHERE source_page_id = ${nodeId}`;
@@ -200,7 +200,7 @@ describe('savePage — derived links', () => {
       nodeId,
       workspaceId,
       markdown: 'See [[No Such Page]].\n',
-      expectedContentHash: null,
+      expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES,
     });
 
     expect(result.contentHash).toBeTruthy();
@@ -217,7 +217,7 @@ describe('savePage — derived tags', () => {
   test('a new tag is created on save and the page is linked to it', async () => {
     const { workspaceId, nodeId } = await seedPageNode();
 
-    await savePage(sql, { nodeId, workspaceId, markdown: 'Body #project text.\n', expectedContentHash: null });
+    await savePage(sql, { nodeId, workspaceId, markdown: 'Body #project text.\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
 
     const [tag] = await sql<{ id: string }[]>`SELECT id FROM tags WHERE workspace_id = ${workspaceId} AND name = 'project'`;
     expect(tag).toBeTruthy();
@@ -227,9 +227,9 @@ describe('savePage — derived tags', () => {
 
   test('a removed tag drops its page_tags association', async () => {
     const { workspaceId, nodeId } = await seedPageNode();
-    const first = await savePage(sql, { nodeId, workspaceId, markdown: 'Body #project text.\n', expectedContentHash: null });
+    const first = await savePage(sql, { nodeId, workspaceId, markdown: 'Body #project text.\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
 
-    await savePage(sql, { nodeId, workspaceId, markdown: 'Body without the tag.\n', expectedContentHash: first.contentHash });
+    await savePage(sql, { nodeId, workspaceId, markdown: 'Body without the tag.\n', expectedContentHash: first.contentHash, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
 
     const rows = await sql`SELECT 1 AS x FROM page_tags WHERE page_id = ${nodeId}`;
     expect(rows).toHaveLength(0);
@@ -247,7 +247,7 @@ describe('savePage — block reconciliation', () => {
       nodeId,
       workspaceId,
       markdown: 'This is the tracked paragraph with enough distinct words to match reliably. ^abc123\n',
-      expectedContentHash: null,
+      expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES,
     });
 
     let rows = await sql<{ status: string }[]>`SELECT status FROM page_blocks WHERE page_id = ${nodeId} AND block_id = 'abc123'`;
@@ -258,7 +258,7 @@ describe('savePage — block reconciliation', () => {
       nodeId,
       workspaceId,
       markdown: 'Nothing here resembles that original wording whatsoever anymore.\n',
-      expectedContentHash: first.contentHash,
+      expectedContentHash: first.contentHash, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES,
     });
 
     rows = await sql`SELECT status FROM page_blocks WHERE page_id = ${nodeId} AND block_id = 'abc123'`;
@@ -275,7 +275,7 @@ describe('savePage — revisions', () => {
   test('a successful save writes exactly one new page_revision row matching the saved content', async () => {
     const { workspaceId, nodeId } = await seedPageNode();
 
-    const result = await savePage(sql, { nodeId, workspaceId, markdown: '# Hello\n', expectedContentHash: null });
+    const result = await savePage(sql, { nodeId, workspaceId, markdown: '# Hello\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
 
     const rows = await sql<{ content: string; content_hash: string }[]>`
       SELECT content, content_hash FROM page_revision WHERE page_id = ${nodeId}
@@ -287,9 +287,9 @@ describe('savePage — revisions', () => {
 
   test('a second save writes a second revision, leaving the first untouched', async () => {
     const { workspaceId, nodeId } = await seedPageNode();
-    const first = await savePage(sql, { nodeId, workspaceId, markdown: '# First\n', expectedContentHash: null });
+    const first = await savePage(sql, { nodeId, workspaceId, markdown: '# First\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
 
-    await savePage(sql, { nodeId, workspaceId, markdown: '# Second\n', expectedContentHash: first.contentHash });
+    await savePage(sql, { nodeId, workspaceId, markdown: '# Second\n', expectedContentHash: first.contentHash, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
 
     const rows = await sql<{ content: string }[]>`
       SELECT content FROM page_revision WHERE page_id = ${nodeId} ORDER BY created_at ASC
@@ -300,10 +300,10 @@ describe('savePage — revisions', () => {
 
   test('a failed save (stale content hash) writes neither page_content nor page_revision', async () => {
     const { workspaceId, nodeId } = await seedPageNode();
-    await savePage(sql, { nodeId, workspaceId, markdown: '# First\n', expectedContentHash: null });
+    await savePage(sql, { nodeId, workspaceId, markdown: '# First\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
 
     await expect(
-      savePage(sql, { nodeId, workspaceId, markdown: '# Second\n', expectedContentHash: 'wrong-hash' }),
+      savePage(sql, { nodeId, workspaceId, markdown: '# Second\n', expectedContentHash: 'wrong-hash', changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES, }),
     ).rejects.toThrow(StaleContentError);
 
     const revisionRows = await sql`SELECT 1 AS x FROM page_revision WHERE page_id = ${nodeId} AND content = '# Second\n'`;

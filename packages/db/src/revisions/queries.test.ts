@@ -7,7 +7,7 @@
  */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import postgres from 'postgres';
-import { provisionTestDatabase, type ProvisionedTestDatabase } from '../../testing/provision';
+import { provisionTestDatabase, TEST_CHANGESET_WINDOW_MINUTES, type ProvisionedTestDatabase } from '../../testing/provision';
 import { savePage } from '../content/save-page';
 import { getRevisionsByIds, listPageRevisions } from './queries';
 
@@ -45,13 +45,13 @@ async function seedPage(): Promise<{ workspaceId: string; pageId: string; author
 describe('listPageRevisions', () => {
   test('returns a page\'s revisions newest first', async () => {
     const { workspaceId, pageId, authorId } = await seedPage();
-    const first = await savePage(sql, { nodeId: pageId, workspaceId, markdown: '# One\n', expectedContentHash: null, updatedBy: authorId });
+    const first = await savePage(sql, { nodeId: pageId, workspaceId, markdown: '# One\n', expectedContentHash: null, updatedBy: authorId, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
     const second = await savePage(sql, {
       nodeId: pageId,
       workspaceId,
       markdown: '# Two\n',
       expectedContentHash: first.contentHash,
-      updatedBy: authorId,
+      updatedBy: authorId, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES,
     });
     void second;
 
@@ -75,7 +75,7 @@ describe('listPageRevisions', () => {
 
   test('carries the author\'s display name, not just their id, for the history screen to render "who"', async () => {
     const { workspaceId, pageId, authorId } = await seedPage();
-    await savePage(sql, { nodeId: pageId, workspaceId, markdown: '# One\n', expectedContentHash: null, updatedBy: authorId });
+    await savePage(sql, { nodeId: pageId, workspaceId, markdown: '# One\n', expectedContentHash: null, updatedBy: authorId, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
 
     const [revision] = await listPageRevisions(sql, { pageId, workspaceId });
 
@@ -85,7 +85,7 @@ describe('listPageRevisions', () => {
 
   test('a save with no author has a null display name, not a crash or an empty-string join artefact', async () => {
     const { workspaceId, pageId } = await seedPage();
-    await savePage(sql, { nodeId: pageId, workspaceId, markdown: '# One\n', expectedContentHash: null });
+    await savePage(sql, { nodeId: pageId, workspaceId, markdown: '# One\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
 
     const [revision] = await listPageRevisions(sql, { pageId, workspaceId });
 
@@ -97,13 +97,13 @@ describe('listPageRevisions', () => {
 describe('getRevisionsByIds', () => {
   test('returns each requested revision\'s own content, not the other side\'s', async () => {
     const { workspaceId, pageId, authorId } = await seedPage();
-    const first = await savePage(sql, { nodeId: pageId, workspaceId, markdown: '# First content\n', expectedContentHash: null, updatedBy: authorId });
+    const first = await savePage(sql, { nodeId: pageId, workspaceId, markdown: '# First content\n', expectedContentHash: null, updatedBy: authorId, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
     await savePage(sql, {
       nodeId: pageId,
       workspaceId,
       markdown: '# Second content\n',
       expectedContentHash: first.contentHash,
-      updatedBy: authorId,
+      updatedBy: authorId, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES,
     });
     const revisions = await listPageRevisions(sql, { pageId, workspaceId });
     const [newest, oldest] = revisions;

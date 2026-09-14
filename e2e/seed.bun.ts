@@ -30,6 +30,17 @@ async function hashPassword(): Promise<string> {
   return Bun.password.hash(ONBOARDING_PASSWORD, { algorithm: 'argon2id', memoryCost: 19_456, timeCost: 2 });
 }
 
+// `SavePageInput.changesetWindowMinutes` is required — `packages/db` never
+// reads env, so every save below threads this. `global-setup.ts` sets this
+// env var on this script's own process (matching the one it sets for the
+// spawned `apps/api` process); it is not read from `.env` directly so this
+// script keeps working the same way whether or not a developer's own `.env`
+// happens to be loaded in their shell.
+const CHANGESET_WINDOW_MINUTES = Number(process.env.CHANGESET_WINDOW_MINUTES);
+if (!Number.isFinite(CHANGESET_WINDOW_MINUTES) || CHANGESET_WINDOW_MINUTES <= 0) {
+  throw new Error('seed.bun.ts: CHANGESET_WINDOW_MINUTES is not set on this process — global-setup.ts must set it.');
+}
+
 async function seedFixtures(sql: postgres.Sql) {
   const [owner] = await sql<{ id: string }[]>`
     INSERT INTO users (email, password_hash, display_name)
@@ -112,7 +123,7 @@ async function seedFixtures(sql: postgres.Sql) {
     nodeId: readPage!.id,
     workspaceId: ws!.id,
     markdown: '## Overview\n\nRead mode serves this exact content, cached, without reparsing.\n',
-    expectedContentHash: null,
+    expectedContentHash: null, changesetWindowMinutes: CHANGESET_WINDOW_MINUTES,
   });
 
   const [readerUser] = await sql<{ id: string }[]>`
@@ -171,7 +182,7 @@ async function seedFixtures(sql: postgres.Sql) {
       'A paragraph about apples that will move down in the next revision.\n\n' +
       'A paragraph about bananas that will be removed entirely.\n',
     expectedContentHash: null,
-    updatedBy: owner!.id,
+    updatedBy: owner!.id, changesetWindowMinutes: CHANGESET_WINDOW_MINUTES,
   });
   await savePage(sql, {
     nodeId: historyPage!.id,
@@ -182,7 +193,7 @@ async function seedFixtures(sql: postgres.Sql) {
       'A brand new paragraph about kiwis, added in this revision.\n\n' +
       'A paragraph about apples that will move down in the next revision.\n',
     expectedContentHash: historyFirstSave.contentHash,
-    updatedBy: owner!.id,
+    updatedBy: owner!.id, changesetWindowMinutes: CHANGESET_WINDOW_MINUTES,
   });
   await insertGrants(sql, ws!.id, 'user', readerUser!.id, [{ resourceId: historyPage!.id, action: 'read', effect: 'allow' }]);
 
@@ -248,11 +259,10 @@ async function seedFixtures(sql: postgres.Sql) {
   // paragraph, deliberately different content, so navigating "Next" from
   // Page A to Page B is provably showing a DIFFERENT page rather than a
   // re-render of the first (the trap named explicitly in tasks.md 10.5).
-  // `changesetWindowMinutes` MUST be passed explicitly — `writeRevision()`
-  // (packages/db/src/revisions/insert-revision.ts) only resolves a book and
-  // a changeset when it is not `undefined`; every save below passes 30,
-  // matching `env.example`'s `CHANGESET_WINDOW_MINUTES` and
-  // `global-setup.ts`'s API env var, the one place this number exists.
+  // `changesetWindowMinutes` is required on every `savePage()` call now
+  // (see the module-level `CHANGESET_WINDOW_MINUTES` constant above) — a
+  // book-scoped, authored save can no longer silently skip changeset
+  // resolution by omitting it.
   const bookPageASave1 = await savePage(sql, {
     nodeId: bookPageA!.id,
     workspaceId: ws!.id,
@@ -263,7 +273,7 @@ async function seedFixtures(sql: postgres.Sql) {
       'A paragraph about grapefruit that will be removed entirely.\n',
     expectedContentHash: null,
     updatedBy: owner!.id,
-    changesetWindowMinutes: 30,
+    changesetWindowMinutes: CHANGESET_WINDOW_MINUTES,
   });
   const bookPageBSave1 = await savePage(sql, {
     nodeId: bookPageB!.id,
@@ -271,7 +281,7 @@ async function seedFixtures(sql: postgres.Sql) {
     markdown: '## Book page beta\n\nThe page as it was first saved, with no edits yet.\n',
     expectedContentHash: null,
     updatedBy: owner!.id,
-    changesetWindowMinutes: 30,
+    changesetWindowMinutes: CHANGESET_WINDOW_MINUTES,
   });
 
   // The book-diff "since" boundary: captured from the database's own
@@ -307,7 +317,7 @@ async function seedFixtures(sql: postgres.Sql) {
       'A paragraph about oranges that will move down in the next revision.\n',
     expectedContentHash: bookPageASave1.contentHash,
     updatedBy: owner!.id,
-    changesetWindowMinutes: 30,
+    changesetWindowMinutes: CHANGESET_WINDOW_MINUTES,
   });
   await savePage(sql, {
     nodeId: bookPageB!.id,
@@ -315,7 +325,7 @@ async function seedFixtures(sql: postgres.Sql) {
     markdown: '## Book page beta\n\nThe page as it was first saved, now with one small edit.\n',
     expectedContentHash: bookPageBSave1.contentHash,
     updatedBy: owner!.id,
-    changesetWindowMinutes: 30,
+    changesetWindowMinutes: CHANGESET_WINDOW_MINUTES,
   });
 
   await insertGrants(sql, ws!.id, 'user', readerUser!.id, [

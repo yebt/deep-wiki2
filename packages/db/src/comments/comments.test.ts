@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import postgres from 'postgres';
-import { provisionTestDatabase, type ProvisionedTestDatabase } from '../../testing/provision';
+import { provisionTestDatabase, TEST_CHANGESET_WINDOW_MINUTES, type ProvisionedTestDatabase } from '../../testing/provision';
 import { savePage } from '../content/save-page';
 
 let db: ProvisionedTestDatabase;
@@ -52,8 +52,8 @@ describe('comments — tenant isolation', () => {
     const { workspaceId, rootId } = await seedWorkspace();
     const pageA = await seedPage(workspaceId, rootId);
     const pageB = await seedPage(workspaceId, rootId);
-    await savePage(sql, { nodeId: pageA, workspaceId, markdown: 'Paragraph one. ^blocka\n', expectedContentHash: null });
-    await savePage(sql, { nodeId: pageB, workspaceId, markdown: 'Paragraph two. ^blockb\n', expectedContentHash: null });
+    await savePage(sql, { nodeId: pageA, workspaceId, markdown: 'Paragraph one. ^blocka\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
+    await savePage(sql, { nodeId: pageB, workspaceId, markdown: 'Paragraph two. ^blockb\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
 
     await expect(
       (async () => {
@@ -68,7 +68,7 @@ describe('comments — tenant isolation', () => {
   test('a same-page comment insert succeeds', async () => {
     const { workspaceId, rootId } = await seedWorkspace();
     const pageA = await seedPage(workspaceId, rootId);
-    await savePage(sql, { nodeId: pageA, workspaceId, markdown: 'Paragraph one. ^blocka\n', expectedContentHash: null });
+    await savePage(sql, { nodeId: pageA, workspaceId, markdown: 'Paragraph one. ^blocka\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
 
     const rows = await sql`
       INSERT INTO comments (workspace_id, page_id, body, block_id, offset_start, offset_end, quote, quote_hash, status)
@@ -81,7 +81,7 @@ describe('comments — tenant isolation', () => {
   test('a reply must carry no anchor columns of its own (CHECK constraint)', async () => {
     const { workspaceId, rootId } = await seedWorkspace();
     const pageA = await seedPage(workspaceId, rootId);
-    await savePage(sql, { nodeId: pageA, workspaceId, markdown: 'Paragraph one. ^blocka\n', expectedContentHash: null });
+    await savePage(sql, { nodeId: pageA, workspaceId, markdown: 'Paragraph one. ^blocka\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
     const [root] = await sql<{ id: string }[]>`
       INSERT INTO comments (workspace_id, page_id, body, block_id, offset_start, offset_end, quote, quote_hash, status)
       VALUES (${workspaceId}, ${pageA}, 'hi', 'blocka', 0, 5, 'Parag', 'hash', 'anchored')
@@ -101,7 +101,7 @@ describe('comments — tenant isolation', () => {
   test('a reply with no anchor columns succeeds', async () => {
     const { workspaceId, rootId } = await seedWorkspace();
     const pageA = await seedPage(workspaceId, rootId);
-    await savePage(sql, { nodeId: pageA, workspaceId, markdown: 'Paragraph one. ^blocka\n', expectedContentHash: null });
+    await savePage(sql, { nodeId: pageA, workspaceId, markdown: 'Paragraph one. ^blocka\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
     const [root] = await sql<{ id: string }[]>`
       INSERT INTO comments (workspace_id, page_id, body, block_id, offset_start, offset_end, quote, quote_hash, status)
       VALUES (${workspaceId}, ${pageA}, 'hi', 'blocka', 0, 5, 'Parag', 'hash', 'anchored')

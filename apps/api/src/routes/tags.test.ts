@@ -4,7 +4,7 @@
  */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { createSession, savePage } from '@deep-wiki/db';
-import { provisionTestDatabase, type ProvisionedTestDatabase } from '@deep-wiki/db/testing/provision';
+import { provisionTestDatabase, TEST_CHANGESET_WINDOW_MINUTES, type ProvisionedTestDatabase } from '@deep-wiki/db/testing/provision';
 import postgres from 'postgres';
 import { expectNoDisclosure } from '../../testing/expect-no-disclosure';
 import { SESSION_COOKIE_NAME } from '../middleware/session';
@@ -53,7 +53,7 @@ describe('GET /tags/:name/pages', () => {
     const [ws] = await sql<{ id: string }[]>`INSERT INTO workspaces (owner_id, name, slug) VALUES (${owner}, 'WS', ${`ws-${crypto.randomUUID()}`}) RETURNING id`;
     const root = await insertNode(ws!.id, null, 'workspace', 'root', 'Root');
     const hiddenPage = await insertNode(ws!.id, root, 'page', 'hidden', 'Confidential Project Notes');
-    await savePage(sql, { nodeId: hiddenPage, workspaceId: ws!.id, markdown: 'Body #project text.\n', expectedContentHash: null });
+    await savePage(sql, { nodeId: hiddenPage, workspaceId: ws!.id, markdown: 'Body #project text.\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
     const requester = await insertUser('requester');
 
     const app = buildApp();
@@ -70,7 +70,7 @@ describe('GET /tags/:name/pages', () => {
     const [ws] = await sql<{ id: string }[]>`INSERT INTO workspaces (owner_id, name, slug) VALUES (${owner}, 'WS2', ${`ws2-${crypto.randomUUID()}`}) RETURNING id`;
     const root = await insertNode(ws!.id, null, 'workspace', 'root2', 'Root');
     const page = await insertNode(ws!.id, root, 'page', 'visible', 'Visible Project');
-    await savePage(sql, { nodeId: page, workspaceId: ws!.id, markdown: 'Body #project text.\n', expectedContentHash: null });
+    await savePage(sql, { nodeId: page, workspaceId: ws!.id, markdown: 'Body #project text.\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
     const requester = await insertUser('requester2');
     await sql`
       INSERT INTO permissions (workspace_id, subject_type, subject_id, resource_id, action, effect)

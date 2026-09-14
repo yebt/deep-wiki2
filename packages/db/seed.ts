@@ -343,7 +343,13 @@ async function createTree(
 }
 
 /** Saves a page's content only if it has none yet — re-seeding must never reset a page a developer has since edited, the same policy the seed already applies to the user's password. */
-async function ensurePageContent(sql: postgres.Sql, workspaceId: string, updatedBy: string, seeded: SeededPage): Promise<void> {
+async function ensurePageContent(
+  sql: postgres.Sql,
+  workspaceId: string,
+  updatedBy: string,
+  seeded: SeededPage,
+  changesetWindowMinutes: number,
+): Promise<void> {
   const [existing] = await sql<{ node_id: string }[]>`SELECT node_id FROM page_content WHERE node_id = ${seeded.nodeId}`;
   if (existing) return;
 
@@ -353,6 +359,7 @@ async function ensurePageContent(sql: postgres.Sql, workspaceId: string, updated
     markdown: canonicalise(seeded.markdown),
     expectedContentHash: null,
     updatedBy,
+    changesetWindowMinutes,
   });
 }
 
@@ -360,6 +367,17 @@ async function main(): Promise<void> {
   const url = process.env.DATABASE_URL;
   if (!url) {
     console.error('seed: DATABASE_URL is not set. Copy env.example to .env first.');
+    process.exit(1);
+  }
+
+  // `SavePageInput.changesetWindowMinutes` is required — `packages/db`
+  // never reads env, so this script threads the same `CHANGESET_WINDOW_MINUTES`
+  // env var `apps/api`'s `loadConfig()` reads, rather than a second
+  // hardcoded copy of `env.example`'s value.
+  const changesetWindowMinutesRaw = process.env.CHANGESET_WINDOW_MINUTES;
+  const changesetWindowMinutes = Number(changesetWindowMinutesRaw);
+  if (!changesetWindowMinutesRaw || !Number.isFinite(changesetWindowMinutes) || changesetWindowMinutes <= 0) {
+    console.error('seed: CHANGESET_WINDOW_MINUTES is not set. Copy env.example to .env first.');
     process.exit(1);
   }
 
@@ -410,7 +428,7 @@ async function main(): Promise<void> {
     const pages: SeededPage[] = [];
     await createTree(sql, workspace.workspaceId, workspace.rootNodeId, CONTENT_TREE, pages);
     for (const seeded of pages) {
-      await ensurePageContent(sql, workspace.workspaceId, user!.id, seeded);
+      await ensurePageContent(sql, workspace.workspaceId, user!.id, seeded, changesetWindowMinutes);
     }
 
     const featured = pages.find((seeded) => seeded.title === 'Local Development Setup')!;

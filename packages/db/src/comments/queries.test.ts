@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import postgres from 'postgres';
-import { provisionTestDatabase, type ProvisionedTestDatabase } from '../../testing/provision';
+import { provisionTestDatabase, TEST_CHANGESET_WINDOW_MINUTES, type ProvisionedTestDatabase } from '../../testing/provision';
 import { savePage } from '../content/save-page';
 import { createReply, createRootComment, listCommentIndicators, listCommentThreads, setThreadResolved } from './queries';
 
@@ -61,7 +61,7 @@ describe('comment queries', () => {
   test('listCommentIndicators counts a root plus its replies against the root block', async () => {
     const { workspaceId, rootId } = await seedWorkspace();
     const pageId = await seedPage(workspaceId, rootId);
-    await savePage(sql, { nodeId: pageId, workspaceId, markdown: 'Some text. ^blocka\n', expectedContentHash: null });
+    await savePage(sql, { nodeId: pageId, workspaceId, markdown: 'Some text. ^blocka\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
     const authorId = await seedUser();
 
     const root = await createRootComment(sql, {
@@ -94,8 +94,8 @@ describe('comment queries', () => {
     const { workspaceId, rootId } = await seedWorkspace();
     const pageA = await seedPage(workspaceId, rootId);
     const pageB = await seedPage(workspaceId, rootId);
-    await savePage(sql, { nodeId: pageA, workspaceId, markdown: 'Page A text. ^blockx\n', expectedContentHash: null });
-    await savePage(sql, { nodeId: pageB, workspaceId, markdown: 'Page B text. ^blocky\n', expectedContentHash: null });
+    await savePage(sql, { nodeId: pageA, workspaceId, markdown: 'Page A text. ^blockx\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
+    await savePage(sql, { nodeId: pageB, workspaceId, markdown: 'Page B text. ^blocky\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
     const authorId = await seedUser();
 
     const rootOnB = await createRootComment(sql, {
@@ -124,7 +124,7 @@ describe('comment queries', () => {
   test('listCommentIndicators excludes orphaned threads', async () => {
     const { workspaceId, rootId } = await seedWorkspace();
     const pageId = await seedPage(workspaceId, rootId);
-    await savePage(sql, { nodeId: pageId, workspaceId, markdown: 'Some text. ^blockb\n', expectedContentHash: null });
+    await savePage(sql, { nodeId: pageId, workspaceId, markdown: 'Some text. ^blockb\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
     const authorId = await seedUser();
     const root = await createRootComment(sql, {
       workspaceId,
@@ -146,7 +146,7 @@ describe('comment queries', () => {
   test('setThreadResolved marks and unmarks a root thread only', async () => {
     const { workspaceId, rootId } = await seedWorkspace();
     const pageId = await seedPage(workspaceId, rootId);
-    await savePage(sql, { nodeId: pageId, workspaceId, markdown: 'Some text. ^blockc\n', expectedContentHash: null });
+    await savePage(sql, { nodeId: pageId, workspaceId, markdown: 'Some text. ^blockc\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
     const authorId = await seedUser();
     const root = await createRootComment(sql, {
       workspaceId,
@@ -174,7 +174,7 @@ describe('comment queries', () => {
   test('a resolved thread persists across a later reconciliation-triggering save', async () => {
     const { workspaceId, rootId } = await seedWorkspace();
     const pageId = await seedPage(workspaceId, rootId);
-    const first = await savePage(sql, { nodeId: pageId, workspaceId, markdown: 'Some text. ^blockd\n', expectedContentHash: null });
+    const first = await savePage(sql, { nodeId: pageId, workspaceId, markdown: 'Some text. ^blockd\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
     const authorId = await seedUser();
     const root = await createRootComment(sql, {
       workspaceId,
@@ -190,7 +190,7 @@ describe('comment queries', () => {
     await setThreadResolved(sql, { threadId: root.id, workspaceId, resolved: true, resolvedBy: authorId });
 
     // In-place edit, same anchor, same id — reconciliation runs but does not touch resolution.
-    await savePage(sql, { nodeId: pageId, workspaceId, markdown: 'Some other text. ^blockd\n', expectedContentHash: first.contentHash });
+    await savePage(sql, { nodeId: pageId, workspaceId, markdown: 'Some other text. ^blockd\n', expectedContentHash: first.contentHash, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
 
     const [row] = await sql<{ resolved_at: Date | null }[]>`SELECT resolved_at FROM comments WHERE id = ${root.id}`;
     expect(row!.resolved_at).not.toBeNull();
@@ -208,7 +208,7 @@ describe('listCommentThreads', () => {
   test('a root with no replies is still returned, with an empty replies array', async () => {
     const { workspaceId, rootId } = await seedWorkspace();
     const pageId = await seedPage(workspaceId, rootId);
-    await savePage(sql, { nodeId: pageId, workspaceId, markdown: 'Some text. ^blocke\n', expectedContentHash: null });
+    await savePage(sql, { nodeId: pageId, workspaceId, markdown: 'Some text. ^blocke\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
     const authorId = await seedUser();
     const root = await createRootComment(sql, {
       workspaceId,
@@ -232,7 +232,7 @@ describe('listCommentThreads', () => {
   test('replies nest under their root, ordered by creation time', async () => {
     const { workspaceId, rootId } = await seedWorkspace();
     const pageId = await seedPage(workspaceId, rootId);
-    await savePage(sql, { nodeId: pageId, workspaceId, markdown: 'Some text. ^blockf\n', expectedContentHash: null });
+    await savePage(sql, { nodeId: pageId, workspaceId, markdown: 'Some text. ^blockf\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
     const authorId = await seedUser();
     const root = await createRootComment(sql, {
       workspaceId,
@@ -258,7 +258,7 @@ describe('listCommentThreads', () => {
   test('carries the author display name, not just the id', async () => {
     const { workspaceId, rootId } = await seedWorkspace();
     const pageId = await seedPage(workspaceId, rootId);
-    await savePage(sql, { nodeId: pageId, workspaceId, markdown: 'Some text. ^blockg\n', expectedContentHash: null });
+    await savePage(sql, { nodeId: pageId, workspaceId, markdown: 'Some text. ^blockg\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
     const authorId = await seedUser();
     await createRootComment(sql, {
       workspaceId,
@@ -281,7 +281,7 @@ describe('listCommentThreads', () => {
   test('an anchored thread reports orphaned:false and carries its anchor', async () => {
     const { workspaceId, rootId } = await seedWorkspace();
     const pageId = await seedPage(workspaceId, rootId);
-    await savePage(sql, { nodeId: pageId, workspaceId, markdown: 'Some text. ^blockh\n', expectedContentHash: null });
+    await savePage(sql, { nodeId: pageId, workspaceId, markdown: 'Some text. ^blockh\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
     const authorId = await seedUser();
     await createRootComment(sql, {
       workspaceId,
@@ -308,7 +308,7 @@ describe('listCommentThreads', () => {
   test('an orphaned thread reports orphaned:true and still carries its captured excerpt', async () => {
     const { workspaceId, rootId } = await seedWorkspace();
     const pageId = await seedPage(workspaceId, rootId);
-    await savePage(sql, { nodeId: pageId, workspaceId, markdown: 'Some text. ^blocki\n', expectedContentHash: null });
+    await savePage(sql, { nodeId: pageId, workspaceId, markdown: 'Some text. ^blocki\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
     const authorId = await seedUser();
     const root = await createRootComment(sql, {
       workspaceId,
@@ -332,7 +332,7 @@ describe('listCommentThreads', () => {
   test('resolution state is carried on the thread', async () => {
     const { workspaceId, rootId } = await seedWorkspace();
     const pageId = await seedPage(workspaceId, rootId);
-    await savePage(sql, { nodeId: pageId, workspaceId, markdown: 'Some text. ^blockj\n', expectedContentHash: null });
+    await savePage(sql, { nodeId: pageId, workspaceId, markdown: 'Some text. ^blockj\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
     const authorId = await seedUser();
     const root = await createRootComment(sql, {
       workspaceId,
@@ -359,8 +359,8 @@ describe('listCommentThreads', () => {
     const { workspaceId, rootId } = await seedWorkspace();
     const pageA = await seedPage(workspaceId, rootId);
     const pageB = await seedPage(workspaceId, rootId);
-    await savePage(sql, { nodeId: pageA, workspaceId, markdown: 'Page A. ^blockk\n', expectedContentHash: null });
-    await savePage(sql, { nodeId: pageB, workspaceId, markdown: 'Page B. ^blockl\n', expectedContentHash: null });
+    await savePage(sql, { nodeId: pageA, workspaceId, markdown: 'Page A. ^blockk\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
+    await savePage(sql, { nodeId: pageB, workspaceId, markdown: 'Page B. ^blockl\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
     const authorId = await seedUser();
     await createRootComment(sql, {
       workspaceId,
@@ -382,7 +382,7 @@ describe('listCommentThreads', () => {
   test('a page with no threads returns an empty array', async () => {
     const { workspaceId, rootId } = await seedWorkspace();
     const pageId = await seedPage(workspaceId, rootId);
-    await savePage(sql, { nodeId: pageId, workspaceId, markdown: 'Some text.\n', expectedContentHash: null });
+    await savePage(sql, { nodeId: pageId, workspaceId, markdown: 'Some text.\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
 
     const threads = await listCommentThreads(sql, { pageId });
 

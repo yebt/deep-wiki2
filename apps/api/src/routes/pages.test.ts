@@ -5,7 +5,7 @@
  */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { createSession, savePage } from '@deep-wiki/db';
-import { provisionTestDatabase, type ProvisionedTestDatabase } from '@deep-wiki/db/testing/provision';
+import { provisionTestDatabase, TEST_CHANGESET_WINDOW_MINUTES, type ProvisionedTestDatabase } from '@deep-wiki/db/testing/provision';
 import type { PresenceBroadcaster, PresenceEvent } from '@deep-wiki/core';
 import postgres from 'postgres';
 import { SESSION_COOKIE_NAME } from '../middleware/session';
@@ -97,7 +97,7 @@ function buildApp() {
 describe('GET /pages/:id', () => {
   test('a subject with no read grant receives no content', async () => {
     const fixture = await buildFixture();
-    await savePage(sql, { nodeId: fixture.pageId, workspaceId: fixture.workspaceId, markdown: '# Hello\n', expectedContentHash: null });
+    await savePage(sql, { nodeId: fixture.pageId, workspaceId: fixture.workspaceId, markdown: '# Hello\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
     const app = buildApp();
 
     const res = await app.request(`/pages/${fixture.pageId}`, { headers: { cookie: fixture.outsiderCookie } });
@@ -109,7 +109,7 @@ describe('GET /pages/:id', () => {
 
   test('a subject with a read grant receives the cached HTML', async () => {
     const fixture = await buildFixture();
-    await savePage(sql, { nodeId: fixture.pageId, workspaceId: fixture.workspaceId, markdown: '# Hello\n', expectedContentHash: null });
+    await savePage(sql, { nodeId: fixture.pageId, workspaceId: fixture.workspaceId, markdown: '# Hello\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
     const app = buildApp();
 
     const res = await app.request(`/pages/${fixture.pageId}`, { headers: { cookie: fixture.readerCookie } });
@@ -126,7 +126,7 @@ describe('GET /pages/:id', () => {
   // edit lock. The value is already on the row this handler reads.
   test('the read response names the workspace the page belongs to', async () => {
     const fixture = await buildFixture();
-    await savePage(sql, { nodeId: fixture.pageId, workspaceId: fixture.workspaceId, markdown: '# Hello\n', expectedContentHash: null });
+    await savePage(sql, { nodeId: fixture.pageId, workspaceId: fixture.workspaceId, markdown: '# Hello\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
     const app = buildApp();
 
     const res = await app.request(`/pages/${fixture.pageId}`, { headers: { cookie: fixture.readerCookie } });
@@ -140,7 +140,7 @@ describe('GET /pages/:id', () => {
 describe('PUT /pages/:id', () => {
   test('a subject with no write grant cannot save, and storage is unchanged', async () => {
     const fixture = await buildFixture();
-    await savePage(sql, { nodeId: fixture.pageId, workspaceId: fixture.workspaceId, markdown: '# Original\n', expectedContentHash: null });
+    await savePage(sql, { nodeId: fixture.pageId, workspaceId: fixture.workspaceId, markdown: '# Original\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
     const app = buildApp();
 
     const res = await app.request(`/pages/${fixture.pageId}`, {
@@ -156,7 +156,7 @@ describe('PUT /pages/:id', () => {
 
   test('a stale content_hash returns 409 without writing', async () => {
     const fixture = await buildFixture();
-    await savePage(sql, { nodeId: fixture.pageId, workspaceId: fixture.workspaceId, markdown: '# Original\n', expectedContentHash: null });
+    await savePage(sql, { nodeId: fixture.pageId, workspaceId: fixture.workspaceId, markdown: '# Original\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
     const app = buildApp();
 
     const res = await app.request(`/pages/${fixture.pageId}`, {
@@ -172,7 +172,7 @@ describe('PUT /pages/:id', () => {
 
   test('an authorised save with a matching content_hash persists the new markdown', async () => {
     const fixture = await buildFixture();
-    const first = await savePage(sql, { nodeId: fixture.pageId, workspaceId: fixture.workspaceId, markdown: '# Original\n', expectedContentHash: null });
+    const first = await savePage(sql, { nodeId: fixture.pageId, workspaceId: fixture.workspaceId, markdown: '# Original\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
     const app = buildApp();
 
     const res = await app.request(`/pages/${fixture.pageId}`, {
@@ -199,7 +199,7 @@ describe('PUT /pages/:id', () => {
       nodeId: fixture.pageId,
       workspaceId: fixture.workspaceId,
       markdown: `${WITH_ANCHOR}\n${FILLER}`,
-      expectedContentHash: null,
+      expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES,
     });
     // Delete the anchored paragraph: matchBlocks scores it against nothing
     // it recognises, so the id is tombstoned.
@@ -207,7 +207,7 @@ describe('PUT /pages/:id', () => {
       nodeId: fixture.pageId,
       workspaceId: fixture.workspaceId,
       markdown: FILLER,
-      expectedContentHash: first.contentHash,
+      expectedContentHash: first.contentHash, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES,
     });
     const app = buildApp();
 
@@ -290,7 +290,7 @@ describe('PUT /pages/:id', () => {
 describe('GET /pages/:id/edit-session', () => {
   test('returns the canonical markdown and acquires the lock when the round trip holds', async () => {
     const fixture = await buildFixture();
-    await savePage(sql, { nodeId: fixture.pageId, workspaceId: fixture.workspaceId, markdown: '# Hello\n', expectedContentHash: null });
+    await savePage(sql, { nodeId: fixture.pageId, workspaceId: fixture.workspaceId, markdown: '# Hello\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
     const app = buildApp();
 
     const res = await app.request(`/pages/${fixture.pageId}/edit-session`, { headers: { cookie: fixture.writerCookie } });
@@ -334,7 +334,7 @@ describe('GET /pages/:id/edit-session', () => {
     // the probe accepted an empty document, this request answered 409 with
     // no construct and no line — the page could never be edited again.
     const fixture = await buildFixture();
-    await savePage(sql, { nodeId: fixture.pageId, workspaceId: fixture.workspaceId, markdown: '', expectedContentHash: null });
+    await savePage(sql, { nodeId: fixture.pageId, workspaceId: fixture.workspaceId, markdown: '', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
     const app = buildApp();
 
     const res = await app.request(`/pages/${fixture.pageId}/edit-session`, { headers: { cookie: fixture.writerCookie } });
@@ -346,7 +346,7 @@ describe('GET /pages/:id/edit-session', () => {
 
   test('a page already locked by another writer reports the holder and offers read-only/take-over', async () => {
     const fixture = await buildFixture();
-    await savePage(sql, { nodeId: fixture.pageId, workspaceId: fixture.workspaceId, markdown: '# Hello\n', expectedContentHash: null });
+    await savePage(sql, { nodeId: fixture.pageId, workspaceId: fixture.workspaceId, markdown: '# Hello\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
     const app = buildApp();
     await app.request(`/pages/${fixture.pageId}/edit-session`, { headers: { cookie: fixture.writerCookie } });
 
@@ -372,7 +372,7 @@ describe('GET /pages/:id/edit-session', () => {
 describe('PATCH /pages/:id/lock', () => {
   test('a heartbeat from the current holder extends the lock and returns ok', async () => {
     const fixture = await buildFixture();
-    await savePage(sql, { nodeId: fixture.pageId, workspaceId: fixture.workspaceId, markdown: '# Hello\n', expectedContentHash: null });
+    await savePage(sql, { nodeId: fixture.pageId, workspaceId: fixture.workspaceId, markdown: '# Hello\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
     const app = buildApp();
     await app.request(`/pages/${fixture.pageId}/edit-session`, { headers: { cookie: fixture.writerCookie } });
 
@@ -387,7 +387,7 @@ describe('PATCH /pages/:id/lock', () => {
   // this route's heartbeat is the sole write path presence has.
   test('a successful heartbeat publishes a presence event through the wired broadcaster', async () => {
     const fixture = await buildFixture();
-    await savePage(sql, { nodeId: fixture.pageId, workspaceId: fixture.workspaceId, markdown: '# Hello\n', expectedContentHash: null });
+    await savePage(sql, { nodeId: fixture.pageId, workspaceId: fixture.workspaceId, markdown: '# Hello\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
     const broadcaster = new RecordingBroadcaster();
     const app = createPageRoutes({ sql, sessionIdleTimeoutMinutes: 30, pageLockTtlSeconds: 120, changesetWindowMinutes: 30, broadcaster });
     await app.request(`/pages/${fixture.pageId}/edit-session`, { headers: { cookie: fixture.writerCookie } });
@@ -402,7 +402,7 @@ describe('PATCH /pages/:id/lock', () => {
 
   test('a heartbeat from a displaced holder reports lost', async () => {
     const fixture = await buildFixture();
-    await savePage(sql, { nodeId: fixture.pageId, workspaceId: fixture.workspaceId, markdown: '# Hello\n', expectedContentHash: null });
+    await savePage(sql, { nodeId: fixture.pageId, workspaceId: fixture.workspaceId, markdown: '# Hello\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
     const app = buildApp();
     await app.request(`/pages/${fixture.pageId}/edit-session`, { headers: { cookie: fixture.writerCookie } });
 
@@ -425,7 +425,7 @@ describe('PATCH /pages/:id/lock', () => {
 
   test('a subject with no write grant cannot heartbeat', async () => {
     const fixture = await buildFixture();
-    await savePage(sql, { nodeId: fixture.pageId, workspaceId: fixture.workspaceId, markdown: '# Hello\n', expectedContentHash: null });
+    await savePage(sql, { nodeId: fixture.pageId, workspaceId: fixture.workspaceId, markdown: '# Hello\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
     const app = buildApp();
 
     const res = await app.request(`/pages/${fixture.pageId}/lock`, { method: 'PATCH', headers: { cookie: fixture.readerCookie } });
@@ -437,7 +437,7 @@ describe('PATCH /pages/:id/lock', () => {
 describe('POST /pages/:id/lock/take-over', () => {
   test('transfers the lock to the caller and returns the markdown', async () => {
     const fixture = await buildFixture();
-    await savePage(sql, { nodeId: fixture.pageId, workspaceId: fixture.workspaceId, markdown: '# Hello\n', expectedContentHash: null });
+    await savePage(sql, { nodeId: fixture.pageId, workspaceId: fixture.workspaceId, markdown: '# Hello\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
     const app = buildApp();
     await app.request(`/pages/${fixture.pageId}/edit-session`, { headers: { cookie: fixture.writerCookie } });
 
@@ -463,7 +463,7 @@ describe('POST /pages/:id/lock/take-over', () => {
 
   test('a subject with no write grant cannot take over the lock', async () => {
     const fixture = await buildFixture();
-    await savePage(sql, { nodeId: fixture.pageId, workspaceId: fixture.workspaceId, markdown: '# Hello\n', expectedContentHash: null });
+    await savePage(sql, { nodeId: fixture.pageId, workspaceId: fixture.workspaceId, markdown: '# Hello\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
     const app = buildApp();
 
     const res = await app.request(`/pages/${fixture.pageId}/lock/take-over`, { method: 'POST', headers: { cookie: fixture.readerCookie } });
