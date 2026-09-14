@@ -171,9 +171,13 @@ describe('read-mode page', () => {
     const header = component.get('header').element;
     const links = Array.from(header.querySelectorAll('a')).map((anchor) => anchor.getAttribute('href'));
     // Brand, then the quieter navigation, then the emphasised one — the
-    // order edit mode already uses for "Read" before "Save"
-    // (docs/DESIGN-SYSTEM.md §9.1's emphasis ladder).
-    expect(links).toEqual(['/', '/pages/page-1/history', '/pages/page-1/edit']);
+    // order edit mode already uses for "Read page" before "Save"
+    // (docs/DESIGN-SYSTEM.md §9.1's emphasis ladder) — and then the
+    // shell's own chrome (the registration entry, `AppShell.vue`, added
+    // 2026-09-14) after every screen-specific control. Enumerated in
+    // full on purpose: this is what catches a control silently dropping
+    // out of the sequence.
+    expect(links).toEqual(['/', '/pages/page-1/history', '/pages/page-1/edit', '/admin/registration']);
     // A link, not a click handler: reachable and operable by keyboard
     // with no JavaScript of its own (checklist §5).
     expect(component.get('header a[href="/pages/page-1/history"]').element.tagName).toBe('A');
