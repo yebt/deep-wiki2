@@ -139,7 +139,7 @@ describe('GET /books/:id/history', () => {
     `;
     const [book] = await sql<{ id: string }[]>`
       INSERT INTO nodes (workspace_id, parent_id, type, path, position, slug, title)
-      VALUES (${ws!.id}, ${root!.id}, 'book', '', 0, ${`book-${crypto.randomUUID()}`}, 'Book') RETURNING id
+      VALUES (${ws!.id}, ${root!.id}, 'book', '', 0, ${`book-${crypto.randomUUID()}`}, 'Operations Handbook') RETURNING id
     `;
     const [chapter] = await sql<{ id: string }[]>`
       INSERT INTO nodes (workspace_id, parent_id, type, path, position, slug, title)
@@ -194,6 +194,44 @@ describe('GET /books/:id/history', () => {
     expect(body.changesets[0]!.authorDisplayName).toBe('Owner');
     expect(body.changesets[0]!.message).toBeNull();
     expect(body.changesets[0]!.revisions.map((r) => r.pageId)).toEqual([fixture.nestedPageId]);
+  });
+
+  // The screen cannot show the book's own name or link back to its tree
+  // without these — neither field existed on this response at all before.
+  test('carries the book title and workspaceId', async () => {
+    const fixture = await seedBookFixture();
+    await savePage(sql, {
+      nodeId: fixture.nestedPageId,
+      workspaceId: fixture.workspaceId,
+      markdown: '# Nested\n',
+      expectedContentHash: null,
+      updatedBy: fixture.authorId,
+      changesetWindowMinutes: WINDOW_MINUTES,
+    });
+
+    const app = buildApp();
+    const res = await app.request(`/books/${fixture.bookId}/history`, { headers: { cookie: fixture.readerCookie } });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { title: string; workspaceId: string };
+    expect(body.title).toBe('Operations Handbook');
+    expect(body.workspaceId).toBe(fixture.workspaceId);
+  });
+
+  // The empty-history state needs a way forward (a name and a link back to
+  // the tree) even when there is nothing to list yet — book identity must
+  // not ride along with the changesets array.
+  test('a book with no changesets still carries its title and workspaceId', async () => {
+    const fixture = await seedBookFixture();
+    const app = buildApp();
+
+    const res = await app.request(`/books/${fixture.bookId}/history`, { headers: { cookie: fixture.readerCookie } });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { title: string; workspaceId: string; changesets: unknown[] };
+    expect(body.title).toBe('Operations Handbook');
+    expect(body.workspaceId).toBe(fixture.workspaceId);
+    expect(body.changesets).toEqual([]);
   });
 
   // A reader who can read the book but not one page inside it must not see

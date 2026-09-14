@@ -20,6 +20,11 @@ interface NodeRow {
   workspace_id: string;
 }
 
+interface NodeWithTitleRow {
+  workspace_id: string;
+  title: string;
+}
+
 function notFound(c: Context): Response {
   return c.json(ErrorResponseSchema.parse({ error: 'not found' }), 404);
 }
@@ -67,7 +72,7 @@ export function createRevisionRoutes(deps: RevisionRouteDeps): Hono<{ Variables:
     const bookId = c.req.param('id');
     const session = c.get('session');
 
-    const [node] = await deps.sql<NodeRow[]>`SELECT workspace_id FROM nodes WHERE id = ${bookId}`;
+    const [node] = await deps.sql<NodeWithTitleRow[]>`SELECT workspace_id, title FROM nodes WHERE id = ${bookId}`;
     const canRead =
       node !== undefined &&
       (await can(deps.sql, { subjectType: 'user', subjectId: session.userId, resourceId: bookId, action: 'read' }));
@@ -91,6 +96,8 @@ export function createRevisionRoutes(deps: RevisionRouteDeps): Hono<{ Variables:
 
     return c.json(
       BookHistoryResponseSchema.parse({
+        title: node.title,
+        workspaceId: node.workspace_id,
         changesets: visible.map((changeset) => ({
           id: changeset.id,
           authorId: changeset.authorId,

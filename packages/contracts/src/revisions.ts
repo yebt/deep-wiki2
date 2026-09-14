@@ -48,6 +48,9 @@ export const BookChangesetSchema = z.object({
 export type BookChangesetPayload = z.infer<typeof BookChangesetSchema>;
 
 export const BookHistoryResponseSchema = z.object({
+  /** The book node's own title/workspace — so the screen can name the book and link back to its tree. */
+  title: z.string(),
+  workspaceId: z.string(),
   changesets: z.array(BookChangesetSchema),
 });
 export type BookHistoryResponse = z.infer<typeof BookHistoryResponseSchema>;

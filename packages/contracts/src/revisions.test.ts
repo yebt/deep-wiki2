@@ -81,6 +81,8 @@ describe('BookHistoryResponseSchema', () => {
   // required.
   test('parses a changeset with a null message and its grouped revisions', () => {
     const parsed = BookHistoryResponseSchema.parse({
+      title: 'Operations Handbook',
+      workspaceId: 'ws-1',
       changesets: [
         {
           id: 'cs-1',
@@ -100,6 +102,8 @@ describe('BookHistoryResponseSchema', () => {
 
   test('rejects a changeset missing its revisions', () => {
     const result = BookHistoryResponseSchema.safeParse({
+      title: 'Operations Handbook',
+      workspaceId: 'ws-1',
       changesets: [
         {
           id: 'cs-1',
@@ -115,5 +119,24 @@ describe('BookHistoryResponseSchema', () => {
     expect(result.success).toBe(false);
     if (result.success) return;
     expect(result.error.issues.map((issue) => issue.path)).toEqual([['changesets', 0, 'revisions']]);
+  });
+
+  // The book-history and book-diff screens cannot show the book's own name
+  // or link back to its tree without these — added because neither field
+  // existed on this response at all. A fixture using '' here would let a
+  // schema that merely checks "is a string" pass without proving anything,
+  // so this uses a distinctive non-empty title instead.
+  test('rejects a response missing the book title or workspaceId', () => {
+    const result = BookHistoryResponseSchema.safeParse({ changesets: [] });
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.path)).toEqual([['title'], ['workspaceId']]);
+  });
+
+  test('a book with an empty-string title still parses — the schema enforces presence, not non-emptiness', () => {
+    const parsed = BookHistoryResponseSchema.parse({ title: '', workspaceId: 'ws-1', changesets: [] });
+
+    expect(parsed.title).toBe('');
   });
 });
