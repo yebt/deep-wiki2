@@ -27,11 +27,29 @@ import { API_PORT, API_URL, MAILPIT_SMTP_PORT, WEB_URL } from './ports';
 const REPO_ROOT = join(import.meta.dirname, '..');
 const FIXTURES_PATH = join(import.meta.dirname, '.auth-fixtures.json');
 
-interface SeedResult {
+/**
+ * Every field `e2e/seed.bun.ts`'s `main()` prints on its last stdout line —
+ * `{ url, dbName, ...seedFixtures()'s return }`. This used to list only the
+ * auth-suite fields and worked anyway, because `main()` below spreads
+ * `fixtures` straight into `JSON.stringify(...)` untyped: nothing forced
+ * the two to agree, so a field seed.bun.ts added (`keyboardEmail`, every
+ * onboarding field) was never a compile error here — only a runtime
+ * `undefined` wherever a spec expected it. Keep this in step with
+ * `seedFixtures`'s return object in seed.bun.ts; see
+ * scripts/checks/__tests__/e2e-seed-result-shape.test.ts for the
+ * type-level regression guard.
+ */
+export interface SeedResult {
   readonly url: string;
   readonly dbName: string;
+  readonly founderEmail: string;
+  readonly colleagueEmail: string;
+  readonly superRootEmail: string;
+  readonly onboardingPassword: string;
   readonly signinEmail: string;
   readonly signinInvitationToken: string;
+  readonly keyboardEmail: string;
+  readonly keyboardInvitationToken: string;
   readonly expiredInvitationToken: string;
   readonly resetEmail: string;
   readonly resetToken: string;
@@ -40,6 +58,13 @@ interface SeedResult {
   readonly historyFirstRevisionId: string;
   readonly historySecondRevisionId: string;
   readonly emptyHistoryPageId: string;
+  readonly workspaceId: string;
+  readonly bookHistoryShelfTitle: string;
+  readonly bookHistoryBookId: string;
+  readonly bookHistoryBookTitle: string;
+  readonly bookHistoryPageAId: string;
+  readonly bookHistoryPageBId: string;
+  readonly bookDiffSinceIso: string;
   readonly readerSessionToken: string;
   readonly outsiderSessionToken: string;
 }
