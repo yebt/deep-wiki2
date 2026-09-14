@@ -48,12 +48,71 @@ const activeOptionId = computed(() => {
   return undefined;
 });
 
+/** Which menu is open, for the editor's `aria-controls` / `aria-expanded`: the listbox a screen reader is told the textbox drives (checklist §5). */
+const openMenuId = computed(() => {
+  if (mentionState.value?.active) return MENTION_MENU_ID;
+  if (slashState.value?.active) return SLASH_MENU_ID;
+  return undefined;
+});
+
+const MENTION_MENU_ID = 'dw-mention-menu';
+const SLASH_MENU_ID = 'dw-slash-menu';
+
 let editorView: EditorView | undefined;
+/** The `"./mount"` module, kept from the dynamic import so the click paths below can build the same transactions the plugins build on Enter. */
+let editorModule: typeof import('@deep-wiki/editor/mount') | undefined;
 
 const { search: searchMentions, checkAccess } = useMentionCandidates(props.workspaceId, props.pageId);
 
+/** document-editor: "Mentioning A User Does Not Silently Grant Them Access" — the check a confirmed user mention runs, whichever way it was confirmed. */
+function onMentionConfirmed(candidate: MentionCandidate): void {
+  if (candidate.type !== 'user') return;
+  void checkAccess(candidate.id).then((canRead) => {
+    mentionMismatch.value = canRead ? null : `${candidate.label} does not have access to this page yet — mentioning them does not grant it.`;
+  });
+}
+
+/**
+ * The pointer half of "confirmed (Enter or click)" (`mention-plugin.ts`).
+ * The plugins own Enter inside `handleKeyDown` and expose no confirm
+ * action, so a click builds the very transaction Enter builds — the
+ * insertion and the dismiss in ONE transaction, so undo removes the whole
+ * mention as one step (document-editor: "Mention And Slash Insertions
+ * Undo As One Step") — and then hands focus back to the editor, which the
+ * `mousedown.prevent` on the row kept from leaving in the first place.
+ * Measured on 2026-09-14, before this existed: clicking the second
+ * candidate left the text unchanged, the menu open and the editor
+ * unfocused (docs/UI-CHECKLIST.md §6, "no inert interactions").
+ */
+function confirmMentionAt(index: number): void {
+  const state = mentionState.value;
+  if (!state?.active || !editorView || !editorModule) return;
+  const candidate = state.candidates[index];
+  if (!candidate) return;
+  const tr = editorModule
+    .insertMention(candidate, { from: state.from, to: state.to }, editorView.state.tr)
+    .setMeta(editorModule.mentionPluginKey, { type: 'dismiss' });
+  editorView.dispatch(tr);
+  onMentionConfirmed(candidate);
+  editorView.focus();
+}
+
+/** The click twin of the slash plugin's Enter: look the runnable command up by id (the state only carries the render-facing summary) and let `confirmSlashCommand` build the one transaction, or dismiss if it refuses. */
+function confirmSlashAt(index: number): void {
+  const state = slashState.value;
+  if (!state?.active || !editorView || !editorModule) return;
+  const summary = state.commands[index];
+  if (!summary) return;
+  const command = editorModule.SLASH_COMMANDS.find((candidate) => candidate.id === summary.id);
+  if (!command) return;
+  const tr = editorModule.confirmSlashCommand(editorView.state, command, { from: state.from, to: state.to });
+  editorView.dispatch(tr ?? editorView.state.tr.setMeta(editorModule.slashPluginKey, { type: 'dismiss' }));
+  editorView.focus();
+}
+
 async function mount(): Promise<void> {
   const mod = await import('@deep-wiki/editor/mount');
+  editorModule = mod;
   if (!rootEl.value) return;
 
   let debounceTimer: ReturnType<typeof setTimeout> | undefined;
@@ -91,12 +150,7 @@ async function mount(): Promise<void> {
           lastMentionQuery = null;
         }
       },
-      onConfirmed: (candidate) => {
-        if (candidate.type !== 'user') return;
-        void checkAccess(candidate.id).then((canRead) => {
-          mentionMismatch.value = canRead ? null : `${candidate.label} does not have access to this page yet — mentioning them does not grant it.`;
-        });
-      },
+      onConfirmed: onMentionConfirmed,
     },
     slash: {
       onStateChange: (state) => {
@@ -141,11 +195,23 @@ defineExpose({
          instead of beside it (docs/UI-CHECKLIST.md §4.1).
          `aria-activedescendant` is what connects the menus below to the
          element that actually holds focus — without it a screen-reader user
-         gets no announcement as the arrow keys move the selection. -->
+         gets no announcement as the arrow keys move the selection.
+         `role="textbox"` + `aria-multiline` name what this contenteditable
+         is; `aria-haspopup` / `aria-expanded` / `aria-controls` are the
+         combobox-style chain from the textbox to the listbox it drives,
+         so the options an arrow key lands on are announced as belonging
+         to *this* editor (checklist §5; the audit of 2026-09-14 found an
+         unnamed contenteditable with no relationship to its menus). -->
     <div
       ref="rootEl"
       class="doc-body text-doc-body text-default prosemirror-editor min-h-64 rounded-lg bg-default p-4"
       data-testid="editor-surface"
+      role="textbox"
+      aria-multiline="true"
+      aria-label="Page content"
+      aria-haspopup="listbox"
+      :aria-expanded="openMenuId ? 'true' : 'false'"
+      :aria-controls="openMenuId"
       :aria-activedescendant="activeOptionId"
     />
 
@@ -163,9 +229,14 @@ defineExpose({
          checklist §4.2 names. The selected row keeps its opaque
          `secondary-container` fill, so selected and hovered stay
          unmistakably different (§4.6). -->
-    <!-- @ mention menu -->
+    <!-- @ mention menu. The `<ul>` between the listbox and its options is
+         `role="presentation"`, so the options are the listbox's own
+         children to assistive technology. Rows confirm on click as well as
+         on Enter; `mousedown.prevent` keeps focus in the editor across the
+         click (the menu is outside the contenteditable). -->
     <div
       v-if="mentionState?.active"
+      :id="MENTION_MENU_ID"
       role="listbox"
       aria-label="Mention suggestions"
       class="fixed z-10 min-w-56 rounded-md bg-accented p-1 shadow-lg ring ring-default"
@@ -175,15 +246,17 @@ defineExpose({
         Type to search people and pages…
       </p>
       <p v-else-if="mentionState.candidates.length === 0" class="px-3 py-2 text-body-small text-muted">No matches</p>
-      <ul v-else>
+      <ul v-else role="presentation">
         <li
           v-for="(candidate, index) in mentionState.candidates"
           :id="`dw-mention-option-${index}`"
           :key="candidate.id"
           role="option"
           :aria-selected="index === mentionState.selectedIndex"
-          class="dw-state-layer flex items-center gap-2 rounded-md px-3 py-2 text-body-medium"
+          class="dw-state-layer flex cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-body-medium"
           :class="index === mentionState.selectedIndex ? 'bg-secondary-container text-on-secondary-container' : 'text-default'"
+          @mousedown.prevent
+          @click="confirmMentionAt(index)"
         >
           <UIcon :name="candidate.type === 'page' ? 'i-lucide-file-text' : 'i-lucide-user'" class="size-4 shrink-0" aria-hidden="true" />
           {{ candidate.label }}
@@ -196,24 +269,27 @@ defineExpose({
       {{ mentionMismatch }}
     </InlineNotice>
 
-    <!-- / slash command menu -->
+    <!-- / slash command menu — same ownership and click wiring as above. -->
     <div
       v-if="slashState?.active"
+      :id="SLASH_MENU_ID"
       role="listbox"
       aria-label="Block commands"
       class="fixed z-10 min-w-64 rounded-md bg-accented p-1 shadow-lg ring ring-default"
       :style="slashCaretRect ? { top: `${slashCaretRect.top}px`, left: `${slashCaretRect.left}px` } : {}"
     >
       <p v-if="slashState.commands.length === 0" class="px-3 py-2 text-body-small text-muted">No matching commands</p>
-      <ul v-else>
+      <ul v-else role="presentation">
         <li
           v-for="(command, index) in slashState.commands"
           :id="`dw-slash-option-${index}`"
           :key="command.id"
           role="option"
           :aria-selected="index === slashState.selectedIndex"
-          class="dw-state-layer rounded-md px-3 py-2"
+          class="dw-state-layer cursor-pointer rounded-md px-3 py-2"
           :class="index === slashState.selectedIndex ? 'bg-secondary-container text-on-secondary-container' : 'text-default'"
+          @mousedown.prevent
+          @click="confirmSlashAt(index)"
         >
           <p class="text-body-medium">{{ command.label }}</p>
           <p class="text-body-small text-muted">{{ command.description }}</p>

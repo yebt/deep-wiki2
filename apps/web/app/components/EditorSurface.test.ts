@@ -59,6 +59,10 @@ const { harness } = vi.hoisted(() => ({
     dispatchSlash: (_action: SlashAction): void => {
       throw new Error('no editor mounted');
     },
+    /** What the host asked the editor to insert on a click — the fake `insertMention` / `confirmSlashCommand` record it here instead of touching a document. */
+    confirmed: null as null | { readonly kind: 'mention'; readonly label: string } | { readonly kind: 'slash'; readonly id: string },
+    /** How many times the host asked the (fake) view to take focus back. */
+    focusCalls: 0,
   },
 }));
 
@@ -67,6 +71,19 @@ vi.mock('@deep-wiki/editor/mount', async (importOriginal) => {
 
   return {
     ...actual,
+    // The two confirm paths the host wires for a click. The real ones build
+    // ProseMirror transactions against a real document; here they record
+    // what was confirmed and hand back a `tr`-shaped object whose `setMeta`
+    // the fake `dispatch` below understands, so the dismiss still closes
+    // the menu through the shipped reducer.
+    insertMention(candidate: MentionCandidate, _range: unknown, tr: { setMeta: (key: unknown, action: unknown) => unknown }) {
+      harness.confirmed = { kind: 'mention', label: candidate.label };
+      return tr;
+    },
+    confirmSlashCommand(state: { tr: { setMeta: (key: unknown, action: unknown) => unknown } }, command: { id: string }) {
+      harness.confirmed = { kind: 'slash', id: command.id };
+      return state.tr.setMeta(actual.slashPluginKey, { type: 'dismiss' });
+    },
     createEditorView(options: FakeViewOptions) {
       let mention = actual.INACTIVE_MENTION_STATE;
       let slash = actual.INACTIVE_SLASH_STATE;
@@ -83,7 +100,9 @@ vi.mock('@deep-wiki/editor/mount', async (importOriginal) => {
           if (tr.key === actual.mentionPluginKey) applyMention(tr.action as MentionAction);
           else applySlash(tr.action as SlashAction);
         },
-        focus: () => {},
+        focus: () => {
+          harness.focusCalls += 1;
+        },
         destroy: () => {},
       };
 
@@ -160,7 +179,124 @@ describe('EditorSurface', () => {
     searchMock.mockReset();
     checkAccessMock.mockReset();
     searchMock.mockResolvedValue(PEOPLE);
+    // The real `checkAccess` always returns a promise; a confirmed user
+    // mention awaits it before deciding whether to warn.
+    checkAccessMock.mockResolvedValue(true);
     harness.caret = { top: 100, bottom: 120, left: 40 };
+    harness.confirmed = null;
+    harness.focusCalls = 0;
+  });
+
+  /**
+   * Measured by the 2026-09-14 audit: clicking the second candidate left
+   * the text unchanged, the menu open and the editor unfocused. The
+   * plugins handle Enter themselves and document the click as the host's
+   * to wire (`mention-plugin.ts`: "confirmed (Enter or click)"); nothing
+   * was wired. docs/UI-CHECKLIST.md §6, "no inert interactions".
+   *
+   * The click is dispatched on the option row itself — the element that
+   * looks clickable — never on the listbox around it.
+   */
+  describe('a click confirms an option', () => {
+    test('clicking the second mention candidate inserts that candidate, closes the menu and keeps the editor focused', async () => {
+      const component = await mountSurface();
+      await openMentionMenu('a');
+      const second = component.findAll('[role="option"]')[1]!;
+
+      // `mousedown` on something outside the contenteditable would move
+      // focus off the editor before the click ever lands; the host has to
+      // cancel it. This asserts the mechanism, since happy-dom does not
+      // move focus for a real pointer.
+      const mousedown = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
+      second.element.dispatchEvent(mousedown);
+      expect(mousedown.defaultPrevented).toBe(true);
+      await second.trigger('click');
+
+      expect(harness.confirmed).toEqual({ kind: 'mention', label: PEOPLE[1]!.label });
+      expect(component.find('[role="listbox"]').exists()).toBe(false);
+      expect(harness.focusCalls).toBeGreaterThan(0);
+    });
+
+    test('clicking the second slash command runs that command, not the one the arrow keys sat on', async () => {
+      const component = await mountSurface();
+      openSlashMenu('');
+      await component.vm.$nextTick();
+      const options = component.findAll('[role="option"]');
+      const second = options[1]!;
+      const secondId = second.attributes('id');
+      expect(secondId).toBeTruthy();
+
+      const mousedown = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
+      second.element.dispatchEvent(mousedown);
+      expect(mousedown.defaultPrevented).toBe(true);
+      await second.trigger('click');
+
+      expect(harness.confirmed?.kind).toBe('slash');
+      // The second *rendered* command — whatever the shipped list orders
+      // there — not index 0, which is where the selection still was.
+      const secondLabel = second.text();
+      const shipped = (await import('@deep-wiki/editor/mount')).SLASH_COMMANDS.find((command) => secondLabel.startsWith(command.label));
+      expect(shipped).toBeDefined();
+      expect(harness.confirmed).toEqual({ kind: 'slash', id: shipped!.id });
+      expect(component.find('[role="listbox"]').exists()).toBe(false);
+      expect(harness.focusCalls).toBeGreaterThan(0);
+    });
+  });
+
+  /**
+   * The editor is a contenteditable with no name and no relationship to
+   * the menus it drives (audit, 2026-09-14; checklist §5). A combobox-style
+   * chain needs: the editor named as a multiline textbox, `aria-haspopup`
+   * saying what opens, `aria-controls` naming the open listbox, and the
+   * listbox *owning* its options — with no `<ul>` of its own role in
+   * between, or the options are orphans to assistive technology.
+   */
+  describe('ARIA ownership between the editor and its menus', () => {
+    test('the editor is a named multiline textbox that declares its popup', async () => {
+      const component = await mountSurface();
+      const editor = component.get('[data-testid="editor-surface"]');
+
+      expect(editor.attributes('role')).toBe('textbox');
+      expect(editor.attributes('aria-multiline')).toBe('true');
+      expect(editor.attributes('aria-label')).toBeTruthy();
+      expect(editor.attributes('aria-haspopup')).toBe('listbox');
+      expect(editor.attributes('aria-expanded')).toBe('false');
+      expect(editor.attributes('aria-controls')).toBeUndefined();
+    });
+
+    test('while a menu is open, aria-controls names an element that exists, is the listbox, and owns the options', async () => {
+      const component = await mountSurface();
+      await openMentionMenu('a');
+      const editor = component.get('[data-testid="editor-surface"]');
+
+      expect(editor.attributes('aria-expanded')).toBe('true');
+      const controlsId = editor.attributes('aria-controls');
+      expect(controlsId).toBeTruthy();
+      const listbox = component.get(`#${controlsId}`);
+      expect(listbox.attributes('role')).toBe('listbox');
+
+      // Every option's nearest ancestor with a role is the listbox itself:
+      // an intervening `<ul>` must be `role="presentation"` (or absent).
+      for (const option of listbox.findAll('[role="option"]')) {
+        let node = option.element.parentElement;
+        while (node && node !== listbox.element && (node.getAttribute('role') === null || node.getAttribute('role') === 'presentation')) {
+          node = node.parentElement;
+        }
+        expect(node).toBe(listbox.element);
+      }
+    });
+
+    test('the slash menu is wired the same way', async () => {
+      const component = await mountSurface();
+      openSlashMenu('');
+      await component.vm.$nextTick();
+      const editor = component.get('[data-testid="editor-surface"]');
+
+      const controlsId = editor.attributes('aria-controls');
+      expect(controlsId).toBeTruthy();
+      expect(component.get(`#${controlsId}`).attributes('aria-label')).toBe('Block commands');
+      expect(editor.attributes('aria-expanded')).toBe('true');
+    });
   });
 
   describe('empty and no-results states', () => {

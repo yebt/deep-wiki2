@@ -187,3 +187,56 @@ test('a save refused as "not canonical" offers the canonical document back, and 
   await expect(page.getByRole('status').filter({ hasText: /Saved/ })).toBeVisible();
   expect(saveAttempts).toBe(2);
 });
+
+// Measured by the 2026-09-14 audit: clicking the second candidate of either
+// menu left the text unchanged, the menu open and the editor unfocused —
+// the plugins handle Enter and leave the click to the host, and no host
+// wired it (docs/UI-CHECKLIST.md §6, "no inert interactions"). The unit
+// suite proves the wiring against a fake view; this proves a real pointer
+// on a real ProseMirror document produces the block and keeps the caret.
+test('clicking the second slash command runs it, closes the menu and leaves the editor focused', async ({ page }) => {
+  test.setTimeout(60000);
+  await signIn(page);
+  await page.route(`${apiOrigin()}/pages/${PAGE_ID}/edit-session`, (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        markdown: 'Start.\n',
+        title: 'Slash Click Test',
+        workspaceId: 'ws-e2e',
+        lock: { holderUserId: 'me', acquiredAt: new Date().toISOString(), heartbeatAt: new Date().toISOString() },
+      }),
+    }),
+  );
+  await page.route(`${apiOrigin()}/pages/${PAGE_ID}/lock`, (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ status: 'ok' }) }),
+  );
+
+  await page.goto(`/pages/${PAGE_ID}/edit`);
+  const editor = page.getByTestId('editor-surface');
+  await expect(editor).toContainText('Start.', { timeout: 30000 });
+  await editor.click();
+  await page.keyboard.press('End');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('/');
+
+  const menu = page.getByRole('listbox', { name: 'Block commands' });
+  await expect(menu).toBeVisible();
+  // The textbox says which listbox it drives, and that listbox owns the
+  // options (checklist §5).
+  await expect(editor).toHaveAttribute('aria-expanded', 'true');
+  await expect(editor).toHaveAttribute('aria-controls', (await menu.getAttribute('id'))!);
+  const second = menu.getByRole('option').nth(1);
+  await expect(second).toHaveText(/Heading 2/);
+
+  await second.click();
+
+  await expect(menu).toHaveCount(0);
+  await expect(editor.locator('h2')).toHaveCount(1);
+  await expect(editor).toBeFocused();
+  // The caret is inside the new block: typing lands in the heading.
+  await page.keyboard.type('Second');
+  await expect(editor.locator('h2')).toHaveText('Second');
+});
+
