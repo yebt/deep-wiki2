@@ -293,6 +293,26 @@ export function refineEnv(env: Env): Result<Env, EnvIssue[]> {
     }
   }
 
+  // The page soft lock is held iff `heartbeat_at > now() - PAGE_LOCK_TTL_SECONDS`
+  // (packages/db/src/locks/page-lock.ts), evaluated fresh on every read, with
+  // no sweeper and no client clock. A heartbeat at or above the TTL can
+  // therefore lapse an active editor's lock between beats — and a heartbeat
+  // merely *below* the TTL is not enough margin either: the client heartbeats
+  // every PAGE_LOCK_HEARTBEAT_SECONDS, and one beat arriving late — ordinary
+  // network jitter, a slow event loop, a backgrounded tab waking up — must
+  // still land inside the window. Requiring the TTL to be at least twice the
+  // heartbeat interval gives a held lock the slack of one entire missed beat
+  // before it can expire out from under an editor who is still there.
+  if (env.PAGE_LOCK_TTL_SECONDS < env.PAGE_LOCK_HEARTBEAT_SECONDS * 2) {
+    issues.push({
+      variable: 'PAGE_LOCK_HEARTBEAT_SECONDS',
+      message:
+        'PAGE_LOCK_HEARTBEAT_SECONDS is too close to PAGE_LOCK_TTL_SECONDS: PAGE_LOCK_TTL_SECONDS must be at ' +
+        'least twice PAGE_LOCK_HEARTBEAT_SECONDS, or a single late heartbeat — ordinary network jitter, not a ' +
+        `bug — can let an active editor's lock lapse. ${TEMPLATE} shows values that satisfy this.`,
+    });
+  }
+
   if (issues.length > 0) {
     return err(issues);
   }

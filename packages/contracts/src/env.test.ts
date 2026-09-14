@@ -304,6 +304,75 @@ describe('refineEnv', () => {
     expect(parsed.SMTP_PASSWORD).toBeUndefined();
     expect(parsed.BLOB_STORE_S3_ENDPOINT).toBeUndefined();
   });
+
+  // content-and-editor design.md "The soft lock, coherent without
+  // presence": a lock is held iff `heartbeat_at > now() - PAGE_LOCK_TTL_SECONDS`.
+  // A heartbeat interval at or above the TTL can lapse an active editor's
+  // lock between beats — the client beats every PAGE_LOCK_HEARTBEAT_SECONDS,
+  // and a beat merely *below* the TTL leaves no room for the one beat that
+  // arrives late from ordinary network jitter or scheduling delay. The
+  // margin required here is one full missed beat's worth of slack: the TTL
+  // must be at least twice the heartbeat interval.
+  describe('the page-lock heartbeat must stay safely inside its own TTL', () => {
+    test('rejects a heartbeat equal to the TTL — a lock could lapse between beats', () => {
+      const parsed = envSchema.parse(
+        validRawEnv({ PAGE_LOCK_TTL_SECONDS: '60', PAGE_LOCK_HEARTBEAT_SECONDS: '60' }),
+      );
+      const result = refineEnv(parsed);
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.some((issue) => issue.variable === 'PAGE_LOCK_HEARTBEAT_SECONDS')).toBe(true);
+      }
+    });
+
+    test('rejects a heartbeat above the TTL too', () => {
+      const parsed = envSchema.parse(
+        validRawEnv({ PAGE_LOCK_TTL_SECONDS: '30', PAGE_LOCK_HEARTBEAT_SECONDS: '45' }),
+      );
+
+      expect(refineEnv(parsed).ok).toBe(false);
+    });
+
+    test('rejects a heartbeat below the TTL with too little margin for one missed beat', () => {
+      // 20s heartbeat, 30s TTL: below the TTL, but a single late beat still
+      // has nowhere to land before expiry.
+      const parsed = envSchema.parse(
+        validRawEnv({ PAGE_LOCK_TTL_SECONDS: '30', PAGE_LOCK_HEARTBEAT_SECONDS: '20' }),
+      );
+
+      expect(refineEnv(parsed).ok).toBe(false);
+    });
+
+    test('accepts a heartbeat exactly at the required margin (TTL is twice the heartbeat)', () => {
+      const parsed = envSchema.parse(
+        validRawEnv({ PAGE_LOCK_TTL_SECONDS: '40', PAGE_LOCK_HEARTBEAT_SECONDS: '20' }),
+      );
+
+      expect(refineEnv(parsed).ok).toBe(true);
+    });
+
+    test('the defaults env.example ships already satisfy the margin', () => {
+      const parsed = envSchema.parse(validRawEnv());
+
+      expect(refineEnv(parsed).ok).toBe(true);
+    });
+
+    test('never echoes either configured value in the rejection message', () => {
+      const parsed = envSchema.parse(
+        validRawEnv({ PAGE_LOCK_TTL_SECONDS: '77', PAGE_LOCK_HEARTBEAT_SECONDS: '77' }),
+      );
+      const result = refineEnv(parsed);
+
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+
+      const message = result.error.find((issue) => issue.variable === 'PAGE_LOCK_HEARTBEAT_SECONDS')?.message ?? '';
+      expect(message).not.toContain('77');
+      expect(message).toContain('PAGE_LOCK_TTL_SECONDS');
+      expect(message).toContain('env.example');
+    });
+  });
 });
 
 /**
