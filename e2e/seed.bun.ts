@@ -30,18 +30,31 @@ async function hashPassword(): Promise<string> {
   return Bun.password.hash(ONBOARDING_PASSWORD, { algorithm: 'argon2id', memoryCost: 19_456, timeCost: 2 });
 }
 
-// `SavePageInput.changesetWindowMinutes` is required — `packages/db` never
-// reads env, so every save below threads this. `global-setup.ts` sets this
-// env var on this script's own process (matching the one it sets for the
-// spawned `apps/api` process); it is not read from `.env` directly so this
-// script keeps working the same way whether or not a developer's own `.env`
-// happens to be loaded in their shell.
-const CHANGESET_WINDOW_MINUTES = Number(process.env.CHANGESET_WINDOW_MINUTES);
-if (!Number.isFinite(CHANGESET_WINDOW_MINUTES) || CHANGESET_WINDOW_MINUTES <= 0) {
-  throw new Error('seed.bun.ts: CHANGESET_WINDOW_MINUTES is not set on this process — global-setup.ts must set it.');
+/**
+ * `SavePageInput.changesetWindowMinutes` is required — `packages/db` never
+ * reads env, so every `savePage()` call in `seedFixtures` below threads
+ * this. `global-setup.ts` sets this env var on this script's own process
+ * (matching the one it sets for the spawned `apps/api` process); it is not
+ * read from `.env` directly so this script keeps working the same way
+ * whether or not a developer's own `.env` happens to be loaded in their
+ * shell.
+ *
+ * Read lazily, on the seed path only — never at module load. The `--drop`
+ * path never calls `savePage()`, so it must never depend on a save-time
+ * constant: reading it unconditionally at the top of the module made every
+ * teardown throw before it inspected `--drop` at all, leaking every e2e
+ * run's `dw_test_*` database (global-setup.ts's teardown spawns this exact
+ * script with no such variable set — it is not part of the drop contract).
+ */
+function requireChangesetWindowMinutes(): number {
+  const value = Number(process.env.CHANGESET_WINDOW_MINUTES);
+  if (!Number.isFinite(value) || value <= 0) {
+    throw new Error('seed.bun.ts: CHANGESET_WINDOW_MINUTES is not set on this process — global-setup.ts must set it.');
+  }
+  return value;
 }
 
-async function seedFixtures(sql: postgres.Sql) {
+async function seedFixtures(sql: postgres.Sql, CHANGESET_WINDOW_MINUTES: number) {
   const [owner] = await sql<{ id: string }[]>`
     INSERT INTO users (email, password_hash, display_name)
     VALUES (${`e2e-owner-${randomUUID()}@example.com`}, 'unused', 'E2E Owner')
@@ -260,9 +273,8 @@ async function seedFixtures(sql: postgres.Sql) {
   // Page A to Page B is provably showing a DIFFERENT page rather than a
   // re-render of the first (the trap named explicitly in tasks.md 10.5).
   // `changesetWindowMinutes` is required on every `savePage()` call now
-  // (see the module-level `CHANGESET_WINDOW_MINUTES` constant above) — a
-  // book-scoped, authored save can no longer silently skip changeset
-  // resolution by omitting it.
+  // (see `seedFixtures`'s own parameter above) — a book-scoped, authored
+  // save can no longer silently skip changeset resolution by omitting it.
   const bookPageASave1 = await savePage(sql, {
     nodeId: bookPageA!.id,
     workspaceId: ws!.id,
@@ -402,6 +414,10 @@ async function main(): Promise<void> {
     return;
   }
 
+  // Only the seed path calls `savePage()`, so only the seed path requires
+  // this — checked before any provisioning happens, same as before.
+  const changesetWindowMinutes = requireChangesetWindowMinutes();
+
   // The invitation e2e reads the accept link out of the real mail the API
   // sends, so the test Mailpit has to be reachable — the same stack the
   // apps/api adapter suites bring up, on this worktree's own ports.
@@ -409,7 +425,7 @@ async function main(): Promise<void> {
   const testDb = await provisionTestDatabase();
   const sql = postgres(testDb.url, { max: 5 });
   try {
-    const fixtures = await seedFixtures(sql);
+    const fixtures = await seedFixtures(sql, changesetWindowMinutes);
     console.log(JSON.stringify({ url: testDb.url, dbName: testDb.name, ...fixtures }));
   } finally {
     await sql.end({ timeout: 1 }).catch(() => {});
