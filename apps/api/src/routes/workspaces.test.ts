@@ -6,7 +6,7 @@
  * leaving things out.
  */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { createSession } from '@deep-wiki/db';
+import { can, createInvitation, createSession, insertGrants } from '@deep-wiki/db';
 import { provisionTestDatabase, type ProvisionedTestDatabase } from '@deep-wiki/db/testing/provision';
 import postgres from 'postgres';
 import { expectNoDisclosure } from '../../testing/expect-no-disclosure';
@@ -144,6 +144,218 @@ describe('GET /workspaces', () => {
 
   test('a request with no session is unauthorized', async () => {
     const res = await buildApp().request('/workspaces');
+
+    expect(res.status).toBe(401);
+  });
+});
+
+async function insertPlan(maxWorkspaces: number): Promise<string> {
+  const [plan] = await sql<{ id: string }[]>`
+    INSERT INTO plans (name, max_workspaces, max_seats, max_storage_bytes, max_ai_tokens_monthly)
+    VALUES (${`plan-${crypto.randomUUID()}`}, ${maxWorkspaces}, 5, '1000000', '1000')
+    RETURNING id
+  `;
+  return plan!.id;
+}
+
+async function insertUserWithPlan(label: string, maxWorkspaces: number): Promise<string> {
+  const planId = await insertPlan(maxWorkspaces);
+  const [row] = await sql<{ id: string }[]>`
+    INSERT INTO users (email, password_hash, display_name, plan_id)
+    VALUES (${`${label}-${crypto.randomUUID()}@example.com`}, 'hash', ${label}, ${planId})
+    RETURNING id
+  `;
+  return row!.id;
+}
+
+function postWorkspace(cookie: string, body: unknown) {
+  return buildApp().request('/workspaces', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', cookie },
+    body: JSON.stringify(body),
+  });
+}
+
+describe('POST /workspaces', () => {
+  test('any signed-in user within their plan creates a workspace and can manage its root at once', async () => {
+    const userId = await insertUserWithPlan('creator', 2);
+    const cookie = await cookieFor(userId);
+    const slug = `acme-${crypto.randomUUID()}`;
+
+    const res = await postWorkspace(cookie, { name: 'Acme Handbook', slug });
+
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { workspaceId: string; rootNodeId: string };
+    expect(body.workspaceId).toBeTruthy();
+    expect(await can(sql, { subjectType: 'user', subjectId: userId, resourceId: body.rootNodeId, action: 'manage' })).toBe(true);
+
+    // And it is now a workspace the creator can open — the list endpoint
+    // and the create endpoint agree about what a workspace id is worth.
+    const list = await buildApp().request('/workspaces', { headers: { cookie } });
+    const listed = (await list.json()) as { workspaces: { id: string; slug: string }[] };
+    expect(listed.workspaces.map((w) => w.id)).toContain(body.workspaceId);
+  });
+
+  /**
+   * The limit is genuinely reached first: a plan of one, one workspace
+   * already owned. A test whose plan limit is never reached would pass
+   * against a route that ignores the plan entirely.
+   */
+  test('a creation past the plan limit is refused naming the plan and its limit, and creates nothing', async () => {
+    const userId = await insertUserWithPlan('limited', 1);
+    const cookie = await cookieFor(userId);
+    const first = await postWorkspace(cookie, { name: 'First', slug: `first-${crypto.randomUUID()}` });
+    expect(first.status).toBe(201);
+
+    const res = await postWorkspace(cookie, { name: 'Second', slug: `second-${crypto.randomUUID()}` });
+
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { reason: string; planName: string; maxWorkspaces: number; error: string };
+    expect(body.reason).toBe('plan_limit');
+    expect(body.maxWorkspaces).toBe(1);
+    expect(body.planName).toMatch(/^plan-/);
+    const owned = await sql`SELECT id FROM workspaces WHERE owner_id = ${userId}`;
+    expect(owned).toHaveLength(1);
+  });
+
+  test('a user with no plan assigned is refused with its own reason, not a 500', async () => {
+    const userId = await insertUser('planless');
+    const cookie = await cookieFor(userId);
+
+    const res = await postWorkspace(cookie, { name: 'Acme', slug: `acme-${crypto.randomUUID()}` });
+
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as { reason: string }).reason).toBe('no_plan');
+  });
+
+  test('a slug that is already taken is a 409 with its own reason', async () => {
+    const userId = await insertUserWithPlan('slugger', 5);
+    const cookie = await cookieFor(userId);
+    const slug = `taken-${crypto.randomUUID()}`;
+    await postWorkspace(cookie, { name: 'One', slug });
+
+    const res = await postWorkspace(cookie, { name: 'Two', slug });
+
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { reason: string }).reason).toBe('slug_taken');
+  });
+
+  test('a malformed body is a 400', async () => {
+    const userId = await insertUserWithPlan('sloppy', 5);
+    const cookie = await cookieFor(userId);
+
+    const res = await postWorkspace(cookie, { name: 'Acme', slug: 'Not A Slug' });
+
+    expect(res.status).toBe(400);
+  });
+
+  test('a request with no session is unauthorized and creates nothing', async () => {
+    const slug = `nobody-${crypto.randomUUID()}`;
+    const res = await buildApp().request('/workspaces', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'Acme', slug }),
+    });
+
+    expect(res.status).toBe(401);
+    expect(await sql`SELECT id FROM workspaces WHERE slug = ${slug}`).toHaveLength(0);
+  });
+});
+
+interface MembersFixture {
+  readonly workspace: Workspace;
+  readonly managerCookie: string;
+  readonly readerCookie: string;
+  readonly readerId: string;
+  readonly pendingEmail: string;
+  readonly acceptedEmail: string;
+}
+
+/**
+ * A workspace with a manager, a reader who is a member but may not manage,
+ * one pending invitation and one already-accepted invitation. The
+ * pending one is what the screen exists to show; the accepted one is what
+ * it must leave out; the reader is the caller the route must refuse
+ * without disclosing.
+ */
+async function buildMembersFixture(): Promise<MembersFixture> {
+  const owner = await insertUser('owner');
+  const manager = await insertUser('manager');
+  const reader = await insertUser('reader');
+  const workspace = await insertWorkspace(owner, 'Members Handbook');
+  await insertGrants(sql, workspace.id, 'user', manager, [{ resourceId: workspace.rootId, action: 'manage', effect: 'allow' }]);
+  await allowRead(workspace.id, reader, workspace.rootId);
+
+  const pendingEmail = `pending-${crypto.randomUUID()}@example.com`;
+  await createInvitation(sql, {
+    workspaceId: workspace.id,
+    email: pendingEmail,
+    startingGrants: [{ resourceId: workspace.rootId, action: 'read', effect: 'allow' }],
+    ttlDays: 7,
+    invitedByUserId: manager,
+  });
+  const acceptedEmail = `accepted-${crypto.randomUUID()}@example.com`;
+  await createInvitation(sql, {
+    workspaceId: workspace.id,
+    email: acceptedEmail,
+    startingGrants: [{ resourceId: workspace.rootId, action: 'read', effect: 'allow' }],
+    ttlDays: 7,
+  });
+  await sql`UPDATE invitations SET accepted_at = now() WHERE email = ${acceptedEmail}`;
+
+  return {
+    workspace,
+    managerCookie: await cookieFor(manager),
+    readerCookie: await cookieFor(reader),
+    readerId: reader,
+    pendingEmail,
+    acceptedEmail,
+  };
+}
+
+describe('GET /workspaces/:id/members', () => {
+  test('a manager sees the members and the pending invitations, and not the accepted one', async () => {
+    const fixture = await buildMembersFixture();
+
+    const res = await buildApp().request(`/workspaces/${fixture.workspace.id}/members`, { headers: { cookie: fixture.managerCookie } });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      workspace: { id: string; name: string; slug: string };
+      rootNodeId: string;
+      members: { id: string; displayName: string; email: string }[];
+      invitations: { email: string; startingGrants: unknown[] }[];
+      truncated: boolean;
+    };
+    expect(body.workspace).toEqual({ id: fixture.workspace.id, name: fixture.workspace.name, slug: fixture.workspace.slug });
+    expect(body.rootNodeId).toBe(fixture.workspace.rootId);
+    expect(body.members.map((m) => m.id)).toContain(fixture.readerId);
+    expect(body.invitations.map((i) => i.email)).toEqual([fixture.pendingEmail]);
+    expect(body.invitations[0]!.startingGrants).toEqual([{ resourceId: fixture.workspace.rootId, action: 'read' }]);
+    expect(body.truncated).toBe(false);
+  });
+
+  test('a member without manage gets the same 404 as a workspace that does not exist, and learns nothing', async () => {
+    const fixture = await buildMembersFixture();
+
+    const denied = await buildApp().request(`/workspaces/${fixture.workspace.id}/members`, { headers: { cookie: fixture.readerCookie } });
+    const absent = await buildApp().request(`/workspaces/${crypto.randomUUID()}/members`, { headers: { cookie: fixture.readerCookie } });
+
+    expect(denied.status).toBe(404);
+    expect(absent.status).toBe(404);
+    const deniedText = await denied.text();
+    expect(deniedText).toBe(await absent.text());
+    expectNoDisclosure(
+      deniedText,
+      { id: fixture.workspace.id, slug: fixture.workspace.slug, title: fixture.workspace.name, values: [fixture.workspace.rootId, fixture.pendingEmail] },
+      denied.headers,
+    );
+  });
+
+  test('a request with no session is unauthorized', async () => {
+    const fixture = await buildMembersFixture();
+
+    const res = await buildApp().request(`/workspaces/${fixture.workspace.id}/members`);
 
     expect(res.status).toBe(401);
   });

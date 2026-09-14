@@ -140,5 +140,26 @@ export {
 } from './nodes';
 export type { CreateNodeRequest, CreateNodeResponse, NodeType, RenameNodeRequest, RenameNodeResponse } from './nodes';
 
-export { WorkspaceListResponseSchema, WorkspaceSummarySchema } from './workspaces';
-export type { WorkspaceListResponse, WorkspaceSummaryPayload } from './workspaces';
+export {
+  CreateWorkspaceRefusalSchema,
+  CreateWorkspaceRequestSchema,
+  CreateWorkspaceResponseSchema,
+  PendingInvitationSchema,
+  slugifyTitle,
+  WORKSPACE_NAME_MAX_LENGTH,
+  WorkspaceListResponseSchema,
+  WorkspaceMemberSchema,
+  WorkspaceMembersResponseSchema,
+  WorkspaceSlugSchema,
+  WorkspaceSummarySchema,
+} from './workspaces';
+export type {
+  CreateWorkspaceRefusal,
+  CreateWorkspaceRequest,
+  CreateWorkspaceResponse,
+  PendingInvitationPayload,
+  WorkspaceListResponse,
+  WorkspaceMemberPayload,
+  WorkspaceMembersResponse,
+  WorkspaceSummaryPayload,
+} from './workspaces';
