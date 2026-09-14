@@ -201,11 +201,11 @@ describe('GET /books/:id/diff', () => {
     `;
     const [book] = await sql<{ id: string }[]>`
       INSERT INTO nodes (workspace_id, parent_id, type, path, position, slug, title)
-      VALUES (${ws!.id}, ${root!.id}, 'book', '', 0, ${`book-${crypto.randomUUID()}`}, 'Book') RETURNING id
+      VALUES (${ws!.id}, ${root!.id}, 'book', '', 0, ${`book-${crypto.randomUUID()}`}, 'Operations Handbook') RETURNING id
     `;
     const [page] = await sql<{ id: string }[]>`
       INSERT INTO nodes (workspace_id, parent_id, type, path, position, slug, title)
-      VALUES (${ws!.id}, ${book!.id}, 'page', '', 0, ${`page-${crypto.randomUUID()}`}, 'A Page') RETURNING id
+      VALUES (${ws!.id}, ${book!.id}, 'page', '', 0, ${`page-${crypto.randomUUID()}`}, 'Runbook') RETURNING id
     `;
     await sql`
       INSERT INTO permissions (workspace_id, subject_type, subject_id, resource_id, action, effect)
@@ -232,7 +232,13 @@ describe('GET /books/:id/diff', () => {
       changesetWindowMinutes: WINDOW_MINUTES,
     });
 
-    return { workspaceId: ws!.id, bookId: book!.id, pageId: page!.id, since, readerCookie: await cookieFor(reader) };
+    return {
+      workspaceId: ws!.id,
+      bookId: book!.id,
+      pageId: page!.id,
+      since,
+      readerCookie: await cookieFor(reader),
+    };
   }
 
   test('aggregates every page changed since the given date, with its page-level diff', async () => {
@@ -248,5 +254,90 @@ describe('GET /books/:id/diff', () => {
     expect(body.pages).toHaveLength(1);
     expect(body.pages[0]?.pageId).toBe(fixture.pageId);
     expect(body.pages[0]?.diff.changes.some((change) => change.kind === 'added')).toBe(true);
+  });
+
+  // block-diff spec: carrying block text, both revision ids and the page
+  // title directly avoids the web screen re-deriving revision ids from a
+  // separate `GET /pages/:id/history` call per page and refetching text
+  // from `GET /pages/:id/diff` — the N+1 `book-diff.ts`'s own comment says
+  // it exists to avoid, reintroduced client-side otherwise.
+  test('carries the book title/workspaceId, and each changed page carries its own text, revision ids and title', async () => {
+    const fixture = await buildBookFixture();
+    const app = buildApp();
+
+    const res = await app.request(`/books/${fixture.bookId}/diff?since=${encodeURIComponent(fixture.since.toISOString())}`, {
+      headers: { cookie: fixture.readerCookie },
+    });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      title: string;
+      workspaceId: string;
+      pages: {
+        pageId: string;
+        pageTitle: string;
+        baselineRevisionId: string | null;
+        latestRevisionId: string;
+        diff: { changes: (BlockChange & { text: string })[] };
+      }[];
+    };
+
+    expect(body.title).toBe('Operations Handbook');
+    expect(body.workspaceId).toBe(fixture.workspaceId);
+
+    const page = body.pages[0]!;
+    expect(page.pageTitle).toBe('Runbook');
+    expect(typeof page.baselineRevisionId === 'string' || page.baselineRevisionId === null).toBe(true);
+    expect(page.baselineRevisionId).not.toBeNull();
+    expect(typeof page.latestRevisionId).toBe('string');
+    const added = page.diff.changes.find((change) => change.kind === 'added');
+    expect(added?.text).toContain('Added after the cutoff');
+  });
+
+  // A page whose very first revision landed after `since` has no earlier
+  // revision to diff against — `baselineRevisionId` must be `null`, not a
+  // stand-in string, and the page's added blocks still carry text.
+  test('a page with no revision before the cutoff reports a null baselineRevisionId', async () => {
+    const owner = await seedUser('Owner');
+    const reader = await seedUser('Reader');
+    const [ws] = await sql<{ id: string }[]>`
+      INSERT INTO workspaces (owner_id, name, slug) VALUES (${owner}, 'WS', ${`ws-${crypto.randomUUID()}`}) RETURNING id
+    `;
+    const [root] = await sql<{ id: string }[]>`
+      INSERT INTO nodes (workspace_id, parent_id, type, path, position, slug, title)
+      VALUES (${ws!.id}, NULL, 'workspace', '', 0, 'root', 'Root') RETURNING id
+    `;
+    const [book] = await sql<{ id: string }[]>`
+      INSERT INTO nodes (workspace_id, parent_id, type, path, position, slug, title)
+      VALUES (${ws!.id}, ${root!.id}, 'book', '', 0, ${`book-${crypto.randomUUID()}`}, 'Fresh Book') RETURNING id
+    `;
+    const [page] = await sql<{ id: string }[]>`
+      INSERT INTO nodes (workspace_id, parent_id, type, path, position, slug, title)
+      VALUES (${ws!.id}, ${book!.id}, 'page', '', 0, ${`page-${crypto.randomUUID()}`}, 'Brand New Page') RETURNING id
+    `;
+    await sql`
+      INSERT INTO permissions (workspace_id, subject_type, subject_id, resource_id, action, effect)
+      VALUES (${ws!.id}, 'user', ${reader}, ${book!.id}, 'read', 'allow')
+    `;
+    const since = new Date(Date.now() - 1000);
+    await savePage(sql, {
+      nodeId: page!.id,
+      workspaceId: ws!.id,
+      markdown: 'Only revision.\n',
+      expectedContentHash: null,
+      updatedBy: owner,
+      changesetWindowMinutes: WINDOW_MINUTES,
+    });
+
+    const app = buildApp();
+    const res = await app.request(`/books/${book!.id}/diff?since=${encodeURIComponent(since.toISOString())}`, {
+      headers: { cookie: await cookieFor(reader) },
+    });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { pages: { baselineRevisionId: string | null; pageTitle: string }[] };
+    expect(body.pages).toHaveLength(1);
+    expect(body.pages[0]!.baselineRevisionId).toBeNull();
+    expect(body.pages[0]!.pageTitle).toBe('Brand New Page');
   });
 });

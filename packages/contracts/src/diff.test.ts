@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { PageDiffResponseSchema } from './diff';
+import { BookDiffResponseSchema, PageDiffResponseSchema } from './diff';
 
 /**
  * `GET /pages/:id/diff` response (block-diff spec). Every change kind
@@ -105,5 +105,95 @@ describe('PageDiffResponseSchema', () => {
     // whichever member the union happened to try first.
     expect(result.error.issues.map((issue) => issue.path)).toEqual([['diff', 'changes', 0, 'kind']]);
     expect(result.error.issues[0]?.code).toBe('invalid_union_discriminator');
+  });
+});
+
+/**
+ * `GET /books/:id/diff` response (block-diff spec: "Book-Level Diff
+ * Aggregates Changed Pages Since A Date"). Until this schema existed the
+ * route returned `diffBlocks()`'s raw output unvalidated (no `text`, no
+ * revision ids, no page title) and the web book-diff screen had to
+ * re-derive `baselineRevisionId`/`latestRevisionId` from a separate
+ * `GET /pages/:id/history` call per page and refetch text from
+ * `GET /pages/:id/diff` — the exact N+1 `book-diff.ts`'s own comment says
+ * it exists to avoid, reintroduced client-side.
+ */
+describe('BookDiffResponseSchema', () => {
+  test('parses the book title/workspaceId and each changed page with its own text, revision ids and title', () => {
+    const parsed = BookDiffResponseSchema.parse({
+      title: 'Operations Handbook',
+      workspaceId: 'ws-1',
+      pages: [
+        {
+          pageId: 'page-1',
+          pageTitle: 'Runbook',
+          baselineRevisionId: 'rev-1',
+          latestRevisionId: 'rev-2',
+          diff: { changes: [{ kind: 'added', id: 'b1', slot: 0, text: 'New paragraph.' }] },
+        },
+      ],
+    });
+
+    expect(parsed.title).toBe('Operations Handbook');
+    expect(parsed.workspaceId).toBe('ws-1');
+    expect(parsed.pages[0]).toEqual({
+      pageId: 'page-1',
+      pageTitle: 'Runbook',
+      baselineRevisionId: 'rev-1',
+      latestRevisionId: 'rev-2',
+      diff: { changes: [{ kind: 'added', id: 'b1', slot: 0, text: 'New paragraph.' }] },
+    });
+  });
+
+  // A page with no revision before `since` (its very first save landed
+  // after the cutoff) has no baseline to diff against — `null`, not an
+  // empty string standing in for "none".
+  test('a changed page with no baseline revision parses with baselineRevisionId null', () => {
+    const parsed = BookDiffResponseSchema.parse({
+      title: 'Operations Handbook',
+      workspaceId: 'ws-1',
+      pages: [
+        {
+          pageId: 'page-1',
+          pageTitle: 'Runbook',
+          baselineRevisionId: null,
+          latestRevisionId: 'rev-1',
+          diff: { changes: [] },
+        },
+      ],
+    });
+
+    expect(parsed.pages[0]!.baselineRevisionId).toBeNull();
+  });
+
+  // A book-diff test whose changed page has no text is one of the traps
+  // named for this task — the change's own `text` must be required, not
+  // silently defaulted to `''` by an over-permissive schema.
+  test('rejects a changed page whose block change carries no text', () => {
+    const result = BookDiffResponseSchema.safeParse({
+      title: 'Operations Handbook',
+      workspaceId: 'ws-1',
+      pages: [
+        {
+          pageId: 'page-1',
+          pageTitle: 'Runbook',
+          baselineRevisionId: 'rev-1',
+          latestRevisionId: 'rev-2',
+          diff: { changes: [{ kind: 'added', id: 'b1', slot: 0 }] },
+        },
+      ],
+    });
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.path)).toEqual([['pages', 0, 'diff', 'changes', 0, 'text']]);
+  });
+
+  test('rejects a response missing the book title', () => {
+    const result = BookDiffResponseSchema.safeParse({ workspaceId: 'ws-1', pages: [] });
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.path)).toEqual([['title']]);
   });
 });

@@ -6,7 +6,7 @@
  * shape `comments.ts`/`revisions.ts` already use.
  */
 import { can, getRevisionsByIds, listChangedPagesSince, readableResourceIds } from '@deep-wiki/db';
-import { ErrorResponseSchema, PageDiffResponseSchema } from '@deep-wiki/contracts';
+import { BookDiffResponseSchema, ErrorResponseSchema, PageDiffResponseSchema } from '@deep-wiki/contracts';
 import { diffBlocks, parse, sliceBlocks } from '@deep-wiki/markdown';
 import { Hono, type Context } from 'hono';
 import type postgres from 'postgres';
@@ -20,6 +20,16 @@ export interface DiffRouteDeps {
 
 interface NodeRow {
   workspace_id: string;
+}
+
+interface NodeWithTitleRow {
+  workspace_id: string;
+  title: string;
+}
+
+interface TitleRow {
+  id: string;
+  title: string;
 }
 
 function notFound(c: Context): Response {
@@ -80,7 +90,7 @@ export function createDiffRoutes(deps: DiffRouteDeps): Hono<{ Variables: Session
     const sinceDate = new Date(since);
     if (Number.isNaN(sinceDate.getTime())) return c.json(ErrorResponseSchema.parse({ error: 'since must be a valid date' }), 400);
 
-    const [node] = await deps.sql<NodeRow[]>`SELECT workspace_id FROM nodes WHERE id = ${bookId}`;
+    const [node] = await deps.sql<NodeWithTitleRow[]>`SELECT workspace_id, title FROM nodes WHERE id = ${bookId}`;
     const canRead =
       node !== undefined &&
       (await can(deps.sql, { subjectType: 'user', subjectId: session.userId, resourceId: bookId, action: 'read' }));
@@ -93,18 +103,48 @@ export function createDiffRoutes(deps: DiffRouteDeps): Hono<{ Variables: Session
       subjectId: session.userId,
       resourceIds: changed.map((page) => page.pageId),
     });
+    const readablePages = changed.filter((p) => readable.has(p.pageId));
+    // Every readable changed page's own title, in one query — never one
+    // `SELECT` per page (the same batching principle `listChangedPagesSince`
+    // itself already follows for revisions).
+    const titleRows = readablePages.length
+      ? await deps.sql<TitleRow[]>`SELECT id, title FROM nodes WHERE id = ANY(${readablePages.map((p) => p.pageId)})`
+      : [];
+    const titleByPageId = new Map(titleRows.map((row) => [row.id, row.title]));
 
-    const pages: { pageId: string; diff: ReturnType<typeof diffBlocks> }[] = [];
-    for (const page of changed.filter((p) => readable.has(p.pageId))) {
+    const pages: {
+      pageId: string;
+      pageTitle: string;
+      baselineRevisionId: string | null;
+      latestRevisionId: string;
+      diff: { changes: ReturnType<typeof attachBlockText> };
+    }[] = [];
+    for (const page of readablePages) {
       const ids = page.baselineRevisionId ? [page.baselineRevisionId, page.latestRevisionId] : [page.latestRevisionId];
       const revisions = await getRevisionsByIds(deps.sql, { workspaceId: node.workspace_id, ids });
       const latest = revisions.find((r) => r.id === page.latestRevisionId);
       const baseline = page.baselineRevisionId ? revisions.find((r) => r.id === page.baselineRevisionId) : undefined;
       if (!latest) continue; // the revision was pruned meanwhile
-      pages.push({ pageId: page.pageId, diff: diffBlocks(baseline?.content ?? '', latest.content) });
+
+      // Same shape as the page-level route: `diffBlocks()` reports
+      // classification only, so each change's own text is attached from
+      // the two sides' own `sliceBlocks()` output.
+      const beforeContent = baseline?.content ?? '';
+      const beforeSlices = sliceBlocks(parse(beforeContent), beforeContent);
+      const afterSlices = sliceBlocks(parse(latest.content), latest.content);
+      const diff = diffBlocks(beforeContent, latest.content);
+      const changes = attachBlockText(diff.changes, beforeSlices, afterSlices);
+
+      pages.push({
+        pageId: page.pageId,
+        pageTitle: titleByPageId.get(page.pageId) ?? '',
+        baselineRevisionId: page.baselineRevisionId,
+        latestRevisionId: page.latestRevisionId,
+        diff: { changes },
+      });
     }
 
-    return c.json({ pages });
+    return c.json(BookDiffResponseSchema.parse({ title: node.title, workspaceId: node.workspace_id, pages }));
   });
 
   return app;

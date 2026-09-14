@@ -68,3 +68,31 @@ export const PageDiffResponseSchema = z.object({
   }),
 });
 export type PageDiffResponse = z.infer<typeof PageDiffResponseSchema>;
+
+/**
+ * `GET /books/:id/diff?since=` response (block-diff spec: "Book-Level Diff
+ * Aggregates Changed Pages Since A Date"). Each changed page carries its own
+ * `text`-bearing changes (via `DiffBlockChangeSchema`, the same shape the
+ * page-level route uses), both revision ids `listChangedPagesSince` already
+ * computes, and the page's own title — before this schema existed the route
+ * returned none of the three, forcing the web book-diff screen to re-derive
+ * revision ids from a separate `GET /pages/:id/history` call per page and
+ * refetch text from `GET /pages/:id/diff`, reintroducing client-side the
+ * N+1 `book-diff.ts`'s own comment says it exists to avoid.
+ */
+export const ChangedPageDiffSchema = z.object({
+  pageId: z.string(),
+  pageTitle: z.string(),
+  /** `null` when the page's very first revision landed after `since` — there is no earlier revision to diff against. */
+  baselineRevisionId: z.string().nullable(),
+  latestRevisionId: z.string(),
+  diff: z.object({ changes: z.array(DiffBlockChangeSchema) }),
+});
+export type ChangedPageDiffPayload = z.infer<typeof ChangedPageDiffSchema>;
+
+export const BookDiffResponseSchema = z.object({
+  title: z.string(),
+  workspaceId: z.string(),
+  pages: z.array(ChangedPageDiffSchema),
+});
+export type BookDiffResponse = z.infer<typeof BookDiffResponseSchema>;

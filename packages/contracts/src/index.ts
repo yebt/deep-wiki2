@@ -127,8 +127,8 @@ export type {
   RevisionSummaryPayload,
 } from './revisions';
 
-export { DiffBlockChangeSchema, PageDiffResponseSchema, RevisionMetaSchema } from './diff';
-export type { DiffBlockChangePayload, PageDiffResponse, RevisionMetaPayload } from './diff';
+export { BookDiffResponseSchema, ChangedPageDiffSchema, DiffBlockChangeSchema, PageDiffResponseSchema, RevisionMetaSchema } from './diff';
+export type { BookDiffResponse, ChangedPageDiffPayload, DiffBlockChangePayload, PageDiffResponse, RevisionMetaPayload } from './diff';
 
 export {
   CreateNodeRequestSchema,
