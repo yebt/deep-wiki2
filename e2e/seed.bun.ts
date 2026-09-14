@@ -248,6 +248,11 @@ async function seedFixtures(sql: postgres.Sql) {
   // paragraph, deliberately different content, so navigating "Next" from
   // Page A to Page B is provably showing a DIFFERENT page rather than a
   // re-render of the first (the trap named explicitly in tasks.md 10.5).
+  // `changesetWindowMinutes` MUST be passed explicitly — `writeRevision()`
+  // (packages/db/src/revisions/insert-revision.ts) only resolves a book and
+  // a changeset when it is not `undefined`; every save below passes 30,
+  // matching `env.example`'s `CHANGESET_WINDOW_MINUTES` and
+  // `global-setup.ts`'s API env var, the one place this number exists.
   const bookPageASave1 = await savePage(sql, {
     nodeId: bookPageA!.id,
     workspaceId: ws!.id,
@@ -258,6 +263,7 @@ async function seedFixtures(sql: postgres.Sql) {
       'A paragraph about grapefruit that will be removed entirely.\n',
     expectedContentHash: null,
     updatedBy: owner!.id,
+    changesetWindowMinutes: 30,
   });
   const bookPageBSave1 = await savePage(sql, {
     nodeId: bookPageB!.id,
@@ -265,6 +271,7 @@ async function seedFixtures(sql: postgres.Sql) {
     markdown: '## Book page beta\n\nThe page as it was first saved, with no edits yet.\n',
     expectedContentHash: null,
     updatedBy: owner!.id,
+    changesetWindowMinutes: 30,
   });
 
   // The book-diff "since" boundary: captured from the database's own
@@ -300,6 +307,7 @@ async function seedFixtures(sql: postgres.Sql) {
       'A paragraph about oranges that will move down in the next revision.\n',
     expectedContentHash: bookPageASave1.contentHash,
     updatedBy: owner!.id,
+    changesetWindowMinutes: 30,
   });
   await savePage(sql, {
     nodeId: bookPageB!.id,
@@ -307,6 +315,7 @@ async function seedFixtures(sql: postgres.Sql) {
     markdown: '## Book page beta\n\nThe page as it was first saved, now with one small edit.\n',
     expectedContentHash: bookPageBSave1.contentHash,
     updatedBy: owner!.id,
+    changesetWindowMinutes: 30,
   });
 
   await insertGrants(sql, ws!.id, 'user', readerUser!.id, [

@@ -161,7 +161,7 @@ Chain strategy: pending
 - [ ] 10.2 **STOP — owner review gate 1/6: page history.** Do not start 10.3 until the owner has reviewed and passed this screen against `UI-CHECKLIST.md` and `DESIGN-SYSTEM.md`.
 - [x] 10.3 Build page-level diff view (added/removed/**modified**/**moved** distinctly treated, §4.7); write and pass its happy-path and permission-denied e2e.
 - [ ] 10.4 **STOP — owner review gate 2/6: page diff view.**
-- [ ] 10.5 Build book-level changeset history + book diff, navigable between changed pages without returning to a list (§4.7); e2e coverage per §7.
+- [x] 10.5 Build book-level changeset history + book diff, navigable between changed pages without returning to a list (§4.7); e2e coverage per §7.
 - [ ] 10.6 **STOP — owner review gate 3/6: book changeset history and diff.**
 - [ ] 10.7 Build the comment gutter + thread panel on the read screen (anchored-indicator display, reply, resolve), composed client-side over unchanged cached HTML per design.md Decision 5; e2e coverage including the permission-denied case (comment-indicator absent for `read`-only).
 - [ ] 10.8 **STOP — owner review gate 4/6: comment gutter and thread panel.**

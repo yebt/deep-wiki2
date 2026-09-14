@@ -228,4 +228,67 @@ describe('navigation tree page', () => {
       expect(component.findComponent(NavigationTreeActions).props('rootId')).toBe('root-1');
     });
   });
+
+  /*
+   * task 10.5's one authorized affordance on this file: a way to reach a
+   * book's changeset history without editing `NavigationTreeNode.vue`
+   * (out of this task's file ownership). It lives in the header, not
+   * inside a row, so it cannot collide with that component's drag/keyboard
+   * contract.
+   */
+  describe('reaching book history', () => {
+    const ONE_BOOK = [
+      {
+        id: 'shelf-1',
+        type: 'shelf',
+        slug: 'shelf',
+        title: 'Engineering',
+        position: 0,
+        children: [{ id: 'book-1', type: 'book', slug: 'handbook', title: 'Handbook', position: 0, children: [] }],
+      },
+    ];
+
+    const TWO_BOOKS = [
+      {
+        id: 'shelf-1',
+        type: 'shelf',
+        slug: 'shelf',
+        title: 'Engineering',
+        position: 0,
+        children: [
+          { id: 'book-1', type: 'book', slug: 'handbook', title: 'Handbook', position: 0, children: [] },
+          { id: 'book-2', type: 'book', slug: 'runbook', title: 'Runbook', position: 1, children: [] },
+        ],
+      },
+    ];
+
+    test('a single book renders a direct link to its history, named by its title', async () => {
+      mockTree({ status: 'success', nodes: ONE_BOOK });
+      const component = await mountSuspended(PageInApp);
+
+      expect(component.text()).toMatch(/book history/i);
+      const link = component.get('a[href="/books/book-1/history"]');
+      expect(link.text()).toBe('Handbook');
+    });
+
+    test('more than one book offers a link per book, each named by its own title, not a bare id', async () => {
+      mockTree({ status: 'success', nodes: TWO_BOOKS });
+      const component = await mountSuspended(PageInApp);
+
+      const handbook = component.get('a[href="/books/book-1/history"]');
+      expect(handbook.text()).toBe('Handbook');
+      const runbook = component.get('a[href="/books/book-2/history"]');
+      expect(runbook.text()).toBe('Runbook');
+    });
+
+    test('no book anywhere in the tree offers no affordance at all', async () => {
+      mockTree({
+        status: 'success',
+        nodes: [{ id: 'shelf-1', type: 'shelf', slug: 'shelf', title: 'Engineering', position: 0, children: [] }],
+      });
+      const component = await mountSuspended(PageInApp);
+
+      expect(component.text()).not.toMatch(/book history/i);
+    });
+  });
 });

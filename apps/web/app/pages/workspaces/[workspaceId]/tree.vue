@@ -174,6 +174,31 @@ function onActivate(nodeId: string): void {
   activeId.value = nodeId;
 }
 
+/**
+ * task 10.5's one authorized affordance on this file: a way to reach a
+ * book's changeset history. Deliberately NOT added inside
+ * `NavigationTreeNode.vue` — out of this task's file ownership, and that
+ * component's `isNavigable`/`onKeydown` already carry a keyboard and
+ * drag-and-drop contract a new interactive element inside a row risks
+ * reopening (the 2026-09-07 review's own finding). It lives in the
+ * header instead: plain, always-visible links, not a portal-rendered menu
+ * — one book renders one link, several render one link per book, and the
+ * whole block is absent when the tree has none, so the affordance never
+ * competes with `NavigationTreeActions`' own primary action for
+ * attention.
+ */
+const bookNodes = computed<TreeNode[]>(() => {
+  const out: TreeNode[] = [];
+  const walk = (list: readonly TreeNode[]): void => {
+    for (const node of list) {
+      if (node.type === 'book') out.push(node);
+      if (node.children.length > 0) walk(node.children);
+    }
+  };
+  walk(nodes.value);
+  return out;
+});
+
 /** Deliberate activation: a click, or Enter/Space. */
 function onOpen(nodeId: string): void {
   activeId.value = nodeId;
@@ -186,6 +211,23 @@ useSeoMeta({ title: 'Navigation tree — deep-wiki' });
 
 <template>
   <AppShell>
+    <template v-if="bookNodes.length > 0" #header-end>
+      <div class="flex flex-wrap items-center gap-2">
+        <span class="text-body-small text-muted">Book history:</span>
+        <UButton
+          v-for="book in bookNodes"
+          :key="book.id"
+          size="sm"
+          variant="ghost"
+          color="neutral"
+          icon="i-lucide-history"
+          :to="`/books/${book.id}/history`"
+        >
+          {{ book.title }}
+        </UButton>
+      </div>
+    </template>
+
     <!-- `AppShell`'s `measure` column, the same one read and edit mode
          stand in. A tree row is not prose, but it is a single line of
          `body-large` read left to right, and a label that starts at x=0 and
