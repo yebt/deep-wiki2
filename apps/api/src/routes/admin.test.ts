@@ -303,3 +303,71 @@ describe('PUT /admin/registration-mode (Super Root only)', () => {
     expect(row!.smtp_verified_at).toBeNull();
   });
 });
+
+describe('GET /admin/instance-settings (Super Root only)', () => {
+  test('returns the mode, the allowlist and whether SMTP is verified, and never the configuration hash', async () => {
+    await resetInstanceSettings();
+    const superRoot = await insertSuperRoot();
+    const app = buildApp();
+    await app.request('/admin/registration-domains', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json', cookie: superRoot.cookie },
+      body: JSON.stringify({ domains: ['company.com'] }),
+    });
+
+    const res = await app.request('/admin/instance-settings', { headers: { cookie: superRoot.cookie } });
+
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    expect(JSON.parse(text)).toEqual({
+      registrationMode: 'invitation_only',
+      openRegistrationDomains: ['company.com'],
+      smtpVerifiedAt: null,
+      smtpVerificationReverted: false,
+    });
+    expect(text).not.toContain('hash-a');
+  });
+
+  test('an ordinary session is refused', async () => {
+    const user = await insertOrdinaryUser();
+
+    const res = await buildApp().request('/admin/instance-settings', { headers: { cookie: user.cookie } });
+
+    expect(res.status).toBe(403);
+  });
+
+  /**
+   * The state an operator most needs to be told about: `open` was chosen,
+   * the SMTP configuration changed, and the very read that renders the
+   * screen is the one that reverted the mode. The screen must be able to
+   * say "this was switched off for you", not merely show the switch off.
+   */
+  test('the read that reverts a stale open mode says so, and a later read reports the settled state', async () => {
+    await resetInstanceSettings();
+    const superRoot = await insertSuperRoot();
+    const appWithHashA = buildApp(new RecordingMailSender(), 'hash-a');
+    await appWithHashA.request('/admin/smtp-test', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie: superRoot.cookie },
+      body: JSON.stringify({ to: 'ops@example.com' }),
+    });
+    await appWithHashA.request('/admin/registration-mode', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json', cookie: superRoot.cookie },
+      body: JSON.stringify({ mode: 'open' }),
+    });
+
+    const appWithHashB = buildApp(new RecordingMailSender(), 'hash-b');
+    const reverting = (await (await appWithHashB.request('/admin/instance-settings', { headers: { cookie: superRoot.cookie } })).json()) as Record<string, unknown>;
+    const settled = (await (await appWithHashB.request('/admin/instance-settings', { headers: { cookie: superRoot.cookie } })).json()) as Record<string, unknown>;
+
+    expect(reverting).toEqual({
+      registrationMode: 'invitation_only',
+      openRegistrationDomains: [],
+      smtpVerifiedAt: null,
+      smtpVerificationReverted: true,
+    });
+    expect(settled.smtpVerificationReverted).toBe(false);
+    expect(settled.registrationMode).toBe('invitation_only');
+  });
+});

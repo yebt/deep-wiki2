@@ -14,6 +14,7 @@ import { normalizeEmail } from '@deep-wiki/core';
 import type { MailSender, PasswordHasher } from '@deep-wiki/core';
 import {
   ErrorResponseSchema,
+  InstanceSettingsResponseSchema,
   RegisterRequestSchema,
   RegisterResponseSchema,
   RegistrationDomainsRequestSchema,
@@ -138,6 +139,25 @@ export function createAdminRoutes(deps: AdminRouteDeps): Hono<{ Variables: Sessi
   const admin = new Hono<{ Variables: SessionVariables }>();
   admin.use('*', sessionMiddleware(deps.sql, { idleTimeoutMinutes: deps.sessionIdleTimeoutMinutes }));
   admin.use('*', requireSuperRoot(deps.sql));
+
+  // What the registration screen renders. Reading reconciles: if the SMTP
+  // configuration changed since it was verified, this read is the one that
+  // reverts `open`, and it says so in the response rather than only in a
+  // log line, so the operator sees that a switch they flipped is off.
+  admin.get('/instance-settings', async (c) => {
+    const settings = await getInstanceSettings(deps.sql, deps.smtpConfigHash);
+    if (settings.reverted) {
+      logger.info('smtp_verification_reverted', { reason: 'SMTP configuration changed since it was last verified' });
+    }
+    return c.json(
+      InstanceSettingsResponseSchema.parse({
+        registrationMode: settings.registrationMode,
+        openRegistrationDomains: settings.openRegistrationDomains,
+        smtpVerifiedAt: settings.smtpVerifiedAt ? settings.smtpVerifiedAt.toISOString() : null,
+        smtpVerificationReverted: settings.reverted,
+      }),
+    );
+  });
 
   admin.put('/registration-mode', async (c) => {
     const body = await readJsonBody(c.req.raw);

@@ -53,3 +53,23 @@ export const SmtpTestResponseSchema = z.object({
   ok: z.literal(true),
 });
 export type SmtpTestResponse = z.infer<typeof SmtpTestResponseSchema>;
+
+/**
+ * `GET /admin/instance-settings` — what the registration screen renders.
+ *
+ * `smtpVerifiedAt` is what decides whether `open` may be chosen at all
+ * (registration-policy spec: "`open` Mode Requires Verified SMTP").
+ * `smtpVerificationReverted` is true only on the read that discovered the
+ * SMTP configuration had changed since it was verified and reverted
+ * `open` back to `invitation_only` — the moment an operator most needs to
+ * be told that a switch they flipped is no longer on. Nothing here names
+ * the SMTP configuration itself; the hash is a reconciliation key and is
+ * never exposed.
+ */
+export const InstanceSettingsResponseSchema = z.object({
+  registrationMode: RegistrationModeSchema,
+  openRegistrationDomains: z.array(z.string()),
+  smtpVerifiedAt: z.string().nullable(),
+  smtpVerificationReverted: z.boolean(),
+});
+export type InstanceSettingsResponse = z.infer<typeof InstanceSettingsResponseSchema>;

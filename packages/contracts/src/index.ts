@@ -22,6 +22,7 @@ export type {
 } from './auth';
 
 export {
+  InstanceSettingsResponseSchema,
   RegisterRequestSchema,
   RegisterResponseSchema,
   RegistrationDomainsRequestSchema,
@@ -33,6 +34,7 @@ export {
   SmtpTestResponseSchema,
 } from './admin';
 export type {
+  InstanceSettingsResponse,
   RegisterRequest,
   RegisterResponse,
   RegistrationDomainsRequest,

@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  InstanceSettingsResponseSchema,
   RegisterRequestSchema,
   RegisterResponseSchema,
   RegistrationDomainsRequestSchema,
@@ -93,5 +94,35 @@ describe('SmtpTestRequestSchema / SmtpTestResponseSchema', () => {
 
   test('accepts the bare acknowledgement', () => {
     expect(SmtpTestResponseSchema.safeParse({ ok: true }).success).toBe(true);
+  });
+});
+
+describe('InstanceSettingsResponseSchema', () => {
+  test('parses the four fields the registration screen renders', () => {
+    const parsed = InstanceSettingsResponseSchema.parse({
+      registrationMode: 'invitation_only',
+      openRegistrationDomains: ['company.com'],
+      smtpVerifiedAt: null,
+      smtpVerificationReverted: true,
+    });
+
+    expect(parsed).toEqual({
+      registrationMode: 'invitation_only',
+      openRegistrationDomains: ['company.com'],
+      smtpVerifiedAt: null,
+      smtpVerificationReverted: true,
+    });
+  });
+
+  test('strips the SMTP configuration hash a widened handler might add', () => {
+    const parsed = InstanceSettingsResponseSchema.parse({
+      registrationMode: 'open',
+      openRegistrationDomains: [],
+      smtpVerifiedAt: '2026-09-14T00:00:00.000Z',
+      smtpVerificationReverted: false,
+      smtpConfigHash: 'deadbeef',
+    });
+
+    expect(Object.keys(parsed)).not.toContain('smtpConfigHash');
   });
 });
