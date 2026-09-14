@@ -7,6 +7,7 @@
 import {
   acquireLock,
   can,
+  DeadAnchorError,
   heartbeatLock,
   NotCanonicalError,
   readPageHtml,
@@ -95,6 +96,9 @@ export function createPageRoutes(deps: PageRouteDeps): Hono<{ Variables: Session
       }
       if (error instanceof NotCanonicalError) {
         return c.json({ error: 'not canonical', canonical: error.canonical }, 409);
+      }
+      if (error instanceof DeadAnchorError) {
+        return c.json({ error: 'dead anchor', corrected: error.corrected, anchors: error.anchors }, 409);
       }
       throw error;
     }

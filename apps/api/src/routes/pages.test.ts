@@ -170,6 +170,50 @@ describe('PUT /pages/:id', () => {
     expect(row!.markdown).toBe('# Changed\n');
   });
 
+  // page-content spec, mirroring `DeadAnchorError`'s own fixtures in
+  // `packages/db/src/content/rebuild-derived.test.ts`: the conflict this
+  // guard turns on is `(page_id, block_id)`, so the anchor has to be
+  // reintroduced on the SAME page to exercise anything.
+  test('a save that reintroduces a tombstoned anchor answers 409 with the corrected document, not 500', async () => {
+    const fixture = await buildFixture();
+    const WITH_ANCHOR = 'Apples and oranges are tasty fruits, and bananas are also delicious. ^abc1234567\n';
+    const FILLER = 'Zebras migrate north through dusty savannah every summer without exception.\n';
+
+    const first = await savePage(sql, {
+      nodeId: fixture.pageId,
+      workspaceId: fixture.workspaceId,
+      markdown: `${WITH_ANCHOR}\n${FILLER}`,
+      expectedContentHash: null,
+    });
+    // Delete the anchored paragraph: matchBlocks scores it against nothing
+    // it recognises, so the id is tombstoned.
+    const second = await savePage(sql, {
+      nodeId: fixture.pageId,
+      workspaceId: fixture.workspaceId,
+      markdown: FILLER,
+      expectedContentHash: first.contentHash,
+    });
+    const app = buildApp();
+
+    // The author pastes the paragraph back, literal ` ^abc1234567` and all.
+    const reintroduced = `${FILLER}\n${WITH_ANCHOR}`;
+    const res = await app.request(`/pages/${fixture.pageId}`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json', cookie: fixture.writerCookie },
+      body: JSON.stringify({ markdown: reintroduced, expectedContentHash: second.contentHash }),
+    });
+
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { error?: string; corrected?: string; anchors?: { id: string; status: string }[] };
+    expect(body.corrected).toBe(reintroduced.replace(' ^abc1234567', ''));
+    expect(body.anchors).toEqual([{ id: 'abc1234567', status: 'tombstoned' }]);
+
+    // `reconcileDerived` runs inside `savePage`'s transaction, so the
+    // refusal has to roll the content write back with it.
+    const [row] = await sql`SELECT markdown FROM page_content WHERE node_id = ${fixture.pageId}`;
+    expect(row!.markdown).toBe(FILLER);
+  });
+
   // versioning-and-collaboration design.md Decision 4: changesetWindowMinutes
   // is threaded from route deps through to savePage(), mirroring
   // pageLockTtlSeconds's propagation path exactly.
