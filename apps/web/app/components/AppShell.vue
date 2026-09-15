@@ -163,11 +163,14 @@ const crumbs = computed<BreadcrumbItem[]>(() => {
     <UDashboardPanel id="content" :ui="{ root: 'bg-default', body: 'p-4 sm:p-6 lg:px-10' }">
       <template #header>
         <!-- The contextual top bar: `bg-elevated`, a hairline, no shadow
-             (§9.3, §4.3). The toggle it renders below `lg` opens the
-             drawer. The breadcrumb is where the person is; the `right`
-             slot is what this screen can do. -->
+             (§9.3, §4.3). At the sidebar's edge, the sidebar's control:
+             the drawer toggle the bar renders itself below `lg`, and
+             focus mode's `SidebarToggle` from `lg` up. Then the
+             breadcrumb — where the person is — and, in the `right` slot,
+             what this screen can do. -->
         <UDashboardNavbar id="content-bar" as="header" tabindex="-1" class="outline-none" :ui="{ root: 'bg-elevated', left: 'flex-1' }">
           <template #left>
+            <SidebarToggle />
             <UBreadcrumb :items="crumbs" :ui="{ link: 'text-label-large', root: 'min-w-0 flex-1' }" aria-label="Where you are" />
           </template>
           <template #right>

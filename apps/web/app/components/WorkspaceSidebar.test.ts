@@ -1,7 +1,7 @@
 import { UApp, UDashboardGroup } from '#components';
 import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime';
 import { describe, expect, test, vi } from 'vitest';
-import { computed, defineComponent, h, ref } from 'vue';
+import { computed, defineComponent, h, nextTick, ref } from 'vue';
 import NavigationTree from './NavigationTree.vue';
 import WorkspaceSidebar from './WorkspaceSidebar.vue';
 import WorkspaceSwitcher from './WorkspaceSwitcher.vue';
@@ -42,13 +42,17 @@ function mockCollaborators() {
   });
 }
 
-/** `UDashboardSidebar` reads its context from `UDashboardGroup`, so the pane is mounted inside one, as it ships. */
+/** `UDashboardSidebar` reads its context from `UDashboardGroup`, so the pane is mounted inside one, as it ships — with the frame's own storage key, so the cookie asserted below is the one the product writes. */
 function mount(props: { workspaceId: string | null; currentNodeId?: string | null }) {
   mockCollaborators();
+  useFocusMode().collapsed.value = false;
   return mountSuspended(
     defineComponent({
       name: 'SidebarInApp',
-      setup: () => () => h(UApp, null, { default: () => h(UDashboardGroup, { unit: 'rem' }, { default: () => h(WorkspaceSidebar, props) }) }),
+      setup: () => () =>
+        h(UApp, null, {
+          default: () => h(UDashboardGroup, { unit: 'rem', storage: 'cookie', storageKey: 'dw-frame' }, { default: () => h(WorkspaceSidebar, props) }),
+        }),
     }),
   );
 }
@@ -84,5 +88,31 @@ describe('WorkspaceSidebar', () => {
     expect(component.get('a[href="/workspaces"]').text()).toContain('All workspaces');
     // The operator door and the theme toggle do not depend on a workspace.
     expect(component.find('a[href="/admin/registration"]').exists()).toBe(true);
+  });
+
+  /*
+   * Focus mode. The sidebar is `collapsible` and bound to `useFocusMode`,
+   * so the control in the content bar hides it — to nothing: the root is
+   * hidden from `lg` up rather than narrowed to a rail, and the resize
+   * handle is hidden with it, since a handle on nothing is a control
+   * that does nothing (§6). Nuxt UI persists the collapse in the same cookie
+   * as the width. That the pane actually vanishes and the article takes
+   * the width is `e2e/frame.spec.ts`'s ("focus mode"); this holds the
+   * binding and the cookie.
+   */
+  test('focus mode hides the pane rather than narrowing it, hides the resize handle with it, and persists beside the width', async () => {
+    const component = await mount({ workspaceId: 'ws-1' });
+    const root = component.get('[data-slot="root"][id]');
+    expect(root.attributes('data-collapsed')).toBe('false');
+    expect(root.classes()).toContain('lg:data-[collapsed=true]:hidden');
+    expect(component.get('[role="separator"]').classes()).not.toContain('lg:hidden');
+
+    useFocusMode().toggle();
+    await nextTick();
+    await nextTick();
+
+    expect(component.get('[data-slot="root"][id]').attributes('data-collapsed')).toBe('true');
+    expect(component.get('[role="separator"]').classes()).toContain('lg:hidden');
+    expect(decodeURIComponent(document.cookie)).toMatch(/dw-frame-sidebar-workspace=\{[^}]*"collapsed":true/);
   });
 });

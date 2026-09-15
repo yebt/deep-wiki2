@@ -199,6 +199,93 @@ test.describe('the sidebar survives a navigation', () => {
 });
 
 /**
+ * Focus mode: the sidebar hidden to nothing and the document alone,
+ * from a control in the contextual bar or `Ctrl`/`⌘`+`\`, persisted
+ * beside the sidebar's width, announced, and — below `lg` — without any
+ * effect on the drawer. Measured: the sidebar is gone (not a rail), the
+ * article keeps its 72ch and is centred in the whole viewport, and focus
+ * does not fall to the body when the pane it was in disappears.
+ */
+for (const theme of ['light', 'dark'] as const) {
+  test.describe(`focus mode 1280x900 ${theme}`, () => {
+    test.use({ viewport: { width: 1280, height: 900 } });
+
+    test('hides the sidebar to nothing, gives the article the whole pane, survives a reload, and comes back on the keys', async ({
+      page,
+      context,
+    }) => {
+      await signInAs(context, fixtures.readerSessionToken);
+      await useTheme(page, theme);
+
+      await page.goto(`/pages/${fixtures.readPageId}`);
+      await expect(page.getByRole('heading', { level: 1, name: 'E2E Read Page' })).toBeVisible({ timeout: 30000 });
+      const sidebar = page.getByRole('navigation', { name: 'Workspace' });
+      await expect(sidebar).toBeVisible();
+      const before = (await page.locator('article').boundingBox())!;
+
+      const hide = page.getByRole('button', { name: 'Hide sidebar' });
+      await expect(hide).toBeVisible();
+      await hide.click();
+
+      await expect(sidebar).toBeHidden();
+      await expect(page.getByRole('button', { name: 'Show sidebar' })).toBeVisible();
+      await expect(page.getByRole('status').filter({ hasText: /^Sidebar hidden\. Press .+ to show it\.$/ })).toHaveCount(1);
+      // No rail: nothing stands between the viewport's left edge and the pane.
+      const bar = (await page.locator('#content-bar').boundingBox())!;
+      expect(bar.x, 'the content pane starts at the viewport edge').toBe(0);
+      // The 72ch measure holds and the article is centred in the whole width.
+      const after = (await page.locator('article').boundingBox())!;
+      expect(Math.abs(after.width - before.width), `article width ${before.width} → ${after.width}`).toBeLessThanOrEqual(1);
+      const leftGap = after.x;
+      const rightGap = 1280 - (after.x + after.width);
+      expect(Math.abs(leftGap - rightGap), `centred in the viewport: left ${leftGap}, right ${rightGap}`).toBeLessThanOrEqual(2);
+      const box = await overflow(page);
+      expect(box.scrollWidth).toBeLessThanOrEqual(box.innerWidth);
+
+      await shot(page, `2-read-focus-1280-${theme}`);
+
+      // Persisted: the next visit opens on the document alone, with no
+      // sidebar flashing by first.
+      await page.reload();
+      await expect(page.getByRole('heading', { level: 1, name: 'E2E Read Page' })).toBeVisible({ timeout: 30000 });
+      await expect(sidebar).toBeHidden();
+      await expect(page.getByRole('button', { name: 'Show sidebar' })).toBeVisible();
+
+      // The keys bring it back, from anywhere on the page.
+      await page.locator('article').click();
+      await page.keyboard.press('Control+\\');
+      await expect(sidebar).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Hide sidebar' })).toBeVisible();
+      await expect(page.getByRole('status').filter({ hasText: 'Sidebar shown.' })).toHaveCount(1);
+    });
+  });
+}
+
+test.describe('focus mode and the keyboard', () => {
+  test.use({ viewport: { width: 1280, height: 900 } });
+
+  test('hiding the sidebar while focus is inside it moves focus to the content bar rather than losing it', async ({ page, context }) => {
+    await signInAs(context, fixtures.readerSessionToken);
+
+    await page.goto(`/pages/${fixtures.readPageId}`);
+    await expect(page.getByRole('heading', { level: 1, name: 'E2E Read Page' })).toBeVisible({ timeout: 30000 });
+    const sidebar = page.getByRole('navigation', { name: 'Workspace' });
+    const row = sidebar.getByRole('treeitem', { name: /E2E Read Page/ });
+    await expect(row).toBeVisible({ timeout: 30000 });
+    await row.focus();
+    expect(await page.evaluate(() => document.activeElement?.getAttribute('role'))).toBe('treeitem');
+
+    await page.keyboard.press('Control+\\');
+
+    await expect(sidebar).toBeHidden();
+    expect(await page.evaluate(() => document.activeElement?.id), 'focus landed on the content bar').toBe('content-bar');
+    // And the next Tab is this screen's first control, not nothing.
+    await page.keyboard.press('Tab');
+    expect(await page.evaluate(() => document.activeElement?.getAttribute('aria-label'))).toBe('Show sidebar');
+  });
+});
+
+/**
  * `/` opens onto the last workspace the person was in, the way Obsidian
  * reopens the last vault (apps/web/PRODUCT.md). The memory is a cookie,
  * so the redirect resolves on the server: the list never flashes by.
@@ -229,12 +316,18 @@ test.describe('the front door', () => {
 test.describe('320x900 light', () => {
   test.use({ viewport: { width: 320, height: 900 } });
 
-  test('the sidebar collapses into a drawer opened from the top bar; the dashboard is one column; nothing scrolls sideways', async ({
+  test('the sidebar collapses into a drawer opened from the top bar; the dashboard is one column; nothing scrolls sideways — focus mode or not', async ({
     page,
     context,
   }) => {
     await signInAs(context, fixtures.readerSessionToken);
     await useTheme(page, 'light');
+    // Focus mode persisted from a wide screen: below `lg` it has no
+    // effect — the sidebar is a drawer here either way, and the focus-mode
+    // control is not offered because it would do nothing.
+    await context.addCookies([
+      { name: 'dw-frame-sidebar-workspace', value: encodeURIComponent(JSON.stringify({ size: 17.5, collapsed: true })), domain: 'localhost', path: '/' },
+    ]);
 
     await page.goto(`/workspaces/${fixtures.workspaceId}`);
     await expect(page.getByRole('heading', { level: 1, name: 'E2E Workspace' })).toBeVisible({ timeout: 30000 });
@@ -255,6 +348,7 @@ test.describe('320x900 light', () => {
     expect(box.scrollHeight).toBe(box.innerHeight);
 
     await shot(page, 'dashboard-320-light');
+    await expect(page.getByRole('button', { name: 'Show sidebar' })).toBeHidden();
 
     // The drawer: opened from the top bar, holds the same tree, traps
     // focus, and closes on Escape (§6).

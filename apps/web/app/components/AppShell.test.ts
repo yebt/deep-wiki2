@@ -3,6 +3,7 @@ import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime';
 import { describe, expect, test, vi } from 'vitest';
 import { computed, defineComponent, h, ref, type VNode } from 'vue';
 import AppShell from './AppShell.vue';
+import SidebarToggle from './SidebarToggle.vue';
 import WorkspaceFrame from './WorkspaceFrame.vue';
 import WorkspaceSidebar from './WorkspaceSidebar.vue';
 
@@ -136,6 +137,20 @@ describe('AppShell', () => {
       const withTitle = await mountShell({ workspaceId: 'ws-1', nodeId: 'unplaced', title: 'Members' });
       const titleLabels = withTitle.get('nav[aria-label="Where you are"]').findAll('li').map((li) => li.text()).filter(Boolean);
       expect(titleLabels).toEqual(['Acme', 'Members']);
+    });
+
+    // Focus mode's control stands at the sidebar's edge of the bar — before
+    // the breadcrumb, where the drawer's own toggle stands below `lg` — on
+    // every screen inside a workspace, in either frame mode.
+    test('the contextual bar opens with the sidebar toggle, before the breadcrumb', async () => {
+      const component = await mountShell({ workspaceId: 'ws-1' });
+
+      const toggle = component.findComponent(SidebarToggle);
+      expect(toggle.exists()).toBe(true);
+      const bar = component.get('#content-bar').element;
+      expect(bar.contains(toggle.element)).toBe(true);
+      const html = bar.innerHTML;
+      expect(html.indexOf('aria-label="Hide sidebar"')).toBeLessThan(html.indexOf('aria-label="Where you are"'));
     });
 
     test('`header-end` is the contextual bar’s action area, beside the breadcrumb', async () => {

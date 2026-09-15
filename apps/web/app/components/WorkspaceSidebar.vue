@@ -25,24 +25,43 @@
  *
  * `--ui-header-height` is 56px (§7.2); the header slot takes it so the
  * switcher lines up with the content pane's top bar beside it.
+ *
+ * **Focus mode.** `collapsible`, bound to `useFocusMode`: the control in
+ * the content pane's bar (`SidebarToggle`) and `Ctrl`/`⌘`+`\` hide the
+ * pane — to nothing, not to a rail. Nuxt UI's collapse leaves a `min-w-16`
+ * rail, so the root is hidden outright from `lg` up while collapsed, and
+ * the resize handle goes with it: a handle beside nothing is a control
+ * that does nothing (§6). The library persists the collapse in the same
+ * cookie as the width (`dw-frame-sidebar-workspace`) and reads it back
+ * before the first render, so a person who chose the document alone gets
+ * it on the next visit without a flash. Below `lg` the collapse has no
+ * effect: the sidebar is a drawer there either way.
  */
 defineProps<{
   workspaceId: string | null;
   currentNodeId?: string | null;
 }>();
+
+const { collapsed } = useFocusMode();
+
+/** `UDashboardSidebar`'s own id for the pane: the group's storage key, then the `id` prop below. */
+const SIDEBAR_ELEMENT_ID = 'dw-frame-sidebar-workspace';
 </script>
 
 <template>
   <UDashboardSidebar
     id="workspace"
+    v-model:collapsed="collapsed"
     role="navigation"
     aria-label="Workspace"
     resizable
+    collapsible
+    :collapsed-size="0"
     :default-size="17.5"
     :min-size="14"
     :max-size="28"
     :ui="{
-      root: 'bg-elevated',
+      root: 'bg-elevated lg:data-[collapsed=true]:hidden',
       header: 'px-2 border-b border-default',
       body: 'px-2 py-2 gap-2',
       footer: 'px-2 py-2 gap-1 border-t border-default',
@@ -51,6 +70,18 @@ defineProps<{
   >
     <template #header>
       <WorkspaceSwitcher :workspace-id="workspaceId" />
+    </template>
+
+    <!-- Hidden with the pane rather than removed: a slot that renders
+         nothing makes Vue fall back to the library's own handle. -->
+    <template #resize-handle="{ onMouseDown, onTouchStart, onDoubleClick }">
+      <UDashboardResizeHandle
+        :class="collapsed ? 'lg:hidden' : undefined"
+        :aria-controls="SIDEBAR_ELEMENT_ID"
+        @mousedown="onMouseDown"
+        @touchstart="onTouchStart"
+        @dblclick="onDoubleClick"
+      />
     </template>
 
     <NavigationTree v-if="workspaceId" :workspace-id="workspaceId" :current-node-id="currentNodeId" />
