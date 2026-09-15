@@ -158,6 +158,7 @@ export function createPageRoutes(deps: PageRouteDeps): Hono<{ Variables: Session
       markdown: content.markdown,
       title: node.title,
       workspaceId: node.workspace_id,
+      contentHash: content.contentHash,
       lock: { holderUserId: lock.holderUserId, acquiredAt: lock.acquiredAt.toISOString(), heartbeatAt: lock.heartbeatAt.toISOString() },
     });
   });
@@ -208,6 +209,7 @@ export function createPageRoutes(deps: PageRouteDeps): Hono<{ Variables: Session
       markdown: content.markdown,
       title: node.title,
       workspaceId: node.workspace_id,
+      contentHash: content.contentHash,
       lock: { holderUserId: lock.holderUserId, acquiredAt: lock.acquiredAt.toISOString(), heartbeatAt: lock.heartbeatAt.toISOString() },
     });
   });

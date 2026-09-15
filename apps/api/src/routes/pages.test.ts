@@ -305,6 +305,26 @@ describe('GET /pages/:id/edit-session', () => {
     expect(lockRow).toBeTruthy();
   });
 
+  // page-content spec, D16: the browser's first Save on an already-saved
+  // page has no other way to learn the row's current content_hash — the
+  // read screen never acquires the lock, and this is the only route that
+  // does. Without it, edit.vue sends `expectedContentHash: null`, which
+  // `savePage()` treats as a brand-new page and refuses with a
+  // stale-content 409 on every page that already has content (docs/TODO.md
+  // Finding, this task; reproduced by e2e/comments.spec.ts's PUT
+  // workaround before this fix).
+  test('the response carries the row’s real content_hash, so a real Save can match it', async () => {
+    const fixture = await buildFixture();
+    const saved = await savePage(sql, { nodeId: fixture.pageId, workspaceId: fixture.workspaceId, markdown: '# Hello\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
+    const app = buildApp();
+
+    const res = await app.request(`/pages/${fixture.pageId}/edit-session`, { headers: { cookie: fixture.writerCookie } });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { contentHash?: string };
+    expect(body.contentHash).toBe(saved.contentHash);
+  });
+
   test('a refused document returns 409 naming the reason and offers read-only/normalise, without acquiring a lock', async () => {
     const fixture = await buildFixture();
     // A setext heading is refused (bucket C) — inserted directly, bypassing
@@ -459,6 +479,30 @@ describe('POST /pages/:id/lock/take-over', () => {
 
     const [lockRow] = await sql`SELECT holder_user_id FROM page_locks WHERE node_id = ${fixture.pageId}`;
     expect(lockRow!.holder_user_id).toBe(secondWriter!.id);
+  });
+
+  // page-content spec, D16: the taking-over author's first Save needs the
+  // same hash for the same reason the initial edit-session response does.
+  test('the response also carries the row’s real content_hash', async () => {
+    const fixture = await buildFixture();
+    const saved = await savePage(sql, { nodeId: fixture.pageId, workspaceId: fixture.workspaceId, markdown: '# Hello\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
+    const app = buildApp();
+    await app.request(`/pages/${fixture.pageId}/edit-session`, { headers: { cookie: fixture.writerCookie } });
+
+    const [secondWriter] = await sql<{ id: string }[]>`
+      INSERT INTO users (email, password_hash, display_name) VALUES (${`writer5-${crypto.randomUUID()}@example.com`}, 'hash', 'Writer5') RETURNING id
+    `;
+    await sql`
+      INSERT INTO permissions (workspace_id, subject_type, subject_id, resource_id, action, effect)
+      VALUES (${fixture.workspaceId}, 'user', ${secondWriter!.id}, ${fixture.pageId}, 'write', 'allow')
+    `;
+    const secondCookie = await cookieFor(secondWriter!.id);
+
+    const res = await app.request(`/pages/${fixture.pageId}/lock/take-over`, { method: 'POST', headers: { cookie: secondCookie } });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { contentHash?: string };
+    expect(body.contentHash).toBe(saved.contentHash);
   });
 
   test('a subject with no write grant cannot take over the lock', async () => {
