@@ -24,6 +24,14 @@ bun --env-file=.env run -F @deep-wiki/api start   # apps/api, on PORT (3000)
 bun run -F @deep-wiki/web dev                     # apps/web, on 3001
 ```
 
+The two lines differ on purpose. The API needs the file. The web server **must not see it**:
+`nuxt dev` reads `PORT` from the environment ahead of `devServer.port`, so
+`bun --env-file=.env run -F @deep-wiki/web dev` starts Nuxt on the *API's* port — or, if the
+API is already there, on whatever port is free (measured 2026-09-14: `[get-port] Unable to
+find an available port (tried 14606 …). Using alternative port 3000.`). Either way `APP_URL`
+no longer names the page's origin and sign-in fails the way §3 describes. Do not export `PORT`
+in the shell you start the web server from, for the same reason.
+
 Open **`http://localhost:3001/login`** and sign in with:
 
 | | |
@@ -67,10 +75,16 @@ token-bearing screens, because this product has no public pages.
 | `/reset-password?token=…` | Set a new password | a token from the mail in Mailpit |
 | `/invite/accept?token=…` | Accept a workspace invitation | a token from the mail in Mailpit |
 | `/workspaces` | The wikis you can open | a session |
-| `/workspaces/:workspaceId/tree` | Navigation tree — shelves, books, chapters, pages | a session with read on the workspace |
-| `/pages/:id` | Read mode — pre-rendered HTML, no editor loaded | a session with read on the page |
-| `/pages/:id/edit` | Edit mode — ProseMirror, `@` mentions, `/` commands, soft lock | a session with write on the page |
+| `/workspaces/new` | Create a workspace — the way in from the list | a session **and an account with a plan**: the seed user has one, an account created by registration or invitation does not (`403 no_plan`; `docs/TODO.md` Open Questions, "Default plan policy") |
+| `/workspaces/:workspaceId/tree` | Navigation tree — shelves, books, chapters, pages; create, rename, drag-reorder | a session with read on the workspace |
+| `/workspaces/:workspaceId/members` | Members and invitations — the list, and the form that sends an invite | `manage` on the workspace root; anyone else gets the not-found state, deliberately (the API answers "no such workspace" and "not yours to manage" identically). The link to it on the tree renders for everyone — see Open Questions, "Which signal tells the client `manage`" |
+| `/admin/registration` | Instance registration mode, allowed domains, SMTP test | Super Root (`users.is_super_root`); anyone else gets the forbidden state. Linked from the app chrome for everyone, for the same reason as Members |
+| `/pages/:id` | Read mode — pre-rendered HTML, no editor loaded; comment gutter and thread panel; who is editing | a session with read on the page (`comment` to see threads) |
+| `/pages/:id/edit` | Edit mode — ProseMirror, `@` mentions, `/` commands, soft lock, who else is here | a session with write on the page |
 | `/pages/:id/history` | Revision history for a page | a session with read on the page |
+| `/pages/:id/diff?from=<revisionId>&to=<revisionId>` | Block diff between two revisions — added, removed, modified, moved | a session with read on the page |
+| `/books/:id/history` | Changeset history for a book — who changed what, grouped by the changeset window | a session with read on the book |
+| `/books/:id/diff?since=<ISO date>[&page=<pageId>]` | Everything that changed in a book since a moment, navigable page to page without returning to the list | a session with read on the book |
 
 Anything else lands on `apps/web/app/error.vue` — the product's own error screen, not Nuxt's.
 It distinguishes *not found* from *the server failed*, and its recovery action comes out of
@@ -80,41 +94,58 @@ in, because it cannot — see §6.
 
 ### The API
 
-Every route apps/api mounts. All are on `PORT` (3000 by default) and all except `/health`,
-`/auth/*` and `/invitations/accept` require the session cookie.
+Every route apps/api mounts, read off `apps/api/src/index.ts` and `apps/api/src/routes/*.ts`
+on 2026-09-14 (`scripts/checks/routes-mounted.ts` fails `bun run check` if a route module
+exists that `index.ts` does not mount, so this list can only go stale by a route being
+*added*). All are on `PORT` (3000 by default). All except `/health`, `/auth/*` and
+`/invitations/accept` require the session cookie (`401` without it — measured); "not found"
+below means the deliberate `404` that covers both "no such thing" and "not yours", so that
+no route answers whether a thing exists.
 
 | Method | Path | Notes |
 | --- | --- | --- |
 | GET | `/health` | `{"status":"ok"}` — the only unauthenticated read |
 | POST | `/auth/login` | Sets an HttpOnly session cookie; no token in the body |
-| POST | `/auth/register` | Subject to the instance registration mode |
-| POST | `/auth/password-reset` | Always the same response whether or not the account exists |
+| POST | `/auth/register` | Subject to the instance registration mode; `403` in `closed` and `invitation_only` before the address is looked up |
+| POST | `/auth/password-reset` | Always the same response whether or not the account exists; the mail is handed off, never awaited |
 | POST | `/auth/password-reset/confirm` | Single-use, expiring token |
+| GET | `/admin/instance-settings` | Super Root only. What `/admin/registration` renders; reading reconciles a stale SMTP verification and says so |
 | PUT | `/admin/registration-mode` | Super Root only |
 | PUT | `/admin/registration-domains` | Super Root only |
 | POST | `/admin/smtp-test` | Super Root only |
-| POST | `/invitations` | Create an invitation |
-| POST | `/invitations/accept` | Redeem one |
-| POST | `/uploads/avatar` | |
-| GET / PUT | `/pages/:id` | Read and save, behind `can()` and optimistic concurrency |
-| GET | `/pages/:id/edit-session` | What edit mode opens with |
-| PATCH | `/pages/:id/lock` | Soft-lock heartbeat |
-| POST | `/pages/:id/lock/take-over` | Soft-lock take-over |
-| GET | `/pages/:id/history` | Revisions |
-| GET | `/pages/:id/diff` | Page diff |
-| GET | `/books/:id/diff` | Changeset (book-level) diff |
-| GET | `/pages/:id/backlinks` | |
-| GET | `/pages/:id/comments/indicators` | |
-| POST | `/pages/:id/comments` | |
-| PATCH | `/comments/:threadId/resolved` | |
-| GET | `/mentions/pages` | |
-| GET | `/mentions/subjects` | |
-| GET | `/pages/:id/mentions/:userId/check` | |
-| GET | `/tags/:name/pages` | |
+| POST | `/invitations` | Create an invitation — `manage` on the workspace root, else not found |
+| POST | `/invitations/accept` | Redeem one; creates the account (with no plan — see `/workspaces`) |
+| POST | `/uploads/avatar` | Validated, resized, scoped to the caller's workspace |
 | GET | `/workspaces` | The workspaces you can open |
+| POST | `/workspaces` | Create one; the creator gets `manage` on its root in the same transaction. `403 no_plan` for an account without a plan, `403` with the plan's name and limit when it is full |
+| GET | `/workspaces/:id/members` | `manage` on the root, else not found |
 | GET | `/workspaces/:id/tree` | Permission-filtered node tree |
-| PATCH | `/nodes/:id/position` | Tree reorder |
-| GET | `/workspaces/:workspaceId/presence/stream` | Server-sent events |
+| POST | `/nodes` | Create a shelf, book, chapter or page under a parent |
+| PATCH | `/nodes/:id` | Rename |
+| PATCH | `/nodes/:id/position` | Drag-reorder and re-parent |
+| GET / PUT | `/pages/:id` | Read (with the workspace's name) and save, behind `can()` and optimistic concurrency; `409` with `canonical` for non-canonical markdown, `409` with `corrected` for a reintroduced dead anchor |
+| GET | `/pages/:id/edit-session` | What edit mode opens with — acquires the soft lock |
+| PATCH | `/pages/:id/lock` | Soft-lock heartbeat; the one place presence is published from. The interval is `PAGE_LOCK_HEARTBEAT_SECONDS`; boot refuses a `.env` whose `PAGE_LOCK_TTL_SECONDS` is less than twice it |
+| POST | `/pages/:id/lock/take-over` | Soft-lock take-over |
+| GET | `/pages/:id/history` | Revisions, newest first |
+| GET | `/books/:id/history` | Changesets in a book, newest first, with the book's name |
+| GET | `/pages/:id/diff?from=&to=` | Block diff between two revision ids — added, removed, modified, moved, with block text |
+| GET | `/books/:id/diff?since=` | Every page changed in the book since an ISO instant, each with its diff. Page order is the database's, not a declared one (`docs/TODO.md` Findings 2026-09-14) |
+| GET | `/pages/:id/backlinks` | Index lookup over `links`; no screen calls it yet |
+| GET | `/pages/:id/comments` | Threads, replies, resolution and anchor status — what the read screen fetches. `read` to reach it; without `comment` the response is indistinguishable from a page with no comments |
+| GET | `/pages/:id/comments/indicators` | Anchored-thread counts per block. Mounted and tested; the client derives its own from `/comments` instead |
+| POST | `/pages/:id/comments` | A root thread (`blockId`, `quote`, offsets) or a reply (`parentId`); mints the block's persisted anchor if it has none; mentions go out over `MailSender` only to people who can read the page |
+| PATCH | `/comments/:threadId/resolved` | |
+| GET | `/mentions/pages` | Autocomplete, filtered by what the caller can read |
+| GET | `/mentions/subjects` | Users and cells, same rule |
+| GET | `/pages/:id/mentions/:userId/check` | Can this person be mentioned into this page |
+| GET | `/tags/:name/pages` | No screen calls it, and there is no tag *listing* route |
+| GET | `/workspaces/:workspaceId/presence/stream` | Server-sent events: who is editing what. Membership opens the stream; each event is dropped unless the subscriber can read that page |
+
+The API answers `OPTIONS` preflights for `GET, POST, PUT, PATCH, DELETE` from `APP_URL` only —
+measured 2026-09-14 (`204`, `Access-Control-Allow-Methods: GET,POST,PUT,PATCH,DELETE,OPTIONS`).
+`PATCH` was missing until `a4bec8c`, and no route test could see it: `app.request()` never
+preflights.
 
 `/ai/credentials` is **not** here — it lives on the `ai-provider-foundation` branch.
 
@@ -315,7 +346,64 @@ and it should be reverted rather than accommodated.
   under load. Run that package's tests in isolation before treating a timeout as real.
 - **There is no git remote**, so `.github/workflows/ci.yml` never executes. Enforcement is
   local: `bun run check` on every commit, `bun run verify` before tagging.
-- **Never `pkill -f "nuxt dev"`.** It reaches other projects' dev servers on this machine. Find
-  the pid with `ss -ltnp | grep :<port>` and kill that one.
-- **Nuxt refuses a second `nuxt dev` for the same project** ("Another Nuxt dev is already
-  running"), which is a lock, not a port collision. Kill the first one.
+- **Never `pkill -f "nuxt dev"`** — or `pkill -f` anything broad. It reaches other projects'
+  dev servers on this machine, and other agents' on this checkout (§7). Find the pid with
+  `ss -ltnp | grep :<port>` and kill that one.
+- **Nuxt refuses a second `nuxt dev` for the same checkout** ("Another Nuxt dev is already
+  running"), which is a lock in `apps/web/.nuxt/nuxt.lock`, not a port collision. If the
+  first one is yours, kill it by pid; if it is not, you need a second worktree (§7).
+
+---
+
+## 7. Working beside another agent or session
+
+Several agents worked this checkout at once on 2026-09-14. Each rule below cost a sibling
+its work, which is why it is a rule and not advice; the incidents are in `docs/TODO.md`,
+Findings of that date, and the first four are non-negotiables in `CLAUDE.md`.
+
+**Never kill a process you did not start.** Three times in one session a `pkill -f <pattern>`
+matched another agent's dev server or test run and killed it mid-flight. Record the pid when
+you spawn something, or find the listener with `ss -ltnp | grep :<port>`, and kill that one.
+And remember that killing the `bun run -F` wrapper leaves the real server running — measured
+again that day: the wrapper died and `nuxt dev` kept the port, reparented to pid 1.
+
+**Never `git add -A`, and `git diff --cached` before every commit.** `-A` staged another
+agent's half-written files under a message that described none of them. The quieter version:
+`git add` on a package's `src/index.ts` staged a sibling's hunk in the same barrel, because a
+barrel is the one file every change in a package touches. Add the paths you changed, read the
+staged diff, and `git add -p` any shared file that carries hunks that are not yours.
+
+**Never `git stash` on a shared tree.** A stash takes every uncommitted change in the checkout,
+not "yours". One agent stashed to get a clean tree and dropped the stash afterwards; a
+sibling's completed task went with it and was rewritten from scratch. If you need a clean
+tree, you need your own worktree — see §4.
+
+**`git commit -F <file>`, never `-m "…"` with backticks.** A message that quoted a command in
+backticks inside double quotes had the command substituted by the shell; the quoted command
+was the e2e suite, and a full Playwright run started as a side effect of committing.
+
+Three environment facts that read as application bugs when you meet them beside someone
+else's work:
+
+- **One `nuxt dev` per checkout.** The lock is per checkout, not per port, so
+  `DEEPWIKI_TEST_SLOT` — which moves every port the harness uses — does not route around it.
+  `bun run e2e` refuses to start while a foreign lock is live and names it (`scripts/e2e.ts`).
+  A second dev server or a second e2e run means a second worktree.
+- **`podman compose up --wait`'s exit code is not the health signal.** It has been observed
+  returning `125` with every container healthy, and `0` on other days including the bring-up
+  that verified this file. Read `podman ps` for `(healthy)`; never run `podman compose` for a
+  project while another invocation for the same project may be in flight — `podman-compose`
+  is unsafe under concurrent invocation (§6).
+- **`expect(sql\`…\`).rejects` hangs `bun test`, and `bun test` does not typecheck.** A
+  postgres.js query is a thenable, not a native Promise, and `.rejects` never settles on it —
+  `packages/db/src/schema.test.ts` carries `assertRejects()` for exactly this. And a green
+  `bun test` says nothing about types: `bun run typecheck` is its own gate, and a shape that
+  drifts (as `SeedResult` did) passes every test until something reads `undefined`.
+
+The bring-up in §1 — compose up, migrate, seed, API start, web dev — and the route probes
+this file cites were run on 2026-09-14 against a fresh copy of `env.example` moved to a
+private port block (14600–14606) under a private compose project name (`podman compose
+--env-file <copy> -p <name> up -d --wait`, so the owner's `.env` and stack were never
+touched), then torn down with `podman compose --env-file <copy> -p <name> down -v`. That is
+also how to verify this file without disturbing whoever else is on the machine. If you
+change a command here, run it first.
