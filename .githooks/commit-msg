@@ -1,0 +1,25 @@
+#!/bin/sh
+# Refuse a commit message carrying AI attribution.
+#
+# CLAUDE.md forbids it in two places and the owner has said so three times,
+# and on 2026-09-14 two agents still added `Co-Authored-By` and `Claude-Session`
+# trailers to nine commits because a harness reminder told them to. A rule that
+# depends on someone reading a report to catch it is advice; this is the
+# mechanism. Nine commits were rewritten with `git filter-branch` to strip them.
+#
+# The pre-commit hook cannot see the message; only commit-msg can. It is
+# deliberately a fixed-string check on the trailer shapes that have actually
+# appeared, plus the two phrases CLAUDE.md names, so it cannot false-positive on
+# ordinary prose that mentions a tool.
+#
+# Enabled with: git config core.hooksPath .githooks
+set -e
+
+MSG_FILE="$1"
+
+if grep -Eqi '^(Co-Authored-By|Claude-Session):|Generated with \[?Claude|🤖 Generated with' "$MSG_FILE"; then
+  echo "commit-msg: the message carries AI attribution, which CLAUDE.md forbids." >&2
+  echo "commit-msg: remove every Co-Authored-By / Claude-Session trailer and any 'Generated with' line, then commit again." >&2
+  echo "commit-msg: write the message to a file and use \`git commit -F <file>\`." >&2
+  exit 1
+fi
