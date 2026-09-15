@@ -26,10 +26,13 @@ Keep the second user in a private window so both sessions live at once.
 
 ## 1. Sign in — `/login`
 
-**Do:** open `http://localhost:3001`. You are redirected to `/workspaces`, which shows the
-signed-out state with one action. Sign in as the operator.
+**Do:** open `http://localhost:3001`. Signed out, `/` sends you to `/login` (the way in, not a
+screen of its own). Sign in as the operator.
 
-**See:** the workspace list. One workspace, "Demo workspace", from the seed.
+**See:** `/` now opens onto the last workspace you were in — a `dw-workspace` cookie, decided
+on the server before anything renders — so a returning session lands straight on its
+dashboard, not a list. The seed's first sign-in has nothing remembered yet, so you land on
+`/workspaces`, the chooser: one workspace, "Demo workspace".
 
 **Provoke:**
 - Wrong password → "Invalid credentials", form kept, no hint about whether the account exists.
@@ -55,12 +58,14 @@ signed-out state with one action. Sign in as the operator.
 
 ## 3. Invite a colleague — `/workspaces/:id/members`
 
-**Do:** from the workspace's tree, "Members" in the app bar. Invite an address you can read in
-Mailpit, pick the starting grant (read / comment / write / manage on the root).
+**Do:** "Members" in the sidebar's footer — it stands beside Registration settings and the
+theme toggle, and is reachable from any screen inside the workspace, not only the dashboard.
+Invite an address you can read in Mailpit, pick the starting grant (read / comment / write /
+manage on the root).
 
 **See:** a live region confirms the address; the invitation appears under pending with its time
 in **your** zone, zone named. In Mailpit, open the mail, follow `/invite/accept` in a private
-window, set a password, land on the tree signed in as the new user.
+window, set a password, land on the workspace's dashboard signed in as the new user.
 
 **Provoke:**
 - Follow the same link twice → "already used", with a way out.
@@ -68,14 +73,21 @@ window, set a password, land on the tree signed in as the new user.
 - As the **second user**, open `/workspaces/<id>/members` by address → the same 404 a
   nonexistent workspace gives. Absence and denial are one answer here, on purpose.
 
-## 4. Build the tree — `/workspaces/:id/tree`
+## 4. The dashboard, and the tree in the sidebar — `/workspaces/:id`
 
-**Do:** as the operator. "New…" → shelf → book (under the shelf) → chapter → page. Rename one.
-Click a row to select it (the fill shows which); Enter folds a container; Alt+↑/↓ reorders;
-drag works too.
+**Do:** as the operator. `/workspaces/:id` is the workspace's dashboard, not the tree — the
+tree moved into the sidebar, mounted once by `layouts/workspace.vue` and present on every
+screen inside the workspace, not just this one. In the sidebar: "New…" → shelf → book (under
+the shelf) → chapter → page. Rename one. Click a row to select it (the fill shows which);
+Enter folds a container; Alt+↑/↓ reorders; drag works too.
 
-**See:** every row does something; the toolbar acts on the row you picked, and says so; folded
-subtrees are skipped by the arrow keys.
+**See:** every tree row does something; the toolbar acts on the row you picked, and says so;
+folded subtrees are skipped by the arrow keys. The dashboard pane beside it answers "what
+changed and who is here": recent saves (added / changed / moved / removed), your own recent
+saves, open comment threads that mention you, and who is editing right now — `GET
+/workspaces/:id/activity` plus the workspace-wide presence stream. A click on any tree row
+swaps only this pane; the sidebar itself — its scroll position, its folds, a drag in
+progress — survives the navigation.
 
 **Provoke:**
 - Try to create a book directly under a page → refused, and the refusal names both types. The
@@ -92,15 +104,25 @@ subtrees are skipped by the arrow keys.
 
 **Do:** open any page. This is the cached, sanitised HTML — no editor code loads here.
 
-**See:** the measure column, the heading block, the app bar with **history** (clock icon,
-tooltip "Revision history") and **Edit**. If someone else is editing, a chip says who and since
-when.
+**See:** the measure column, the heading block, and the workspace frame's contextual bar:
+from `lg` up, the sidebar toggle at its edge, then the breadcrumb, then — screen-specific —
+the comments toggle (only when there are threads to hide), **history** (clock icon, tooltip
+"Revision history") and **Edit**. If someone else is editing, a chip says who and since when.
 
 **Provoke:**
 - Open a page the second user cannot read, as the second user, by address → the not-found
   screen, byte-identical to a page that never existed. Offers "Your workspaces", not "sign in".
-- Resize to 320px: nothing scrolls sideways; the bar holds brand, history, Edit, theme.
+- Resize to 320px: nothing scrolls sideways; the bar holds the drawer toggle, up to four
+  controls and the breadcrumb (below `sm` the breadcrumb shows its last crumb only).
 - Toggle dark. The card is a card, not a hole — measured 1.49:1 against the ground.
+- **Focus mode:** `Ctrl`/`⌘`+`\`, or the sidebar-toggle icon in the bar. The sidebar hides to
+  nothing — not a rail — and the article re-centres in the whole pane. Reload: still hidden.
+  Press the keys again: it comes back where it was, and the width you left it at.
+- **Hide the comments:** with at least one thread on the page, the comments toggle in the bar
+  hides the gutter marks and the panel (the "not placed yet" chip stays). While hidden, its
+  label and badge still carry the count of open threads that mention you — hiding the marks
+  never means you stop hearing about them. The choice survives a reload (`dw-comments`
+  cookie); a reader with `read` but not `comment` sees no toggle and no marks either way.
 
 ## 6. Edit and save — `/pages/:id/edit`
 
@@ -174,11 +196,16 @@ stops updating on the next event; presence never tells you about a page you can 
 
 ## 11. Book history and diff — `/books/:id/history`, `/books/:id/diff`
 
-**Do:** from the tree's app bar on a book row. History groups saves into **changesets** — same
-author, same book, within thirty minutes. Diff answers "what changed in this book since
-<date>" and lets you step page to page **without going back to a list**.
+**Do:** "Book history" from a book row's own action in the sidebar tree. History groups saves
+into **changesets** — same author, same book, within thirty minutes — and its bar offers
+"Compare since…" without scrolling to the top row. Diff answers "what changed in this book
+since <date>" and lets you step page to page, previous/current/next, **without going back to
+a list**.
 
-**See:** the book's name in the heading, a way back to its tree, each changed page by title.
+**See:** both screens inside the workspace frame: the breadcrumb carries the book's identity
+("workspace › shelf › book › History", then "… › History › Changes since <date>") and is
+itself the way back — there is no separate "Workspace home" or "Back to history" button, the
+breadcrumb's own crumbs are the links. Each changed page is named, in tree order.
 
 **Provoke:** a book with no saves → empty state with a way forward.
 

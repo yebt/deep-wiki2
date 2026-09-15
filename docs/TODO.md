@@ -481,6 +481,95 @@ makes conventions portable across projects.
 
 Discoveries and constraints. Newest first.
 
+### 2026-09-15 — Members, the chooser, book history and diff, edit mode, and page history and diff move onto the frame
+
+**What happened.** The six document-page screens the two entries below left outside
+`layouts/workspace.vue` ("only the dashboard and the read page were migrated") are in, each
+its own commit:
+
+- **Members** (`8fe04ef`) opts in. The breadcrumb now carries the workspace's name, so the
+  hand-written eyebrow and the "Workspace home" button are gone and the heading is a bare
+  `<h1>` — the same contract read mode's `PageHeading :heading="title"` keeps. The invite
+  form, its pending list and the roster take the *pane's* width as columns (`@container`, the
+  dashboard's own rule): stacked narrow, the invite form beside the roster from `@2xl`, so the
+  layout holds with the sidebar open, closed or resized. `e2e/onboarding.spec.ts`'s
+  workspace-name assertion moved from `<main>` to the breadcrumb, which is where the name lives now.
+- **The workspaces list becomes a chooser** (`84337d3`). Now that `/` opens onto the last
+  workspace (previous entry), `/workspaces` is reached only when there is none yet, or by
+  choice from the switcher's "All workspaces". Its job flipped from reading to choosing: "New
+  workspace" is now the screen's one Filled button (`docs/DESIGN-SYSTEM.md` §9.1), not an
+  outline meant not to compete with the rows. No last-activity signal on each row —
+  `GET /workspaces/:id/activity` is per-workspace, and adding one to every row would be an
+  N+1 this screen does not pay for a nice-to-have.
+- **`/admin/registration` deliberately stays in the document frame** (`2a26cfe`, comment only,
+  no behavioural change): registration is an instance setting, orthogonal to "one workspace at
+  a time", and its heaviest user — the Super Root — may hold no workspace at all.
+- **Book history and book diff** (`8a5673d`, screenshots and e2e in `25c23ba`). The frame's own
+  breadcrumb now carries "workspace / shelf / book / History" and "... / History / Changes
+  since `<date>`", so the hand-built "Workspace home" and "Back to history" buttons are gone —
+  the breadcrumb's own crumbs are the links — and `PageHeading` is replaced by a single
+  `sr-only` `<h1>` per screen. History gains "Compare since…" in the contextual bar; diff's page
+  switcher (previous / current name / next) moves from the pane into the bar, wired to
+  `buildTreeOrderIndex` (`940cfb4`) so the switcher's order matches the sidebar's tree instead
+  of `GET /books/:id/diff`'s random `page_id` order (see "The book diff's happy path passed on
+  a coin toss" below) — a client-side stand-in; **the server should order instead**, unresolved.
+- **Edit mode** (`b5a7f55`). The tree survives Read → Edit → Read; the breadcrumb ends in the
+  page and an "Editing" crumb; the contextual bar carries the presence chip, "Read page" and
+  Save. **This closes the 16px read/edit column step** `docs/UI-CHECKLIST.md`'s 2026-09-07
+  review recorded (x=310.5 read vs. x=326.5 edit): both modes now stand on the frame's
+  `bg-default` pane, so the editor's own canvas is the same tone as its ground, and the
+  article and the editor's first paragraph measure identical in x, width and y
+  (`e2e/editor.spec.ts`). Closure recorded in `docs/UI-CHECKLIST.md`'s Review Log and
+  `docs/DESIGN-SYSTEM.md` §14.
+- **Page history and page diff** (`613e274`). Same breadcrumb treatment; the bar carries "Read
+  page" (history) and "Back to history" (diff). The revision pair being compared moved out of
+  the bar and into a caption above the block list — at 1280 with the 280px sidebar, two zoned
+  timestamps beside "Back to history" left the breadcrumb 400px short and it truncated to
+  "E2E Wor... > His... > Com...", the identity the bar exists to show.
+- Two test-infrastructure fixes surfaced while migrating (`2b1658c`): `last-workspace`
+  middleware now reads the `dw-workspace` cookie directly (`rememberedWorkspaceId()`) rather
+  than through `useCurrentWorkspace`'s shared state, which in the test environment is
+  initialised once, before any test sets a cookie; and three screen tests (edit, members,
+  book history) that took the page's first `role="status"` as their own notice are now scoped
+  to `main`, because the contextual bar's sidebar-toggle live region now precedes it.
+  `162c470` separately fixed an `e2e/frame.spec.ts` flake under a shared workspace (a tree long
+  enough to put the clicked row above the fold) and a race in the drawer's animation wait.
+- `b9680dd` moved the presence e2e's locator from `getByRole('status')` to
+  `data-testid="presence-indicator"`, for the same reason as `2b1658c`'s `main`-scoping: the
+  sidebar toggle's own live region now also matches `role="status"`, so counting them by role
+  stopped measuring what the assertion's name claimed — the same shape as the 2026-09-08
+  centring-test finding this file already carries.
+
+**Full verification, on `b9680dd`, run as separate stages** (`bun run verify` chained is
+killed for memory on this machine — see Known gaps, below): `bun run check` 11/11,
+`bun run typecheck` 0 errors, `bun run lint` 0, `bun run test` 2384 passing,
+`gate-2-round-trip` 168/168, `bun run e2e` 111/111.
+
+**Found on the way, fixed here.** `docs/DESIGN-SYSTEM.md`'s change-log table carried two stray
+lines — a literal `</content>` and `</invoke>` — sitting inside the 2026-09-14/2026-09-15 rows,
+apparently pasted in from a tool transcript rather than written. Removed; no row's content was
+lost, only the two extraneous lines between them.
+
+**What this leaves open, on purpose.**
+
+- **Known 320px defect on members: the invite card overflows.** Not yet fixed; see
+  `docs/UI-CHECKLIST.md`'s Review Log entry for this batch.
+- **The book-diff page order is still a client-side stand-in** (`940cfb4`); `GET /books/:id/diff`
+  itself should order by tree position, and the 2026-09-14 Finding on the point stands
+  unresolved.
+- All six owner-review gates (10.2, 10.4, 10.6, 10.8, 10.10, 10.12 in
+  `openspec/changes/versioning-and-collaboration/tasks.md`) are still open; this batch adds no
+  ticks. Phase 3 sits at **88 of 97 tasks ticked**, unchanged by this batch — the six gates
+  remain the long pole to 11.4/11.5.
+- **`packages/db/seed.ts` still prints a dead URL.** Its `tree:` line
+  (`console.log(\`  tree:  /workspaces/${workspace.workspaceId}/tree\`)`) advertises
+  `/workspaces/<uuid>/tree`, the frontend page route this batch's predecessor deleted; the
+  workspace's tree now lives in the sidebar at `/workspaces/<uuid>` (the dashboard). `docs/RUNNING.md`
+  §1 now flags this next to the quoted output; the seed script itself is unchanged — fixing the
+  printed line is a one-line `packages/db` change owed to the next batch that touches it.
+
+---
+
 ### 2026-09-15 — The frame is mounted once; focus mode; the comments toggle; `/` reopens the room
 
 **What happened.** The owner passed the workspace frame ("ha mejorado mucho la UI y UX… más
@@ -3210,6 +3299,25 @@ in Findings.
   Engine-specific features are avoided where the cost of avoiding them is low, and accepted
   where they buy something the product genuinely needs — see the Findings entry for the
   reasoning and the exact line between the two.
+- **Logout — clearing the cookie is not the same as ending the session.** `createSession`
+  (`apps/api/src/routes/auth.ts`) writes a server-side session row and hands back a cookie;
+  there is no route that deletes or expires that row on demand. `apps/web/PRODUCT.md` lists
+  logout under "Not yet" as an unbuilt screen, but the mechanism underneath it is a design
+  question, not just missing UI: a client-side "clear the cookie" leaves the session valid on
+  the server until its idle or absolute timeout, so a token that leaked before logout — a
+  shared machine, a copied header — is not actually revoked. Owed: a `DELETE` (or `POST
+  /auth/logout`) route that invalidates the session row, called from wherever the control
+  ends up living (the sidebar footer is the obvious door, next to Members).
+- **Serving avatars.** `POST /uploads/avatar` validates, resizes and stores an image and writes
+  its key to `users.avatar_key` (`apps/api/src/routes/uploads.ts`), but no route reads a key
+  back into bytes a browser can request — there is no `GET /avatars/…` and no signed-URL
+  response field carrying one. An uploaded avatar is presently unusable: nothing in
+  `apps/web` can point an `<img>` at it. Options: a proxy route through the API (keeps the
+  bucket private, adds a request per avatar shown), a short-lived signed URL from the object
+  store returned alongside `avatar_key` wherever a user is named, or serving the bucket
+  publicly under an unguessable key (weakest, and a decision about the bucket's own
+  visibility). Recent changes, the members roster and mention pickers all render initials
+  today because of this gap, not by design.
 
 ---
 
@@ -3223,6 +3331,13 @@ Accepted, not fixed. Do not "clean up" one of these without discussion.
 - **CI cannot run.** There is no git remote, so `.github/workflows/ci.yml` never
   executes. Enforcement is local: `.githooks/pre-commit` runs `bun run check` on every
   commit, and `bun run verify` runs all four gates before tagging.
+- **`bun run verify` chained is killed for memory on this machine.** Running `check`,
+  `typecheck`, `lint`, `test`, `gate-2-round-trip` and `e2e` back to back in one process (its
+  current shape) gets OOM-killed here; each stage passes cleanly run on its own (confirmed on
+  `b9680dd`: check 11/11, typecheck 0, lint 0, test 2384 passing, GATE-2 168/168, e2e 111/111).
+  Owed: make `verify` run its stages as separate processes, or split it into two documented
+  commands (a light gate and an e2e gate) rather than one script that needs more memory than a
+  dev machine reliably has.
 - **Icon rendering verified with only the `lucide` collection.** The UI checklist's
   two-icon-pack requirement (`docs/UI-CHECKLIST.md` §11.1) is untested; carried forward
   from Phase 0's archive report.

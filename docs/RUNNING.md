@@ -56,6 +56,11 @@ seed: ready
     edit:  /pages/<uuid>/edit
 ```
 
+That `tree:` line is stale as of the 2026-09-15 workspace-frame batch: `packages/db/seed.ts`
+still prints `/workspaces/<uuid>/tree`, a page route that no longer exists (`docs/TODO.md`
+Findings, 2026-09-15) — open `/workspaces/<uuid>` instead, the workspace's dashboard, with the
+tree in its sidebar.
+
 **Do not pass `--port` to the web server.** It used to be required, and forgetting it is what
 broke sign-in for a day — see §3. `apps/web/nuxt.config.ts` now declares `devServer.port`, so
 the port is a fact in the repository rather than a flag in your shell history.
@@ -69,16 +74,16 @@ token-bearing screens, because this product has no public pages.
 
 | Route | What it is | Needs |
 | --- | --- | --- |
-| `/` | Redirects to `/workspaces` — the way in, not a screen of its own | nothing |
+| `/` | Signed out: `/login`. Signed in: the last workspace's dashboard if one is remembered (`dw-workspace` cookie, `middleware/last-workspace.ts`), else `/workspaces` — the way in, not a screen of its own | nothing |
 | `/login` | Sign in | apps/api + a seeded user |
 | `/forgot-password` | Request a reset link | apps/api + Mailpit |
 | `/reset-password?token=…` | Set a new password | a token from the mail in Mailpit |
 | `/invite/accept?token=…` | Accept a workspace invitation | a token from the mail in Mailpit |
-| `/workspaces` | The wikis you can open | a session |
-| `/workspaces/new` | Create a workspace — the way in from the list | a session **and an account with a plan**: the seed user has one, an account created by registration or invitation does not (`403 no_plan`; `docs/TODO.md` Open Questions, "Default plan policy") |
-| `/workspaces/:workspaceId/tree` | Navigation tree — shelves, books, chapters, pages; create, rename, drag-reorder | a session with read on the workspace |
-| `/workspaces/:workspaceId/members` | Members and invitations — the list, and the form that sends an invite | `manage` on the workspace root; anyone else gets the not-found state, deliberately (the API answers "no such workspace" and "not yours to manage" identically). The link to it on the tree renders for everyone — see Open Questions, "Which signal tells the client `manage`" |
-| `/admin/registration` | Instance registration mode, allowed domains, SMTP test | Super Root (`users.is_super_root`); anyone else gets the forbidden state. Linked from the app chrome for everyone, for the same reason as Members |
+| `/workspaces` | The workspaces chooser — reached only when `/` has none remembered, or by choice from the sidebar switcher's "All workspaces" | a session |
+| `/workspaces/new` | Create a workspace — the way in from the chooser | a session **and an account with a plan**: the seed user has one, an account created by registration or invitation does not (`403 no_plan`; `docs/TODO.md` Open Questions, "Default plan policy") |
+| `/workspaces/:workspaceId` | The workspace's dashboard — what changed and who is here (`GET /workspaces/:id/activity` + the presence stream). The navigation tree — shelves, books, chapters, pages; create, rename, drag-reorder — is not a route: it is the sidebar, mounted once by `layouts/workspace.vue` and present on every screen below, including this one. `/workspaces/:workspaceId/tree` no longer exists (`docs/TODO.md` Findings, 2026-09-15) | a session with read on the workspace |
+| `/workspaces/:workspaceId/members` | Members and invitations — the list, and the form that sends an invite | `manage` on the workspace root; anyone else gets the not-found state, deliberately (the API answers "no such workspace" and "not yours to manage" identically). The link to it, in the sidebar's footer, renders for everyone — see Open Questions, "Which signal tells the client `manage`" |
+| `/admin/registration` | Instance registration mode, allowed domains, SMTP test. Deliberately stays in the document frame, not the workspace one — an instance setting, and its heaviest user (the Super Root) may hold no workspace at all | Super Root (`users.is_super_root`); anyone else gets the forbidden state. Linked from both the document chrome's icon button and, when inside a workspace, the sidebar's footer — for everyone, for the same reason as Members |
 | `/pages/:id` | Read mode — pre-rendered HTML, no editor loaded; comment gutter and thread panel; who is editing | a session with read on the page (`comment` to see threads) |
 | `/pages/:id/edit` | Edit mode — ProseMirror, `@` mentions, `/` commands, soft lock, who else is here | a session with write on the page |
 | `/pages/:id/history` | Revision history for a page | a session with read on the page |

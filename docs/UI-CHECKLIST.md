@@ -782,8 +782,8 @@ content.
 
 **Follow-ups carried forward, not fixed**
 
-- **Read and edit now share the column but not the last 16px.** Measured at
-  1280×900: the `<h1>` and the document surface are identical in both modes
+- ~~**Read and edit now share the column but not the last 16px.**~~ **Closed 2026-09-15.**
+  Measured at 1280×900: the `<h1>` and the document surface are identical in both modes
   (658.9px at x=310.5), but a paragraph is 658.9px at x=310.5 in read mode
   and **626.9px at x=326.5** in edit — the editor's canvas carries `p-4`
   (§1.4 gives it `bg-default` as the document canvas) while read mode's
@@ -795,6 +795,12 @@ content.
   canvas and the editor body as one rung. That is a design-system ruling to
   be made once and deliberately (§1's standing rule), not improvised inside
   this batch, so it is recorded rather than taken.
+  **Resolution:** edit mode's move onto the workspace frame (`b5a7f55`, 2026-09-15) puts both
+  modes on the frame's own `bg-default` pane, which settled the ruling in the second
+  direction — read mode's canvas, not the editor's inset, is what the pane now supplies.
+  Measured in `e2e/editor.spec.ts`: title and first paragraph identical in x, width and y
+  across the two modes, both themes, at 1280×900. See this file's Review Log, 2026-09-15, and
+  `docs/DESIGN-SYSTEM.md` §14.
 - No test asserts the column geometry. Both findings above were caught by
   measuring the running app, and the suite would be green with the column
   back against the left edge. `e2e/auth-layout.spec.ts` is the right home
@@ -965,6 +971,47 @@ the session scratchpad.
 - The sidebar's resize handle is pointer-only (§5); the mention count is capped by the
   activity endpoint's twenty threads; below `sm` the breadcrumb shows only the last crumb.
 - The two-icon-pack requirement (§4.3) remains untested.
+
+---
+
+### 2026-09-15 — Members, the workspaces chooser, book history and diff, edit mode, and page history and diff onto the frame — awaiting the owner's eye
+
+**Reviewer:** none yet — this entry is what was shipped for review, not a review.
+**Verdict:** Pending
+
+The follow-up above ("Edit, history, diff, members, book history and book diff have not
+opted into the layout") is closed: all six are now inside `layouts/workspace.vue`, each its
+own commit (`8fe04ef`, `84337d3`, `8a5673d`/`25c23ba`, `b5a7f55`, `613e274`; full detail in
+`docs/TODO.md` Findings, 2026-09-15). Measured at 1280×900 in both themes and at 320×900 in
+light, against `e2e/editor.spec.ts`, `e2e/history.spec.ts`, `e2e/diff.spec.ts`,
+`e2e/frame.spec.ts` and the book screenshot batch (`DEEPWIKI_BOOK_SHOTS`): every screen's
+breadcrumb carries its real identity in place of the hand-built "Workspace home"/"Back to
+history" buttons it replaced; edit mode's article and first paragraph land at the same x,
+width and y as read mode's, closing the 2026-09-07 16px column-step follow-up above; nothing
+scrolls sideways at 320. Screenshots `frame3-{members,book-history,book-diff,history,diff,
+edit,edit-focus}-{1280-light,1280-dark,320-light}.png` in the session scratchpad (not every
+combination was shot — `edit-focus` is 1280-light only). The same batch also reshot the
+already-frame'd list, new-workspace and registration screens (`frame3-{list,new,
+registration}-*.png`) for a like-for-like set.
+
+**Gates still open.** None of `openspec/changes/versioning-and-collaboration/tasks.md`'s six
+owner-review gates move: **10.2** (page history), **10.4** (page diff), **10.6** (book
+changeset history and diff), **10.8** (comment gutter and thread panel), **10.10**
+(orphaned-comment surface), **10.12** (presence indicators) are all still `[ ]`. This entry is
+the same kind of backlog the 2026-09-14 entry above was — an agent's cross-screen pass, not a
+substitute for the owner's review against this checklist and `docs/DESIGN-SYSTEM.md`.
+
+**Follow-ups carried forward, not fixed**
+
+- **Known defect at 320px: the members invite card overflows.** Not yet fixed — status is
+  fix in flight.
+- The book-diff page switcher's order is a client-side stand-in (`940cfb4`, tree position
+  falling back to title); `GET /books/:id/diff` should order server-side instead
+  (`docs/TODO.md` Findings, 2026-09-14 and 2026-09-15).
+- Everything the 2026-09-15 "owner review" entry above carried forward and this batch did not
+  touch: the contextual (third) pane is still an overlay, the sidebar's resize handle is
+  pointer-only, the mention count is capped at twenty threads, the breadcrumb below `sm` shows
+  only the last crumb, and the two-icon-pack requirement (§4.3) remains untested.
 
 ---
 
