@@ -21,6 +21,12 @@
  */
 import { formatRevisionDate } from '~/utils/format-revision-date';
 
+// Inside the workspace layout: the frame is mounted once and this screen
+// renders only its pane, so the room does not change when the mode does —
+// the sidebar's tree keeps its scroll and its folds across Read → Edit →
+// Read (`layouts/workspace.vue`).
+definePageMeta({ layout: 'workspace' });
+
 const route = useRoute();
 const nodeId = route.params.id as string;
 
@@ -150,17 +156,27 @@ async function onSave(): Promise<void> {
   }
 }
 
+// A full reload is what actually discards this tab's buffer, so a dirty
+// buffer is confirmed first, explicitly naming what is about to be lost
+// (docs/UI-CHECKLIST.md §3, "Error — fatal … says explicitly whether the
+// work was lost or preserved"). One helper for the two states that name a
+// reload, so the confirmation cannot drift between them.
+function reloadDiscardingBuffer(warning: string): void {
+  if (isDirty.value && !window.confirm(warning)) return;
+  window.location.reload();
+}
+
 // The `stale` 409 carries no document body to merge (unlike `not
 // canonical`/`dead anchor`) — the only honest recovery is the reload
-// `saveMessage` already names. A full reload is what actually discards
-// this tab's buffer, so a dirty buffer is confirmed first, explicitly
-// naming what is about to be lost (docs/UI-CHECKLIST.md §3, "Error —
-// fatal … says explicitly whether the work was lost or preserved").
+// `saveMessage` already names.
 function reloadForNewerVersion(): void {
-  if (isDirty.value && !window.confirm('Someone else saved a newer version. Reloading now will discard your unsaved changes in this tab. Reload anyway?')) {
-    return;
-  }
-  window.location.reload();
+  reloadDiscardingBuffer('Someone else saved a newer version. Reloading now will discard your unsaved changes in this tab. Reload anyway?');
+}
+
+// The lock was lost mid-session (the heartbeat answered `lost`): this
+// tab can no longer save, and a new session needs a reload.
+function reloadAfterLockLost(): void {
+  reloadDiscardingBuffer('This tab no longer holds the lock. Reloading now will discard your unsaved changes in this tab. Reload anyway?');
 }
 
 async function confirmTakeOver(): Promise<void> {
@@ -189,10 +205,25 @@ useSeoMeta({ title: () => (session.value?.title ? `Editing ${session.value.title
 
 <template>
   <AppShell :workspace-id="session?.workspaceId ?? null" :node-id="nodeId" :title="session?.title || undefined" :trail="[{ label: 'Editing' }]">
-    <!-- Rendered inside the workspace frame so the mode switch does not
-         change the room around the text; the layout of this screen itself
-         is the next batch's. -->
+    <!-- The breadcrumb ends in the page — placed through the tree once
+         the session names the workspace, the title alone until then — and
+         then the state this screen adds: "Editing". The word alone, no
+         pencil: at 320 the bar holds the drawer toggle, this one crumb,
+         "Read page" and Save, and with an icon the crumb truncated to
+         "Edit…". The mode is unmistakable without it (docs/UI-CHECKLIST.md
+         §4.5): a Filled Save where read mode has a tonal Edit, and the
+         crumb says so.
+
+         The contextual bar: who else is here, then what this screen can
+         do — the same order the read screen uses (presence, then its
+         actions), so the bar reads the same in both modes. -->
     <template #header-end>
+      <!-- editing-presence spec: "show the other holder if one appears
+           mid-session" — not the soft lock itself (the `locked` refusal
+           below, before the editor ever opens); this is the signal that
+           makes a takeover *informed* once this tab is already inside the
+           editor (docs/UI-CHECKLIST.md §4.8). -->
+      <PresenceIndicator v-if="status === 'ready'" :editors="otherEditors" class="mr-2" />
       <!-- One chrome for one destination: this and the history screen's
            app-bar control both lead to `/pages/:id`, and used to be
            "Read" (eye) here and "Back to page" (arrow-left) there. The
@@ -230,9 +261,26 @@ useSeoMeta({ title: () => (session.value?.title ? `Editing ${session.value.title
          was one thing, the denied, missing, locked and refused panels
          rendered 1216px wide while the editor beside them rendered 659px,
          so the screen changed width with its state. -->
+    <!-- Loading: the read skeleton's shape, because the loaded editor is
+         the read article's shape — a title line in `PageHeading`'s block
+         (36px `headline-medium`, 32px `mb-8` under it) and text on the
+         pane, on `doc-body`'s 26px lines. Not a slab: the editor draws no
+         box of its own on the pane (`EditorSurface`). `e2e/editor.spec.ts`
+         holds the response back and measures the title and the first line
+         against the editor's first paragraph (docs/UI-CHECKLIST.md §3,
+         "no layout shift on load — measure it"). -->
     <div v-if="status === 'idle' || status === 'loading'" data-testid="edit-skeleton" aria-hidden="true">
-      <USkeleton class="h-9 w-2/3" />
-      <USkeleton class="mt-6 h-48 w-full" />
+      <div class="mb-8 max-w-measure">
+        <USkeleton class="h-9 w-2/3" data-testid="edit-skeleton-title" />
+      </div>
+      <!-- `as="span"`: a `<div>` inside a `<p>` is invalid HTML and the
+           server-rendered skeleton would be re-parsed with the paragraph
+           closed early, losing the 26px line box this exists for. -->
+      <div class="doc-body text-doc-body">
+        <p data-testid="edit-skeleton-line"><USkeleton as="span" class="inline-block h-4 w-full align-middle" /></p>
+        <p><USkeleton as="span" class="inline-block h-4 w-full align-middle" /></p>
+        <p><USkeleton as="span" class="inline-block h-4 w-5/6 align-middle" /></p>
+      </div>
     </div>
 
     <!-- Never a dead end (§3): read-only is the nearest door, and the two
@@ -322,30 +370,34 @@ useSeoMeta({ title: () => (session.value?.title ? `Editing ${session.value.title
     </PageNotice>
 
     <template v-else>
+      <!-- The document's own title is the screen's `<h1>` — the same
+           heading, from the same component, in the same box the read
+           screen renders it in, so the text under it does not move when
+           the mode changes. No eyebrow and no supporting sentence: the
+           breadcrumb already says "Editing", and a heading block repeating
+           it would title the page twice. -->
       <PageHeading :heading="session?.title ?? ''" />
 
-      <!-- Presence and the lock-heartbeat state live in the content flow,
-           not the header: measured at 320×900 with the lock lost, the
-           header's `scrollWidth` (352px) exceeded its `clientWidth`
-           (320px) and the status text wrapped to three lines inside the
-           app bar's fixed height, clipping. This row wraps freely instead
-           (docs/UI-CHECKLIST.md §6). -->
-      <div v-if="status === 'ready' && (otherEditors.length > 0 || heartbeat.status.value === 'lost')" class="mb-4 flex flex-col gap-2">
-        <!-- editing-presence spec: "show the other holder if one appears
-             mid-session" — not the soft lock itself (the `locked` refusal
-             screen above, before the editor ever opens); this is the
-             signal that makes a takeover *informed* once this tab is
-             already inside the editor (docs/UI-CHECKLIST.md §4.8). -->
-        <PresenceIndicator :editors="otherEditors" />
-        <span v-if="heartbeat.status.value === 'lost'" role="status" class="text-label-medium text-error">
-          Lock lost — reload to keep editing. Your unsaved changes in this tab are kept, but cannot be saved until you reload and retry.
-        </span>
-      </div>
-
-      <!-- The save banners are the chip tier — `InlineNotice tier="chip"`,
-           the one-line notice about the thing directly below it (its
-           tiers are stated once, in that component). Six hand-rolled
-           copies of the same `div` lived here before; checklist §4.1. -->
+      <!-- The notices about the editor stand in the pane, directly above
+           it, never in the contextual bar: measured at 320×900 with the
+           lock lost, a bar holding them overflowed its width and the text
+           wrapped to three lines inside the bar's fixed height, clipping
+           (docs/UI-CHECKLIST.md §6). Every one of them is the chip tier —
+           `InlineNotice tier="chip"`, the one-line notice about the thing
+           directly below it (its tiers are stated once, in that
+           component). Six hand-rolled copies of the same `div` lived here
+           before, and the lock-lost line was a bare `span` — a fourth
+           shape; checklist §4.1. -->
+      <!-- Lock lost mid-session: the heartbeat answered `lost`, so this
+           tab can no longer save. §3 "Error — fatal": says the work is
+           kept, and carries the reload it names rather than only naming
+           it (never a dead end). -->
+      <InlineNotice v-if="heartbeat.status.value === 'lost'" tier="chip" tone="error" role="alert" class="mb-4">
+        Lock lost — this tab can no longer save. Your unsaved changes are kept here to copy out; reload to start editing again.
+        <template #actions>
+          <UButton size="xs" variant="outline" color="error" icon="i-lucide-refresh-cw" @click="reloadAfterLockLost">Reload</UButton>
+        </template>
+      </InlineNotice>
       <!-- `stale`: a concurrent save already happened, and the server
            offers no document to merge — the only honest recovery is a
            reload, so the banner carries the action it names, and Save

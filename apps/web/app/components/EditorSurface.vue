@@ -193,6 +193,18 @@ defineExpose({
          editor carried both, in two different roles and two widths.
          `min-h-64` rather than `min-h-[16rem]`: same 256px, on the scale
          instead of beside it (docs/UI-CHECKLIST.md §4.1).
+         No canvas of its own: the document pane the workspace frame
+         stands this on is already `bg-default`, §1.4's document canvas
+         (docs/DESIGN-SYSTEM.md §8.3), so a `bg-default` box here was the
+         same tone as its ground — invisible by construction (§9.4's
+         corollary) — and its `p-4` inset was the one thing left between
+         read and edit mode sharing the column: measured on 2026-09-07, a
+         paragraph stood at x=310.5 in read mode and x=326.5 in edit. The
+         text now stands where read mode's article stands, and
+         `e2e/editor.spec.ts` holds the two to the pixel. `-m-4 p-4`: the
+         box still reaches 16px past the text on every side, so the focus
+         indicator — 3px at 2px offset, main.css — does not hug the
+         first character the way it would on a bare column.
          `aria-activedescendant` is what connects the menus below to the
          element that actually holds focus — without it a screen-reader user
          gets no announcement as the arrow keys move the selection.
@@ -204,7 +216,7 @@ defineExpose({
          unnamed contenteditable with no relationship to its menus). -->
     <div
       ref="rootEl"
-      class="doc-body text-doc-body text-default prosemirror-editor min-h-64 rounded-lg bg-default p-4"
+      class="doc-body text-doc-body text-default prosemirror-editor -m-4 min-h-64 rounded-lg p-4"
       data-testid="editor-surface"
       role="textbox"
       aria-multiline="true"

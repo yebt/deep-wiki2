@@ -1,22 +1,63 @@
 import { UApp } from '#components';
 import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime';
 import { describe, expect, test, vi } from 'vitest';
-import { defineComponent, h, ref } from 'vue';
+import { computed, defineComponent, h, ref } from 'vue';
 import EditPage from './edit.vue';
 
-const { useEditSessionMock, useLockHeartbeatMock, useSavePageMock, usePresenceStreamMock, useRouteMock } = vi.hoisted(() => ({
-  useEditSessionMock: vi.fn(),
-  useLockHeartbeatMock: vi.fn(),
-  useSavePageMock: vi.fn(),
-  usePresenceStreamMock: vi.fn(),
-  useRouteMock: vi.fn(() => ({ params: { id: 'page-1' } })),
-}));
+const { useEditSessionMock, useLockHeartbeatMock, useSavePageMock, usePresenceStreamMock, useRouteMock, useWorkspaceTreeMock, useWorkspaceDirectoryMock } =
+  vi.hoisted(() => ({
+    useEditSessionMock: vi.fn(),
+    useLockHeartbeatMock: vi.fn(),
+    useSavePageMock: vi.fn(),
+    usePresenceStreamMock: vi.fn(),
+    useRouteMock: vi.fn(() => ({ params: { id: 'page-1' } })),
+    useWorkspaceTreeMock: vi.fn(),
+    useWorkspaceDirectoryMock: vi.fn(),
+  }));
 
 mockNuxtImport('useEditSession', () => useEditSessionMock);
 mockNuxtImport('useLockHeartbeat', () => useLockHeartbeatMock);
 mockNuxtImport('useSavePage', () => useSavePageMock);
 mockNuxtImport('usePresenceStream', () => usePresenceStreamMock);
 mockNuxtImport('useRoute', () => useRouteMock);
+mockNuxtImport('useWorkspaceTree', () => useWorkspaceTreeMock);
+mockNuxtImport('useWorkspaceDirectory', () => useWorkspaceDirectoryMock);
+
+/**
+ * The frame's own collaborators — the sidebar's tree and the workspace
+ * directory — are stubbed so this file stays about the edit screen. The
+ * tree places `page-1` under a shelf and a book: a page at the root would
+ * make the breadcrumb test below pass with the ancestors never rendered.
+ */
+function mockFrame() {
+  useWorkspaceTreeMock.mockReturnValue({
+    status: ref('success'),
+    nodes: ref([]),
+    rootId: ref('root-1'),
+    message: ref(''),
+    collapsedIds: computed(() => new Set<string>()),
+    selectedId: ref(null),
+    load: vi.fn(async () => {}),
+    reorder: vi.fn(async () => true),
+    toggleCollapsed: vi.fn(),
+    reveal: vi.fn(),
+    pathTo: (id: string) =>
+      id === 'page-1'
+        ? [
+            { id: 'shelf-1', type: 'shelf', slug: 's', title: 'Engineering', position: 0, children: [] },
+            { id: 'book-1', type: 'book', slug: 'b', title: 'Handbook', position: 0, children: [] },
+            { id: 'page-1', type: 'page', slug: 'p', title: 'A Page', position: 0, children: [] },
+          ]
+        : [],
+  });
+  useWorkspaceDirectoryMock.mockReturnValue({
+    status: ref('success'),
+    workspaces: computed(() => [{ id: 'ws-1', name: 'Acme', slug: 'acme' }]),
+    ensure: vi.fn(async () => {}),
+    refresh: vi.fn(async () => {}),
+    nameOf: (id: string) => (id === 'ws-1' ? 'Acme' : null),
+  });
+}
 
 // Every screen now renders inside the workspace frame. Its sidebar — the
 // tree, the switcher, the doors — is stubbed here so this file stays about
@@ -70,8 +111,12 @@ function mockDefaults(
     save,
   });
   mockPresence();
+  mockFrame();
   return { save };
 }
+
+const READY_SESSION = { markdown: '# Hi\n', title: 'A Page', workspaceId: 'ws-1', lock: { holderUserId: 'me', acquiredAt: 'x', heartbeatAt: 'x' } };
+const EDITOR_STUBS = { global: { stubs: { EditorSurface: true, WorkspaceSidebar: true } } };
 
 function mockPresence(editors: readonly { userId: string; userDisplayName: string; since: string }[] = []) {
   usePresenceStreamMock.mockReturnValue({
@@ -138,7 +183,9 @@ describe('edit-mode page', () => {
     });
     const component = await mountSuspended(PageInApp, { global: { stubs: { EditorSurface: true, WorkspaceSidebar: true } } });
 
-    const back = component.get('header a[href="/pages/page-1"]');
+    // In the bar's actions, not its breadcrumb — the page crumb links to
+    // the same address, and is the frame's, not this screen's.
+    const back = component.get('header [data-slot="right"] a[href="/pages/page-1"]');
     expect(back.text()).toBe('Read page');
     expect(back.find('[class*="i-lucide-eye"], .iconify').exists()).toBe(true);
   });
@@ -164,6 +211,7 @@ describe('edit-mode page', () => {
       save,
     });
     mockPresence();
+    mockFrame();
     mockSession({
       status: 'ready',
       session: {
@@ -549,5 +597,146 @@ describe('edit-mode page', () => {
     expect(component.find('header').text()).not.toMatch(/lock lost/i);
     expect(component.find('main').text()).toMatch(/lock lost/i);
     expect(component.text()).toMatch(/kept/i);
+  });
+
+  /*
+   * The screen opts into the workspace layout, so the sidebar around it is
+   * the one the layout mounted — the tree keeps its scroll and its folds
+   * when the person arrives from Read, and the room does not change when
+   * the mode does. The record is read from the application's router; that
+   * the sidebar actually survives is `e2e/frame.spec.ts`'s claim.
+   */
+  test('stands inside the workspace layout', async () => {
+    mockDefaults();
+    mockSession({ status: 'ready', session: READY_SESSION });
+    await mountSuspended(PageInApp, EDITOR_STUBS);
+    const { useRouter } = await import('#imports');
+
+    expect(useRouter().getRoutes().find((route) => route.path === '/pages/:id()/edit')?.meta.layout).toBe('workspace');
+  });
+
+  describe('inside the workspace frame', () => {
+    // Where the person is: workspace › shelf › book › page, through the
+    // tree the sidebar holds, then the state this screen adds — a crumb
+    // saying "Editing" (docs/UI-CHECKLIST.md §4.5). The word alone: with
+    // an icon the crumb truncated to "Edit…" at 320 beside the bar's two
+    // actions (`e2e/editor.spec.ts` measures that bar).
+    test('the breadcrumb walks from the workspace to the page and ends in the Editing state', async () => {
+      mockDefaults();
+      mockSession({ status: 'ready', session: READY_SESSION });
+      const component = await mountSuspended(PageInApp, EDITOR_STUBS);
+
+      const nav = component.get('nav[aria-label="Where you are"]');
+      const crumbs = nav.findAll('li').map((li) => li.text()).filter(Boolean);
+      expect(crumbs).toEqual(['Acme', 'Engineering', 'Handbook', 'A Page', 'Editing']);
+      // The page crumb is the link back to reading it; the state crumb is
+      // a place name, not a link.
+      expect(nav.find('a[href="/pages/page-1"]').exists()).toBe(true);
+      const editing = nav.findAll('li').find((li) => li.text() === 'Editing')!;
+      expect(editing.find('a').exists()).toBe(false);
+    });
+
+    // The contextual bar carries what this screen can do and who else is
+    // here: the presence chip, then Read page, then Save. The column below
+    // holds the document and the notices about it, nothing else.
+    test('the contextual bar carries the presence chip beside Read page and Save, and the column carries none of them', async () => {
+      mockDefaults();
+      mockPresence([{ userId: 'other-1', userDisplayName: 'Ana', since: '2026-01-01T00:00:00.000Z' }]);
+      mockSession({ status: 'ready', session: READY_SESSION });
+      const component = await mountSuspended(PageInApp, EDITOR_STUBS);
+
+      const header = component.get('header');
+      const actions = header.get('[data-slot="right"]');
+      expect(actions.text()).toMatch(/Ana is editing/);
+      expect(actions.get('a[href="/pages/page-1"]').text()).toBe('Read page');
+      expect(actions.findAll('button').some((button) => /^Save/.test(button.text()))).toBe(true);
+      // Presence first, then the quieter navigation, then the primary
+      // action — the read screen's order.
+      const order = actions.text();
+      expect(order.indexOf('Ana is editing')).toBeLessThan(order.indexOf('Read page'));
+      expect(order.indexOf('Read page')).toBeLessThan(order.indexOf('Save'));
+      const main = component.get('main');
+      expect(main.text()).not.toMatch(/Ana is editing/);
+      expect(main.findAll('button').some((button) => /^Save/.test(button.text()))).toBe(false);
+      expect(main.find('a[href="/pages/page-1"]').exists()).toBe(false);
+    });
+
+    // The document's own title is the screen's `<h1>`, the same heading
+    // the read screen renders in the same box — the mode changes the room's
+    // bar, never the column. No eyebrow, no supporting sentence: the crumb
+    // says "Editing", so a heading block repeating it would title the page
+    // twice.
+    test('the page title is the one h1, with no eyebrow or description under it', async () => {
+      mockDefaults();
+      mockSession({ status: 'ready', session: READY_SESSION });
+      const component = await mountSuspended(PageInApp, EDITOR_STUBS);
+
+      const headings = component.findAll('main h1');
+      expect(headings).toHaveLength(1);
+      expect(headings[0]!.text()).toBe('A Page');
+      const block = headings[0]!.element.parentElement!;
+      expect(block.querySelectorAll('p')).toHaveLength(0);
+    });
+
+    // The lock-lost state was a bare `span` — a fourth notice shape beside
+    // the three `InlineNotice` states (docs/DESIGN-SYSTEM.md §14,
+    // 2026-09-14) — and named a reload it did not offer (docs/UI-CHECKLIST.md
+    // §3, never a dead end). It is the chip tier now, above the editor,
+    // with the action, and it confirms before a dirty buffer is discarded
+    // the way the stale banner's Reload does.
+    test('the lock-lost notice is the shared chip tier above the editor, offers Reload, and confirms before discarding unsaved edits', async () => {
+      mockDefaults({ heartbeatStatus: 'lost' });
+      mockSession({ status: 'ready', session: READY_SESSION });
+      const component = await mountSuspended(PageInApp, EDITOR_STUBS);
+
+      const chip = component.get('main [role="alert"][data-notice-tier="chip"]');
+      expect(chip.text()).toMatch(/lock lost/i);
+      expect(chip.text()).toMatch(/kept/i);
+      expect(component.get('header').text()).not.toMatch(/lock lost/i);
+      // Above the editor, not below it.
+      const main = component.get('main').element;
+      expect(Array.from(main.querySelectorAll('*')).indexOf(chip.element)).toBeLessThan(
+        Array.from(main.querySelectorAll('*')).indexOf(component.find('editor-surface-stub').element),
+      );
+
+      const editorStub = component.findComponent({ name: 'EditorSurface' });
+      editorStub.vm.$emit('update', '# Hi\n\nedited\n');
+      await component.vm.$nextTick();
+
+      const confirmMock = vi.fn().mockReturnValue(false);
+      const reloadSpy = vi.fn();
+      vi.stubGlobal('confirm', confirmMock);
+      vi.stubGlobal('location', { ...window.location, reload: reloadSpy });
+
+      const reload = chip.findAll('button').find((button) => /Reload/.test(button.text()))!;
+      await reload.trigger('click');
+      expect(confirmMock).toHaveBeenCalled();
+      expect(reloadSpy).not.toHaveBeenCalled();
+
+      confirmMock.mockReturnValue(true);
+      await reload.trigger('click');
+      expect(reloadSpy).toHaveBeenCalledTimes(1);
+
+      vi.unstubAllGlobals();
+    });
+
+    // The skeleton is the loaded screen's boxes: the title line the
+    // heading takes and the editor's text on `doc-body` lines — the read
+    // skeleton's shape, not one slab of a guessed height. That the boxes
+    // coincide is a measurement (`e2e/editor.spec.ts`); this holds that
+    // both parts exist, are marked for it, and that the lines are prose
+    // line boxes.
+    test('the skeleton is the title line and doc-body text lines, marked for measurement', async () => {
+      mockDefaults();
+      mockSession({ status: 'loading' });
+      const component = await mountSuspended(PageInApp, EDITOR_STUBS);
+
+      const skeleton = component.get('[data-testid="edit-skeleton"]');
+      expect(skeleton.attributes('aria-hidden')).toBe('true');
+      expect(skeleton.find('[data-testid="edit-skeleton-title"]').exists()).toBe(true);
+      const line = skeleton.get('[data-testid="edit-skeleton-line"]');
+      expect(line.element.tagName).toBe('P');
+      expect(line.element.parentElement!.classList.contains('text-doc-body')).toBe(true);
+    });
   });
 });

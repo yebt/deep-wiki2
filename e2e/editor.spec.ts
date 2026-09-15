@@ -307,3 +307,256 @@ test('clicking the second slash command runs it, closes the menu and leaves the 
   await expect(editor.locator('h2')).toHaveText('Second');
 });
 
+
+/**
+ * Inside the workspace frame (docs/UI-CHECKLIST.md Review Log, 2026-09-15:
+ * every screen opts into `layouts/workspace.vue`; the owner's pass on the
+ * frame). Measured in a real browser, because happy-dom has no layout
+ * engine: the editor stands on the column read mode stands on — to the
+ * pixel, closing the 16px step the 2026-09-07 review recorded — the
+ * breadcrumb ends in the page and the "Editing" state, this screen's
+ * actions are in the contextual bar, the skeleton is the editor's own box,
+ * focus mode works with a live editor under it, and at 320 the bar holds
+ * with the lock-lost notice in the pane rather than in it.
+ *
+ * The screenshots are the owner's review material for this batch
+ * (`frame3-edit-*.png`); the assertions are what keeps them honest.
+ */
+const SHOTS = process.env.DEEPWIKI_FRAME_SHOTS ?? '';
+
+async function shot3(page: Page, name: string): Promise<void> {
+  if (!SHOTS) return;
+  await page.screenshot({ path: `${SHOTS}/frame3-edit-${name}.png`, fullPage: false });
+}
+
+async function useTheme(page: Page, theme: 'light' | 'dark'): Promise<void> {
+  await page.addInitScript((value) => localStorage.setItem('nuxt-color-mode', value), theme);
+}
+
+function overflow(page: Page) {
+  return page.evaluate(() => ({
+    scrollHeight: document.documentElement.scrollHeight,
+    innerHeight: window.innerHeight,
+    scrollWidth: document.documentElement.scrollWidth,
+    innerWidth: window.innerWidth,
+  }));
+}
+
+for (const theme of ['light', 'dark'] as const) {
+  test.describe(`inside the workspace frame, 1280x900 ${theme}`, () => {
+    test.use({ viewport: { width: 1280, height: 900 } });
+
+    test('the editor takes the column read mode takes, under the same title, with the tree beside it and Editing in the breadcrumb', async ({ page }) => {
+      test.setTimeout(90000);
+      await signInAs(page, editorFixtures.writerSessionToken);
+      await useTheme(page, theme);
+
+      // Read mode first: where the title and the first paragraph stand.
+      await page.goto(`/pages/${editorFixtures.editablePageId}`);
+      const readTitle = page.getByRole('heading', { level: 1, name: editorFixtures.editablePageTitle });
+      await expect(readTitle).toBeVisible({ timeout: 30000 });
+      const readTitleBox = (await readTitle.boundingBox())!;
+      const readParagraph = (await page.locator('article > p').first().boundingBox())!;
+
+      // Edit mode, by the control read mode offers — the transition a
+      // person actually makes (docs/UI-CHECKLIST.md §4.5).
+      await page.getByRole('link', { name: 'Edit', exact: true }).click();
+      await expect(page).toHaveURL(new RegExp(`/pages/${editorFixtures.editablePageId}/edit$`));
+      const editor = page.getByTestId('editor-surface');
+      await expect(editor).toContainText(editorFixtures.editablePageMarkdown.trim(), { timeout: 30000 });
+      await expect(page.locator('html')).toHaveClass(theme === 'dark' ? /dark/ : /light/);
+
+      // The room did not change: the same sidebar, marking this page.
+      const sidebar = page.getByRole('navigation', { name: 'Workspace' });
+      await expect(sidebar).toBeVisible();
+      await expect(sidebar.locator('[role="treeitem"][aria-current="page"]')).toHaveCount(1);
+
+      // The contextual bar: where the person is, ending in the state, then
+      // what they can do.
+      const crumbs = page.getByRole('navigation', { name: 'Where you are' });
+      await expect(crumbs).toContainText(editorFixtures.editablePageTitle);
+      await expect(crumbs.getByRole('listitem').last()).toHaveText('Editing');
+      const bar = page.locator('#content-bar');
+      await expect(bar.getByRole('link', { name: 'Read page' })).toBeVisible();
+      await expect(bar.getByRole('button', { name: /^Save/ })).toBeVisible();
+
+      // The same title in the same box, and the prose on the same column:
+      // the text does not move under the cursor when the mode changes.
+      const editTitle = page.getByRole('main').getByRole('heading', { level: 1, name: editorFixtures.editablePageTitle });
+      await expect(editTitle).toBeVisible();
+      const editTitleBox = (await editTitle.boundingBox())!;
+      const editParagraph = (await editor.locator(':scope > p').first().boundingBox())!;
+      expect(Math.abs(editTitleBox.x - readTitleBox.x), `title x: read ${readTitleBox.x}, edit ${editTitleBox.x}`).toBeLessThanOrEqual(1);
+      expect(Math.abs(editTitleBox.width - readTitleBox.width), `title width: read ${readTitleBox.width}, edit ${editTitleBox.width}`).toBeLessThanOrEqual(1);
+      expect(Math.abs(editParagraph.x - readParagraph.x), `paragraph x: read ${readParagraph.x}, edit ${editParagraph.x}`).toBeLessThanOrEqual(1);
+      expect(Math.abs(editParagraph.width - readParagraph.width), `paragraph width: read ${readParagraph.width}, edit ${editParagraph.width}`).toBeLessThanOrEqual(
+        1,
+      );
+      expect(Math.abs(editParagraph.y - readParagraph.y), `paragraph y: read ${readParagraph.y}, edit ${editParagraph.y}`).toBeLessThanOrEqual(1);
+
+      const box = await overflow(page);
+      expect(box.scrollWidth).toBeLessThanOrEqual(box.innerWidth);
+      expect(box.scrollHeight).toBe(box.innerHeight);
+
+      await shot3(page, `1280-${theme}`);
+    });
+  });
+}
+
+test.describe('inside the workspace frame, focus mode', () => {
+  test.use({ viewport: { width: 1280, height: 900 } });
+
+  // The frame's focus mode, proved on this route: an editor with a
+  // sidebar is where people reach for it, and the proof is that the
+  // editor is still live afterwards — the keys typed after the collapse
+  // land in the document and make it saveable.
+  test('Ctrl+\\ hides the sidebar, the editor re-centres at its width, and typing still lands in it', async ({ page }) => {
+    test.setTimeout(90000);
+    await signInAs(page, editorFixtures.writerSessionToken);
+    await useTheme(page, 'light');
+
+    await page.goto(`/pages/${editorFixtures.editablePageId}/edit`);
+    const editor = page.getByTestId('editor-surface');
+    await expect(editor).toContainText(editorFixtures.editablePageMarkdown.trim(), { timeout: 30000 });
+    const sidebar = page.getByRole('navigation', { name: 'Workspace' });
+    await expect(sidebar).toBeVisible();
+    const before = (await editor.boundingBox())!;
+    const save = page.getByRole('button', { name: /^Save/ });
+    await expect(save).toHaveAttribute('aria-disabled', 'true');
+
+    await editor.click();
+    await page.keyboard.press('End');
+    await page.keyboard.press('Control+\\');
+
+    await expect(sidebar).toBeHidden();
+    await expect(page.getByRole('button', { name: 'Show sidebar' })).toBeVisible();
+    const bar = (await page.locator('#content-bar').boundingBox())!;
+    expect(bar.x, 'no rail: the pane starts at the viewport edge').toBe(0);
+    const after = (await editor.boundingBox())!;
+    expect(Math.abs(after.width - before.width), `editor width ${before.width} → ${after.width}`).toBeLessThanOrEqual(1);
+    const leftGap = after.x;
+    const rightGap = 1280 - (after.x + after.width);
+    expect(Math.abs(leftGap - rightGap), `centred in the viewport: left ${leftGap}, right ${rightGap}`).toBeLessThanOrEqual(2);
+
+    // Still an editor: the next keys are content, and Save wakes up.
+    await page.keyboard.type(' Typed with the sidebar hidden.');
+    await expect(editor).toContainText('Typed with the sidebar hidden.');
+    await expect(save).not.toHaveAttribute('aria-disabled', 'true');
+
+    await shot3(page, 'focus-1280-light');
+
+    await page.keyboard.press('Control+\\');
+    await expect(sidebar).toBeVisible();
+    await expect(editor).toContainText('Typed with the sidebar hidden.');
+  });
+});
+
+test.describe('inside the workspace frame, the skeleton', () => {
+  test.use({ viewport: { width: 1280, height: 900 } });
+
+  /**
+   * docs/UI-CHECKLIST.md §3: the skeleton occupies the box the loaded
+   * content will — measured, not assumed. The response is held back, the
+   * skeleton's title and first line are measured, the response is
+   * released, and the title and the editor's first paragraph are measured
+   * where they land: same tops, same lefts, same widths, and a line that
+   * is one `doc-body` line box.
+   */
+  test('occupies the title line and the editor\'s first text line: same tops, same lefts, same widths', async ({ page }) => {
+    test.setTimeout(90000);
+    await signInAs(page, editorFixtures.writerSessionToken);
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route(`${apiOrigin()}/pages/${editorFixtures.editablePageId}/edit-session`, async (route) => {
+      await held;
+      await route.continue();
+    });
+
+    await page.goto(`/pages/${editorFixtures.editablePageId}/edit`);
+    const skeleton = page.getByTestId('edit-skeleton');
+    await expect(skeleton).toBeVisible({ timeout: 30000 });
+    const skeletonTitle = (await skeleton.getByTestId('edit-skeleton-title').boundingBox())!;
+    const skeletonLine = (await skeleton.getByTestId('edit-skeleton-line').first().boundingBox())!;
+
+    release();
+    const title = page.getByRole('main').getByRole('heading', { level: 1, name: editorFixtures.editablePageTitle });
+    await expect(title).toBeVisible({ timeout: 30000 });
+    const editor = page.getByTestId('editor-surface');
+    await expect(editor).toContainText(editorFixtures.editablePageMarkdown.trim(), { timeout: 30000 });
+    const loadedTitle = (await title.boundingBox())!;
+    const firstParagraph = editor.locator(':scope > p').first();
+    const loadedLine = (await firstParagraph.boundingBox())!;
+    const loadedLineHeight = await firstParagraph.evaluate((p) => Number.parseFloat(getComputedStyle(p).lineHeight));
+
+    expect(Math.abs(skeletonTitle.y - loadedTitle.y), `title top: skeleton ${skeletonTitle.y}, loaded ${loadedTitle.y}`).toBeLessThanOrEqual(1);
+    expect(Math.abs(skeletonTitle.height - loadedTitle.height), `title height: skeleton ${skeletonTitle.height}, loaded ${loadedTitle.height}`).toBeLessThanOrEqual(1);
+    expect(Math.abs(skeletonLine.y - loadedLine.y), `first line top: skeleton ${skeletonLine.y}, loaded ${loadedLine.y}`).toBeLessThanOrEqual(1);
+    expect(Math.abs(skeletonLine.x - loadedLine.x), `first line left: skeleton ${skeletonLine.x}, loaded ${loadedLine.x}`).toBeLessThanOrEqual(1);
+    expect(Math.abs(skeletonLine.width - loadedLine.width), `first line width: skeleton ${skeletonLine.width}, loaded ${loadedLine.width}`).toBeLessThanOrEqual(1);
+    expect(Math.abs(skeletonLine.height - loadedLineHeight), `line box: skeleton ${skeletonLine.height}, prose ${loadedLineHeight}`).toBeLessThanOrEqual(1);
+  });
+});
+
+test.describe('inside the workspace frame, 320x900 light', () => {
+  test.use({ viewport: { width: 320, height: 900 } });
+
+  // The frame's own review measured the bar overflowing at 320 with the
+  // lock-lost and save notices inside it. They stand in the pane, above
+  // the editor; the bar holds the drawer toggle, the last crumb and this
+  // screen's two actions, and nothing scrolls sideways.
+  test('the bar holds with the lock-lost notice in the pane, above the editor, and nothing scrolls sideways', async ({ page }) => {
+    test.setTimeout(90000);
+    await signIn(page);
+    await useTheme(page, 'light');
+    await page.route(`${apiOrigin()}/pages/${PAGE_ID}/edit-session`, (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          markdown: 'A page whose lock is about to be lost.\n',
+          title: 'Heartbeat Test',
+          workspaceId: seed.workspaceId,
+          contentHash: 'hash-1',
+          lock: { holderUserId: 'me', acquiredAt: new Date().toISOString(), heartbeatAt: new Date().toISOString() },
+        }),
+      }),
+    );
+    // The first heartbeat answers "lost": the notice is on screen from the
+    // moment the editor is.
+    await page.route(`${apiOrigin()}/pages/${PAGE_ID}/lock`, (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ status: 'lost' }) }),
+    );
+
+    await page.goto(`/pages/${PAGE_ID}/edit`);
+    const editor = page.getByTestId('editor-surface');
+    await expect(editor).toContainText('about to be lost', { timeout: 30000 });
+
+    const notice = page.getByRole('main').getByRole('alert').filter({ hasText: /lock lost/i });
+    await expect(notice).toBeVisible();
+    await expect(notice.getByRole('button', { name: 'Reload' })).toBeVisible();
+    const noticeBox = (await notice.boundingBox())!;
+    const editorBox = (await editor.boundingBox())!;
+    expect(noticeBox.y + noticeBox.height, 'the notice stands above the editor').toBeLessThanOrEqual(editorBox.y);
+    await expect(page.locator('#content-bar')).not.toContainText(/lock lost/i);
+
+    const bar = page.locator('#content-bar');
+    await expect(bar.getByRole('button', { name: /^Save/ })).toBeVisible();
+    await expect(bar.getByRole('link', { name: 'Read page' })).toBeVisible();
+    // The one crumb shown at this width is whole, not "Edit…".
+    const crumb = page.getByRole('navigation', { name: 'Where you are' }).getByRole('listitem').last();
+    await expect(crumb).toHaveText('Editing');
+    const clipped = await crumb.evaluate((el) => Array.from(el.querySelectorAll('*')).some((node) => node.scrollWidth > node.clientWidth + 1));
+    expect(clipped, 'the Editing crumb is not truncated').toBe(false);
+    const barOverflow = await bar.evaluate((el) => ({ scrollWidth: el.scrollWidth, clientWidth: el.clientWidth }));
+    expect(barOverflow.scrollWidth, `bar scrollWidth ${barOverflow.scrollWidth} vs clientWidth ${barOverflow.clientWidth}`).toBeLessThanOrEqual(
+      barOverflow.clientWidth,
+    );
+    const box = await overflow(page);
+    expect(box.scrollWidth, 'no horizontal body scroll at 320').toBeLessThanOrEqual(box.innerWidth);
+    expect(box.scrollHeight).toBe(box.innerHeight);
+
+    await shot3(page, '320-light');
+  });
+});
