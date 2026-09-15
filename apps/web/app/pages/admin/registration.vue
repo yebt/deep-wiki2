@@ -43,6 +43,27 @@
  *
  * **A 403 is a plain denied state.** The existence of instance settings
  * is no secret, so "only the operator can change this" discloses nothing.
+ *
+ * **The frame decision.** This stays in the document frame, deliberately,
+ * not the workspace one. Registration is an instance setting — orthogonal
+ * to "one workspace at a time" (apps/web/PRODUCT.md: a person lives inside
+ * one workspace the way they live inside one Obsidian vault), not a fact
+ * *about* whichever workspace happens to be last-visited. The operator who
+ * needs this screen most is exactly the one who may hold **no** workspace
+ * at all — `e2e/navigation.spec.ts`'s seeded Super Root carries no grant
+ * anywhere and reaches "No workspaces you can open" before reaching here —
+ * so standing the workspace frame around it would mean either an empty
+ * sidebar with nothing to orient around, or silently adopting a workspace
+ * this setting has nothing to do with. Both entry points already exist and
+ * both stay: the chrome's icon button (`AppShell`'s document frame, for a
+ * caller with no workspace open) and the sidebar footer's (for a caller
+ * who is in one and wants to jump out to an instance-wide setting without
+ * losing their place) — one screen, reached from two rooms, the way
+ * `docs/UI-CHECKLIST.md` §4.1 asks a shared thing to be one component
+ * rather than one copy per screen. Because it stays in the document frame,
+ * it keeps its `PageHeading` — the eyebrow ("Instance") names what makes
+ * this different from a workspace's own settings, which a bare `<h1>`
+ * cannot say on its own.
  */
 import type { FormSubmitEvent } from '@nuxt/ui';
 import { RegistrationModeSchema, type RegistrationModeValue } from '@deep-wiki/contracts';
