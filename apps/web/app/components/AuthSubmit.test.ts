@@ -89,6 +89,20 @@ describe('AuthSubmit — the pre-hydration window', () => {
     expect(html).toMatch(/needs JavaScript/i);
   });
 
+  test('the control is the last thing in the form, so the form’s rhythm never pads under the primary action', async () => {
+    const host = intoDocument(await serverRender('Sign in'));
+    const form = host.querySelector('form')!;
+
+    // `UAuthForm`'s form is `space-y-6`, which gives every child but the
+    // last a 24px margin below it. With `<noscript>` rendered *after* the
+    // button, the button was not the last child, and measured 24px of dead
+    // space under it in every card (2026-09-15, 1280x900: button bottom
+    // 652, form bottom 676). The explanation for a scriptless browser goes
+    // above the control it explains, and the control closes the form.
+    expect(form.lastElementChild?.tagName).toBe('BUTTON');
+    expect(host.querySelector('noscript')?.nextElementSibling?.tagName).toBe('BUTTON');
+  });
+
   test('hydration turns it into a real submit control, in place', async () => {
     const host = intoDocument(await serverRender('Sign in'));
     const before = host.querySelector('button');

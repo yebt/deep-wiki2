@@ -41,7 +41,7 @@
  *   `min-h-10` (§7.2), so the box is identical on both sides of hydration —
  *   the same element, the same classes, a different word inside it.
  *
- * ## Why there is also a `<noscript>`
+ * ## Why there is also a `<noscript>`, and why it comes first
  *
  * "Not hydrated yet" and "will never hydrate" render identically, and a
  * visitor with JavaScript switched off would otherwise sit forever in front
@@ -51,7 +51,10 @@
  * which is why it carries no display utility of its own — and it holds a
  * single text child on purpose: a browser that *is* running scripts parses
  * `<noscript>`'s contents as raw text, so any element inside it would be a
- * hydration mismatch.
+ * hydration mismatch. It precedes the button so that the button stays the
+ * form's last child: `UAuthForm`'s `space-y-6` pads every child but the
+ * last, and a hidden element after the button had left 24px of dead space
+ * under the primary action in every card.
  */
 const props = defineProps<{
   /** The action in the user's words — "Sign in", "Join workspace". */
@@ -76,6 +79,12 @@ const label = computed(() => (ready.value ? props.label : 'Preparing the form…
 </script>
 
 <template>
+  <!-- `<noscript>` comes *before* the button, and the button closes the
+       form. `UAuthForm`'s form is `space-y-6`, which pads every child but
+       the last; with `<noscript>` last, the button carried 24px of dead
+       space under it in every card (measured 2026-09-15). A scriptless
+       browser reads the explanation, then meets the control it explains. -->
+  <noscript class="text-body-medium text-muted">This form needs JavaScript, and this browser is not running any. Turn it on for this site to continue.</noscript>
   <UButton
     :type="ready ? 'submit' : 'button'"
     :label="label"
@@ -83,5 +92,4 @@ const label = computed(() => (ready.value ? props.label : 'Preparing the form…
     :aria-disabled="ready ? undefined : 'true'"
     block
   />
-  <noscript class="text-body-medium text-muted">This form needs JavaScript, and this browser is not running any. Turn it on for this site to continue.</noscript>
 </template>
