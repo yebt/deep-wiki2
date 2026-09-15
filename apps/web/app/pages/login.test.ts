@@ -25,15 +25,24 @@ function mockLogin(overrides: Partial<{ status: string; message: string }> = {})
 }
 
 describe('login page', () => {
-  test('renders exactly one h1 and the semantic landmarks', async () => {
+  test('renders exactly one h1 inside main, and no app chrome around it', async () => {
     mockLogin();
     const component = await mountSuspended(PageInApp);
 
     expect(component.findAll('h1')).toHaveLength(1);
-    expect(component.get('h1').text()).toMatch(/sign in/i);
-    expect(component.find('header').exists()).toBe(true);
+    expect(component.get('h1').text()).toMatch(/^sign in$/i);
     expect(component.find('main').exists()).toBe(true);
-    expect(component.find('footer').exists()).toBe(true);
+    // A sign-in is met before the product: no app bar, no footer (AuthShell).
+    expect(component.find('header').exists()).toBe(false);
+    expect(component.find('footer').exists()).toBe(false);
+  });
+
+  test('says what the product is, in one truthful line, under the mark', async () => {
+    mockLogin();
+    const component = await mountSuspended(PageInApp);
+
+    expect(component.text()).toContain('deep-wiki');
+    expect(component.get('h1 + p').text()).toBe('Your team’s design documents, decisions and runbooks.');
   });
 
   test('has a labeled email field and a labeled password field', async () => {

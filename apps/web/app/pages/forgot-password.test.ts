@@ -25,14 +25,14 @@ function mockRequest(overrides: Partial<{ status: string; message: string }> = {
 }
 
 describe('forgot-password page', () => {
-  test('renders exactly one h1 and the semantic landmarks', async () => {
+  test('renders exactly one h1 inside main, and no app chrome around it', async () => {
     mockRequest();
     const component = await mountSuspended(PageInApp);
 
     expect(component.findAll('h1')).toHaveLength(1);
-    expect(component.find('header').exists()).toBe(true);
     expect(component.find('main').exists()).toBe(true);
-    expect(component.find('footer').exists()).toBe(true);
+    expect(component.find('header').exists()).toBe(false);
+    expect(component.find('footer').exists()).toBe(false);
   });
 
   test('has a labeled email field and links back to sign in', async () => {

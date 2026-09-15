@@ -70,7 +70,11 @@ async function onSubmit(event: FormSubmitEvent<{ displayName: string; password: 
 </script>
 
 <template>
-  <AuthShell heading="Join your workspace">
+  <AuthShell heading="Join your workspace" description="Your team’s design documents, decisions and runbooks.">
+    <!-- The invitee has never seen the product, and the workspace they are
+         joining is resolved server-side and never rendered here — so the
+         supporting sentence is the same one line of orientation the sign-in
+         screen carries: what is inside, in the product's own words. -->
     <!-- Every result here is the bar tier (`InlineNotice`). The three that
          arrive after a submit (invalid, expired, already used) are alerts
          and take the focus the submit control held; the joined confirmation

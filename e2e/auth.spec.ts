@@ -63,7 +63,7 @@ test.describe.serial('invitation accept -> sign in (happy path)', () => {
   test('signing in with the account just created succeeds', async ({ page }) => {
     await goto(page, '/login');
 
-    await expect(page.getByRole('heading', { level: 1, name: 'Sign in to deep-wiki' })).toBeVisible();
+    await expect(page.getByRole('heading', { level: 1, name: 'Sign in' })).toBeVisible();
 
     await page.getByLabel('Email').fill(fixtures.signinEmail);
     await page.getByLabel('Password', { exact: true }).fill(SIGNIN_PASSWORD);
@@ -168,7 +168,7 @@ test.describe('password reset', () => {
 
     await page.getByRole('link', { name: /continue to sign in/i }).click();
     await page.waitForLoadState('networkidle');
-    await expect(page.getByRole('heading', { level: 1, name: 'Sign in to deep-wiki' })).toBeVisible();
+    await expect(page.getByRole('heading', { level: 1, name: 'Sign in' })).toBeVisible();
 
     await page.getByLabel('Email').fill(fixtures.resetEmail);
     await page.getByLabel('Password', { exact: true }).fill(NEW_RESET_PASSWORD);

@@ -40,6 +40,16 @@ describe('reset-password page', () => {
     expect(component.find('a[href="/forgot-password"]').exists()).toBe(true);
   });
 
+  test('renders inside main with no app chrome around it', async () => {
+    useRouteMock.mockReturnValue({ query: { token: 'abc123' } });
+    mockConfirm();
+    const component = await mountSuspended(PageInApp);
+
+    expect(component.find('main').exists()).toBe(true);
+    expect(component.find('header').exists()).toBe(false);
+    expect(component.find('footer').exists()).toBe(false);
+  });
+
   test('a present token renders the new-password form with matching-confirmation fields', async () => {
     useRouteMock.mockReturnValue({ query: { token: 'abc123' } });
     mockConfirm();

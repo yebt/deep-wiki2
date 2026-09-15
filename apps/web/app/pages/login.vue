@@ -55,7 +55,14 @@ async function onSubmit(event: FormSubmitEvent<{ email: string; password: string
 </script>
 
 <template>
-  <AuthShell heading="Sign in to deep-wiki">
+  <AuthShell heading="Sign in" description="Your team’s design documents, decisions and runbooks.">
+    <!-- The heading is "Sign in", not "Sign in to deep-wiki": the shell puts
+         the product's mark and name 32px above it, and a heading that repeats
+         the wordmark directly over it spends its words on a paraphrase — the
+         same defect the 2026-09-04 review removed with the eyebrow. The
+         supporting sentence is the one line of orientation a person gets
+         before trusting the product: what is inside, in the product's own
+         words, and nothing PRODUCT.md's Evidence on Hand cannot back. -->
     <!-- The bar tier (`InlineNotice`), which replaces the form the user just
          submitted — so it takes the focus that form's submit control held
          (docs/UI-CHECKLIST.md §5: async state changes are announced, and
@@ -78,6 +85,9 @@ async function onSubmit(event: FormSubmitEvent<{ email: string; password: string
            re-renders the screen with the fields cleared and looks exactly
            like a rejected password. The whole reason lives in that
            component. -->
+      <!-- `loading` is `UButton`'s own spinner on the action while the
+           request runs — the one place a spinner is right (docs/UI-CHECKLIST.md
+           §3: an action of unknown duration with no result shape). -->
       <template #submit="{ loading }">
         <AuthSubmit :label="status === 'loading' ? 'Signing in…' : 'Sign in'" :loading="loading" />
       </template>

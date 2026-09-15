@@ -86,6 +86,19 @@ describe('invite/accept page', () => {
     component.unmount();
   });
 
+  test('renders inside main with no app chrome, and tells the invitee what they are joining', async () => {
+    useRouteMock.mockReturnValue({ query: { token: 'abc123' } });
+    mockAccept();
+    const component = await mountSuspended(PageInApp);
+
+    expect(component.find('main').exists()).toBe(true);
+    expect(component.find('header').exists()).toBe(false);
+    expect(component.find('footer').exists()).toBe(false);
+    // The invitee has never seen the product; the one line of orientation
+    // is the same truthful line the sign-in screen carries.
+    expect(component.get('h1 + p').text()).toBe('Your team’s design documents, decisions and runbooks.');
+  });
+
   test('a present token renders the join form: display name and password', async () => {
     useRouteMock.mockReturnValue({ query: { token: 'abc123' } });
     mockAccept();

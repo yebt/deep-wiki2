@@ -2,20 +2,23 @@ import { UApp, UCard } from '#components';
 import { mountSuspended } from '@nuxt/test-utils/runtime';
 import { describe, expect, test } from 'vitest';
 import { defineComponent, h } from 'vue';
+import AppShell from './AppShell.vue';
 import AuthShell from './AuthShell.vue';
 
 /**
- * The four authentication screens' only genuinely own layout decision:
- * which of `AppShell`'s columns they stand in, and a card in it.
- * Everything else — the chrome, the height, the heading block — is
- * delegated, and that delegation is the contract, because it was written
- * here too until 2026-09-07 and the copies drifted (this file rendered the
- * brand as an inert `<span>` and the theme toggle at 40px; `AppShell`
- * rendered a link at 32px).
+ * The sign-in family's own shell: the product's mark, the heading block and
+ * the card, on the app ground, with no app chrome around them. Until
+ * 2026-09-15 this component rendered inside `AppShell` — the top app bar
+ * with the brand link, the registration entry and the theme toggle, and
+ * the footer — so a visitor met the product's chrome before they had
+ * entered the product. A sign-in screen is the one surface a person sees
+ * *before* trusting the product, and it showed them a header for a room
+ * they were not yet in.
  *
- * So the assertions below are about *what this shell delegates to* rather
- * than what it draws: the narrow column, the vertical centring, the page's
- * `<h1>` outside the card, and the card the form goes in.
+ * The assertions below are therefore about two things: what the shell
+ * refuses to draw (the app's landmarks and navigation), and what it keeps
+ * from the family's existing contracts (one `<h1>` outside the card, the
+ * form inside it, the narrow column centred both ways, no eyebrow).
  */
 function mountAuthShell(props: { heading: string; description?: string }) {
   return mountSuspended(
@@ -82,13 +85,40 @@ describe('AuthShell', () => {
     expect(column.parentElement!.className).toContain('my-auto');
   });
 
-  test('the chrome is the app shell’s: every auth screen gets the same landmarks as every other screen', async () => {
-    const component = await mountAuthShell({ heading: 'Sign in to deep-wiki' });
+  test('a sign-in carries no app chrome: no header, no footer, no brand link, and no AppShell at all', async () => {
+    const component = await mountAuthShell({ heading: 'Sign in' });
 
-    expect(component.findAll('header')).toHaveLength(1);
+    // The app's `banner` and `contentinfo` landmarks belong to a signed-in
+    // product. Here they are absent — not hidden, not emptied, absent.
+    expect(component.findAll('header')).toHaveLength(0);
+    expect(component.findAll('footer')).toHaveLength(0);
+    expect(component.findComponent(AppShell).exists()).toBe(false);
+    // The brand is identity on this screen, not a way back: there is no
+    // "back" for a person who has not signed in, so it is not a link.
+    expect(component.find('a[href="/"]').exists()).toBe(false);
+    // One `main`, and the heading lives in it (docs/UI-CHECKLIST.md §5).
     expect(component.findAll('main')).toHaveLength(1);
-    expect(component.findAll('footer')).toHaveLength(1);
-    expect(component.get('header a').attributes('href')).toBe('/');
     expect(component.get('main').element.contains(component.get('h1').element)).toBe(true);
+  });
+
+  test('the product’s mark and name come first, and are not interactive', async () => {
+    const component = await mountAuthShell({ heading: 'Sign in' });
+
+    const column = component.get('h1').element.parentElement!.parentElement!;
+    const first = column.children[0]!;
+    expect(first.textContent?.trim()).toBe('deep-wiki');
+    expect(first.tagName).not.toBe('A');
+    expect(first.querySelector('a, button')).toBeNull();
+    // An icon is never the only carrier of meaning (§4.3): the name is text.
+    expect(first.querySelector('[aria-hidden="true"]')).not.toBeNull();
+  });
+
+  test('the theme toggle stays — small, named, and the only control outside the card', async () => {
+    const component = await mountAuthShell({ heading: 'Sign in' });
+
+    const card = component.findComponent(UCard).element;
+    const outside = component.findAll('button, a').filter((node) => !card.contains(node.element));
+    expect(outside).toHaveLength(1);
+    expect(outside[0]!.attributes('aria-label')).toMatch(/theme|dark|light/i);
   });
 });
