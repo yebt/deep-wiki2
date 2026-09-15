@@ -385,22 +385,49 @@ Users can see **what another person is currently working on**. Full visibility o
 person's in-progress work is a future phase; the present requirement is knowing who is
 where.
 
+**Corrected 2026-09-14 to match what shipped (`packages/db/drizzle/0014_presence_view.sql`,
+versioning-and-collaboration design.md Decision 5).** The original text here said the
+inverse — "there is no separate lock table: an `editing` presence row *is* the lock" — and
+described a `presence` table with a `viewing | editing` mode and its own TTL. The lock table
+is the thing that exists; presence is derived from it.
+
 ```sql
-presence (
-  user_id      uuid not null,
-  workspace_id uuid not null,
-  page_id      uuid not null,
-  mode         presence_mode not null,     -- viewing | editing
-  last_seen_at timestamptz not null,
-  primary key (user_id, page_id)
-);
+-- page_locks is the soft lock (0010_page_locks.sql): one row per page while someone
+-- edits, refreshed by heartbeat, expired on read when heartbeat_at is older than
+-- PAGE_LOCK_TTL_SECONDS. It carries the composite foreign key
+-- (node_id, workspace_id) -> page_content (node_id, workspace_id).
+--
+-- presence is a VIEW over it, not a table:
+CREATE VIEW presence AS
+  SELECT node_id AS page_id, workspace_id, holder_user_id AS user_id,
+         acquired_at AS since, heartbeat_at, 'editing'::text AS mode
+    FROM page_locks;
 ```
 
-Broadcast over **SSE per workspace** — unidirectional, simple, and proxy-friendly.
-WebSockets are deferred until real-time multiplayer arrives.
+Consequences that follow from "a view, not a table":
 
-**Presence is also the soft-lock signal.** There is no separate lock table: an `editing`
-presence row with a fresh heartbeat *is* the lock.
+- **The lock is the presence signal, not the other way round.** `page_locks` is written
+  only by the lock's own operations in `packages/db/src/locks/page-lock.ts` — acquire
+  (`GET /pages/:id/edit-session`), heartbeat (`PATCH /pages/:id/lock`) and take-over
+  (`POST /pages/:id/lock/take-over`) — and the heartbeat's success path is the single
+  caller of the broadcaster's `publish`. There is no presence writer, no presence TTL, no
+  sweeper: staleness is evaluated on read exactly as `readLockStatus` evaluates the lock.
+- **`mode` is always `editing`.** Nobody is ever recorded as *viewing* a page; the
+  product can say who is editing and since when, and nothing else. The roadmap bullet
+  for a `viewing` mode stays unticked (`docs/TODO.md`, Phase 3).
+- **Tenant isolation is inherited, not declared.** The proposal flagged the original
+  table sketch as missing a composite foreign key into `page_content`. A view has no rows
+  to be cross-tenant; it inherits `page_locks_page_fk (node_id, workspace_id) ->
+  page_content (node_id, workspace_id)` structurally (§14, "Tenant isolation by composite
+  foreign key").
+
+Broadcast over **SSE per workspace** — `GET /workspaces/:workspaceId/presence/stream` —
+unidirectional, simple, and proxy-friendly. Membership opens the stream; every event is
+checked with `can(user, page, read)` before it is emitted and silently dropped otherwise,
+so a member who cannot read a page never learns it is being edited. Each keep-alive tick
+also polls the view and emits anything not yet sent on that connection, which is what keeps
+correctness from depending on a single API process. WebSockets are deferred until real-time
+multiplayer arrives.
 
 ### 7.3 Profile photos
 
@@ -764,7 +791,9 @@ packages/
   markdown/       the single shared unified/remark pipeline:
                   parse, block-ids, wiki-links, tags, chunking
   contracts/      zod schemas shared by web, api, and mcp
-  editor/         Milkdown setup, block-id plugin, serializer round-trip tests
+  editor/         ProseMirror schema, markdown <-> doc round trip and its tests,
+                  and the mount entry (view, keymaps, input rules, @ mention and
+                  / command plugins); the soft lock lives in db and api
   ai-tools/       the single tool layer shared by MCP and the in-app panel
   db/             drizzle schema and migrations
 ```
@@ -798,7 +827,7 @@ API, and the indexer, and it is the reason the backend is TypeScript (§14).
 | **Authorisation walks `parent_id`, never the `path` cache** | `nodes.path` is a trigger-maintained denormalised cache that exists for subtree *navigation* queries. If it goes stale or corrupt, a resolver reading it grants or denies access silently and wrongly. `parent_id` is the authoritative structure, depth is bounded at five, and each step is a primary-key lookup. Correctness of the cache is then a separate, testable concern instead of a security dependency | A measured cost difference at realistic depth, which would require the path integrity check to run continuously rather than per test |
 | **The workspace is a real `nodes` row** | Materialising it as a fifth `node_type` gives the ancestor chain a genuine root, makes the resource foreign key unconditional, and deletes the workspace-level special case from the resolver. A branch in the authorisation query is exactly where an isolation bug hides. It also resolves a latent contradiction in this document, which previously declared `node_type` with four values in one place and five in another | Nothing foreseeable |
 | **Tenant isolation by composite foreign key `(id, workspace_id)`** | A cross-tenant row becomes *unrepresentable* rather than merely unqueried. A `WHERE workspace_id = ?` is one forgotten clause away from a leak; a composite FK cannot be forgotten. GATE-3 will rely on this | Nothing foreseeable |
-| **Super Root does not bypass `can()`** | An operator is not a reader. A bypass path is the same failure mode as any unchecked machine read. Instance-level operations go through a separate `canOperateInstance()` so operating the platform and reading a tenant's documents stay different authorities | A break-glass requirement, which would need its own audit trail |
+| **Super Root does not bypass `can()`** | An operator is not a reader. A bypass path is the same failure mode as any unchecked machine read. Instance-level operations go through a separate authority so operating the platform and reading a tenant's documents stay different things. **As built (corrected 2026-09-14):** that authority is the `requireSuperRoot()` middleware in `apps/api/src/routes/admin.ts`, which reads `users.is_super_root` and gates the whole `/admin` sub-app; the `canOperateInstance()` this row used to name was never written and exists only as a comment in `packages/core/src/permissions/can.ts` | A break-glass requirement, which would need its own audit trail |
 | **`resource_type` is not stored on `permissions`** | It is `nodes.type` of `resource_id`. Storing it twice creates a second value that can disagree with the tree, and the disagreement would be an authorisation bug | A resource that is not a node |
 | **`invitation_only` registration by default** | An open-by-default self-hosted instance gets discovered and spam-registered, and the operator blames the software | Nothing — `open` remains available as an explicit choice |
 
