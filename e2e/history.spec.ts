@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { expect, test, type BrowserContext } from '@playwright/test';
+import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 
 /**
  * Page history (revision-history spec: "Page History Query Returns
@@ -19,6 +19,7 @@ interface Fixtures {
   readonly historyFirstRevisionId: string;
   readonly historySecondRevisionId: string;
   readonly emptyHistoryPageId: string;
+  readonly workspaceId: string;
   readonly readerSessionToken: string;
   readonly outsiderSessionToken: string;
 }
@@ -41,14 +42,15 @@ test('a reader sees every revision newest-first, with its author and changeset m
 
   await page.goto(`/pages/${fixtures.historyPageId}/history`);
 
-  // `<h1>Revision history</h1>` is server-rendered and visible immediately
-  // regardless of client hydration; the list below it is not — it only
-  // exists once the client mounts, fetches, and hydrates the skeleton away.
-  // The generous timeout belongs on THAT wait, not on the heading: the dev
-  // server compiles this route on first visit, which under load can take
-  // longer than Playwright's 5s default (see e2e/read.spec.ts's identical
-  // note).
-  await expect(page.getByRole('heading', { level: 1, name: 'Revision history' })).toBeVisible();
+  // `<h1>Revision history</h1>` is server-rendered and in the tree
+  // immediately regardless of client hydration — for assistive technology;
+  // visibly the screen's identity is the breadcrumb's. The list below it is
+  // not — it only exists once the client mounts, fetches, and hydrates the
+  // skeleton away. The generous timeout belongs on THAT wait, not on the
+  // heading: the dev server compiles this route on first visit, which under
+  // load can take longer than Playwright's 5s default (see
+  // e2e/read.spec.ts's identical note).
+  await expect(page.getByRole('heading', { level: 1, name: 'Revision history' })).toBeAttached();
 
   const rows = page.getByRole('main').getByRole('listitem');
   await expect(rows).toHaveCount(2, { timeout: 30000 });
@@ -100,7 +102,7 @@ test('the history screen is reachable from the read screen by its control, not o
   await history.click();
 
   await expect(page).toHaveURL(`/pages/${fixtures.historyPageId}/history`);
-  await expect(page.getByRole('heading', { level: 1, name: 'Revision history' })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 1, name: 'Revision history' })).toBeAttached();
   // Arrived at the history of *this* page, not merely at the route: the
   // seeded page has two revisions and the empty one has none.
   await expect(page.getByRole('main').getByRole('listitem')).toHaveCount(2, { timeout: 30000 });
@@ -152,7 +154,7 @@ test('the history control is operable with the keyboard alone, and names itself 
   await page.keyboard.press('Enter');
 
   await expect(page).toHaveURL(`/pages/${fixtures.historyPageId}/history`);
-  await expect(page.getByRole('heading', { level: 1, name: 'Revision history' })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 1, name: 'Revision history' })).toBeAttached();
 });
 
 /**
@@ -346,3 +348,124 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 320, height: 900 
   });
 }
 
+
+/**
+ * Inside the workspace frame (docs/UI-CHECKLIST.md Review Log, 2026-09-15).
+ * Measured in a real browser: the tree beside the list, the breadcrumb
+ * ending in the page and then "History", "Read page" as the bar's one
+ * action, and — the document-frame residue gone — the list starting right
+ * under the bar with no heading block between them; the `<h1>` is for the
+ * accessibility tree. At 320 nothing scrolls sideways. The screenshots are
+ * the owner's review material for this batch (`frame3-history-*.png`).
+ */
+const SHOTS = process.env.DEEPWIKI_FRAME_SHOTS ?? '';
+
+async function shot3(page: Page, name: string): Promise<void> {
+  if (!SHOTS) return;
+  await page.screenshot({ path: `${SHOTS}/frame3-history-${name}.png`, fullPage: false });
+}
+
+async function useTheme(page: Page, theme: 'light' | 'dark'): Promise<void> {
+  await page.addInitScript((value) => localStorage.setItem('nuxt-color-mode', value), theme);
+}
+
+function overflow(page: Page) {
+  return page.evaluate(() => ({
+    scrollHeight: document.documentElement.scrollHeight,
+    innerHeight: window.innerHeight,
+    scrollWidth: document.documentElement.scrollWidth,
+    innerWidth: window.innerWidth,
+  }));
+}
+
+/** The pane's inset from the bar to its first block (`UDashboardPanel` body `p-4 sm:p-6`). */
+const PANE_INSET = 24;
+
+/**
+ * The history response names no workspace, so the frame stands on the
+ * last one the person was in — the cookie the read screen writes on the
+ * way here (`useCurrentWorkspace`). A person reaches this screen from
+ * that one; a fresh browser typing the address has no workspace to stand
+ * on and gets the bar's trailing crumb alone.
+ */
+async function inWorkspace(context: BrowserContext): Promise<void> {
+  await context.addCookies([{ name: 'dw-workspace', value: fixtures.workspaceId, domain: 'localhost', path: '/' }]);
+}
+
+for (const theme of ['light', 'dark'] as const) {
+  test.describe(`inside the workspace frame, 1280x900 ${theme}`, () => {
+    test.use({ viewport: { width: 1280, height: 900 } });
+
+    test('the list stands right under the bar on the reading measure, beside the tree, with the breadcrumb ending in History', async ({
+      page,
+      context,
+    }) => {
+      await signInAs(context, fixtures.readerSessionToken);
+      await useTheme(page, theme);
+      await inWorkspace(context);
+
+      await page.goto(`/pages/${fixtures.historyPageId}/history`);
+      const rows = page.getByRole('list', { name: /revision history/i }).locator('li');
+      await expect(rows.first()).toBeVisible({ timeout: 30000 });
+      await expect(page.locator('html')).toHaveClass(theme === 'dark' ? /dark/ : /light/);
+
+      const sidebar = page.getByRole('navigation', { name: 'Workspace' });
+      await expect(sidebar).toBeVisible();
+      await expect(sidebar.getByRole('treeitem', { name: /E2E History Page/ })).toBeVisible({ timeout: 30000 });
+      await expect(sidebar.locator('[role="treeitem"][aria-current="page"]')).toHaveCount(1);
+
+      const crumbs = page.getByRole('navigation', { name: 'Where you are' });
+      await expect(crumbs).toContainText('E2E Workspace');
+      await expect(crumbs.getByRole('link', { name: 'E2E History Page' })).toBeVisible();
+      await expect(crumbs.getByRole('listitem').last()).toHaveText('History');
+      const bar = page.locator('#content-bar');
+      await expect(bar.getByRole('link', { name: 'Read page' })).toBeVisible();
+
+      // The screen's `<h1>` is in the tree, and nothing visible repeats
+      // the crumb: the list's card begins one pane inset under the bar.
+      await expect(page.getByRole('heading', { level: 1, name: 'Revision history' })).toBeAttached();
+      const barBox = (await bar.boundingBox())!;
+      const card = page.getByRole('list', { name: /revision history/i }).locator('xpath=ancestor::*[contains(@class, "rounded-lg")][1]');
+      const cardBox = (await card.boundingBox())!;
+      expect(cardBox.y - (barBox.y + barBox.height), `card top under the bar: ${cardBox.y - (barBox.y + barBox.height)}`).toBe(PANE_INSET);
+
+      // The reading measure, centred in the pane (docs/DESIGN-SYSTEM.md §2.4).
+      const sidebarBox = (await sidebar.boundingBox())!;
+      const paneLeft = sidebarBox.x + sidebarBox.width;
+      expect(cardBox.width, `card width ${cardBox.width}`).toBeLessThan(720);
+      expect(cardBox.width, `card width ${cardBox.width}`).toBeGreaterThan(600);
+      const leftGap = cardBox.x - paneLeft;
+      const rightGap = 1280 - (cardBox.x + cardBox.width);
+      expect(Math.abs(leftGap - rightGap), `centred in the pane: left ${leftGap}, right ${rightGap}`).toBeLessThanOrEqual(2);
+
+      const box = await overflow(page);
+      expect(box.scrollWidth).toBeLessThanOrEqual(box.innerWidth);
+      expect(box.scrollHeight).toBe(box.innerHeight);
+
+      await shot3(page, `1280-${theme}`);
+    });
+  });
+}
+
+test.describe('inside the workspace frame, 320x900 light', () => {
+  test.use({ viewport: { width: 320, height: 900 } });
+
+  test('the bar holds "Read page" beside the drawer toggle and the last crumb; nothing scrolls sideways', async ({ page, context }) => {
+    await signInAs(context, fixtures.readerSessionToken);
+    await useTheme(page, 'light');
+
+    await page.goto(`/pages/${fixtures.historyPageId}/history`);
+    const rows = page.getByRole('list', { name: /revision history/i }).locator('li');
+    await expect(rows.first()).toBeVisible({ timeout: 30000 });
+
+    const bar = page.locator('#content-bar');
+    await expect(bar.getByRole('button', { name: 'Open sidebar' })).toBeVisible();
+    await expect(bar.getByRole('link', { name: 'Read page' })).toBeVisible();
+    const barOverflow = await bar.evaluate((el) => ({ scrollWidth: el.scrollWidth, clientWidth: el.clientWidth }));
+    expect(barOverflow.scrollWidth).toBeLessThanOrEqual(barOverflow.clientWidth);
+    const box = await overflow(page);
+    expect(box.scrollWidth, 'no horizontal body scroll at 320').toBeLessThanOrEqual(box.innerWidth);
+
+    await shot3(page, '320-light');
+  });
+});

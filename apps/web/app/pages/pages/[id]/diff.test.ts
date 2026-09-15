@@ -1,16 +1,67 @@
 import { UApp, UIcon } from '#components';
 import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime';
-import { describe, expect, test, vi } from 'vitest';
-import { defineComponent, h, ref } from 'vue';
+import { afterEach, describe, expect, test, vi } from 'vitest';
+import { computed, defineComponent, h, ref } from 'vue';
 import DiffPage from './diff.vue';
 
-const { usePageDiffMock, useRouteMock } = vi.hoisted(() => ({
+const { usePageDiffMock, useRouteMock, useCurrentWorkspaceMock, useWorkspaceTreeMock, useWorkspaceDirectoryMock } = vi.hoisted(() => ({
   usePageDiffMock: vi.fn(),
   useRouteMock: vi.fn(() => ({ params: { id: 'page-1' }, query: { from: 'rev-1', to: 'rev-2' } })),
+  useCurrentWorkspaceMock: vi.fn(),
+  useWorkspaceTreeMock: vi.fn(),
+  useWorkspaceDirectoryMock: vi.fn(),
 }));
 
 mockNuxtImport('usePageDiff', () => usePageDiffMock);
 mockNuxtImport('useRoute', () => useRouteMock);
+mockNuxtImport('useCurrentWorkspace', () => useCurrentWorkspaceMock);
+mockNuxtImport('useWorkspaceTree', () => useWorkspaceTreeMock);
+mockNuxtImport('useWorkspaceDirectory', () => useWorkspaceDirectoryMock);
+
+/**
+ * The frame's own collaborators, stubbed so this file stays about the diff
+ * screen. The diff response names no workspace, so the frame stands on the
+ * last one the person was in (`useCurrentWorkspace`), and the tree places
+ * `page-1` under a shelf and a book — a page at the root would let the
+ * breadcrumb test pass with the ancestors never rendered.
+ */
+function mockFrame() {
+  useCurrentWorkspaceMock.mockReturnValue({ workspaceId: ref('ws-1'), enter: vi.fn() });
+  useWorkspaceTreeMock.mockReturnValue({
+    status: ref('success'),
+    nodes: ref([]),
+    rootId: ref('root-1'),
+    message: ref(''),
+    collapsedIds: computed(() => new Set<string>()),
+    selectedId: ref(null),
+    load: vi.fn(async () => {}),
+    reorder: vi.fn(async () => true),
+    toggleCollapsed: vi.fn(),
+    reveal: vi.fn(),
+    pathTo: (id: string) =>
+      id === 'page-1'
+        ? [
+            { id: 'shelf-1', type: 'shelf', slug: 's', title: 'Engineering', position: 0, children: [] },
+            { id: 'book-1', type: 'book', slug: 'b', title: 'Handbook', position: 0, children: [] },
+            { id: 'page-1', type: 'page', slug: 'p', title: 'A Page', position: 0, children: [] },
+          ]
+        : [],
+  });
+  useWorkspaceDirectoryMock.mockReturnValue({
+    status: ref('success'),
+    workspaces: computed(() => [{ id: 'ws-1', name: 'Acme', slug: 'acme' }]),
+    ensure: vi.fn(async () => {}),
+    refresh: vi.fn(async () => {}),
+    nameOf: (id: string) => (id === 'ws-1' ? 'Acme' : null),
+  });
+}
+
+const originalTz = process.env.TZ;
+
+afterEach(() => {
+  if (originalTz === undefined) delete process.env.TZ;
+  else process.env.TZ = originalTz;
+});
 
 // Every screen now renders inside the workspace frame. Its sidebar — the
 // tree, the switcher, the doors — is stubbed here so this file stays about
@@ -36,6 +87,7 @@ interface Change {
 }
 
 function mockDiff(overrides: Partial<{ status: string; changes: Change[]; message: string }> = {}) {
+  mockFrame();
   const load = vi.fn(async () => {});
   const diffValue =
     overrides.status === undefined || overrides.status === 'success'
@@ -230,10 +282,122 @@ describe('page-diff screen', () => {
     expect(component.text()).toContain('Paragraph about apples, removed entirely.');
   });
 
-  test('renders exactly one h1 for the screen, at the same type role every state uses', async () => {
+  // One `<h1>` in every state, for the accessibility tree; visibly, the
+  // screen's identity is the breadcrumb's ("… › History › Compare"), so the
+  // heading is `sr-only` and no heading block — no title repeated, no
+  // supporting sentence — stands between the bar and the blocks (the
+  // document-frame residue the owner reacted to on 2026-09-15).
+  test('renders exactly one h1 for the screen, for the accessibility tree only, in every state', async () => {
+    const states: Parameters<typeof mockDiff>[0][] = [{ status: 'success', changes: MIXED_CHANGES }, { status: 'not-found' }, { status: 'loading' }];
+    for (const state of states) {
+      mockDiff(state);
+      const component = await mountSuspended(PageInApp, FRAME_STUBS);
+
+      const headings = component.findAll('h1');
+      expect(headings, state!.status).toHaveLength(1);
+      expect(headings[0]!.text()).toBe('Compare revisions');
+      expect(headings[0]!.classes(), 'the heading is for assistive technology; the breadcrumb is the visible identity').toContain('sr-only');
+      expect(component.get('main').text()).not.toMatch(/What changed between two saved revisions/);
+      component.unmount();
+    }
+  });
+
+  /*
+   * The screen opts into the workspace layout, so the sidebar around it is
+   * the one the layout mounted and the tree keeps its scroll when the
+   * person arrives here from history. The record is read from the
+   * application's router; that the sidebar survives is `e2e/frame.spec.ts`'s.
+   */
+  test('stands inside the workspace layout', async () => {
+    mockDiff({ status: 'success', changes: MIXED_CHANGES });
+    await mountSuspended(PageInApp, FRAME_STUBS);
+    const { useRouter } = await import('#imports');
+
+    expect(useRouter().getRoutes().find((route) => route.path === '/pages/:id()/diff')?.meta.layout).toBe('workspace');
+  });
+
+  // Where the person is: workspace › shelf › book › page through the
+  // tree, then History (a link — it is where they came from) and Compare.
+  test('the breadcrumb walks from the workspace to the page, then History as a link, then Compare', async () => {
     mockDiff({ status: 'success', changes: MIXED_CHANGES });
     const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
-    expect(component.findAll('h1')).toHaveLength(1);
+    const nav = component.get('nav[aria-label="Where you are"]');
+    const crumbs = nav.findAll('li').map((li) => li.text()).filter(Boolean);
+    expect(crumbs).toEqual(['Acme', 'Engineering', 'Handbook', 'A Page', 'History', 'Compare']);
+    expect(nav.find('a[href="/pages/page-1/history"]').exists()).toBe(true);
+    expect(nav.find('a[href="/pages/page-1"]').exists()).toBe(true);
+  });
+
+  // The bar's action is the way back; the two revisions being compared
+  // are the list's caption, above the blocks — each a `<time>` carrying
+  // its instant, read in the viewer's own zone with the zone named
+  // (docs/UI-CHECKLIST.md §4.11). Not in the bar: measured at 1280×900
+  // with the sidebar, two zoned timestamps beside "Back to history" left
+  // the breadcrumb 400px short and it truncated to "E2E Wor… › His… ›
+  // Com…". Two zones, one pair of instants: the same instant reads
+  // differently in each, so a formatter stuck on one zone cannot satisfy
+  // both.
+  test('the contextual bar carries "Back to history"; the revision pair captions the blocks, in the viewer\'s zone', async () => {
+    process.env.TZ = 'America/New_York';
+    mockDiff({ status: 'success', changes: MIXED_CHANGES });
+    const inNewYork = await mountSuspended(PageInApp, FRAME_STUBS);
+
+    const actions = inNewYork.get('header [data-slot="right"]');
+    expect(actions.findAll('a').map((a) => a.attributes('href'))).toEqual(['/pages/page-1/history']);
+    expect(actions.get('a[href="/pages/page-1/history"]').text()).toBe('Back to history');
+    expect(actions.findAll('time')).toHaveLength(0);
+
+    const pair = inNewYork.get('main [data-testid="diff-pair"]');
+    const times = pair.findAll('time');
+    expect(times.map((time) => time.attributes('datetime'))).toEqual(['2026-01-01T00:00:00.000Z', '2026-01-02T00:00:00.000Z']);
+    expect(times.map((time) => time.text())).toEqual(['Dec 31, 2025, 7:00 PM EST', 'Jan 1, 2026, 7:00 PM EST']);
+    // The pair reads as a comparison, in order: from, then to — and it
+    // stands above the blocks it captions.
+    expect(pair.text().indexOf('Dec 31')).toBeLessThan(pair.text().indexOf('Jan 1'));
+    const main = inNewYork.get('main').element;
+    const all = Array.from(main.querySelectorAll('*'));
+    expect(all.indexOf(pair.element)).toBeLessThan(all.indexOf(inNewYork.get('main li').element));
+    inNewYork.unmount();
+
+    process.env.TZ = 'Asia/Tokyo';
+    mockDiff({ status: 'success', changes: MIXED_CHANGES });
+    const inTokyo = await mountSuspended(PageInApp, FRAME_STUBS);
+    expect(inTokyo.get('main [data-testid="diff-pair"]').findAll('time').map((time) => time.text())).toEqual(['Jan 1, 2026, 9:00 AM GMT+9', 'Jan 2, 2026, 9:00 AM GMT+9']);
+  });
+
+  // Two identical revisions are still two revisions: the caption names them
+  // above the empty state too.
+  test('the revision pair captions the "No differences" state as well', async () => {
+    mockDiff({ status: 'success', changes: [{ kind: 'unchanged', id: 'b1', slot: 0, text: 'Nothing changed here.' }] });
+    const component = await mountSuspended(PageInApp, FRAME_STUBS);
+
+    expect(component.get('main [data-testid="diff-pair"]').findAll('time')).toHaveLength(2);
+    expect(component.text()).toMatch(/no differences/i);
+  });
+
+  // Before the response there is no pair to name — and after a refusal
+  // there is none either. The way back stays in every state.
+  test('the revision pair is absent until the diff has loaded, while "Back to history" is always offered', async () => {
+    for (const status of ['loading', 'not-found', 'network-error'] as const) {
+      mockDiff({ status, message: 'x' });
+      const component = await mountSuspended(PageInApp, FRAME_STUBS);
+
+      expect(component.findAll('time'), status).toHaveLength(0);
+      expect(component.get('header [data-slot="right"] a[href="/pages/page-1/history"]').text()).toBe('Back to history');
+      component.unmount();
+    }
+  });
+
+  // The skeleton is the loaded screen's boxes — the caption line and the
+  // list's rows, marked for the measurement `e2e/diff.spec.ts` makes.
+  test('the skeleton is the caption line and the list rows, marked for measurement', async () => {
+    mockDiff({ status: 'loading' });
+    const component = await mountSuspended(PageInApp, FRAME_STUBS);
+
+    const skeleton = component.get('[data-testid="diff-skeleton"]');
+    expect(skeleton.attributes('aria-hidden')).toBe('true');
+    expect(skeleton.find('[data-testid="diff-skeleton-caption"]').exists()).toBe(true);
+    expect(skeleton.findAll('[data-testid="diff-skeleton-row"]').length).toBeGreaterThan(0);
   });
 });

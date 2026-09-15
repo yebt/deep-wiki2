@@ -29,6 +29,12 @@
  */
 import { formatRevisionDate } from '~/utils/format-revision-date';
 
+// Inside the workspace layout: the frame is mounted once and this screen
+// renders only its pane, so the sidebar's tree keeps its scroll and its
+// folds when the person arrives here from the read screen
+// (`layouts/workspace.vue`).
+definePageMeta({ layout: 'workspace' });
+
 const route = useRoute();
 const nodeId = route.params.id as string;
 
@@ -85,7 +91,14 @@ useSeoMeta({ title: 'Revision history — deep-wiki' });
          line of `body-large` per row read left to right, the same case
          the navigation tree already made for taking the reading measure
          rather than the `wide` column (docs/DESIGN-SYSTEM.md §2.4). -->
-    <PageHeading heading="Revision history" description="Every saved version of this page, newest first." />
+
+    <!-- The screen's one `<h1>`, for the accessibility tree. Visibly, the
+         identity is the breadcrumb's — "… › page › History" in the bar
+         directly above — so a heading block repeating it, with a sentence
+         under it, would title the screen twice: the document-frame residue
+         the owner reacted to on 2026-09-15. The list starts right under the
+         bar; the notices below keep their `h2`. -->
+    <h1 class="sr-only">Revision history</h1>
 
     <!-- Loading: a skeleton matched to the row shape it replaces, not a
          spinner — the list's shape is known before the response arrives
@@ -122,7 +135,7 @@ useSeoMeta({ title: 'Revision history — deep-wiki' });
          "History denied without read"; the route returns a byte-identical
          404 for both). Splitting it back into a distinct permission-denied
          copy here would leak the difference the server deliberately does
-         not. `level="2"`: PageHeading above already owns the page's `<h1>`. -->
+         not. `level="2"`: the screen's `<h1>` is the one above. -->
     <PageNotice
       v-else-if="status === 'not-found'"
       icon="i-lucide-file-question"

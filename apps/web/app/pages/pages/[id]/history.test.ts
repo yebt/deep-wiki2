@@ -1,16 +1,60 @@
 import { UApp } from '#components';
 import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime';
 import { afterEach, describe, expect, test, vi } from 'vitest';
-import { defineComponent, h, ref } from 'vue';
+import { computed, defineComponent, h, ref } from 'vue';
 import HistoryPage from './history.vue';
 
-const { usePageHistoryMock, useRouteMock } = vi.hoisted(() => ({
+const { usePageHistoryMock, useRouteMock, useCurrentWorkspaceMock, useWorkspaceTreeMock, useWorkspaceDirectoryMock } = vi.hoisted(() => ({
   usePageHistoryMock: vi.fn(),
   useRouteMock: vi.fn(() => ({ params: { id: 'page-1' } })),
+  useCurrentWorkspaceMock: vi.fn(),
+  useWorkspaceTreeMock: vi.fn(),
+  useWorkspaceDirectoryMock: vi.fn(),
 }));
 
 mockNuxtImport('usePageHistory', () => usePageHistoryMock);
 mockNuxtImport('useRoute', () => useRouteMock);
+mockNuxtImport('useCurrentWorkspace', () => useCurrentWorkspaceMock);
+mockNuxtImport('useWorkspaceTree', () => useWorkspaceTreeMock);
+mockNuxtImport('useWorkspaceDirectory', () => useWorkspaceDirectoryMock);
+
+/**
+ * The frame's own collaborators, stubbed so this file stays about the
+ * history screen. The history response names no workspace, so the frame
+ * stands on the last one the person was in (`useCurrentWorkspace`), and
+ * the tree places `page-1` under a shelf and a book — a page at the root
+ * would let the breadcrumb test pass with the ancestors never rendered.
+ */
+function mockFrame() {
+  useCurrentWorkspaceMock.mockReturnValue({ workspaceId: ref('ws-1'), enter: vi.fn() });
+  useWorkspaceTreeMock.mockReturnValue({
+    status: ref('success'),
+    nodes: ref([]),
+    rootId: ref('root-1'),
+    message: ref(''),
+    collapsedIds: computed(() => new Set<string>()),
+    selectedId: ref(null),
+    load: vi.fn(async () => {}),
+    reorder: vi.fn(async () => true),
+    toggleCollapsed: vi.fn(),
+    reveal: vi.fn(),
+    pathTo: (id: string) =>
+      id === 'page-1'
+        ? [
+            { id: 'shelf-1', type: 'shelf', slug: 's', title: 'Engineering', position: 0, children: [] },
+            { id: 'book-1', type: 'book', slug: 'b', title: 'Handbook', position: 0, children: [] },
+            { id: 'page-1', type: 'page', slug: 'p', title: 'A Page', position: 0, children: [] },
+          ]
+        : [],
+  });
+  useWorkspaceDirectoryMock.mockReturnValue({
+    status: ref('success'),
+    workspaces: computed(() => [{ id: 'ws-1', name: 'Acme', slug: 'acme' }]),
+    ensure: vi.fn(async () => {}),
+    refresh: vi.fn(async () => {}),
+    nameOf: (id: string) => (id === 'ws-1' ? 'Acme' : null),
+  });
+}
 
 // Every screen now renders inside the workspace frame. Its sidebar — the
 // tree, the switcher, the doors — is stubbed here so this file stays about
@@ -32,6 +76,7 @@ interface Revision {
 }
 
 function mockHistory(overrides: Partial<{ status: string; revisions: Revision[]; message: string }> = {}) {
+  mockFrame();
   const load = vi.fn(async () => {});
   usePageHistoryMock.mockReturnValue({
     status: ref(overrides.status ?? 'idle'),
@@ -172,7 +217,9 @@ describe('page-history screen', () => {
     mockHistory({ status: 'success' });
     const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
-    const back = component.get('header a[href="/pages/page-1"]');
+    // In the bar's actions, not its breadcrumb — the page crumb links to
+    // the same address, and is the frame's, not this screen's.
+    const back = component.get('header [data-slot="right"] a[href="/pages/page-1"]');
     expect(back.text()).toBe('Read page');
   });
 
@@ -194,10 +241,69 @@ describe('page-history screen', () => {
     expect(load).toHaveBeenCalled();
   });
 
-  test('renders exactly one h1 for the screen, at the same type role every state uses', async () => {
+  // One `<h1>` in every state, for the accessibility tree; visibly, the
+  // screen's identity is the breadcrumb's, so the heading is `sr-only` and
+  // no heading block — no title repeated, no supporting sentence — stands
+  // between the bar and the list (the document-frame residue the owner
+  // reacted to on 2026-09-15). The notices keep their `h2`.
+  test('renders exactly one h1 for the screen, for the accessibility tree only, in every state', async () => {
+    const states: Parameters<typeof mockHistory>[0][] = [
+      { status: 'success', revisions: TWO_REVISIONS },
+      { status: 'success', revisions: [] },
+      { status: 'not-found' },
+      { status: 'loading' },
+    ];
+    for (const state of states) {
+      mockHistory(state);
+      const component = await mountSuspended(PageInApp, FRAME_STUBS);
+
+      const headings = component.findAll('h1');
+      expect(headings, state!.status).toHaveLength(1);
+      expect(headings[0]!.text()).toBe('Revision history');
+      expect(headings[0]!.classes(), 'the heading is for assistive technology; the breadcrumb is the visible identity').toContain('sr-only');
+      expect(component.get('main').text()).not.toMatch(/Every saved version of this page/);
+      component.unmount();
+    }
+  });
+
+  /*
+   * The screen opts into the workspace layout, so the sidebar around it is
+   * the one the layout mounted and the tree keeps its scroll when the
+   * person arrives here from the read screen. The record is read from the
+   * application's router; that the sidebar survives is `e2e/frame.spec.ts`'s.
+   */
+  test('stands inside the workspace layout', async () => {
+    mockHistory({ status: 'success', revisions: TWO_REVISIONS });
+    await mountSuspended(PageInApp, FRAME_STUBS);
+    const { useRouter } = await import('#imports');
+
+    expect(useRouter().getRoutes().find((route) => route.path === '/pages/:id()/history')?.meta.layout).toBe('workspace');
+  });
+
+  // Where the person is: workspace › shelf › book › page — through the
+  // tree, since the history response names no workspace and no title —
+  // then the trailing crumb this screen adds. The page crumb is the link
+  // back to reading it; "History" is where they are.
+  test('the breadcrumb walks from the workspace to the page and ends in a History crumb', async () => {
     mockHistory({ status: 'success', revisions: TWO_REVISIONS });
     const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
-    expect(component.findAll('h1')).toHaveLength(1);
+    const nav = component.get('nav[aria-label="Where you are"]');
+    const crumbs = nav.findAll('li').map((li) => li.text()).filter(Boolean);
+    expect(crumbs).toEqual(['Acme', 'Engineering', 'Handbook', 'A Page', 'History']);
+    expect(nav.find('a[href="/pages/page-1"]').exists()).toBe(true);
+  });
+
+  // The bar's actions: this screen's one way out, and nothing of the
+  // frame's (the doors are in the sidebar). The compare controls are each
+  // row's own, in the column.
+  test('the contextual bar carries only "Read page"; each row keeps its own compare action in the column', async () => {
+    mockHistory({ status: 'success', revisions: TWO_REVISIONS });
+    const component = await mountSuspended(PageInApp, FRAME_STUBS);
+
+    const actions = component.get('header [data-slot="right"]');
+    expect(actions.findAll('a').map((a) => a.attributes('href'))).toEqual(['/pages/page-1']);
+    expect(actions.find('a[href*="/diff"]').exists()).toBe(false);
+    expect(component.get('main li a[href*="/diff"]').text()).toMatch(/compare with previous/i);
   });
 });

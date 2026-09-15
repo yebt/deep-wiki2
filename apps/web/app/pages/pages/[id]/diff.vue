@@ -29,6 +29,13 @@
  *   URL, a table) wraps or scrolls inside its own row rather than
  *   widening the page (docs/UI-CHECKLIST.md §6).
  */
+import { formatRevisionDate } from '~/utils/format-revision-date';
+
+// Inside the workspace layout: the frame is mounted once and this screen
+// renders only its pane, so the sidebar's tree keeps its scroll and its
+// folds when the person arrives here from history (`layouts/workspace.vue`).
+definePageMeta({ layout: 'workspace' });
+
 const route = useRoute();
 const nodeId = route.params.id as string;
 const fromId = (route.query.from as string | undefined) ?? '';
@@ -171,17 +178,51 @@ useSeoMeta({ title: 'Page diff — deep-wiki' });
 <template>
   <AppShell :workspace-id="null" :node-id="nodeId" :trail="[{ label: 'History', to: `/pages/${nodeId}/history` }, { label: 'Compare' }]">
     <template #header-end>
+      <!-- The bar's one action. The pair being compared is NOT here:
+           measured at 1280×900 with the 280px sidebar, two timestamps with
+           their zones (about 370px) beside this control left the breadcrumb
+           400px short and it truncated to "E2E Wor… › His… › Com…" — the
+           identity the bar exists to show. The pair is the list's caption
+           below instead, where the reading measure holds it on one line. -->
       <UButton icon="i-lucide-arrow-left" variant="ghost" color="neutral" size="sm" :to="`/pages/${nodeId}/history`">
         Back to history
       </UButton>
     </template>
 
-    <PageHeading heading="Page diff" description="What changed between two saved revisions." />
+    <!-- The screen's one `<h1>`, for the accessibility tree. Visibly, the
+         identity is the breadcrumb's — "… › History › Compare" in the bar
+         directly above — so a heading block repeating it would title the
+         screen twice (the document-frame residue the owner reacted to on
+         2026-09-15). The blocks start right under the bar; the notices
+         below keep their `h2`. -->
+    <h1 class="sr-only">Compare revisions</h1>
 
-    <div v-if="status === 'idle' || status === 'loading'" data-testid="diff-skeleton" class="space-y-3" aria-hidden="true">
-      <USkeleton class="h-16 w-full" />
-      <USkeleton class="h-16 w-full" />
-      <USkeleton class="h-24 w-5/6" />
+    <!-- Loading: the loaded screen's own boxes — the caption line, then
+         the SAME card and the SAME row classes as the block list below,
+         with the badge and the text swapped for bars of their heights —
+         so a row is the same box by construction rather than by estimate
+         (docs/UI-CHECKLIST.md §3). How many rows, and whether a "removed"
+         card precedes them, only the response knows; `e2e/diff.spec.ts`
+         holds it back and measures the caption and a row. -->
+    <div v-if="status === 'idle' || status === 'loading'" data-testid="diff-skeleton" aria-hidden="true">
+      <p class="mb-4 flex text-body-small">
+        <USkeleton as="span" class="block h-4 w-80 max-w-full" data-testid="diff-skeleton-caption" />
+      </p>
+      <UCard variant="soft" :ui="{ body: CARD_BODY_INSET }">
+        <ol class="divide-y divide-default">
+          <li v-for="n in 3" :key="n" class="rounded-md px-4 py-3" data-testid="diff-skeleton-row">
+            <!-- The badge line (`UBadge size="sm"`: a 12px line on 4px of
+                 padding each side, 20px) and one `body-medium` line of
+                 block text (20px). -->
+            <p class="mb-2 flex">
+              <USkeleton as="span" class="block h-5 w-20" />
+            </p>
+            <p class="flex text-body-medium">
+              <USkeleton as="span" class="block h-5 w-full" />
+            </p>
+          </li>
+        </ol>
+      </UCard>
     </div>
 
     <!-- Absence and denial share this ONE state, the same non-disclosure
@@ -217,57 +258,64 @@ useSeoMeta({ title: 'Page diff — deep-wiki' });
       </template>
     </PageNotice>
 
-    <!-- Two revisions with no differences is a real state (block-diff
-         spec), never folded into the error branch above. -->
-    <PageNotice
-      v-else-if="!hasDifferences"
-      icon="i-lucide-equal"
-      heading="No differences"
-      :level="2"
-    >
-      These two revisions have identical content.
-    </PageNotice>
+    <template v-else>
+      <!-- The pair being compared: from, then to, each a `<time>` read in
+           the viewer's own zone with the zone named and the instant kept in
+           the attribute (docs/UI-CHECKLIST.md §4.11 — fetched in
+           `onMounted`, so never server-rendered). `body-small text-muted`:
+           §9.8's trailing meta, a caption over the list, not a heading. -->
+      <p data-testid="diff-pair" class="mb-4 text-body-small text-muted">
+        From <time :datetime="diff!.from.createdAt">{{ formatRevisionDate(diff!.from.createdAt) }}</time>
+        to <time :datetime="diff!.to.createdAt">{{ formatRevisionDate(diff!.to.createdAt) }}</time>
+      </p>
 
-    <div v-else class="space-y-6">
-      <UCard v-if="removedChanges.length > 0" variant="soft" :ui="{ body: CARD_BODY_INSET }">
-        <p class="px-4 pt-3 text-label-large text-muted">Removed in this revision</p>
-        <ol aria-label="Blocks removed since the earlier revision" class="divide-y divide-default">
-          <li
-            v-for="change in removedChanges"
-            :key="`removed-${change.id}`"
-            class="rounded-md px-4 py-3"
-            :class="rowClass(change)"
-          >
-            <UBadge :color="badgeColor(change)" variant="soft" :icon="badgeIcon(change)" size="sm" class="mb-2">
-              {{ badgeLabel(change) }}
-            </UBadge>
-            <pre class="overflow-x-auto font-mono text-body-medium whitespace-pre-wrap break-words" :class="textClass(change)">{{ change.text }}</pre>
-          </li>
-        </ol>
-      </UCard>
+      <!-- Two revisions with no differences is a real state (block-diff
+           spec), never folded into the error branch above. -->
+      <PageNotice v-if="!hasDifferences" icon="i-lucide-equal" heading="No differences" :level="2">
+        These two revisions have identical content.
+      </PageNotice>
 
-      <UCard variant="soft" :ui="{ body: CARD_BODY_INSET }">
-        <ol aria-label="Current revision, annotated with what changed" class="divide-y divide-default">
-          <li
-            v-for="change in currentChanges"
-            :key="`current-${change.id}`"
-            class="rounded-md px-4 py-3"
-            :class="rowClass(change)"
-          >
-            <UBadge
-              v-if="change.kind !== 'unchanged'"
-              :color="badgeColor(change)"
-              variant="soft"
-              :icon="badgeIcon(change)"
-              size="sm"
-              class="mb-2"
+      <div v-else class="space-y-6">
+        <UCard v-if="removedChanges.length > 0" variant="soft" :ui="{ body: CARD_BODY_INSET }">
+          <p class="px-4 pt-3 text-label-large text-muted">Removed in this revision</p>
+          <ol aria-label="Blocks removed since the earlier revision" class="divide-y divide-default">
+            <li
+              v-for="change in removedChanges"
+              :key="`removed-${change.id}`"
+              class="rounded-md px-4 py-3"
+              :class="rowClass(change)"
             >
-              {{ badgeLabel(change) }}
-            </UBadge>
-            <pre class="overflow-x-auto font-mono text-body-medium whitespace-pre-wrap break-words" :class="textClass(change)">{{ change.text }}</pre>
-          </li>
-        </ol>
-      </UCard>
-    </div>
+              <!-- In its own flex line, so the row's first line box is the
+                   badge's own height rather than the inherited strut's —
+                   what lets the skeleton draw the same box by construction. -->
+              <p class="mb-2 flex">
+                <UBadge :color="badgeColor(change)" variant="soft" :icon="badgeIcon(change)" size="sm">
+                  {{ badgeLabel(change) }}
+                </UBadge>
+              </p>
+              <pre class="overflow-x-auto font-mono text-body-medium whitespace-pre-wrap break-words" :class="textClass(change)">{{ change.text }}</pre>
+            </li>
+          </ol>
+        </UCard>
+
+        <UCard variant="soft" :ui="{ body: CARD_BODY_INSET }">
+          <ol aria-label="Current revision, annotated with what changed" class="divide-y divide-default">
+            <li
+              v-for="change in currentChanges"
+              :key="`current-${change.id}`"
+              class="rounded-md px-4 py-3"
+              :class="rowClass(change)"
+            >
+              <p v-if="change.kind !== 'unchanged'" class="mb-2 flex">
+                <UBadge :color="badgeColor(change)" variant="soft" :icon="badgeIcon(change)" size="sm">
+                  {{ badgeLabel(change) }}
+                </UBadge>
+              </p>
+              <pre class="overflow-x-auto font-mono text-body-medium whitespace-pre-wrap break-words" :class="textClass(change)">{{ change.text }}</pre>
+            </li>
+          </ol>
+        </UCard>
+      </div>
+    </template>
   </AppShell>
 </template>
