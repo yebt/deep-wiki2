@@ -267,6 +267,9 @@ function missingVariableIssue(variable: string, value: string | undefined, reaso
   return { variable, message: `${shape} ${reason}` };
 }
 
+const AI_KEK_ENV_REASON =
+  'It is required when AI_KEK_DRIVER=env (the default): workspace AI credentials are wrapped under this key.';
+
 const MAIL_REASON =
   'The application always needs a MailSender for invitations and password reset, so there is no "mail disabled" mode.';
 
@@ -381,25 +384,36 @@ export function refineEnv(env: Env): Result<Env, EnvIssue[]> {
     });
   }
 
+  // Same sentence shape as the SMTP and S3 refinements above: the variable
+  // is in the message, because `apps/api`'s boot error prints the message
+  // alone. "required when AI_KEK_DRIVER=env" on its own told an operator
+  // that something was required and not what (2026-09-15).
   if (env.AI_KEK_DRIVER === 'env') {
     if (!env.AI_KEK_KEYRING) {
-      issues.push({ variable: 'AI_KEK_KEYRING', message: 'required when AI_KEK_DRIVER=env' });
+      issues.push(missingVariableIssue('AI_KEK_KEYRING', env.AI_KEK_KEYRING, AI_KEK_ENV_REASON));
     } else {
       const parsed = parseKeyring(env.AI_KEK_KEYRING);
       if (!parsed.ok) {
-        issues.push({ variable: 'AI_KEK_KEYRING', message: parsed.message });
+        issues.push({
+          variable: 'AI_KEK_KEYRING',
+          message: `AI_KEK_KEYRING ${parsed.message}. ${TEMPLATE} shows the expected form.`,
+        });
       } else if (!env.AI_KEK_ACTIVE_ID) {
-        issues.push({ variable: 'AI_KEK_ACTIVE_ID', message: 'required when AI_KEK_DRIVER=env' });
+        issues.push(missingVariableIssue('AI_KEK_ACTIVE_ID', env.AI_KEK_ACTIVE_ID, AI_KEK_ENV_REASON));
       } else if (!parsed.keys.has(env.AI_KEK_ACTIVE_ID)) {
         issues.push({
           variable: 'AI_KEK_ACTIVE_ID',
-          message: `must name a key id present in AI_KEK_KEYRING (got "${env.AI_KEK_ACTIVE_ID}")`,
+          message:
+            `AI_KEK_ACTIVE_ID must name a key id present in AI_KEK_KEYRING (got "${env.AI_KEK_ACTIVE_ID}"). ` +
+            `${TEMPLATE} shows the expected form.`,
         });
       }
     }
   } else if (env.AI_KEK_DRIVER === 'kms') {
     if (!env.AI_KEK_KMS_KEY_ID) {
-      issues.push({ variable: 'AI_KEK_KMS_KEY_ID', message: 'required when AI_KEK_DRIVER=kms' });
+      issues.push(
+        missingVariableIssue('AI_KEK_KMS_KEY_ID', env.AI_KEK_KMS_KEY_ID, 'It is required when AI_KEK_DRIVER=kms.'),
+      );
     }
   }
 

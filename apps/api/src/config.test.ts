@@ -40,6 +40,15 @@ describe('loadConfig', () => {
   test('fails fast and names a missing SMTP host', () => {
     expect(() => loadConfig(validRawEnv({ SMTP_HOST: undefined }))).toThrow(/SMTP_HOST/);
   });
+
+  // A refinement issue carries its `variable` separately from its
+  // `message` ("required when AI_KEK_DRIVER=env" names the condition, not
+  // the variable) — the boot error must print both, or an operator whose
+  // `.env` predates the AI variables is told only that *something* is
+  // required.
+  test('fails fast and names a variable a refinement found missing', () => {
+    expect(() => loadConfig(validRawEnv({ AI_KEK_KEYRING: undefined }))).toThrow(/AI_KEK_KEYRING/);
+  });
 });
 
 /**

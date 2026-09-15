@@ -589,6 +589,31 @@ describe('refineEnv — AI_KEK envelope master key (environment-config delta)', 
     }
   });
 
+  // `apps/api`'s boot error prints `issue.message` alone, as every other
+  // refinement here expects (`missingVariableIssue` puts the variable in the
+  // sentence). A message reading only "required when AI_KEK_DRIVER=env"
+  // left an operator whose `.env` predates these variables knowing that
+  // *something* was required and not what — seen on 2026-09-15, first boot
+  // after the ai-provider-foundation merge.
+  test('every AI_KEK refinement message names its variable and the template, like the rest of refineEnv', () => {
+    const cases: Array<[Record<string, string | undefined>, string]> = [
+      [{ AI_KEK_KEYRING: undefined, AI_KEK_ACTIVE_ID: 'k1' }, 'AI_KEK_KEYRING'],
+      [{ AI_KEK_KEYRING: 'not-a-valid-entry', AI_KEK_ACTIVE_ID: 'k1' }, 'AI_KEK_KEYRING'],
+      [{ AI_KEK_KEYRING: `k1:${VALID_KEK}`, AI_KEK_ACTIVE_ID: undefined }, 'AI_KEK_ACTIVE_ID'],
+      [{ AI_KEK_KEYRING: `k1:${VALID_KEK}`, AI_KEK_ACTIVE_ID: 'k-does-not-exist' }, 'AI_KEK_ACTIVE_ID'],
+      [{ AI_KEK_DRIVER: 'kms', AI_KEK_KMS_KEY_ID: undefined }, 'AI_KEK_KMS_KEY_ID'],
+    ];
+    for (const [overrides, variable] of cases) {
+      const result = refineEnv(envSchema.parse(validRawEnv(overrides)));
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        const issue = result.error.find((candidate) => candidate.variable === variable);
+        expect(issue?.message).toContain(variable);
+        expect(issue?.message).toContain('env.example');
+      }
+    }
+  });
+
   test('rejects a malformed AI_KEK_KEYRING entry (no id:base64key shape)', () => {
     const parsed = envSchema.parse(
       validRawEnv({ AI_KEK_KEYRING: 'not-a-valid-entry', AI_KEK_ACTIVE_ID: 'k1' }),
