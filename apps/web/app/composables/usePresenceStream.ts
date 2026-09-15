@@ -52,6 +52,8 @@ const DEFAULT_EXPIRY_MS = 120_000;
 const DEFAULT_EXPIRY_TICK_MS = 5_000;
 
 export interface PresencePageEntry {
+  readonly pageId: string;
+  readonly pageTitle: string;
   readonly userId: string;
   readonly userDisplayName: string;
   /** ISO timestamp the lock (and therefore this presence) was acquired. */
@@ -144,7 +146,14 @@ function defaultPollOnce(url: string): Promise<readonly RawPresenceEvent[]> {
     .catch(() => []);
 }
 
-export function usePresenceStream(pageId: string, options: UsePresenceStreamOptions = {}): UsePresenceStreamResult {
+/**
+ * `pageId` is the one page this consumer shows — read and edit mode — or
+ * `null` for every page in the workspace, which is what the dashboard's
+ * "editing now" column asks for. Either way nothing is filtered here that
+ * the server did not already authorise per event; the page filter is only
+ * about what this screen has a place to render.
+ */
+export function usePresenceStream(pageId: string | null, options: UsePresenceStreamOptions = {}): UsePresenceStreamResult {
   const config = useRuntimeConfig();
   const createSource = options.createEventSource ?? defaultCreateEventSource;
   const poll = options.pollOnce ?? defaultPollOnce;
@@ -171,9 +180,9 @@ export function usePresenceStream(pageId: string, options: UsePresenceStreamOpti
   function recomputeEditors(): void {
     const cutoff = Date.now() - expiryMs;
     const fresh: PresencePageEntry[] = [];
-    for (const [userId, tracked] of roster) {
+    for (const [key, tracked] of roster) {
       if (tracked.lastSeenAt <= cutoff) {
-        roster.delete(userId);
+        roster.delete(key);
       } else {
         fresh.push(tracked.entry);
       }
@@ -182,9 +191,10 @@ export function usePresenceStream(pageId: string, options: UsePresenceStreamOpti
   }
 
   function onRawEvent(raw: RawPresenceEvent): void {
-    if (raw.pageId !== pageId) return; // never surfaced — not this page
-    roster.set(raw.userId, {
-      entry: { userId: raw.userId, userDisplayName: raw.userDisplayName, since: raw.since },
+    if (pageId !== null && raw.pageId !== pageId) return; // never surfaced — not this page
+    // One person on two pages is two entries: the key is the pair, not the person.
+    roster.set(`${raw.pageId}:${raw.userId}`, {
+      entry: { pageId: raw.pageId, pageTitle: raw.pageTitle, userId: raw.userId, userDisplayName: raw.userDisplayName, since: raw.since },
       lastSeenAt: Date.now(),
     });
     recomputeEditors();

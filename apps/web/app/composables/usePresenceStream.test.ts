@@ -62,7 +62,7 @@ describe('usePresenceStream', () => {
     start('ws-1');
     fake.emit('presence', presenceEvent({ pageId: 'page-1', userId: 'user-1', userDisplayName: 'Ana' }));
 
-    expect(editors.value).toEqual([{ userId: 'user-1', userDisplayName: 'Ana', since: '2026-01-01T00:00:00.000Z' }]);
+    expect(editors.value).toEqual([{ pageId: 'page-1', pageTitle: 'A Page', userId: 'user-1', userDisplayName: 'Ana', since: '2026-01-01T00:00:00.000Z' }]);
     stop();
   });
 
@@ -193,9 +193,47 @@ describe('usePresenceStream', () => {
 
     expect(connectionMode.value).toBe('poll');
     expect(pollOnce).toHaveBeenCalledTimes(1);
-    expect(editors.value).toEqual([{ userId: 'user-1', userDisplayName: 'Ana', since: '2026-01-01T00:00:00.000Z' }]);
+    expect(editors.value).toEqual([{ pageId: 'page-1', pageTitle: 'A Page', userId: 'user-1', userDisplayName: 'Ana', since: '2026-01-01T00:00:00.000Z' }]);
 
     stop();
     vi.useRealTimers();
+  });
+});
+
+/**
+ * The workspace dashboard's "editing now" column: one stream, every page.
+ * `pageId: null` is the explicit statement that this consumer wants the
+ * whole workspace — the same server-side per-event authorisation applies,
+ * so an event for a page the subscriber may not read never arrives at all.
+ */
+describe('usePresenceStream across the whole workspace', () => {
+  test('with `pageId: null`, editors of every page are kept, each naming its page', () => {
+    const fake = fakeEventSource();
+    const createEventSource = vi.fn(() => fake.source);
+    const { editors, start, stop } = usePresenceStream(null, { createEventSource });
+
+    start('ws-1');
+    fake.emit('presence', presenceEvent({ pageId: 'page-1', userId: 'user-1', userDisplayName: 'Ana' }));
+    fake.emit('presence', presenceEvent({ pageId: 'page-2', userId: 'user-2', userDisplayName: 'Bo' }));
+
+    expect(editors.value.map((editor) => [editor.pageId, editor.userDisplayName])).toEqual([
+      ['page-1', 'Ana'],
+      ['page-2', 'Bo'],
+    ]);
+    expect(editors.value[0]!.pageTitle).toBe('A Page');
+    stop();
+  });
+
+  test('one person editing two pages is two entries, not one overwritten by the other', () => {
+    const fake = fakeEventSource();
+    const createEventSource = vi.fn(() => fake.source);
+    const { editors, start, stop } = usePresenceStream(null, { createEventSource });
+
+    start('ws-1');
+    fake.emit('presence', presenceEvent({ pageId: 'page-1', userId: 'user-1' }));
+    fake.emit('presence', presenceEvent({ pageId: 'page-2', userId: 'user-1' }));
+
+    expect(editors.value).toHaveLength(2);
+    stop();
   });
 });

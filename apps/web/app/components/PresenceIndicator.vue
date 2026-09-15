@@ -20,17 +20,10 @@
  * side, so there is no server/client zone mismatch to guard against here.
  */
 import { formatRevisionDate } from '../utils/format-revision-date';
+import { initials } from '../utils/initials';
 import type { PresencePageEntry } from '../composables/usePresenceStream';
 
 const props = defineProps<{ editors: readonly PresencePageEntry[] }>();
-
-function initials(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return '?';
-  const first = parts[0]!.charAt(0);
-  const last = parts.length > 1 ? parts[parts.length - 1]!.charAt(0) : '';
-  return (first + last).toUpperCase();
-}
 
 defineExpose({ formatRevisionDate });
 </script>

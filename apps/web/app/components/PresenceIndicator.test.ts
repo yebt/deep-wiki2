@@ -14,7 +14,7 @@ describe('PresenceIndicator', () => {
   // exact instant preserved in `<time datetime>`).
   test('names the editor and states since when, with the zone named and the instant preserved', async () => {
     const component = await mountSuspended(PresenceIndicator, {
-      props: { editors: [{ userId: 'u1', userDisplayName: 'Ana', since: '2026-01-01T00:00:00.000Z' }] },
+      props: { editors: [{ pageId: 'page-1', pageTitle: 'A Page', userId: 'u1', userDisplayName: 'Ana', since: '2026-01-01T00:00:00.000Z' }] },
     });
 
     expect(component.text()).toMatch(/Ana is editing since/);
@@ -29,7 +29,7 @@ describe('PresenceIndicator', () => {
   // non-colour signal (the icon) must be present, not just a tinted chip.
   test('carries a non-colour signal alongside the tint', async () => {
     const component = await mountSuspended(PresenceIndicator, {
-      props: { editors: [{ userId: 'u1', userDisplayName: 'Ana', since: '2026-01-01T00:00:00.000Z' }] },
+      props: { editors: [{ pageId: 'page-1', pageTitle: 'A Page', userId: 'u1', userDisplayName: 'Ana', since: '2026-01-01T00:00:00.000Z' }] },
     });
 
     expect(component.findComponent({ name: 'UIcon' }).exists() || component.find('[class*="i-lucide-pencil"]').exists()).toBe(true);
@@ -39,8 +39,8 @@ describe('PresenceIndicator', () => {
     const component = await mountSuspended(PresenceIndicator, {
       props: {
         editors: [
-          { userId: 'u1', userDisplayName: 'Ana', since: '2026-01-01T00:00:00.000Z' },
-          { userId: 'u2', userDisplayName: 'Beto', since: '2026-01-01T00:00:00.000Z' },
+          { pageId: 'page-1', pageTitle: 'A Page', userId: 'u1', userDisplayName: 'Ana', since: '2026-01-01T00:00:00.000Z' },
+          { pageId: 'page-1', pageTitle: 'A Page', userId: 'u2', userDisplayName: 'Beto', since: '2026-01-01T00:00:00.000Z' },
         ],
       },
     });
@@ -54,7 +54,7 @@ describe('PresenceIndicator', () => {
   // off-grid arbitrary values flagged in review.
   test('uses only on-grid spacing utilities, never an arbitrary bracketed value', async () => {
     const component = await mountSuspended(PresenceIndicator, {
-      props: { editors: [{ userId: 'u1', userDisplayName: 'Ana', since: '2026-01-01T00:00:00.000Z' }] },
+      props: { editors: [{ pageId: 'page-1', pageTitle: 'A Page', userId: 'u1', userDisplayName: 'Ana', since: '2026-01-01T00:00:00.000Z' }] },
     });
 
     expect(component.html()).not.toMatch(/\[\d/); // no `text-[10px]`-shaped arbitrary value
