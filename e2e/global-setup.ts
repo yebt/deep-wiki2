@@ -129,6 +129,56 @@ export async function assertPortFree(port: number, label: string, tryListen: (po
   );
 }
 
+/**
+ * The environment the spawned `apps/api` runs under. Every variable
+ * `loadConfig()` requires is named here explicitly, layered over the
+ * runner's own `process.env`, so the harness never depends on what a
+ * developer's `.env` happens to contain — a worktree with no `.env` at
+ * all must run the suite. `scripts/checks/__tests__/e2e-api-env.test.ts`
+ * holds this object to `parseEnv()`, so the next variable `env.ts` makes
+ * required fails there, not in a browser run.
+ */
+export function apiProcessEnv(
+  input: { readonly databaseUrl: string; readonly blobRoot: string },
+  base: NodeJS.ProcessEnv,
+): Record<string, string | undefined> {
+  return {
+    ...base,
+    NODE_ENV: 'development',
+    PORT: String(API_PORT),
+    DATABASE_URL: input.databaseUrl,
+    APP_URL: WEB_URL,
+    SESSION_IDLE_TIMEOUT_MINUTES: '30',
+    SESSION_ABSOLUTE_TIMEOUT_DAYS: '30',
+    PASSWORD_RESET_TTL_MINUTES: '30',
+    INVITATION_TTL_DAYS: '7',
+    // Required since versioning-and-collaboration Phase 5 added it to
+    // `packages/contracts/src/env.ts` with no `.default()` — this
+    // harness predates that change and never gained it, so every e2e
+    // run failed `loadConfig()` before this fix. `env.example`'s own
+    // value (30) is the only place the number is meant to exist; this
+    // is a copy of that fact for the e2e process's environment, not a
+    // second source of truth for it.
+    CHANGESET_WINDOW_MINUTES: '30',
+    SMTP_HOST: 'localhost',
+    SMTP_PORT: String(MAILPIT_SMTP_PORT),
+    SMTP_SECURE: 'false',
+    MAIL_FROM: 'noreply@deep-wiki.local',
+    BLOB_STORE_DRIVER: 'filesystem',
+    BLOB_STORE_FS_ROOT: input.blobRoot,
+    // Required since ai-provider-foundation: `refineEnv()` insists on a
+    // parseable keyring and an active id under the default `env` driver
+    // (`apps/api` also runs `assertKeyringComplete()` at boot). The same
+    // precedent as CHANGESET_WINDOW_MINUTES above — the harness names
+    // what the server requires rather than trusting the runner's `.env`
+    // to. A 32-byte placeholder key, never a real one: the e2e database
+    // stores no real provider credential.
+    AI_KEK_DRIVER: 'env',
+    AI_KEK_KEYRING: 'e2e:KioqKioqKioqKioqKioqKioqKioqKioqKioqKioqKio=',
+    AI_KEK_ACTIVE_ID: 'e2e',
+  };
+}
+
 export default async function globalSetup(): Promise<() => Promise<void>> {
   // Fail fast, before provisioning a database or spawning apps/api: an
   // honest refusal here costs nothing, where the same collision discovered
@@ -153,31 +203,7 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
 
   const apiProcess: ChildProcess = spawn('bun', ['run', 'src/index.ts'], {
     cwd: join(REPO_ROOT, 'apps', 'api'),
-    env: {
-      ...process.env,
-      NODE_ENV: 'development',
-      PORT: String(API_PORT),
-      DATABASE_URL: seed.url,
-      APP_URL: WEB_URL,
-      SESSION_IDLE_TIMEOUT_MINUTES: '30',
-      SESSION_ABSOLUTE_TIMEOUT_DAYS: '30',
-      PASSWORD_RESET_TTL_MINUTES: '30',
-      INVITATION_TTL_DAYS: '7',
-      // Required since versioning-and-collaboration Phase 5 added it to
-      // `packages/contracts/src/env.ts` with no `.default()` — this
-      // harness predates that change and never gained it, so every e2e
-      // run failed `loadConfig()` before this fix. `env.example`'s own
-      // value (30) is the only place the number is meant to exist; this
-      // is a copy of that fact for the e2e process's environment, not a
-      // second source of truth for it.
-      CHANGESET_WINDOW_MINUTES: '30',
-      SMTP_HOST: 'localhost',
-      SMTP_PORT: String(MAILPIT_SMTP_PORT),
-      SMTP_SECURE: 'false',
-      MAIL_FROM: 'noreply@deep-wiki.local',
-      BLOB_STORE_DRIVER: 'filesystem',
-      BLOB_STORE_FS_ROOT: blobRoot,
-    },
+    env: apiProcessEnv({ databaseUrl: seed.url, blobRoot }, process.env),
     stdio: 'inherit',
   });
 
