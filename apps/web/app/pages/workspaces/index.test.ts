@@ -158,4 +158,22 @@ describe('the new-workspace affordance', () => {
 
     expect(component.findAll('a').find((a) => /new workspace/i.test(a.text()))).toBeUndefined();
   });
+
+  // This screen is reached only when there is no last workspace, or from
+  // the sidebar switcher — its job is choosing, not reading, so creating
+  // is the one filled action (docs/DESIGN-SYSTEM.md §9.1: exactly one
+  // filled button per screen). The rows below it are navigation, not
+  // competing actions in that sense, so this does not conflict with there
+  // being many of them.
+  test('New workspace is the screen\'s one filled action, whether or not there is anything to choose from', async () => {
+    mockWorkspaces({ status: 'success', workspaces: [] });
+    const empty = await mountSuspended(PageInApp);
+    const fromEmpty = empty.findAll('a').find((a) => /new workspace/i.test(a.text()));
+    expect(fromEmpty?.classes()).toContain('bg-primary');
+
+    mockWorkspaces({ status: 'success', workspaces: [alpha] });
+    const loaded = await mountSuspended(PageInApp);
+    const fromLoaded = loaded.findAll('a').find((a) => /new workspace/i.test(a.text()));
+    expect(fromLoaded?.classes()).toContain('bg-primary');
+  });
 });

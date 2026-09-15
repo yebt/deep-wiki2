@@ -1,28 +1,40 @@
 <script setup lang="ts">
 /**
- * The workspace list — the screen the product starts from. Until it
- * existed, `/workspaces/:id/tree` could only be reached by someone who
- * already knew an id, so the only way into any content was a hand-written
- * database query.
+ * The workspace chooser. Until it existed, `/workspaces/:id/tree` could
+ * only be reached by someone who already knew an id, so the only way into
+ * any content was a hand-written database query.
+ *
+ * **This is now pre-workspace, not the front door.** Since the frame
+ * landed (2026-09-15), `/` opens onto the last workspace a signed-in
+ * person was in (`useCurrentWorkspace`, a cookie, decided on the server);
+ * this screen is reached only when there is no last workspace yet, or by
+ * choice, from the sidebar switcher's "All workspaces". Its job is
+ * choosing, not reading — the same reason it stays in the document frame
+ * rather than the one it is about to enter — so it names no workspace of
+ * its own and stands outside "one workspace at a time" (PRODUCT.md).
  *
  * Pre-build contract (docs/UI-CHECKLIST.md §2):
- * - Who: a signed-in member arriving at the app with nothing selected —
- *   most often someone who has just accepted an invitation, or who opened
- *   a bookmark to the root.
- * - Goal, in their words: "Open the wiki I work in."
- * - Single primary action: open a workspace. There is exactly one, and
- *   every row is it. Creating a workspace is a secondary, outlined
- *   affordance above the list — the way into `/workspaces/new` for a
- *   signed-in user who has nothing to open yet — and it is deliberately
- *   not the empty state's primary action, because "nothing shared with me
+ * - Who: a signed-in member with no last workspace remembered — most often
+ *   someone who has just accepted an invitation — or anyone who chose "All
+ *   workspaces" from the switcher to see everything they can open at once.
+ * - Goal, in their words: "Open the wiki I work in, or start a new one."
+ * - Single primary action: create a workspace — the screen's one filled
+ *   button (docs/DESIGN-SYSTEM.md §9.1), not a colour choice. A row below
+ *   it is not a competing action in that sense: it is navigation, and
+ *   every row is equally one. Filled is not the empty state's way of
+ *   saying "you have nothing, so make one" either — it is deliberately not
+ *   conditioned on the list being empty, because "nothing shared with me
  *   yet" and "I should start my own" are different situations and this
  *   screen cannot tell which one the caller is in.
  * - Data: `workspaces.name`, `workspaces.slug` and the id the tree link is
  *   built from — the three fields `GET /workspaces` returns, and nothing
  *   designed against data that does not exist. No timestamp is rendered:
  *   `workspaces.updated_at` tracks the row, not the content, so a "last
- *   edited" reading of it would be false, and §4.11 rightly makes an
- *   honest one a piece of work rather than a decoration.
+ *   edited" reading of it would be false, and a *true* last-activity would
+ *   need `GET /workspaces/:id/activity` once per row — an N+1 this screen
+ *   deliberately does not pay for a nice-to-have. §4.11 rightly makes an
+ *   honest timestamp a piece of work rather than a decoration; absent one,
+ *   a plain list is the honest choice over an invented signal.
  * - Non-goals: no settings, no membership management, no per-workspace
  *   content preview; creation happens on its own screen.
  * - Empty / overflow: a caller who can open nothing gets the state below;
@@ -79,7 +91,7 @@ useSeoMeta({ title: 'Workspaces — deep-wiki' });
          request returns. -->
     <template v-if="status === 'idle' || status === 'loading'">
       <div class="mb-4 flex flex-wrap items-center justify-end gap-3">
-        <UButton to="/workspaces/new" variant="outline" color="neutral" icon="i-lucide-plus">New workspace</UButton>
+        <UButton to="/workspaces/new" variant="solid" color="primary" icon="i-lucide-plus">New workspace</UButton>
       </div>
       <UCard variant="soft" :ui="{ body: 'p-2 sm:p-2' }">
         <div data-testid="workspace-list-skeleton" class="space-y-1" aria-hidden="true">
@@ -117,11 +129,12 @@ useSeoMeta({ title: 'Workspaces — deep-wiki' });
     </PageNotice>
 
     <template v-else>
-      <!-- The one write affordance on this screen, outlined so it does not
-           compete with the rows (the primary action). 16px below it: the
-           4dp grid (docs/DESIGN-SYSTEM.md §7.3). -->
+      <!-- The screen's one filled button (§9.1): this screen's job is
+           choosing, and creating is the one action here that is not a row
+           — a row is navigation, not a competing filled action. 16px below
+           it: the 4dp grid (docs/DESIGN-SYSTEM.md §7.3). -->
       <div class="mb-4 flex flex-wrap items-center justify-end gap-3">
-        <UButton to="/workspaces/new" variant="outline" color="neutral" icon="i-lucide-plus">New workspace</UButton>
+        <UButton to="/workspaces/new" variant="solid" color="primary" icon="i-lucide-plus">New workspace</UButton>
       </div>
 
       <PageNotice
