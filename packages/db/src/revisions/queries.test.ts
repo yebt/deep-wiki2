@@ -9,7 +9,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import postgres from 'postgres';
 import { provisionTestDatabase, TEST_CHANGESET_WINDOW_MINUTES, type ProvisionedTestDatabase } from '../../testing/provision';
 import { savePage } from '../content/save-page';
-import { getRevisionsByIds, listPageRevisions } from './queries';
+import { getRevisionsByIds, listPageRevisions, listWorkspaceRevisions } from './queries';
 
 let db: ProvisionedTestDatabase;
 let sql: postgres.Sql;
@@ -123,5 +123,58 @@ describe('getRevisionsByIds', () => {
     const rows = await getRevisionsByIds(sql, { workspaceId, ids: [] });
 
     expect(rows).toEqual([]);
+  });
+});
+
+/**
+ * The workspace dashboard's "what changed" column (apps/web
+ * `pages/workspaces/[workspaceId]/index.vue`): the newest saves across
+ * every page in one workspace, each carrying the content it replaced so
+ * the route can diff the two and say *what* changed in one line. Read
+ * through `content` only, never `block_index` (block-diff spec: "The Diff
+ * Re-Parses Both Sides Fresh").
+ */
+describe('listWorkspaceRevisions', () => {
+  test('returns the newest saves across the whole workspace, newest first, each with the content it replaced', async () => {
+    const { workspaceId, pageId, authorId } = await seedPage();
+    const [otherPage] = await sql<{ id: string }[]>`
+      INSERT INTO nodes (workspace_id, parent_id, type, path, position, slug, title)
+      SELECT workspace_id, parent_id, 'page', '', 1, ${`page-${crypto.randomUUID()}`}, 'Other Page' FROM nodes WHERE id = ${pageId} RETURNING id
+    `;
+    const first = await savePage(sql, { nodeId: pageId, workspaceId, markdown: '# One\n', expectedContentHash: null, updatedBy: authorId, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
+    await savePage(sql, { nodeId: otherPage!.id, workspaceId, markdown: '# Other\n', expectedContentHash: null, updatedBy: authorId, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
+    await savePage(sql, { nodeId: pageId, workspaceId, markdown: '# Two\n', expectedContentHash: first.contentHash, updatedBy: authorId, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
+
+    const rows = await listWorkspaceRevisions(sql, { workspaceId, limit: 10 });
+
+    expect(rows.map((row) => row.content)).toEqual(['# Two\n', '# Other\n', '# One\n']);
+    expect(rows.map((row) => row.pageTitle)).toEqual(['A Page', 'Other Page', 'A Page']);
+    // The second save of the same page replaced the first; the other two
+    // replaced nothing.
+    expect(rows.map((row) => row.previousContent)).toEqual(['# One\n', null, null]);
+    expect(rows[0]!.authorDisplayName).toBe('Owner');
+    expect(rows[0]!.pageId).toBe(pageId);
+  });
+
+  test('`limit` caps the list and `authorId` narrows it to one person\'s saves', async () => {
+    const { workspaceId, pageId, authorId } = await seedPage();
+    const [other] = await sql<{ id: string }[]>`
+      INSERT INTO users (email, password_hash, display_name) VALUES (${`other-${crypto.randomUUID()}@example.com`}, 'hash', 'Other') RETURNING id
+    `;
+    const first = await savePage(sql, { nodeId: pageId, workspaceId, markdown: '# One\n', expectedContentHash: null, updatedBy: authorId, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
+    const second = await savePage(sql, { nodeId: pageId, workspaceId, markdown: '# Two\n', expectedContentHash: first.contentHash, updatedBy: other!.id, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
+    await savePage(sql, { nodeId: pageId, workspaceId, markdown: '# Three\n', expectedContentHash: second.contentHash, updatedBy: authorId, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
+
+    const capped = await listWorkspaceRevisions(sql, { workspaceId, limit: 2 });
+    expect(capped.map((row) => row.content)).toEqual(['# Three\n', '# Two\n']);
+
+    const mine = await listWorkspaceRevisions(sql, { workspaceId, limit: 10, authorId });
+    expect(mine.map((row) => row.content)).toEqual(['# Three\n', '# One\n']);
+  });
+
+  test('a workspace with no saves answers an empty list', async () => {
+    const { workspaceId } = await seedPage();
+
+    expect(await listWorkspaceRevisions(sql, { workspaceId, limit: 10 })).toEqual([]);
   });
 });

@@ -86,3 +86,78 @@ export async function getRevisionsByIds(sql: SqlExecutor, input: GetRevisionsByI
   `;
   return rows.map((row) => ({ id: row.id, pageId: row.page_id, content: row.content, createdAt: row.created_at }));
 }
+
+export interface WorkspaceRevision {
+  readonly id: string;
+  readonly pageId: string;
+  /** The page's current `nodes.title` — what the dashboard names the change by. */
+  readonly pageTitle: string;
+  readonly authorId: string | null;
+  readonly authorDisplayName: string | null;
+  readonly createdAt: Date;
+  readonly content: string;
+  /** The revision this one replaced, `null` for a page's first save. */
+  readonly previousContent: string | null;
+}
+
+interface WorkspaceRevisionRow {
+  id: string;
+  page_id: string;
+  page_title: string;
+  author_id: string | null;
+  author_display_name: string | null;
+  created_at: Date;
+  content: string;
+  previous_content: string | null;
+}
+
+export interface ListWorkspaceRevisionsInput {
+  readonly workspaceId: string;
+  readonly limit: number;
+  /** Narrow to one person's saves — the dashboard's "what you touched" column. */
+  readonly authorId?: string;
+}
+
+/**
+ * The newest saves across a whole workspace (the dashboard's "what
+ * changed"), newest first, each paired with the content it replaced so
+ * the caller can diff the two — one `LATERAL` lookup per row rather than
+ * a second query per revision. Reads `content` only: `block_index` is an
+ * anchor-only subset and must never feed a diff (block-diff spec).
+ *
+ * Per-page non-disclosure is the route's job, exactly as `listBookHistory`
+ * leaves it: every revision in the workspace is returned here, and
+ * `apps/api` filters by `readableResourceIds` before shaping a response.
+ * The caller is expected to over-fetch by that margin.
+ */
+export async function listWorkspaceRevisions(sql: SqlExecutor, input: ListWorkspaceRevisionsInput): Promise<WorkspaceRevision[]> {
+  const rows = await sql<WorkspaceRevisionRow[]>`
+    SELECT r.id, r.page_id, n.title AS page_title, r.author_id, u.display_name AS author_display_name,
+           r.created_at, r.content, prev.content AS previous_content
+      FROM page_revision r
+      JOIN nodes n ON n.id = r.page_id AND n.workspace_id = r.workspace_id
+      LEFT JOIN users u ON u.id = r.author_id
+      LEFT JOIN LATERAL (
+        SELECT p.content
+          FROM page_revision p
+         WHERE p.page_id = r.page_id AND p.workspace_id = r.workspace_id
+           AND (p.created_at, p.id) < (r.created_at, r.id)
+         ORDER BY p.created_at DESC, p.id DESC
+         LIMIT 1
+      ) prev ON true
+     WHERE r.workspace_id = ${input.workspaceId}
+       ${input.authorId ? sql`AND r.author_id = ${input.authorId}` : sql``}
+     ORDER BY r.created_at DESC, r.id DESC
+     LIMIT ${input.limit}
+  `;
+  return rows.map((row) => ({
+    id: row.id,
+    pageId: row.page_id,
+    pageTitle: row.page_title,
+    authorId: row.author_id,
+    authorDisplayName: row.author_display_name,
+    createdAt: row.created_at,
+    content: row.content,
+    previousContent: row.previous_content,
+  }));
+}

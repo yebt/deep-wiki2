@@ -233,3 +233,109 @@ export async function setThreadResolved(sql: SqlExecutor, input: SetThreadResolv
       `;
   return rows.length === 1;
 }
+
+export interface UserThreadSummary {
+  readonly id: string;
+  readonly pageId: string;
+  readonly pageTitle: string;
+  readonly body: string;
+  readonly quote: string;
+  readonly orphaned: boolean;
+  readonly authorId: string | null;
+  readonly authorDisplayName: string | null;
+  readonly createdAt: Date;
+  readonly replyCount: number;
+  /** The root's own `created_at`, or the newest reply's. */
+  readonly lastActivityAt: Date;
+  /** Who wrote the newest message in the thread — the root's author when there are no replies. */
+  readonly lastAuthorId: string | null;
+  /** The user started the thread or replied in it. */
+  readonly participating: boolean;
+  /** Some message in the thread names the user (`@<display name>`). */
+  readonly mentioned: boolean;
+}
+
+export interface ListOpenThreadsForUserInput {
+  readonly workspaceId: string;
+  readonly userId: string;
+  /** The user's current `users.display_name`; a thread that writes `@<this>` is one that names them. */
+  readonly displayName: string;
+  readonly limit: number;
+}
+
+interface UserThreadRow {
+  id: string;
+  page_id: string;
+  page_title: string;
+  body: string;
+  quote: string;
+  status: string | null;
+  author_id: string | null;
+  author_display_name: string | null;
+  created_at: Date;
+  reply_count: string | number;
+  last_activity_at: Date;
+  last_author_id: string | null;
+  participating: boolean;
+  mentioned: boolean;
+}
+
+/**
+ * The open threads across a workspace that concern one person — the
+ * dashboard's "threads for you". A thread concerns them when they started
+ * it, replied in it, or a message in it writes their name after an `@`.
+ * Comments carry no structured mentions today, so the name match is a
+ * plain-text convention and is labelled as such where it renders. It is a
+ * `strpos` over the bodies of one workspace's open roots and their
+ * replies — a bounded scan by nature, not an indexable prefix predicate,
+ * and stated as one rather than dressed as a `LIKE`.
+ * Newest activity first, where activity is the root or its newest reply.
+ *
+ * Per-page non-disclosure is the route's job: every matching thread in
+ * the workspace is returned, and `apps/api` keeps only those on pages the
+ * caller may `comment` on — the same gate `GET /pages/:id/comments` uses.
+ */
+export async function listOpenThreadsForUser(sql: SqlExecutor, input: ListOpenThreadsForUserInput): Promise<UserThreadSummary[]> {
+  const mention = `@${input.displayName}`;
+  const rows = await sql<UserThreadRow[]>`
+    SELECT c.id, c.page_id, n.title AS page_title, c.body, c.quote, c.status,
+           c.author_id, u.display_name AS author_display_name, c.created_at,
+           activity.reply_count, activity.last_activity_at, activity.last_author_id,
+           (c.author_id = ${input.userId} OR activity.replied) AS participating,
+           (strpos(c.body, ${mention}) > 0 OR activity.mentioned) AS mentioned
+      FROM comments c
+      JOIN nodes n ON n.id = c.page_id AND n.workspace_id = c.workspace_id
+      LEFT JOIN users u ON u.id = c.author_id
+      CROSS JOIN LATERAL (
+        SELECT count(*)::int AS reply_count,
+               coalesce(max(r.created_at), c.created_at) AS last_activity_at,
+               coalesce((SELECT r2.author_id FROM comments r2 WHERE r2.parent_id = c.id ORDER BY r2.created_at DESC LIMIT 1), c.author_id) AS last_author_id,
+               bool_or(r.author_id = ${input.userId}) AS replied,
+               bool_or(strpos(r.body, ${mention}) > 0) AS mentioned
+          FROM comments r
+         WHERE r.parent_id = c.id
+      ) activity
+     WHERE c.workspace_id = ${input.workspaceId}
+       AND c.parent_id IS NULL
+       AND c.resolved_at IS NULL
+       AND (c.author_id = ${input.userId} OR activity.replied OR strpos(c.body, ${mention}) > 0 OR activity.mentioned)
+     ORDER BY activity.last_activity_at DESC, c.id DESC
+     LIMIT ${input.limit}
+  `;
+  return rows.map((row) => ({
+    id: row.id,
+    pageId: row.page_id,
+    pageTitle: row.page_title,
+    body: row.body,
+    quote: row.quote,
+    orphaned: row.status === 'orphaned',
+    authorId: row.author_id,
+    authorDisplayName: row.author_display_name,
+    createdAt: row.created_at,
+    replyCount: Number(row.reply_count),
+    lastActivityAt: row.last_activity_at,
+    lastAuthorId: row.last_author_id,
+    participating: row.participating === true,
+    mentioned: row.mentioned === true,
+  }));
+}

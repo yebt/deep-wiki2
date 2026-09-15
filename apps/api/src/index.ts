@@ -10,6 +10,7 @@ import { SmtpMailSender } from './adapters/mail/smtp-mail-sender';
 import { loadConfig } from './config';
 import { InMemoryPresenceBroadcaster } from './presence/broadcaster';
 import { PresenceStreamRegistry } from './presence/registry';
+import { createActivityRoutes } from './routes/activity';
 import { createAdminRoutes } from './routes/admin';
 import { createAuthRoutes } from './routes/auth';
 import { createCommentRoutes } from './routes/comments';
@@ -206,6 +207,7 @@ if (import.meta.main) {
     }),
   );
   app.route('/', createRevisionRoutes({ sql, sessionIdleTimeoutMinutes: config.SESSION_IDLE_TIMEOUT_MINUTES }));
+  app.route('/', createActivityRoutes({ sql, sessionIdleTimeoutMinutes: config.SESSION_IDLE_TIMEOUT_MINUTES }));
   app.route('/', createDiffRoutes({ sql, sessionIdleTimeoutMinutes: config.SESSION_IDLE_TIMEOUT_MINUTES }));
 
   console.log(`apps/api: listening on port ${config.PORT}`);

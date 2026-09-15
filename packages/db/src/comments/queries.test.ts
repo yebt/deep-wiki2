@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import postgres from 'postgres';
 import { provisionTestDatabase, TEST_CHANGESET_WINDOW_MINUTES, type ProvisionedTestDatabase } from '../../testing/provision';
 import { savePage } from '../content/save-page';
-import { createReply, createRootComment, listCommentIndicators, listCommentThreads, setThreadResolved } from './queries';
+import { createReply, createRootComment, listCommentIndicators, listCommentThreads, listOpenThreadsForUser, setThreadResolved } from './queries';
 
 let db: ProvisionedTestDatabase;
 let sql: postgres.Sql;
@@ -387,5 +387,74 @@ describe('listCommentThreads', () => {
     const threads = await listCommentThreads(sql, { pageId });
 
     expect(threads).toEqual([]);
+  });
+});
+
+/**
+ * The workspace dashboard's "threads for you" column: the open threads
+ * across a workspace that a person is part of — started, replied to, or
+ * named in — with enough about each to say whether it is waiting on them.
+ */
+describe('listOpenThreadsForUser', () => {
+  async function seedNamedUser(displayName: string): Promise<string> {
+    const [user] = await sql`
+      INSERT INTO users (email, password_hash, display_name)
+      VALUES (${`${displayName.toLowerCase()}-${crypto.randomUUID()}@example.com`}, 'hash', ${displayName}) RETURNING id
+    `;
+    return user!.id as string;
+  }
+
+  async function seedThread(workspaceId: string, pageId: string, authorId: string, body: string): Promise<string> {
+    const root = await createRootComment(sql, { workspaceId, pageId, authorId, body, blockId: 'blocka', offsetStart: 0, offsetEnd: 4, quote: 'Some', quoteHash: 'h' });
+    return root.id;
+  }
+
+  test('returns open threads the user started, replied to, or is named in — and nothing else', async () => {
+    const { workspaceId, rootId } = await seedWorkspace();
+    const pageId = await seedPage(workspaceId, rootId);
+    await savePage(sql, { nodeId: pageId, workspaceId, markdown: 'Some text. ^blocka\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
+    const ana = await seedNamedUser('Ana Ruiz');
+    const bo = await seedNamedUser('Bo');
+
+    const started = await seedThread(workspaceId, pageId, ana, 'I started this');
+    const repliedTo = await seedThread(workspaceId, pageId, bo, 'Bo started this');
+    await createReply(sql, { workspaceId, pageId, parentId: repliedTo, authorId: ana, body: 'Ana replied' });
+    const named = await seedThread(workspaceId, pageId, bo, 'What do you think, @Ana Ruiz?');
+    await seedThread(workspaceId, pageId, bo, 'Nothing to do with Ana');
+
+    const threads = await listOpenThreadsForUser(sql, { workspaceId, userId: ana, displayName: 'Ana Ruiz', limit: 10 });
+
+    expect(threads.map((thread) => thread.id).sort()).toEqual([started, repliedTo, named].sort());
+    const byId = new Map(threads.map((thread) => [thread.id, thread]));
+    expect(byId.get(named)!.mentioned).toBe(true);
+    expect(byId.get(named)!.participating).toBe(false);
+    expect(byId.get(repliedTo)!.participating).toBe(true);
+    expect(byId.get(repliedTo)!.replyCount).toBe(1);
+    // Bo's thread was last touched by Ana's reply, so it is not waiting on her; Bo's question is.
+    expect(byId.get(repliedTo)!.lastAuthorId).toBe(ana);
+    expect(byId.get(named)!.lastAuthorId).toBe(bo);
+    expect(byId.get(named)!.pageTitle).toBe('Page');
+    expect(byId.get(named)!.authorDisplayName).toBe('Bo');
+  });
+
+  test('a resolved thread is not returned, and the list is newest activity first, capped by `limit`', async () => {
+    const { workspaceId, rootId } = await seedWorkspace();
+    const pageId = await seedPage(workspaceId, rootId);
+    await savePage(sql, { nodeId: pageId, workspaceId, markdown: 'Some text. ^blocka\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
+    const ana = await seedNamedUser('Ana');
+
+    const older = await seedThread(workspaceId, pageId, ana, 'older');
+    const resolved = await seedThread(workspaceId, pageId, ana, 'resolved');
+    await setThreadResolved(sql, { threadId: resolved, workspaceId, resolved: true, resolvedBy: ana });
+    const newer = await seedThread(workspaceId, pageId, ana, 'newer');
+    // A reply is activity: it lifts the older thread above the newer one.
+    await createReply(sql, { workspaceId, pageId, parentId: older, authorId: ana, body: 'bump' });
+
+    const threads = await listOpenThreadsForUser(sql, { workspaceId, userId: ana, displayName: 'Ana', limit: 10 });
+    expect(threads.map((thread) => thread.id)).toEqual([older, newer]);
+    expect(threads[0]!.lastActivityAt.getTime()).toBeGreaterThanOrEqual(threads[1]!.lastActivityAt.getTime());
+
+    const capped = await listOpenThreadsForUser(sql, { workspaceId, userId: ana, displayName: 'Ana', limit: 1 });
+    expect(capped.map((thread) => thread.id)).toEqual([older]);
   });
 });

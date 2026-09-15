@@ -165,3 +165,12 @@ export type {
   WorkspaceMembersResponse,
   WorkspaceSummaryPayload,
 } from './workspaces';
+
+export {
+  ActivityChangeCountsSchema,
+  OwnEditSchema,
+  RecentChangeSchema,
+  ThreadForYouSchema,
+  WorkspaceActivityResponseSchema,
+} from './activity';
+export type { ActivityChangeCounts, OwnEdit, RecentChange, ThreadForYou, WorkspaceActivityResponse } from './activity';

@@ -68,10 +68,30 @@ export { listChangedPagesSince } from './changesets/book-diff';
 export type { ChangedPageSummary, ListChangedPagesSinceInput } from './changesets/book-diff';
 export { listBookHistory } from './changesets/history';
 export type { BookChangeset, ChangesetRevisionRow, ListBookHistoryInput } from './changesets/history';
-export { getRevisionsByIds, listPageRevisions } from './revisions/queries';
-export type { GetRevisionsByIdsInput, ListPageRevisionsInput, RevisionContent, RevisionSummary } from './revisions/queries';
-export { createReply, createRootComment, listCommentIndicators, listCommentThreads, setThreadResolved } from './comments/queries';
-export type { CommentThreadReply, CommentThreadRoot, ListCommentThreadsInput } from './comments/queries';
+export { getRevisionsByIds, listPageRevisions, listWorkspaceRevisions } from './revisions/queries';
+export type {
+  GetRevisionsByIdsInput,
+  ListPageRevisionsInput,
+  ListWorkspaceRevisionsInput,
+  RevisionContent,
+  RevisionSummary,
+  WorkspaceRevision,
+} from './revisions/queries';
+export {
+  createReply,
+  createRootComment,
+  listCommentIndicators,
+  listCommentThreads,
+  listOpenThreadsForUser,
+  setThreadResolved,
+} from './comments/queries';
+export type {
+  CommentThreadReply,
+  CommentThreadRoot,
+  ListCommentThreadsInput,
+  ListOpenThreadsForUserInput,
+  UserThreadSummary,
+} from './comments/queries';
 export type {
   CommentIndicator,
   CreatedComment,
