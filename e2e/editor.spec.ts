@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import { API_URL } from './ports';
+import { expectNoHorizontalOverflow } from './overflow';
 
 /**
  * Edit mode (document-editor spec: live preview renders in place;
@@ -333,12 +334,11 @@ async function useTheme(page: Page, theme: 'light' | 'dark'): Promise<void> {
   await page.addInitScript((value) => localStorage.setItem('nuxt-color-mode', value), theme);
 }
 
+/** Vertical overflow only — see e2e/overflow.ts for the horizontal check, which the document alone cannot answer inside the frame. */
 function overflow(page: Page) {
   return page.evaluate(() => ({
     scrollHeight: document.documentElement.scrollHeight,
     innerHeight: window.innerHeight,
-    scrollWidth: document.documentElement.scrollWidth,
-    innerWidth: window.innerWidth,
   }));
 }
 
@@ -395,7 +395,7 @@ for (const theme of ['light', 'dark'] as const) {
       expect(Math.abs(editParagraph.y - readParagraph.y), `paragraph y: read ${readParagraph.y}, edit ${editParagraph.y}`).toBeLessThanOrEqual(1);
 
       const box = await overflow(page);
-      expect(box.scrollWidth).toBeLessThanOrEqual(box.innerWidth);
+      await expectNoHorizontalOverflow(page, `editor 1280 ${theme}`);
       expect(box.scrollHeight).toBe(box.innerHeight);
 
       await shot3(page, `1280-${theme}`);
@@ -554,7 +554,7 @@ test.describe('inside the workspace frame, 320x900 light', () => {
       barOverflow.clientWidth,
     );
     const box = await overflow(page);
-    expect(box.scrollWidth, 'no horizontal body scroll at 320').toBeLessThanOrEqual(box.innerWidth);
+    await expectNoHorizontalOverflow(page, 'editor 320');
     expect(box.scrollHeight).toBe(box.innerHeight);
 
     await shot3(page, '320-light');

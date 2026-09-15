@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
+import { expectNoHorizontalOverflow } from './overflow';
 
 /**
  * The workspace frame, measured in a real browser: a persistent sidebar
@@ -51,12 +52,11 @@ async function shot2(page: Page, name: string): Promise<void> {
   await page.screenshot({ path: `${SHOTS}/frame2-${name}.png`, fullPage: false });
 }
 
+/** Vertical overflow only — see e2e/overflow.ts for the horizontal check, which the document alone cannot answer inside the frame. */
 function overflow(page: Page) {
   return page.evaluate(() => ({
     scrollHeight: document.documentElement.scrollHeight,
     innerHeight: window.innerHeight,
-    scrollWidth: document.documentElement.scrollWidth,
-    innerWidth: window.innerWidth,
   }));
 }
 
@@ -98,7 +98,7 @@ for (const theme of ['light', 'dark'] as const) {
       // The frame is the viewport: nothing scrolls but the pane.
       const box = await overflow(page);
       expect(box.scrollHeight).toBe(box.innerHeight);
-      expect(box.scrollWidth).toBeLessThanOrEqual(box.innerWidth);
+      await expectNoHorizontalOverflow(page, `dashboard 1280 ${theme}`);
 
       await shot(page, `dashboard-1280-${theme}`);
     });
@@ -141,8 +141,7 @@ for (const theme of ['light', 'dark'] as const) {
       expect(article.x, 'the article is inside the pane').toBeGreaterThan(paneLeft);
       expect(paneWidth).toBeGreaterThan(article.width);
 
-      const box = await overflow(page);
-      expect(box.scrollWidth).toBeLessThanOrEqual(box.innerWidth);
+      await expectNoHorizontalOverflow(page, `read page 1280 ${theme}`);
 
       await shot(page, `read-1280-${theme}`);
     });
@@ -246,8 +245,7 @@ for (const theme of ['light', 'dark'] as const) {
       const leftGap = after.x;
       const rightGap = 1280 - (after.x + after.width);
       expect(Math.abs(leftGap - rightGap), `centred in the viewport: left ${leftGap}, right ${rightGap}`).toBeLessThanOrEqual(2);
-      const box = await overflow(page);
-      expect(box.scrollWidth).toBeLessThanOrEqual(box.innerWidth);
+      await expectNoHorizontalOverflow(page, `focus mode 1280 ${theme}`);
 
       await shot2(page, `read-focus-1280-${theme}`);
 
@@ -350,8 +348,8 @@ test.describe('320x900 light', () => {
     expect(editingBox.y, 'one column: the panels stack').toBeGreaterThan(recentBox.y + recentBox.height);
     expect(Math.abs(editingBox.x - recentBox.x)).toBeLessThanOrEqual(1);
 
-    let box = await overflow(page);
-    expect(box.scrollWidth, 'no horizontal body scroll at 320').toBeLessThanOrEqual(box.innerWidth);
+    const box = await overflow(page);
+    await expectNoHorizontalOverflow(page, 'dashboard 320');
     expect(box.scrollHeight).toBe(box.innerHeight);
 
     await shot(page, 'dashboard-320-light');
@@ -371,12 +369,65 @@ test.describe('320x900 light', () => {
     const drawerBox = (await drawer.boundingBox())!;
     expect(drawerBox.x, 'the drawer is flush with the left edge').toBe(0);
     expect(drawerBox.width, 'the drawer fits the viewport').toBeLessThanOrEqual(320);
-    box = await overflow(page);
-    expect(box.scrollWidth).toBeLessThanOrEqual(box.innerWidth);
+    await expectNoHorizontalOverflow(page, 'drawer 320');
 
     await shot(page, 'drawer-320-light');
 
     await page.keyboard.press('Escape');
     await expect(drawer).toBeHidden();
+  });
+});
+
+/**
+ * Proof that e2e/overflow.ts's pane check catches what the document-level
+ * check structurally cannot (see e2e/overflow.ts's comment for the CSS
+ * mechanism): a 600px-wide element is injected into `#content-main`, wide
+ * enough to overflow a 320px viewport many times over. The document-level
+ * measurement stays blind to it — `UDashboardPanel`'s body is the real
+ * horizontal scroll container, not `document.documentElement` — while
+ * `expectNoHorizontalOverflow` rejects, quoting the pane's own numbers.
+ */
+test.describe('320x900 light, the pane blind spot', () => {
+  test.use({ viewport: { width: 320, height: 900 } });
+
+  test('an overflowing pane is invisible to the document-level check but caught by the pane check', async ({ page, context }) => {
+    await signInAs(context, fixtures.readerSessionToken);
+    await useTheme(page, 'light');
+
+    await page.goto(`/workspaces/${fixtures.workspaceId}`);
+    await expect(page.getByRole('heading', { level: 1, name: 'E2E Workspace' })).toBeVisible({ timeout: 30000 });
+
+    await page.evaluate(() => {
+      const main = document.getElementById('content-main')!;
+      const spike = document.createElement('div');
+      spike.style.width = '600px';
+      spike.style.height = '1px';
+      spike.style.flexShrink = '0';
+      main.appendChild(spike);
+    });
+
+    // The document is blind: it never scrolls inside the frame, so this
+    // holds even with the 600px spike sitting in the pane.
+    const blind = await page.evaluate(() => ({
+      scrollWidth: document.documentElement.scrollWidth,
+      innerWidth: window.innerWidth,
+    }));
+    expect(
+      blind.scrollWidth,
+      `document.documentElement.scrollWidth ${blind.scrollWidth} vs innerWidth ${blind.innerWidth} — blind to the injected overflow`,
+    ).toBe(blind.innerWidth);
+
+    // The pane check is not blind: it rejects, and its message names the
+    // pane's own scrollWidth/clientWidth.
+    let caught: unknown;
+    try {
+      await expectNoHorizontalOverflow(page, 'injected 600px spike');
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught, 'expectNoHorizontalOverflow must reject the injected overflow').toBeInstanceOf(Error);
+    // Printed so the review can quote the numbers, not merely trust the regex below.
+    console.log('[overflow blind spot]', (caught as Error).message);
+    expect((caught as Error).message).toMatch(/the content pane scrolls sideways: scrollWidth \d+ vs clientWidth \d+/);
   });
 });

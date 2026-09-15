@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 import { boundaryContrast } from './contrast';
+import { expectNoHorizontalOverflow } from './overflow';
 
 /**
  * Read mode (document-modes spec: "Read Mode Serves Pre-Rendered HTML
@@ -259,8 +260,7 @@ test.describe('the comments toggle', () => {
       await expect(page.getByRole('heading', { level: 1, name: comments.commentsPageTitle })).toBeVisible({ timeout: 30000 });
       await expect(page.getByRole('button', { name: /on this block$/ })).toHaveCount(0);
       await expect(page.getByRole('button', { name: /^Show comments — \d+ open thread/ })).toBeVisible({ timeout: 30000 });
-      const box = await page.evaluate(() => ({ scrollWidth: document.documentElement.scrollWidth, innerWidth: window.innerWidth }));
-      expect(box.scrollWidth).toBeLessThanOrEqual(box.innerWidth);
+      await expectNoHorizontalOverflow(page, 'read comments hidden 320');
 
       await shot(page, 'read-comments-hidden-320-light');
     });

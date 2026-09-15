@@ -481,6 +481,50 @@ makes conventions portable across projects.
 
 Discoveries and constraints. Newest first.
 
+### 2026-09-15 — Document-level overflow checks are blind inside the frame
+
+**What happened.** `f2fe61b` (`e2e/onboarding.spec.ts`) found that
+`document.documentElement.scrollWidth` never grows inside the workspace
+frame: `UDashboardPanel`'s generated body carries `overflow-y-auto`, and per
+the CSS spec a non-`visible` `overflow-y` on an element whose `overflow-x` is
+`visible` computes that axis to `auto` too — so the `[data-slot="body"]`
+ancestor of `#content-main`, not `document.documentElement`, is the real
+horizontal scroll container an overflowing screen clips into. A pane can
+overflow by hundreds of pixels while the document-level number reads exactly
+equal to the viewport. `f2fe61b` fixed this for the members screen only;
+every other frame screen's "nothing scrolls sideways at 320" assertion still
+measured just the document — tests passing for the wrong reason, the class
+this file already tracks.
+
+**The fix.** `e2e/overflow.ts` (new): `measureOverflow(page)` reads both the
+document and the pane; `expectNoHorizontalOverflow(page, label)` asserts
+both, with messages that print the numbers. Proven with a red test first, in
+`e2e/frame.spec.ts`: a 600px div injected into `#content-main` at 320x900
+leaves the document check blind —
+`document.documentElement.scrollWidth === innerWidth` still held — while
+`expectNoHorizontalOverflow` rejected, quoting `the content pane scrolls
+sideways: scrollWidth 616 vs clientWidth 320`. Migrated every document-only
+"no horizontal scroll at 320" assertion onto the helper: `e2e/frame.spec.ts`,
+`e2e/diff.spec.ts`, `e2e/history.spec.ts`, `e2e/read.spec.ts`,
+`e2e/editor.spec.ts`. Each spec's element-level checks (the contextual bar's
+own `scrollWidth`/`clientWidth`, the breadcrumb's clipped-crumb check) were
+left as they were — those never had the document's blind spot.
+`e2e/auth-layout.spec.ts` was checked and left alone: `AuthShell` renders no
+`UDashboardPanel` (no header, no footer, no dashboard body), so
+`document.documentElement`/`document.body` genuinely is the scroll
+container there.
+
+**Verified.** `bun run check` 11/11 (`e2e/overflow.ts` is value-imported by
+five specs with assertions, satisfying `test-coverage.ts`'s per-file rule),
+`bun run typecheck` 0 errors, `bun run lint` 0, and
+`bun run e2e -- e2e/frame.spec.ts e2e/read.spec.ts e2e/editor.spec.ts e2e/history.spec.ts e2e/diff.spec.ts e2e/onboarding.spec.ts`
+55/55 passing — including the new red test. **No real pane-level overflow
+turned up on any migrated screen**: every screen that previously passed the
+document-only check also passes the pane check now, so this batch is a test
+fix with no accompanying `fix(web)` commit.
+
+---
+
 ### 2026-09-15 — Members, the chooser, book history and diff, edit mode, and page history and diff move onto the frame
 
 **What happened.** The six document-page screens the two entries below left outside

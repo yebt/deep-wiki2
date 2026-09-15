@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
+import { expectNoHorizontalOverflow } from './overflow';
 
 /**
  * Page-level diff (block-diff spec: "Diff Reports Added, Removed,
@@ -133,15 +134,6 @@ async function useTheme(page: Page, theme: 'light' | 'dark'): Promise<void> {
   await page.addInitScript((value) => localStorage.setItem('nuxt-color-mode', value), theme);
 }
 
-function overflow(page: Page) {
-  return page.evaluate(() => ({
-    scrollHeight: document.documentElement.scrollHeight,
-    innerHeight: window.innerHeight,
-    scrollWidth: document.documentElement.scrollWidth,
-    innerWidth: window.innerWidth,
-  }));
-}
-
 function expectedIn(iso: string, timeZone: string): string {
   return new Intl.DateTimeFormat('en-US', {
     year: 'numeric',
@@ -240,8 +232,7 @@ for (const theme of ['light', 'dark'] as const) {
       const rightGap = 1280 - (cardBox.x + cardBox.width);
       expect(Math.abs(leftGap - rightGap), `centred in the pane: left ${leftGap}, right ${rightGap}`).toBeLessThanOrEqual(2);
 
-      const box = await overflow(page);
-      expect(box.scrollWidth).toBeLessThanOrEqual(box.innerWidth);
+      await expectNoHorizontalOverflow(page, `diff 1280 ${theme}`);
 
       await shot3(page, `1280-${theme}`);
     });
@@ -267,8 +258,7 @@ test.describe('inside the workspace frame, 320x900 light', () => {
     await expect(page.getByTestId('diff-pair').locator('time')).toHaveCount(2);
     const barOverflow = await bar.evaluate((el) => ({ scrollWidth: el.scrollWidth, clientWidth: el.clientWidth }));
     expect(barOverflow.scrollWidth).toBeLessThanOrEqual(barOverflow.clientWidth);
-    const box = await overflow(page);
-    expect(box.scrollWidth, 'no horizontal body scroll at 320').toBeLessThanOrEqual(box.innerWidth);
+    await expectNoHorizontalOverflow(page, 'diff 320');
 
     await shot3(page, '320-light');
   });

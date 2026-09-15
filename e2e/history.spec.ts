@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
+import { expectNoHorizontalOverflow } from './overflow';
 
 /**
  * Page history (revision-history spec: "Page History Query Returns
@@ -369,12 +370,11 @@ async function useTheme(page: Page, theme: 'light' | 'dark'): Promise<void> {
   await page.addInitScript((value) => localStorage.setItem('nuxt-color-mode', value), theme);
 }
 
+/** Vertical overflow only — see e2e/overflow.ts for the horizontal check, which the document alone cannot answer inside the frame. */
 function overflow(page: Page) {
   return page.evaluate(() => ({
     scrollHeight: document.documentElement.scrollHeight,
     innerHeight: window.innerHeight,
-    scrollWidth: document.documentElement.scrollWidth,
-    innerWidth: window.innerWidth,
   }));
 }
 
@@ -439,7 +439,7 @@ for (const theme of ['light', 'dark'] as const) {
       expect(Math.abs(leftGap - rightGap), `centred in the pane: left ${leftGap}, right ${rightGap}`).toBeLessThanOrEqual(2);
 
       const box = await overflow(page);
-      expect(box.scrollWidth).toBeLessThanOrEqual(box.innerWidth);
+      await expectNoHorizontalOverflow(page, `history 1280 ${theme}`);
       expect(box.scrollHeight).toBe(box.innerHeight);
 
       await shot3(page, `1280-${theme}`);
@@ -463,8 +463,7 @@ test.describe('inside the workspace frame, 320x900 light', () => {
     await expect(bar.getByRole('link', { name: 'Read page' })).toBeVisible();
     const barOverflow = await bar.evaluate((el) => ({ scrollWidth: el.scrollWidth, clientWidth: el.clientWidth }));
     expect(barOverflow.scrollWidth).toBeLessThanOrEqual(barOverflow.clientWidth);
-    const box = await overflow(page);
-    expect(box.scrollWidth, 'no horizontal body scroll at 320').toBeLessThanOrEqual(box.innerWidth);
+    await expectNoHorizontalOverflow(page, 'history 320');
 
     await shot3(page, '320-light');
   });
