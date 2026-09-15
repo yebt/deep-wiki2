@@ -108,7 +108,7 @@ Chain strategy: pending
 - [x] 6.6 GREEN: confirm `render()` parses its own tree (`render.ts:123`) separately from `savePage`'s tree, and that `data.hProperties` is ignored by `remark-stringify`. No production code change expected if isolation already holds; if it does not, isolate the transform to `render()`'s own local tree.
 - [x] 6.7 RED: `packages/db/src/content/backfill-render.test.ts` — a stale row (`pipeline_version < CURRENT_PIPELINE_VERSION`) is re-rendered and its `pipeline_version` updated; a row saved concurrently during the backfill (content_hash changed after the backfill read it) is skipped, not clobbered.
 - [x] 6.8 GREEN: `packages/db/src/content/backfill-render.ts` — batched (200 rows), resumable, `content_hash`-guarded re-render, plus a `backfill:render` script entry.
-- [ ] 6.9 Manual/documented check: a pre-backfill page missing `data-block-id` degrades to "no anchors known" in the orphan surface (Phase 10), never an error — cross-reference in Phase 10's orphan-surface task.
+- [x] 6.9 Manual/documented check: a pre-backfill page missing `data-block-id` degrades to "no anchors known" in the orphan surface (Phase 10), never an error — cross-reference in Phase 10's orphan-surface task.
 
 ## Phase 7: Comments — Schema, Reconciliation, Overlay, Mentions
 
@@ -172,8 +172,8 @@ Chain strategy: pending
 
 ## Phase 11: Documentation and Final Verification
 
-- [ ] 11.1 `docs/SPECS.md` §7.2 — correct "there is no separate lock table: an `editing` presence row *is* the lock" to state the inverse (design.md Decision 5); add the composite FK the proposal flagged as missing.
-- [ ] 11.2 `docs/SPECS.md` §14 — record the read-cache/per-viewer-permission tension as resolved, citing this change's overlay decision. **Verify §14 actually exists on this branch's copy of the file before editing it** — the proposal notes it is present on `main` (commit `cc8c700`) but absent from this branch's `docs/SPECS.md`; do not assume the section to edit exists.
+- [x] 11.1 `docs/SPECS.md` §7.2 — correct "there is no separate lock table: an `editing` presence row *is* the lock" to state the inverse (design.md Decision 5); add the composite FK the proposal flagged as missing.
+- [x] 11.2 `docs/SPECS.md` §14 — record the read-cache/per-viewer-permission tension as resolved, citing this change's overlay decision. **Verify §14 actually exists on this branch's copy of the file before editing it** — the proposal notes it is present on `main` (commit `cc8c700`) but absent from this branch's `docs/SPECS.md`; do not assume the section to edit exists.
 - [ ] 11.3 `docs/TODO.md` — append (never delete) Findings for: the orphan-rate instrumentation follow-up, the `page_revision` retention Open Question, and the migration-base collision risk against `ai-provider-foundation`.
 - [ ] 11.4 Run `bun run check`, `bun run typecheck`, `bun run lint`, `bun run test`, then `bun run verify` end to end.
 - [ ] 11.5 Confirm every Success Criteria checkbox in `proposal.md` against the shipped behaviour before declaring the change complete.
