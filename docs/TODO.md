@@ -502,6 +502,67 @@ makes conventions portable across projects.
 
 Discoveries and constraints. Newest first.
 
+### 2026-09-15 — `ai-provider-foundation` integrated into `main`, 204 commits after its base
+
+**What happened.** The branch (24 commits, base `ef94aab`, dated 2026-09-06) was merged onto
+`main` at `48ffdab` as `1493381` on `merge/ai-provider-foundation`, in its own worktree. Twenty
+paths conflicted; the merge message records each resolution. The non-textual work:
+
+- **Migrations renumbered.** The 2026-09-06 Finding below predicted this exactly: the branch
+  claimed `0008`–`0012`, `main` had taken `0008`–`0016`. The five AI migrations became
+  `0017_ai_settings_and_credentials`, `0018_ai_usage_ledger`, `0019_ai_capability_observations`,
+  `0020_embedding_indexes_and_chunks`, `0021_embedding_reindex_jobs` — files, `down/` files,
+  `meta/_journal.json` entries (`idx` 17–21, `when` monotonic) and every reference in tests and
+  doc comments. Their SQL depends only on `workspaces`, `users`, `plans`, `subject_kind`,
+  `nodes_id_workspace_id_unique` and the `vector` extension, none of which `main` changed since the
+  base, so no statement needed rewriting. Proven on a fresh database: `bun run db:migrate` applies
+  `0000`→`0021` (22 rows in `drizzle.__drizzle_migrations`), and the five `down/` files applied in
+  reverse leave exactly `main`'s table set, zero `ai_*`/`embedding_*` enum types and no
+  `plans.max_ai_cost_micro_usd_monthly`.
+- **`apps/api/src/index.ts`.** The branch's `composeApp()` (the composition root a test can drive
+  through `app.request()`) was kept and widened rather than dropped: `AppAdapters` now carries
+  `main`'s `mailDispatcher`, `presenceBroadcaster` and `presenceStreamRegistry`, `AppSettings` its
+  `pageLockTtlSeconds`, `pageLockHeartbeatSeconds` and `changesetWindowMinutes`, and every one of
+  `main`'s fourteen route modules is mounted inside it beside `createAiCredentialRoutes`.
+  `index.test.ts` keeps all of `main`'s tests and adds the branch's composed-app credential test
+  against the widened signature.
+- **Checks.** `main`'s `core-purity` (static-specifier sweep plus forbidden globals) already
+  covers the branch's raw-source scan (`eb98c21`), so the branch's implementation was dropped and
+  its `type-only-imports` fixture and tests kept against `main`'s. `query-boundaries` is `main`'s
+  six rules plus the branch's SDK-import and decryption boundaries as rules 7 and 8; the branch's
+  hand-listed camelCase denylist entries collapsed into `main`'s snake_case-root derivation
+  (`api_key`, `api_key_ciphertext` added as roots). `routes-mounted` — both sides wrote one
+  independently — is `main`'s for script and test: a strict superset (arrow-const factories,
+  comment/string stripping, whole-identifier matching, recursive collection), sharing the
+  branch's header verbatim.
+- **What no longer held on `main`.** `test-coverage` now covers every file per test and refuses
+  type-only credit; ten branch files had no test naming them (`build-cipher`, the gateway's
+  `errors`/`finish-reason`/`messages`, the two contracts schemas, and the four CLI wrappers) and
+  gained one in the merge itself, because `.githooks/pre-commit` runs `bun run check` and a
+  bypassed hook was not an option. The CLIs are driven as child processes and asserted on their
+  refusals, not put on `ALLOW_LIST`. And `e2e/global-setup.ts` had to name the AI keyring for the
+  spawned API (`4386666`) — `refineEnv()` requires it under the default driver, the same shape as
+  `CHANGESET_WINDOW_MINUTES` before it; now guarded by `e2e-api-env.test.ts`, which holds the
+  harness's env to `parseEnv()`.
+- **`env.example`.** The `AI_KEK_*` block appended; `APP_URL` stays `3001` (the branch's `4173`
+  was stale). `scripts/checks/env-example.ts` accepts `AI_KEK_KEYRING=dev:KioqKio…` as written:
+  `KEYRING` is not one of its secret words (rule 3a keys on the last segment), and the value —
+  base64 of 32 `*` bytes — matches none of rule 3c's credential shapes. Stated so nobody assumes
+  the check vetted it: it is an obvious placeholder by inspection, not by mechanism. An empty
+  keyring was not an option, because `AI_KEK_DRIVER` defaults to `env` and a fresh clone must boot.
+
+**Verified, each stage its own process** (`bun run verify` chained is OOM-killed on this
+machine): `bun run check` 11/11; `bun run typecheck` 0 errors; `bun run lint` 0; `bun run test`
+2631 passing across every member plus `scripts/checks` (db 422, api 358, web 645, core 124,
+contracts 141, markdown 325, editor 318, landing 5, checks 293), 0 failing;
+`bun run gate-2-round-trip` 168/168; `bun run e2e` 115 passed in 10.4 minutes. One environment
+note: the first `bun run test` on a worktree whose harness containers do not yet exist lost the
+race between `packages/db` and `apps/api` both running `podman compose up` for the same project
+(exit 125, containers left `Created`) — `bun run --filter '*' test` runs members in parallel and
+`podman-compose` is unsafe under concurrent invocation (RUNNING.md §6). Bringing the stacks up
+once by hand, then rerunning, was green; the main checkout never sees this because its containers
+have been up for days.
+
 ### 2026-09-15 — Document-level overflow checks are blind inside the frame
 
 **What happened.** `f2fe61b` (`e2e/onboarding.spec.ts`) found that
