@@ -23,6 +23,11 @@
  *   the constrained measure and skeleton exist for; there is no
  *   "too much" state beyond normal scrolling.
  */
+// Inside the workspace layout: the frame is mounted once and this screen
+// renders only its pane, so the sidebar's tree keeps its scroll and its
+// folds when the person arrives here from a row (`layouts/workspace.vue`).
+definePageMeta({ layout: 'workspace' });
+
 const route = useRoute();
 const nodeId = route.params.id as string;
 

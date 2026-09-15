@@ -16,6 +16,7 @@ import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 
 interface Fixtures {
   readonly readPageId: string;
+  readonly historyPageId: string;
   readonly workspaceId: string;
   readonly readerSessionToken: string;
 }
@@ -141,6 +142,89 @@ for (const theme of ['light', 'dark'] as const) {
     });
   });
 }
+
+/**
+ * The frame is mounted once — `layouts/workspace.vue` — and a navigation
+ * inside the workspace swaps only the content pane. The proof is what a
+ * component test cannot give: the sidebar is the *same DOM node* after
+ * the click, and the tree keeps the scroll offset and the fold the
+ * person gave it. Before the layout every route rebuilt the sidebar, the
+ * tree scrolled back to the top on every click, and this test would have
+ * failed on its first assertion. The viewport is short so the tree has
+ * something to scroll.
+ */
+test.describe('the sidebar survives a navigation', () => {
+  test.use({ viewport: { width: 1280, height: 380 } });
+
+  test('the tree keeps its DOM, its scroll offset and its fold when a row opens a page', async ({ page, context }) => {
+    await signInAs(context, fixtures.readerSessionToken);
+    await useTheme(page, 'light');
+
+    await page.goto(`/workspaces/${fixtures.workspaceId}`);
+    await expect(page.getByRole('heading', { level: 1, name: 'E2E Workspace' })).toBeVisible({ timeout: 30000 });
+    const sidebar = page.getByRole('navigation', { name: 'Workspace' });
+    const tree = sidebar.getByRole('tree');
+    await expect(tree.getByRole('treeitem').first()).toBeVisible({ timeout: 30000 });
+
+    // Fold one book, scroll the list as far as it goes, and mark the
+    // sidebar's element.
+    const book = tree.getByRole('treeitem', { name: /E2E Book History Handbook/ });
+    await expect(book).toHaveAttribute('aria-expanded', 'true');
+    await book.getByText('E2E Book History Handbook', { exact: true }).click();
+    await expect(book).toHaveAttribute('aria-expanded', 'false');
+    const scrolled = await tree.evaluate((el) => {
+      el.scrollTop = el.scrollHeight;
+      return { scrollTop: el.scrollTop, scrollable: el.scrollHeight > el.clientHeight };
+    });
+    expect(scrolled.scrollable, 'the tree has something to scroll at this height').toBe(true);
+    expect(scrolled.scrollTop).toBeGreaterThan(0);
+    await sidebar.evaluate((el) => {
+      (el as HTMLElement & { __dwFrameProbe?: string }).__dwFrameProbe = 'mounted-once';
+    });
+
+    // A row that is fully in view after the scroll: the first row is
+    // partly above the fold, and focusing a clipped row on click makes the
+    // browser itself scroll it into view — a scroll that would be real,
+    // but not the frame's.
+    await tree.getByRole('treeitem', { name: /E2E History Page/ }).click();
+    await expect(page.getByRole('heading', { level: 1, name: 'E2E History Page' })).toBeVisible({ timeout: 30000 });
+    await expect(page).toHaveURL(new RegExp(`/pages/${fixtures.historyPageId}$`));
+
+    // The same node, not a rebuilt one — and everything it held.
+    expect(await sidebar.evaluate((el) => (el as HTMLElement & { __dwFrameProbe?: string }).__dwFrameProbe)).toBe('mounted-once');
+    expect(await tree.evaluate((el) => el.scrollTop)).toBe(scrolled.scrollTop);
+    await expect(tree.getByRole('treeitem', { name: /E2E Book History Handbook/ })).toHaveAttribute('aria-expanded', 'false');
+    await expect(sidebar.locator('[role="treeitem"][aria-current="page"]')).toHaveCount(1);
+  });
+});
+
+/**
+ * `/` opens onto the last workspace the person was in, the way Obsidian
+ * reopens the last vault (apps/web/PRODUCT.md). The memory is a cookie,
+ * so the redirect resolves on the server: the list never flashes by.
+ * `e2e/navigation.spec.ts` holds the other case — a fresh browser with
+ * nothing remembered lands on the list.
+ */
+test.describe('the front door', () => {
+  test.use({ viewport: { width: 1280, height: 900 } });
+
+  test('after visiting a workspace, `/` opens onto it rather than the list', async ({ page, context }) => {
+    await signInAs(context, fixtures.readerSessionToken);
+
+    await page.goto(`/workspaces/${fixtures.workspaceId}`);
+    await expect(page.getByRole('heading', { level: 1, name: 'E2E Workspace' })).toBeVisible({ timeout: 30000 });
+
+    await page.goto('/');
+
+    await expect(page).toHaveURL(new RegExp(`/workspaces/${fixtures.workspaceId}$`), { timeout: 30000 });
+    await expect(page.getByRole('heading', { level: 1, name: 'E2E Workspace' })).toBeVisible({ timeout: 30000 });
+    // The list was never rendered on the way: the server answered `/` with the redirect.
+    const response = await page.request.get('/', { maxRedirects: 0 });
+    expect(response.status(), 'the server redirects `/` itself').toBeGreaterThanOrEqual(300);
+    expect(response.status()).toBeLessThan(400);
+    expect(response.headers()['location']).toContain(`/workspaces/${fixtures.workspaceId}`);
+  });
+});
 
 test.describe('320x900 light', () => {
   test.use({ viewport: { width: 320, height: 900 } });

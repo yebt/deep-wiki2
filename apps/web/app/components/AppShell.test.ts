@@ -3,6 +3,7 @@ import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime';
 import { describe, expect, test, vi } from 'vitest';
 import { computed, defineComponent, h, ref, type VNode } from 'vue';
 import AppShell from './AppShell.vue';
+import WorkspaceFrame from './WorkspaceFrame.vue';
 import WorkspaceSidebar from './WorkspaceSidebar.vue';
 
 const { useWorkspaceTreeMock, useWorkspaceDirectoryMock } = vi.hoisted(() => ({
@@ -159,6 +160,42 @@ describe('AppShell', () => {
       const bar = component.get('#content-bar');
       expect(bar.element.tagName).toBe('HEADER');
       expect(bar.attributes('tabindex')).toBe('-1');
+    });
+
+    /*
+     * Inside `layouts/workspace.vue` the frame is already standing — mounted
+     * once, so the sidebar survives navigations — and the shell renders
+     * only what belongs to this screen: the contextual bar and the column.
+     * A second frame here would be a second sidebar. The screen still hands
+     * the frame the node it is about, which is how the tree marks the row.
+     */
+    test('inside the workspace layout, renders only the content pane and hands the frame its node', async () => {
+      let frame!: ReturnType<typeof provideWorkspaceFrame>;
+      const component = await mountInApp(() =>
+        h(
+          defineComponent({
+            setup() {
+              frame = provideWorkspaceFrame();
+              return () => h(AppShell, { workspaceId: 'ws-1', nodeId: 'page-1' }, { default: () => h('p', SLOT, 'screen content') });
+            },
+          }),
+        ),
+      );
+
+      expect(component.findComponent(WorkspaceFrame).exists()).toBe(false);
+      expect(component.findComponent(WorkspaceSidebar).exists()).toBe(false);
+      expect(component.find('#content-bar').exists()).toBe(true);
+      expect(component.findAll('main')).toHaveLength(1);
+      expect(frame.nodeId.value).toBe('page-1');
+    });
+
+    test('outside any layout, a screen inside a workspace stands up the whole frame itself — the same component the layout mounts', async () => {
+      const component = await mountShell({ workspaceId: 'ws-1', nodeId: 'page-1' });
+
+      const frame = component.findComponent(WorkspaceFrame);
+      expect(frame.exists()).toBe(true);
+      expect(frame.props('nodeId')).toBe('page-1');
+      expect(frame.element.contains(component.get('#content-bar').element) || frame.findComponent(WorkspaceSidebar).exists()).toBe(true);
     });
 
     test('naming a workspace enters it, so the next screen that has not learned its own starts from this one', async () => {

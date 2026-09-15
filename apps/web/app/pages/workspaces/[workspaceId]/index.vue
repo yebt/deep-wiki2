@@ -36,6 +36,10 @@ import type { ActivityChangeCounts } from '@deep-wiki/contracts';
 import { formatRevisionDate } from '~/utils/format-revision-date';
 import { initials } from '~/utils/initials';
 
+// Inside the workspace layout: the frame — and the tree in it — is mounted
+// once, and a click on a row swaps only this pane (`layouts/workspace.vue`).
+definePageMeta({ layout: 'workspace' });
+
 const route = useRoute();
 const workspaceId = route.params.workspaceId as string;
 

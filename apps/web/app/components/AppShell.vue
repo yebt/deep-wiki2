@@ -11,15 +11,27 @@
  * A person lives inside one workspace at a time, the way a person lives
  * inside one Obsidian vault (apps/web/PRODUCT.md). So once inside one, the
  * frame is: a persistent **sidebar** on the left carrying the workspace's
- * tree, its switcher and its doors (`WorkspaceSidebar`); a **content pane**
- * on the right where every route renders; and, inside that pane, a
- * **contextual top bar** — the breadcrumb of where the person is (shelf ›
- * book › chapter › page) and the actions that belong to *this* screen,
- * through the `header-end` slot. Not a global bar that accumulates links:
- * the previous one held "Book history: A B C" wrapping onto two lines.
- * Below `lg` the sidebar is a drawer opened from the top bar and the
- * content takes the width (§6). The `UDashboard*` set is the library's
- * own shell for exactly this (docs/DESIGN-SYSTEM.md §8.3).
+ * tree, its switcher and its doors (`WorkspaceFrame` → `WorkspaceSidebar`);
+ * a **content pane** on the right where every route renders; and, inside
+ * that pane, a **contextual top bar** — the sidebar's own toggle, the
+ * breadcrumb of where the person is (shelf › book › chapter › page) and
+ * the actions that belong to *this* screen, through the `header-end`
+ * slot. Not a global bar that accumulates links: the previous one held
+ * "Book history: A B C" wrapping onto two lines. Below `lg` the sidebar
+ * is a drawer opened from the top bar and the content takes the width
+ * (§6). The `UDashboard*` set is the library's own shell for exactly this
+ * (docs/DESIGN-SYSTEM.md §8.3).
+ *
+ * **Who mounts the frame.** A screen that opts into `layouts/workspace.vue`
+ * (`definePageMeta({ layout: 'workspace' })`) stands inside a frame the
+ * layout mounted once, and this component renders only the pane — the bar
+ * and the column — and hands the layout the node it is about through
+ * `useWorkspaceFrame`. That is what keeps the sidebar's DOM, and the
+ * tree's scroll position, across a navigation. A screen that has not
+ * opted in yet gets the same `WorkspaceFrame` here, per route: the same
+ * component, so nothing about it can differ (docs/UI-CHECKLIST.md §4.1);
+ * only what persists does. Both take the same props and fill the same
+ * slots, so opting in is one line in the screen.
  *
  * The screen names its workspace: `workspace-id` as a string is "I am in
  * this workspace"; `null` is "I am in one but have not learned which yet"
@@ -55,6 +67,18 @@
  * block taller than the region stays top-aligned and fully reachable.
  */
 import type { BreadcrumbItem } from '@nuxt/ui';
+import WorkspaceFrame from './WorkspaceFrame.vue';
+
+/**
+ * Renders its children and nothing else. Inside the workspace layout the
+ * frame already stands around this screen, so the pane needs no wrapper —
+ * and one template, wrapped or not, is better than the pane written twice.
+ */
+const PaneWithoutFrame = defineComponent({
+  name: 'PaneWithoutFrame',
+  inheritAttrs: false,
+  setup: (_, { slots }) => () => slots.default?.(),
+});
 
 const props = withDefaults(
   defineProps<{
@@ -92,23 +116,25 @@ watch(
   { immediate: true },
 );
 
+/**
+ * The frame the layout mounted around this screen, or `null` when the
+ * screen has not opted into the layout and this component stands the
+ * frame up itself. Set on mount and on change, never cleared on unmount:
+ * during a navigation the next screen's shell sets its node before this
+ * one is torn down, and a clear here would erase it.
+ */
+const layoutFrame = useWorkspaceFrame();
+watch(
+  () => props.nodeId,
+  (nodeId) => layoutFrame?.setNodeId(nodeId ?? null),
+  { immediate: true },
+);
+
 /** The workspace the frame stands on: the screen's, or the last one the person was in. */
 const frameWorkspaceId = computed(() => props.workspaceId ?? current.workspaceId.value);
 
 const directory = useWorkspaceDirectory();
 const tree = useWorkspaceTree(frameWorkspaceId);
-
-/**
- * Moves focus to the content pane's top bar, so the next Tab lands on
- * this screen's first control — the breadcrumb, then its actions — rather
- * than on the sidebar's. The bar, not the column: the bar precedes the
- * column in the DOM, and a Tab from the column would skip it.
- */
-function skipToContent(): void {
-  // By id rather than a template ref: `UDashboardNavbar` renders a fragment,
-  // so its `$el` is not the bar.
-  document.getElementById('content-bar')?.focus();
-}
 
 const crumbs = computed<BreadcrumbItem[]>(() => {
   const items: BreadcrumbItem[] = [];
@@ -130,23 +156,10 @@ const crumbs = computed<BreadcrumbItem[]>(() => {
 </script>
 
 <template>
-  <!-- `fixed inset-0`: the frame is the viewport, and the content pane
-       scrolls inside it — so the page body never scrolls (§6) and the
-       sidebar stays where a hand can reach it. -->
-  <UDashboardGroup v-if="inWorkspace" unit="rem" storage="cookie" storage-key="dw-frame">
-    <!-- The sidebar precedes the content in reading order, so a keyboard
-         user would otherwise cross the switcher, the toolbar, the tree
-         and the doors before reaching this screen's own actions. The
-         first tab stop in the frame jumps past all of it (checklist §5). -->
-    <a
-      href="#content-bar"
-      class="sr-only focus:not-sr-only focus:fixed focus:start-2 focus:top-2 focus:z-50 focus:rounded-md focus:bg-inverted focus:px-3 focus:py-2 focus:text-label-large focus:text-inverted"
-      @click.prevent="skipToContent"
-    >
-      Skip to content
-    </a>
-    <WorkspaceSidebar :workspace-id="frameWorkspaceId" :current-node-id="nodeId" />
-
+  <!-- Inside `layouts/workspace.vue` the frame already stands around this
+       screen and only the pane is rendered; otherwise the frame is stood
+       up here, per route, from the same component. -->
+  <component :is="layoutFrame ? PaneWithoutFrame : WorkspaceFrame" v-if="inWorkspace" :node-id="nodeId ?? null">
     <UDashboardPanel id="content" :ui="{ root: 'bg-default', body: 'p-4 sm:p-6 lg:px-10' }">
       <template #header>
         <!-- The contextual top bar: `bg-elevated`, a hairline, no shadow
@@ -170,7 +183,7 @@ const crumbs = computed<BreadcrumbItem[]>(() => {
         </main>
       </template>
     </UDashboardPanel>
-  </UDashboardGroup>
+  </component>
 
   <div v-else class="flex min-h-svh flex-col">
     <!-- `:toggle="false"`: `UHeader` renders a hamburger that opens a

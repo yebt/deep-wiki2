@@ -152,6 +152,21 @@ function mockPresence(editors: readonly { userId: string; userDisplayName: strin
 }
 
 describe('read-mode page', () => {
+  /*
+   * The screen opts into the workspace layout, so the sidebar around it is
+   * the one the layout mounted and survives the navigation that brought
+   * the person here. The record is read from the application's router;
+   * that the tree's scroll and fold state actually survive is
+   * `e2e/frame.spec.ts`'s claim ("the sidebar survives a navigation").
+   */
+  test('stands inside the workspace layout', async () => {
+    mockRead({ status: 'success', title: 'A Page', html: '<p>Hello from cache</p>' });
+    await mount();
+    const { useRouter } = await import('#imports');
+
+    expect(useRouter().getRoutes().find((route) => route.path === '/pages/:id()')?.meta.layout).toBe('workspace');
+  });
+
   // Presence only. The §3 guarantee that the skeleton occupies the loaded
   // box is a measurement, and happy-dom has no layout engine: its owner is
   // `e2e/read.spec.ts` ("the read skeleton occupies the box…").

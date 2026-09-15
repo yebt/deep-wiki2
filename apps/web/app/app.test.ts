@@ -1,4 +1,4 @@
-import { UApp } from '#components';
+import { NuxtLayout, UApp } from '#components';
 import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime';
 import { describe, expect, test, vi } from 'vitest';
 import { ref } from 'vue';
@@ -14,12 +14,17 @@ import WorkspacesPage from './pages/workspaces/index.vue';
  *   inside a `UApp` by hand for exactly that reason, and each of those is
  *   a claim about this file — none of them checks it. A page rendered
  *   beside `UApp` rather than inside it throws on the first tooltip.
+ * - `NuxtLayout`, so a screen that names a layout gets it. The workspace
+ *   layout is what lets the sidebar be mounted once and survive every
+ *   navigation inside a workspace; without this wrapper `definePageMeta({
+ *   layout })` is ignored and every screen silently falls back to its own
+ *   per-route frame.
  * - the document language, which is the one head value a screen inherits
  *   rather than states: `pages/workspaces/index.vue` sets only a title.
  *
- * The route mounted here is `/workspaces`, not `/`: `/` is now a redirect
- * to it (see `pages/index.vue`), so it renders no component to assert
- * against. `error.vue` is deliberately not covered here — Nuxt renders it
+ * The route mounted here is `/workspaces`, not `/`: `/` is routed onward
+ * by middleware (see `pages/index.vue`), so it renders no component to
+ * assert against. `error.vue` is deliberately not covered here — Nuxt renders it
  * *instead of* this component, which is why it declares its own `UApp` and
  * its own `lang`, and `error.test.ts` holds that.
  */
@@ -48,6 +53,14 @@ describe('app root', () => {
     // how the page actually ships.
     expect(app.findComponent(WorkspacesPage).exists()).toBe(true);
     expect(app.element.contains(component.get('main').element)).toBe(true);
+  });
+
+  test('the routed screen renders inside NuxtLayout, so a page’s layout is honoured', async () => {
+    const component = await mountApp();
+
+    const layout = component.findComponent(NuxtLayout);
+    expect(layout.exists()).toBe(true);
+    expect(layout.findComponent(WorkspacesPage).exists()).toBe(true);
   });
 
   test('the routed screen really is the one the router resolved', async () => {

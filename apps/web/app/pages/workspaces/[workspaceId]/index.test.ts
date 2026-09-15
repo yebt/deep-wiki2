@@ -98,6 +98,20 @@ const PageInApp = defineComponent({
 });
 
 describe('workspace dashboard', () => {
+  /*
+   * The screen opts into the workspace layout, so the sidebar beside it is
+   * mounted once and survives the click on a tree row that leaves this
+   * screen for a page (`e2e/frame.spec.ts`, "the sidebar survives a
+   * navigation", measures that; this reads the route record).
+   */
+  test('stands inside the workspace layout', async () => {
+    mockAll();
+    await mountSuspended(PageInApp);
+    const { useRouter } = await import('#imports');
+
+    expect(useRouter().getRoutes().find((route) => route.path === '/workspaces/:workspaceId()')?.meta.layout).toBe('workspace');
+  });
+
   test('loads the activity and opens the workspace-wide presence stream on mount', async () => {
     const { load, start } = mockAll();
     await mountSuspended(PageInApp);
