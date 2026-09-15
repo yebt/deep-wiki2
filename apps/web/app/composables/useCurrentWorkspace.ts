@@ -22,6 +22,18 @@ function lastWorkspaceCookie() {
 }
 
 /**
+ * The workspace the cookie remembers, read fresh — what `/` routes on.
+ * Read from the cookie rather than the shared state because the state is
+ * initialised once per app, possibly before the cookie was there, and a
+ * value that is not a workspace id as the database mints them is ignored,
+ * never routed to.
+ */
+export function rememberedWorkspaceId(): string | null {
+  const remembered = lastWorkspaceCookie().value;
+  return remembered && WORKSPACE_ID.test(remembered) ? remembered : null;
+}
+
+/**
  * The one workspace the person is in (apps/web/PRODUCT.md: "the workspace
  * is chosen once and everything else happens inside it"). App state rather
  * than a screen's ref: a screen that learns its workspace from a response
@@ -41,10 +53,7 @@ function lastWorkspaceCookie() {
  * away, never on a leak.
  */
 export function useCurrentWorkspace(): UseCurrentWorkspaceResult {
-  const workspaceId = useState<string | null>('dw-current-workspace', () => {
-    const remembered = lastWorkspaceCookie().value;
-    return remembered && WORKSPACE_ID.test(remembered) ? remembered : null;
-  });
+  const workspaceId = useState<string | null>('dw-current-workspace', rememberedWorkspaceId);
 
   function enter(id: string): void {
     if (workspaceId.value === id) return;

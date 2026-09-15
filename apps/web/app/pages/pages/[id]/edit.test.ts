@@ -500,7 +500,9 @@ describe('edit-mode page', () => {
 
   // §3 "Success": "Saved." is the exact weak example this rule names.
   // This must name what was saved, and must stop claiming it once the
-  // document is dirty again.
+  // document is dirty again. Scoped to `main`: the contextual bar carries
+  // a live region of its own since 2026-09-15 (the sidebar toggle's), and
+  // the save banner is the screen's, in the column.
   describe('the success confirmation', () => {
     test('names what was saved, not a bare "Saved."', async () => {
       mockDefaults({ status: 'success' });
@@ -510,7 +512,7 @@ describe('edit-mode page', () => {
       });
       const component = await mountSuspended(PageInApp, { global: { stubs: { EditorSurface: true, WorkspaceSidebar: true } } });
 
-      const banner = component.get('[role="status"][aria-live="polite"]');
+      const banner = component.get('main [role="status"][aria-live="polite"]');
       expect(banner.text()).not.toBe('Saved.');
       expect(banner.text()).toMatch(/My Page/);
     });
@@ -522,13 +524,13 @@ describe('edit-mode page', () => {
         session: { markdown: '# Hi\n', title: 'My Page', workspaceId: 'ws-1', lock: { holderUserId: 'me', acquiredAt: 'x', heartbeatAt: 'x' } },
       });
       const component = await mountSuspended(PageInApp, { global: { stubs: { EditorSurface: true, WorkspaceSidebar: true } } });
-      expect(component.find('[role="status"][aria-live="polite"]').exists()).toBe(true);
+      expect(component.find('main [role="status"][aria-live="polite"]').exists()).toBe(true);
 
       const editorStub = component.findComponent({ name: 'EditorSurface' });
       editorStub.vm.$emit('update', '# Hi\n\nedited again\n');
       await component.vm.$nextTick();
 
-      expect(component.find('[role="status"][aria-live="polite"]').exists()).toBe(false);
+      expect(component.find('main [role="status"][aria-live="polite"]').exists()).toBe(false);
     });
   });
 

@@ -140,7 +140,9 @@ describe('workspace members screen', () => {
     mockMembers({ status: 'not-found', message: 'This workspace does not exist, or you do not manage it.' });
     const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
-    const status = component.get('[role="status"]');
+    // Scoped to `main`: the contextual bar carries the sidebar toggle's own
+    // live region since 2026-09-15; the notice is the screen's, in the column.
+    const status = component.get('main [role="status"]');
     expect(status.text()).toMatch(/does not exist/i);
     expect(status.text()).toMatch(/manage/i);
     expect(component.find('form').exists()).toBe(false);

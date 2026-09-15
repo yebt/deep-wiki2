@@ -32,6 +32,22 @@ describe('last-workspace middleware', () => {
     expect(navigateToMock).toHaveBeenCalledWith('/workspaces/ws-remembered', { replace: true });
   });
 
+  test('with nothing remembered — a first visit, a cleared browser — `/` opens onto the list', () => {
+    document.cookie = `${LAST_WORKSPACE_COOKIE}=; path=/; max-age=0`;
+
+    lastWorkspace(to, to);
+
+    expect(navigateToMock).toHaveBeenCalledWith('/workspaces', { replace: true });
+  });
+
+  test('a cookie that is not a workspace id is ignored, never routed to', () => {
+    document.cookie = `${LAST_WORKSPACE_COOKIE}=${encodeURIComponent('../admin')}; path=/`;
+
+    lastWorkspace(to, to);
+
+    expect(navigateToMock).toHaveBeenCalledWith('/workspaces', { replace: true });
+  });
+
   test('the target it names is a real route, so the redirect cannot land on the not-found screen', async () => {
     const { useRouter } = await import('#imports');
     const paths = useRouter().getRoutes().map((route) => route.path);

@@ -19,6 +19,6 @@
  * one that discloses nothing (docs/UI-CHECKLIST.md §3).
  */
 export default defineNuxtRouteMiddleware(() => {
-  const { workspaceId } = useCurrentWorkspace();
-  return navigateTo(workspaceId.value ? `/workspaces/${workspaceId.value}` : '/workspaces', { replace: true });
+  const remembered = rememberedWorkspaceId();
+  return navigateTo(remembered ? `/workspaces/${remembered}` : '/workspaces', { replace: true });
 });

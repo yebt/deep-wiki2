@@ -190,7 +190,9 @@ describe('book-history screen', () => {
     const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
     expect(component.text()).toMatch(/no changes yet/i);
-    const notice = component.get('[role="status"]');
+    // Scoped to `main`: the contextual bar carries the sidebar toggle's own
+    // live region since 2026-09-15; the notice is the screen's, in the column.
+    const notice = component.get('main [role="status"]');
     expect(notice.find('a[href="/workspaces/ws-1"]').exists()).toBe(true);
   });
 });
