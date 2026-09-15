@@ -33,17 +33,19 @@ This file has three working sections plus a parking lot.
 
 ## Status
 
-_Last updated 2026-09-07._
+_Last updated 2026-09-14._
 
 | Phase | State |
 | --- | --- |
 | 0 — Foundations | Complete and archived (`openspec/changes/archive/2026-09-03-bootstrap-monorepo-foundations/`) |
-| 1 — Tenancy and permissions | SDD change complete — 85/85 tasks, all 18 work units. GATE-1 satisfied. Owner-reviewed and approved (`docs/UI-CHECKLIST.md` Review Log). One broader roadmap item stays open past this change: Super Root plan-authoring admin route (see the unticked bullet below) |
-| 2 — Content and editor | SDD change complete — 93/93 tasks, all 19 work units (`openspec/changes/content-and-editor/`). GATE-2 satisfied. One roadmap bullet stays partially shipped past this change: `/` slash commands cover heading/list/quote/code-block/divider only, not table/diagram-fence/callout/link-to-page (see the unticked bullet above) |
-| 3–9 | Not started |
+| 1 — Tenancy and permissions | SDD change complete and archived — 85/85 tasks, all 18 work units. GATE-1 satisfied. Owner-reviewed and approved (`docs/UI-CHECKLIST.md` Review Log). One broader roadmap item stays open past this change: Super Root plan-authoring admin route (see the unticked bullet below) |
+| 2 — Content and editor | SDD change complete and archived (`openspec/changes/archive/2026-09-07-content-and-editor/`), merged to `main` 2026-09-09. GATE-2 satisfied. One roadmap bullet stays partially shipped past this change: `/` slash commands cover heading/list/quote/code-block/divider only, not table/diagram-fence/callout/link-to-page (see the unticked bullet above) |
+| 3 — Versioning, diffs, comments and presence | **In progress — 88 of 97 tasks ticked** in `openspec/changes/versioning-and-collaboration/tasks.md` (counted 2026-09-14 by counting `- [x]` lines; 85 before this pass, then 6.9 ticked on the evidence of the read screen's `comments-unplaced` state and its e2e, 11.1 on the §7.2 rewrite below, and 11.2 because §14 already carried the row it asks for). Every build task in Phases 1–10 is done and every route is mounted (`apps/api/src/index.ts`). What remains is not code: the six **owner-review gates** (10.2, 10.4, 10.6, 10.8, 10.10, 10.12 — one per shipped surface, all still open, see `docs/UI-CHECKLIST.md` Review Log 2026-09-14) and Phase 11's remaining tasks (11.3 Findings, 11.4 `bun run verify`, 11.5 success-criteria confirmation). Two roadmap bullets below stay unticked past the change: the workspace-wide "what the team is working on" surface, which the change never scoped, and the per-viewer presence `mode` (`viewing`), which the shipped view derives from the lock and so only ever reports `editing` |
+| 4–9 | Not started |
 
-`openspec/changes/tenancy-and-permissions/` is ready to archive; see that change's
-`tasks.md` for the full 18-work-unit breakdown and traceability matrix.
+`openspec/changes/versioning-and-collaboration/` is the active change. Its `tasks.md` is
+the tick record; this table restates its count and must be corrected whenever the two
+disagree — the count above was taken by counting `- [x]` lines, not by reading a summary.
 
 ---
 
@@ -66,7 +68,9 @@ These are hard gates. Work that depends on them does not start until they are gr
 
 > **GATE-2 — Markdown round-trip suite before the editor ships.**
 > `markdown -> ProseMirror doc -> markdown` must be byte-identical across the full
-> fixture corpus, running in CI, before Milkdown is wired into a user-facing screen.
+> fixture corpus, running in CI, before the editor is wired into a user-facing screen.
+> (Written when the editor was planned on Milkdown; it shipped directly on ProseMirror —
+> `docs/SPECS.md` §5.1.)
 > Markdown is the source of truth; a lossy serializer silently corrupts user documents.
 >
 > **Status: SATISFIED (2026-09-07).** `packages/editor/src/round-trip.ts` runs the
@@ -113,7 +117,8 @@ Monorepo, containers, CI. Nothing user-facing.
 - [x] Create `packages/markdown` — placeholder for the shared unified/remark pipeline.
 - [x] Create `packages/contracts` — shared request/response schemas, the single source of
       truth for the API surface consumed by `apps/web` and `apps/api`.
-- [x] Create `packages/editor` — placeholder for Milkdown/ProseMirror integration.
+- [x] Create `packages/editor` — placeholder for the editor integration (planned on
+      Milkdown; built directly on ProseMirror in Phase 2, `docs/SPECS.md` §5.1).
 - [x] Create `packages/db` — schema, migrations, and the query layer.
 - [x] Write `compose.yaml` that runs unchanged under `podman compose` (local dev,
       Fedora) and `docker compose` (production).
@@ -129,8 +134,16 @@ Monorepo, containers, CI. Nothing user-facing.
 - [x] Keep all published host ports at 1024 or above so rootless podman can bind them.
 - [x] Document the local bootstrap in `README.md`: clone, `bun install`, `podman compose up`,
       migrate, seed.
-- [x] Base CI pipeline: install, typecheck, lint, unit tests, on every push.
-- [x] Add the `packages/core` purity check to CI.
+- [ ] ~~Base CI pipeline: install, typecheck, lint, unit tests, on every push.~~ **Unticked
+      2026-09-14.** `.github/workflows/ci.yml` exists with `verify`, `e2e` and
+      `compose-smoke` jobs, but this repository has no git remote (`git remote -v` prints
+      nothing), so the workflow has never run and cannot — "on every push" is a claim about a
+      push that does not happen. What actually gates every commit is `.githooks/pre-commit`
+      running `bun run check`, and `bun run verify` by hand before tagging. A tick here would
+      say CI enforces something; nothing does until a remote exists.
+- [ ] ~~Add the `packages/core` purity check to CI.~~ **Unticked 2026-09-14**, same reason.
+      `core-purity.ts` runs inside `bun run check`, which the workflow's `check` step calls —
+      but the workflow never executes. Enforcement is the pre-commit hook, locally.
 - [x] Define the `MailSender` and `BlobStore` port interfaces in `packages/core`
       (interfaces only — adapters land in Phase 1). They give `packages/core` real
       content to test and exercise the purity check against a genuine boundary.
@@ -140,7 +153,9 @@ Monorepo, containers, CI. Nothing user-facing.
       cannot run under `bun test`; see Findings. Add a structural check asserting Vitest
       appears in exactly one workspace member so the second runner cannot spread.
 - [x] Wire Playwright for e2e and prove it boots `apps/web` with one smoke test.
-- [x] Ensure CI exercises the build of all three apps, not only the two front-ends.
+- [x] Ensure CI exercises the build of all three apps, not only the two front-ends. (The
+      workflow file does — `landing` and `web` build, `api` typechecks because it has no
+      bundler — but see the two unticked CI bullets above: the file never runs.)
 - [x] Add `env.example` (copied to `.env` locally) and typed configuration loading that
       fails fast at startup with
       an actionable message naming the missing or malformed variable.
@@ -182,8 +197,13 @@ lives or dies; it is deliberately front-loaded.
       **Satisfied 2026-09-04** — see "Cross-cutting gates" above.
 - [x] Expose a single `can(subject, action, resource)` entry point in `packages/core`.
       Every read and write path — HTTP, MCP, background jobs — goes through it. Super
-      Root does not bypass `can()`; instance-level operations use a separate
-      `canOperateInstance()` (see `docs/SPECS.md` §14).
+      Root does not bypass `can()`. **Amended 2026-09-14:** this bullet used to say
+      instance-level operations go through "a separate `canOperateInstance()`". No such
+      function exists — the name survives only in a comment in
+      `packages/core/src/permissions/can.ts` and in prose. What exists is the
+      `requireSuperRoot()` middleware in `apps/api/src/routes/admin.ts`, which reads
+      `users.is_super_root` and gates the whole `/admin` sub-app. The decision (no bypass of
+      `can()`) holds; the function the bullet named was never written.
 - [x] Implement `registration_mode` as an instance setting: `closed` | `invitation_only` |
       `open`, defaulting to `invitation_only`.
 - [x] Gate `open` mode behind a verified SMTP configuration; refuse to enable it otherwise
@@ -218,6 +238,13 @@ The markdown pipeline and the two document modes.
       editor, the API and the future indexer. No second parser anywhere in the codebase.
 - [x] Implement stable block IDs: every block-level node (paragraph, heading, list item,
       code fence, table) carries a persistent identifier that survives edits above it.
+      **Amended 2026-09-14 — narrower than written.** `ANCHORABLE_BLOCKS` in
+      `packages/markdown/src/extensions/block-anchor.ts` is `paragraph`, `heading` and
+      `listItem`; a code fence or a table carries no anchor. And since commit `1d0a325` a
+      *block* is a top-level child of the document only (`topLevelBlocks()` in
+      `blocks.ts`), so a `^id` written on a list item is parsed and round-tripped but never
+      becomes a `page_blocks` row or a diff/comment target. The mechanism is shipped and
+      stable; the list of node types in this bullet is not the list the code has.
 - [x] Implement wiki-link parsing and a normalised link representation.
 - [x] Implement tag parsing.
 - [x] Implement the chunking function used later by RAG, keyed on block IDs so retrieval
@@ -243,33 +270,72 @@ The markdown pipeline and the two document modes.
       full bullet.
 - [x] Derive and store the `links` table on every save; replace rows rather than patching.
       The graph is a projection of content and is never user-editable directly.
-- [x] Implement backlinks as an index lookup over the derived `links` table.
-- [x] Implement tag listing and tag-filtered navigation.
+- [ ] ~~Implement backlinks as an index lookup over the derived `links` table.~~ **Unticked
+      2026-09-14 — half shipped.** The lookup exists: `GET /pages/:id/backlinks`
+      (`apps/api/src/routes/links.ts`), behind `can()`, tested. Nothing calls it: `rg
+      backlinks apps/web/app` finds no caller, and no screen shows a page's backlinks. An
+      endpoint with no consumer is an index, not a feature.
+- [ ] ~~Implement tag listing and tag-filtered navigation.~~ **Unticked 2026-09-14 — neither
+      half is what the bullet says.** There is no tag-listing endpoint at all (no
+      `GET /tags`); the only tag route is `GET /tags/:name/pages`
+      (`apps/api/src/routes/tags.ts`), and no code under `apps/web/app` calls it or renders
+      a tag anywhere. Tag *parsing* and the derived `page_tags` rows are done (bullet above);
+      listing and navigation are not started.
 - [x] Implement the navigation tree UI over `nodes` (shelves, books, chapters, pages) with
       drag reordering writing back to `position` (WU-17).
 
 ### Phase 3 — Versioning, diffs, comments and presence
 
-- [ ] Migrate `page_revision`: content snapshot plus the block index at that revision.
-- [ ] Migrate `changeset`: `(id, book_id, author_id, message, created_at)` — a commit-like
-      group of page revisions spanning a book.
-- [ ] Link every `page_revision` to its `changeset` so book-level history is one query.
-- [ ] Implement block-level diff over two block sets: added, removed, modified, **moved**.
+Ticks below were taken 2026-09-14 against the tree, not against
+`openspec/changes/versioning-and-collaboration/tasks.md`; the file and line named on each
+is the evidence. Every shipped screen in this phase is still waiting on its owner-review
+gate (tasks 10.2–10.12) — a tick here means built, mounted and tested, not reviewed.
+
+- [x] Migrate `page_revision`: content snapshot plus the block index at that revision.
+      `packages/db/drizzle/0012_page_revisions_and_changesets.sql`; rows are immutable by
+      trigger.
+- [x] Migrate `changeset`: `(id, book_id, author_id, message, created_at)` — a commit-like
+      group of page revisions spanning a book. Same migration; one open changeset per
+      `(workspace, book, author)` by partial unique index, closed by the
+      `CHANGESET_WINDOW_MINUTES` window.
+- [x] Link every `page_revision` to its `changeset` so book-level history is one query.
+      `GET /books/:id/history` (`apps/api/src/routes/revisions.ts`).
+- [x] Implement block-level diff over two block sets: added, removed, modified, **moved**.
       Moved is free with stable block IDs and impossible with line diffing — do not
-      fall back to a line differ.
-- [ ] Build the page-level diff view.
-- [ ] Build the book-level diff view answering "what changed in this book since <date>"
-      via changesets.
-- [ ] Migrate `comments` anchored to `(block_id, offset_within_block)` so reflow above the
-      anchor does not detach the comment.
-- [ ] Implement comment threads, resolution state, and mention notifications over
-      `MailSender`.
+      fall back to a line differ. `diffBlocks()` in `packages/markdown/src/diff-blocks.ts`,
+      re-parsing both sides; `scripts/checks/diff-input-purity.ts` forbids feeding it the
+      stored `block_index`.
+- [x] Build the page-level diff view. `apps/web/app/pages/pages/[id]/diff.vue` over
+      `GET /pages/:id/diff?from=&to=`.
+- [x] Build the book-level diff view answering "what changed in this book since <date>"
+      via changesets. `apps/web/app/pages/books/[id]/{history,diff}.vue` over
+      `GET /books/:id/{history,diff?since=}`, navigable between changed pages.
+- [x] Migrate `comments` anchored to `(block_id, offset_within_block)` so reflow above the
+      anchor does not detach the comment. `0013_comments.sql`: `block_id`, `offset_start`,
+      `offset_end`, `quote`, `quote_hash`, `status` (`anchored` | `orphaned`); migration
+      across a split follows `page_blocks.split_from` (`0011`); orphaning is one-way.
+- [x] Implement comment threads, resolution state, and mention notifications over
+      `MailSender`. `apps/api/src/routes/comments.ts` (`GET`/`POST /pages/:id/comments`,
+      `PATCH /comments/:threadId/resolved`); the read screen shows, replies to and resolves
+      threads. **Not shipped:** starting a *new* thread from read mode — there is no
+      affordance, and the client's only `POST /pages/:id/comments` call sends a reply
+      (`usePageComments.ts`). Recorded in Findings 2026-09-14.
 - [ ] Migrate `presence`: `(user_id, page_id, mode, last_seen_at)` where `mode` is
-      `viewing` | `editing`, with a short TTL.
-- [ ] Implement an SSE channel per workspace broadcasting presence changes. SSE is
+      `viewing` | `editing`, with a short TTL. **Shipped differently, left unticked on the
+      `viewing` half:** `presence` is a *view* over `page_locks`
+      (`0014_presence_view.sql`), not a table, so it carries no rows, no TTL of its own
+      (the lock's `PAGE_LOCK_TTL_SECONDS` is evaluated on read) and no composite-FK gap —
+      and its `mode` is the constant `'editing'`. Nobody is ever "viewing" as far as the
+      product can tell. `docs/SPECS.md` §7.2 now says this.
+- [x] Implement an SSE channel per workspace broadcasting presence changes. SSE is
       sufficient for one-way fan-out and survives proxies better than WebSockets.
-- [ ] Wire presence as the soft-lock signal: "Ana is editing, opened 4 minutes ago".
-- [ ] Surface "what the team is working on right now" in the workspace UI.
+      `GET /workspaces/:workspaceId/presence/stream` (`apps/api/src/routes/presence.ts`),
+      per-event `can(read)` before emitting, keep-alive poll of the view as the
+      multi-process fallback.
+- [x] Wire presence as the soft-lock signal: "Ana is editing, opened 4 minutes ago".
+      `PresenceIndicator.vue` on the read and edit screens via `usePresenceStream.ts`.
+- [ ] Surface "what the team is working on right now" in the workspace UI. Not scoped by
+      the change; presence is shown per page only.
 
 ### Phase 4 — Diagrams
 
@@ -414,6 +480,305 @@ makes conventions portable across projects.
 ## Findings
 
 Discoveries and constraints. Newest first.
+
+### 2026-09-14 — The edit screen's e2e mocked the one endpoint the bug lived behind, and two more tests that could not see what they named
+
+**What happened.** "Edit mode cannot save an existing page from a browser" was reachable from
+`/pages/:id/edit` on `main` while `e2e/editor.spec.ts` — thirteen tests, "includes
+edit-session/lock/take-over behind can()" by its own header — stayed green. It stayed green
+because the spec answers `GET /pages/:id/edit-session` itself: `page.route(\`${apiOrigin()}/pages/${PAGE_ID}/edit-session\`, …)`
+at four sites (lines 55, 98, 136, 200 at the time of writing), and three more in
+`e2e/presence.spec.ts`. The browser never asked the real API for the one response the save
+path is built from, so the suite proved the screen against the fixture it wrote, not against
+the server it ships with. The fix to the save bug is a sibling agent's, in `apps/**` and
+`e2e/**`, and is recorded there; this entry is about the test. It is the **twenty-third
+recorded instance** of a test passing for a reason unrelated to its name.
+
+**Two more of the same class, the same day, neither numbered because each is a smaller cut of
+the same shape.**
+
+- *`app.request()` never preflights.* `PATCH` was missing from the CORS `allowMethods` list in
+  `apps/api/src/index.ts`, so in a real browser the lock heartbeat, node rename and reorder,
+  and thread resolution were all refused at the preflight — while every route test passed,
+  because Hono's in-process `app.request()` sends the request and nothing before it. Commit
+  `a4bec8c` adds the method and a test that sends the `OPTIONS` a browser sends, with
+  `Access-Control-Request-Method: PATCH`, and asserts the answer lists it. Verified today
+  against a running API: `204`, `GET,POST,PUT,PATCH,DELETE,OPTIONS`.
+- *The book diff's happy path passed on a coin toss.* `GET /books/:id/diff` lists changed
+  pages in `SELECT DISTINCT` order over `page_id` (`packages/db/src/changesets/book-diff.ts`,
+  no `ORDER BY`), the seed mints those ids at random, and `e2e/book-history.spec.ts` asserted
+  that "Alpha" came first. Commit `741ceb9` reads the focused page's title off the screen and
+  asserts that page's own content, then drives Next and Previous against the other one.
+
+**Impact.** An e2e spec may stub a route only when the spec is *about* the stubbed failure
+(a 500, a network drop) and says so beside the stub; a spec named for a feature must reach
+that feature's endpoints on the real backend the harness already provisions —
+`e2e/comments.spec.ts` (commit `f4f9c3b`) is the shape to copy. A CORS claim is proved by an
+`OPTIONS` request, never by a route test. A test that depends on server-side order must
+either read the order off the response or the screen, or the route must declare an
+`ORDER BY` — the route still does not, and that is recorded below under "seen on the way".
+
+### 2026-09-14 — Four ways one agent erased another's work on a shared tree, and four environment quirks that read as application bugs
+
+Several agents worked the same checkout in one session. These are the incidents, each with
+the rule it earned. They are now in `docs/RUNNING.md` §7 and `CLAUDE.md`'s non-negotiables.
+
+1. **`pkill` on a broad pattern — three incidents.** Three times in one session a
+   `pkill -f <pattern>` matched a process the agent had not started — another agent's dev
+   server or test run, or another project's on this host (the `nuxt dev` case was already a
+   warning in `docs/RUNNING.md`) — and killed it mid-run. Rule: never kill a process you did
+   not start. Find the listener with `ss -ltnp | grep :<port>` and kill that pid, or the pid
+   you recorded when you spawned it. And the older finding still applies: killing the
+   `bun run -F` wrapper leaves the real server running — measured again today, the wrapper
+   died and `nuxt dev` (reparented to pid 1) kept port 3001.
+2. **`git add -A`, and `git add` on a shared barrel.** `-A` staged another agent's
+   half-written files into a commit whose message described none of them. The subtler one:
+   adding a package's `src/index.ts` staged a sibling's hunk in the same barrel file,
+   because a barrel is the one file every change in a package touches. Rule: `git add` the
+   paths you changed, run `git diff --cached` before every commit and read it, and if a
+   shared file carries hunks that are not yours, `git add -p` it.
+3. **`git stash` on a shared tree.** One agent stashed "its" changes to get a clean tree;
+   the stash took every uncommitted change in the checkout, including a sibling's completed
+   task, which was then lost when the stash was dropped. One full task, rewritten from
+   scratch. Rule: never `git stash` on a tree you do not own alone. If you need a clean
+   tree, you need your own worktree.
+4. **Backticks in `git commit -m`.** A message that quoted a command in backticks was
+   passed in double quotes; the shell substituted it, and the quoted command was the e2e
+   suite — a full Playwright run started as a side effect of committing. Rule:
+   `git commit -F <file>`, always — the message is a document, not an argument.
+
+The environment quirks, each verified against the tree or by running it today:
+
+- **One `nuxt dev` per checkout.** Nuxt's lock is `apps/web/.nuxt/nuxt.lock`, keyed by
+  checkout, not by port, so `DEEPWIKI_TEST_SLOT` — which moves every *port* the harness uses —
+  cannot route around it (`scripts/e2e.ts`, `checkNuxtLock()`, commit `26fd09e`). A second
+  dev server, or a second `bun run e2e`, in the same checkout needs a second worktree.
+- **`podman compose up --wait`'s exit code is not the health signal.** A sibling observed
+  exit `125` with every container healthy; the 2026-09-06 finding below observed `0`; the
+  bring-up run for `docs/RUNNING.md` today observed `0`. Read `podman ps` for `(healthy)`
+  and do not gate a script on the exit code alone.
+- **`expect(sql\`…\`).rejects` hangs `bun test`.** A postgres.js query is a thenable, not a
+  native Promise, and Bun's `.rejects` never settles on it. `packages/db/src/schema.test.ts`
+  carries `assertRejects()` (plain `try`/`await`/`catch`) for exactly this; use it, and treat
+  a `bun test` that never finishes as this before treating it as a deadlock in the code.
+- **`bun test` does not typecheck.** `e2e/global-setup.ts`'s `SeedResult` was missing every
+  onboarding and book-history field the seed actually printed and every test passed,
+  because the values were spread untyped into `JSON.stringify` (commit `95b4e73`). `bun run typecheck` is a separate gate
+  and a green `bun test` says nothing about types; the fix added a type-level test that
+  fails to *compile* when the two shapes drift.
+
+**Impact.** The four rules are non-negotiable for any agent or person on a shared checkout,
+and the cost of each was a sibling's work, not the offender's — which is why a rule is the
+only fix: nothing in the tooling can tell a process or a hunk you own from one you do not.
+
+### 2026-09-14 — `PORT` in the environment moves `nuxt dev` off `devServer.port`
+
+**What happened.** Running the documented bring-up for `docs/RUNNING.md` on a private
+stack, `bun --env-file=<env> run -F @deep-wiki/web dev` — the same `--env-file` form the API
+command uses — did not start on 3001. Nuxt logged `[get-port] Unable to find an available
+port (tried 14606 on host "localhost"). Using alternative port 3000.`: `14606` was that
+env's `PORT`, the *API's* port, and it was busy because the API was on it. Nuxt reads `PORT`
+from the environment ahead of `devServer.port` in `nuxt.config.ts`. With the shipped
+`env.example` (`PORT=3000`) the same command puts the web server on 3000 if the API is not
+yet up, or on a random free port if it is — and either way `APP_URL=http://localhost:3001`
+no longer names the page's origin, which is the CORS sign-in failure of 2026-09-09 all over
+again, by a different door. Run as documented — `bun run -F @deep-wiki/web dev`, no
+`--env-file`, `PORT` not exported — it listened on 3001 and `/login` answered 200.
+
+**Impact.** `docs/RUNNING.md` §1 now says why the two terminal commands differ in shape: the
+API needs the file, the web server must not see it. `bun run env:check` cannot catch this —
+it compares `.env` to `nuxt.config.ts`, and the mismatch is created at launch, not in
+either file.
+
+### 2026-09-14 — 81 `dw_test_*` databases leaked because a seed-only guard ran before `--drop` was read
+
+**What happened.** `e2e/seed.bun.ts` validated `CHANGESET_WINDOW_MINUTES` at module level,
+before `main()` looked at its arguments. `--drop` never calls `savePage()` and so never
+needs the value, and `global-setup.ts`'s teardown never sets it — so every e2e run's
+teardown threw before dropping anything, and the per-run database stayed behind. Found as
+**81 leaked `dw_test_*` databases** on the local harness Postgres (port 55432); dropped after
+the fix was verified. Commit `e9a1c78` moves the requirement to the seed path only,
+threaded through `seedFixtures()` as a parameter, and adds
+`scripts/checks/__tests__/e2e-seed-drop.test.ts`.
+
+**Impact.** A script that dispatches on a mode must validate per mode, after dispatch. An
+import-time guard is a guard on every mode, including the one that exists to clean up — and
+a cleanup that fails quietly is how a disposable resource becomes permanent. The count
+above is the measure of "quietly": 81 runs, no failure anyone read.
+
+### 2026-09-14 — An optional `changesetWindowMinutes` was a save that silently skipped its changeset
+
+**What happened.** `SavePageInput.changesetWindowMinutes` was `?: number`, and
+`writeRevision()` skipped changeset resolution entirely when it was `undefined` — no error,
+no log, a `page_revision` with no `changeset` behind it, invisible to `GET /books/:id/history`.
+The deviation that made it optional was justified by "49 call sites"; the real count when it
+was made required was **125 call sites** (10 production, 115 test — commit `8c89a06`), and
+the type is now `readonly changesetWindowMinutes: number` in
+`packages/db/src/content/save-page.ts`. `packages/db/testing/provision.ts` exports
+`TEST_CHANGESET_WINDOW_MINUTES` so tests state the value once.
+
+**Impact.** A value the save transaction needs is a required field, and the cost of making
+it required is paid once at the call sites; the cost of leaving it optional is paid by every
+book history that quietly omits a revision. And a count used to justify a shortcut is a
+claim like any other: measure it, do not carry it.
+
+### 2026-09-14 — A workspace could exist with no admin, `POST /invitations` answered whether a workspace existed, and nobody the product creates can create a workspace
+
+**Three defects on the same route family, found while building the new-workspace and members
+screens.**
+
+1. **`createWorkspace()` never granted the creator `manage`.** The grant lived in
+   `packages/db/seed.ts`, written *after* the call — so any other caller produced a
+   workspace nobody could manage. Commit `17aed6c` writes the grant inside the same
+   transaction through `insertGrants`, and a test proves `can(creator, manage, root)`
+   immediately after creation against a stranger the same resolver denies.
+2. **`POST /invitations` was an existence oracle.** A workspace that did not exist and a
+   workspace the caller could not manage answered differently. Commit `dcc9766` routes both
+   through one `notFound(c)` — `404 { error: 'not found' }` — from one call site, so the
+   two are indistinguishable, the property the 2026-09-08 finding below made the rule.
+3. **A user without a plan cannot create a workspace, and nothing assigns one.**
+   `createWorkspace` joins `plans` on `users.plan_id` and throws `NoPlanAssignedError`
+   (`403 { reason: 'no_plan' }` from `POST /workspaces`) when the row is null. Self-
+   registration and invitation acceptance both `INSERT INTO users` without `plan_id`
+   (`packages/db/src/auth/invitations.ts`); only the two seed scripts set it. So every
+   account the product itself creates is refused at the one screen that creates a
+   workspace, with a message that states the fact — and there is no admin route to change
+   it, because the Super Root plan-authoring route is the Phase 1 bullet still unticked.
+
+**Impact.** (1) and (2) are fixed. (3) is a product decision and goes to Open Questions:
+`docs/SPECS.md` §2 makes plans the Super Root's to author, and it says nothing about what a
+new account gets by default. Until that is answered, the new-workspace screen is reachable
+only by a seeded account, and the refusal is the honest state.
+
+### 2026-09-14 — The client cannot learn `manage` or `is_super_root`, so two links render for everyone and the destination refuses
+
+**What happened.** Two new entry points shipped: a **Members** link on the navigation tree
+(`apps/web/app/pages/workspaces/[workspaceId]/tree.vue`) and a **Registration settings**
+link in the app chrome (`AppShell.vue`). Both are meant to be gated — `manage` on the
+workspace root, `is_super_root` on the user — and both render unconditionally, because no
+response the client holds carries either fact: there is no `capabilities` field on any
+response, no `is_super_root` anywhere outside `apps/api/src/routes/admin.ts`, and no
+`GET /me`. The code says so at both sites ("a deliberate fallback, not a permission
+check"). The destination screens gate instead: `/admin/registration` on the API's `403`
+(`useInstanceSettings.ts`), and `/workspaces/:id/members` on the API's deliberately
+ambiguous `404` — `GET /workspaces/:id/members` answers "no such workspace" and "not yours
+to manage" identically, so the members screen shows its not-found state to a member without
+`manage`, and cannot show anything more honest.
+
+**Impact.** Open Question: which signal to add. A `capabilities` object on the responses a
+screen already fetches (`GET /workspaces`, `GET /pages/:id`) keeps one request and keeps
+non-disclosure — the server decides per resource what to name; a `GET /me` carrying
+`is_super_root` is one request for a global fact. Both are cheap; neither is decided, and
+until one is, every screen that reaches a gated destination must degrade the way these two
+do — reach it, and let the server refuse — rather than guess.
+
+### 2026-09-14 — Tonal fills measured 1.00–1.09:1 against their own containers; every tonal control now carries an outline-role ring
+
+**What happened.** The cross-screen audit measured Nuxt UI's `variant="soft"` at **1.02:1**
+on a `PageNotice`, **1.09:1** on the app bar and **1.00:1** as a diff badge on its own
+container row — a chip painted the same tone as the row it sits on is not a chip, it is
+text. The cause is structural: M3's filled-tonal container (`secondary-container`) and this
+project's container rungs (§1.4's ladder) are drawn from the same tone band, so wherever a
+tonal control lands on a container it disappears. Commit `d41ae67` fixes it once, in
+`apps/web/app/app.config.ts`: `TONAL_BOUNDARY = 'ring ring-inset'` and
+`tonalFill(color) = bg-{color}-container text-on-{color}-container ring ring-inset ring-{color}`,
+applied to `soft` and `subtle` on `UButton` and `UBadge`. Measured from the tone tables: the
+ring is ≥ 4.47:1 against the fill and against every surface, both themes, every alias.
+
+**Impact.** Recorded as a deviation in `docs/DESIGN-SYSTEM.md` §9.1 and §9.7 and change-logged
+in §14: M3's filled tonal button has no outline, and this project's does. The alternative —
+a tonal rung that is never a container rung — would cost a sixth surface level §1.4 forbids.
+
+### 2026-09-14 — Five notice shapes in nineteen hand-rolled copies, now three tiers in one file
+
+**What happened.** The same audit counted five distinct notice shapes across nineteen
+hand-rolled copies on the auth, read and edit screens. Commit `861afa0` states the tiers once
+in `apps/web/app/components/InlineNotice.vue`: **panel** (`PageNotice`, replaces a screen's
+content — denied, missing, locked, empty, failed), **bar** (`InlineNotice tier="bar"`, stands
+in for or beside a form — a result, a dead link, a refusal, with an opt-in focus move), and
+**chip** (`InlineNotice tier="chip"`, one line about the thing directly below it, at most one
+action). Edit mode's six save banners and the editor's mention-mismatch line moved to the
+chip tier. Today `<InlineNotice` appears at 25 sites in `apps/web/app`; the nineteen were the
+copies it replaced.
+
+**Impact.** `docs/DESIGN-SYSTEM.md` §14 change-logs the tiers. A notice that fits none of
+the three is a design question, not a fourth `div`.
+
+### 2026-09-14 — `ContentStore` followed `BlockRegistry` out, a block is top-level only, and one of the tombstone follow-ups is still open
+
+**Closing the loose ends of the tombstone finding below.**
+
+- **`ContentStore` deleted** (commit `cb467e5`), for the reason the finding gave for
+  `BlockRegistry`: a port with zero implementers, tested only by a stub in its own test
+  file. `rg "BlockRegistry|ContentStore" packages apps` now finds comments only. The
+  category stands: a port in `packages/core` earns a contract test when an adapter
+  implements it, and a stub-only port is deleted, not carried.
+- **A block is a top-level child, and both walkers say so** (commit `1d0a325`).
+  `buildBlockIndex` walked the whole tree with `visit()` and found a `^id` on a list item;
+  `sliceBlocks` walked `tree.children` and never saw it, so the anchor landed in
+  `page_content.block_index` with no `page_blocks` row behind it — the double-record the
+  earlier entry saw on the way. Both now share `topLevelBlocks()` in
+  `packages/markdown/src/blocks.ts`, and a regression test proves a list-item anchor
+  produces no index entry. Consequence: the `listItem` case in
+  `extensions/block-anchor.ts`'s `findBlockAnchor` is unreachable from either indexer. It
+  is *not* dead — `applyBlockAnchors` and `markCaretsForEscaping` still `visit()` the whole
+  tree so a list-item `^id` round-trips byte-for-byte — but it is a branch the registry
+  never takes, and a reader who assumes otherwise will look for a row that cannot exist.
+- **`PUT /pages/:id` now answers a reintroduced dead anchor with `409` and `corrected`**
+  (commit `40f9844`, `apps/api/src/routes/pages.ts`), and the edit screen no longer reports
+  it as a stale save (`87979d5`). Done.
+- **Still open:** `mintAnchorAtBlock` in `apps/api/src/routes/comments.ts` is called with
+  the markdown and the block id only — it does not receive the page's full id set as
+  `reservedIds`, so the comment-creation mint path can still collide with a tombstoned or
+  superseded id by chance. The refusal in `savePage` would then reject the comment's own
+  save with a `DeadAnchorError` the comment route does not catch. Follow-up, `apps/api`.
+
+**Impact.** As the tombstone entry states, plus: when a finding lists follow-ups, the next
+entry says which ones closed and which did not, by commit — otherwise "recorded here rather
+than acted on" reads as done a week later.
+
+### 2026-09-14 — Seen on the way, not fixed
+
+Small facts an audit or a build surfaced that nobody has acted on. Each is real today;
+none is a decision.
+
+- **The indicators endpoint has no client.** `GET /pages/:id/comments/indicators` counts
+  `anchored` roots only. The read screen fetches `GET /pages/:id/comments` once and derives
+  its own indicators, because orphaned threads would be invisible to the endpoint
+  (`usePageComments.ts`, and the comment there says so). The route is tested and mounted
+  and nothing calls it.
+- **`GET /books/:id/diff` orders pages by uuid, by accident.** `SELECT DISTINCT pr.page_id`
+  with no `ORDER BY` (`packages/db/src/changesets/book-diff.ts`). Postgres sorts to
+  de-duplicate, so the order is by id in practice and by nothing in contract. A reader
+  navigating "changed pages" sees them in a random-looking order; the route should declare
+  one (position in the book, or title).
+- **The app bar wraps the brand at 320px with four controls.** The read screen's own
+  comment measures three controls beside the brand at 320×900 with "no headroom for a
+  fourth"; the Registration settings link (`541856f`) is the fourth. The measurement in
+  the comment predates it and is stale.
+- **The tree skeleton omits the toolbar row.** `tree.vue`'s loading state is four bars; the
+  loaded state has a `NavigationTreeActions` toolbar above the rows, so the layout shifts
+  on load — checklist §3's "skeleton occupies the loaded box" for the rows, not for the
+  toolbar.
+- **No affordance to start a thread from read mode.** The read screen shows, replies to and
+  resolves threads; its pre-build contract records starting one as out of scope for that
+  batch. The only `POST /pages/:id/comments` call in `apps/web` sends `{ parentId, body }`.
+  A comment system nobody can open a thread in from the product is half a feature, and the
+  roadmap bullet above says so.
+- **Page diff options (a) and (c) are the owner's call.** The audit read the page diff as
+  "a highlighter pass over source, not a document" and laid out three directions
+  (`apps/web/app/pages/pages/[id]/diff.vue`, header comment): (a) render each block as
+  `doc-body` prose with a left rule and a badge, (b) keep the slabs and fix the badge, (c) a
+  "moved from here" ghost at the old position. (b) shipped in part — the badge, via the
+  tonal ring above; the before-text under a modified block needs the diff contract to carry
+  it. (a) and (c) go to Open Questions.
+- **Raw HTML in read mode** is now real elements through `rehype-raw` behind a hardened
+  sanitiser (`12b4870`, recorded in the 2026-09-09 "Two pipelines" entry), and
+  `docs/SPECS.md` §5.1 carries the paragraph that says read mode is a second pipeline whose
+  output the round-trip buckets do not describe.
+
+**Impact.** None of these blocks a gate. Each is here so that the next person to touch the
+file finds the fact beside the code and not in a transcript.
 
 ### 2026-09-14 — A tombstoned block id could be resurrected, and a superseded chain severed, on the only markdown write path
 
@@ -2608,6 +2973,37 @@ Fixtures kept permanently at `scripts/checks/__fixtures__/test-coverage/`:
 Decisions still owed. Move an entry out of this section once answered and record the answer
 in Findings.
 
+- **Default plan policy — what a new account gets.** `createWorkspace` refuses a user whose
+  `plan_id` is null (`NoPlanAssignedError` → `403 no_plan`), and both paths that create an
+  account — self-registration and invitation acceptance — leave it null; only the seed
+  scripts set one. `docs/SPECS.md` §2 makes plans the Super Root's to author and is silent
+  on a default. Options: a per-instance default plan assigned at account creation; a plan
+  chosen on the invitation; or no default, with the Super Root plan-authoring route (Phase 1,
+  still unticked) as the only assignment path. Until decided, only a seeded account can
+  reach `/workspaces/new` successfully. (Findings 2026-09-14.)
+- **Which signal tells the client `manage` and `is_super_root`.** No response carries a
+  `capabilities` field and there is no `GET /me`, so the Members and Registration-settings
+  links render for everyone and the destinations refuse. Either a `capabilities` object on
+  the responses screens already fetch, or a `/me` for the global flag — or both. Whichever
+  is chosen must not become an existence oracle: a capability the server names on a
+  resource the caller cannot read is a disclosure. (Findings 2026-09-14.)
+- **`page_revision` retention.** Every save inserts an immutable revision row carrying the
+  full markdown; nothing prunes, compacts or caps them. The table grows with every
+  keystroke-and-save on every page forever. Owed: a retention rule (keep all, keep N per
+  page, keep all within a window then thin), and who may run it. Not a Phase 3 question to
+  answer in-flight; recorded so the growth is a decision, not a surprise.
+- **Node deletion — three questions, unchanged since 2026-09-09.** (1) What happens to
+  children — the schema cascades by accident, not by choice. (2) What happens to revisions
+  and comments other people wrote — a hard delete destroys the audit trail; a soft delete
+  is a schema and permissions change. (3) What a deleted id discloses — absence and denial
+  must stay indistinguishable across tree, backlinks, mentions and MCP. See the Finding of
+  that date; deletion is a recorded non-goal on the tree screen until all three are
+  answered.
+- **Page diff directions (a) and (c).** The audit's (a) — render each diff block as
+  `doc-body` prose with a left rule and a badge, so the diff reads as a document — and (c) —
+  a "moved from here" ghost at the block's old position — are unimplemented and are the
+  owner's call; (b) is what shipped. Recorded in `apps/web/app/pages/pages/[id]/diff.vue`'s
+  header comment and in Findings 2026-09-14 ("Seen on the way").
 - **Registration answers the question password reset refuses.** `POST /auth/register`
   returns `409 "an account already exists for this email address"`, while
   `POST /auth/password-reset` goes to deliberate lengths — an identical body and now an
