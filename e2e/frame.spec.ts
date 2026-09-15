@@ -45,6 +45,12 @@ async function shot(page: Page, name: string): Promise<void> {
   await page.screenshot({ path: `${SHOTS}/frame-${name}.png`, fullPage: false });
 }
 
+/** The second batch's review material: focus mode and the comments toggle. */
+async function shot2(page: Page, name: string): Promise<void> {
+  if (!SHOTS) return;
+  await page.screenshot({ path: `${SHOTS}/frame2-${name}.png`, fullPage: false });
+}
+
 function overflow(page: Page) {
   return page.evaluate(() => ({
     scrollHeight: document.documentElement.scrollHeight,
@@ -242,7 +248,7 @@ for (const theme of ['light', 'dark'] as const) {
       const box = await overflow(page);
       expect(box.scrollWidth).toBeLessThanOrEqual(box.innerWidth);
 
-      await shot(page, `2-read-focus-1280-${theme}`);
+      await shot2(page, `read-focus-1280-${theme}`);
 
       // Persisted: the next visit opens on the document alone, with no
       // sidebar flashing by first.

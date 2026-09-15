@@ -171,7 +171,21 @@ const crumbs = computed<BreadcrumbItem[]>(() => {
         <UDashboardNavbar id="content-bar" as="header" tabindex="-1" class="outline-none" :ui="{ root: 'bg-elevated', left: 'flex-1' }">
           <template #left>
             <SidebarToggle />
-            <UBreadcrumb :items="crumbs" :ui="{ link: 'text-label-large', root: 'min-w-0 flex-1' }" aria-label="Where you are" />
+            <!-- Below `sm` only the last crumb shows — at 320 the bar
+                 also holds the drawer toggle and this screen's controls,
+                 and the workspace crumb rendered as "E." — while the rest
+                 stay for assistive technology. The workspace is one tap
+                 away in the drawer. -->
+            <UBreadcrumb
+              :items="crumbs"
+              :ui="{
+                link: 'text-label-large',
+                root: 'min-w-0 flex-1',
+                item: 'max-sm:sr-only max-sm:last:not-sr-only',
+                separator: 'max-sm:hidden',
+              }"
+              aria-label="Where you are"
+            />
           </template>
           <template #right>
             <slot name="header-end" />

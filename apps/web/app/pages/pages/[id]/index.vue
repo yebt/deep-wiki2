@@ -126,6 +126,51 @@ const comments = usePageComments(nodeId);
 const articleEl = ref<HTMLElement | null>(null);
 const { placed, unplaced } = useBlockPlacement(articleEl, comments.indicators);
 
+/**
+ * The comments toggle — the owner: "the comments on the document should
+ * also be toggleable". A display preference (`useCommentsVisibility`,
+ * a cookie beside the sidebar's), for someone who can comment:
+ *
+ * - **It changes nothing about what is fetched.** `comments.load()` runs
+ *   on every read, hidden or not, so the orphan chip and the count below
+ *   stay honest; and a read-only caller — for whom the API answers
+ *   `{ threads: [] }` — sees no marks and no toggle whichever way the
+ *   preference points, because the toggle is offered only when there are
+ *   threads to hide. A toggle that hides nothing is a control that does
+ *   nothing (§6).
+ * - **Hidden is not unaware.** While hidden, the toggle carries the
+ *   number of open threads on this page that mention the caller
+ *   (`usePageMentions`, off the workspace activity, asked for only in
+ *   this state), in its name and as a badge — §3's honesty rule applied
+ *   to a preference. The orphan chip stays regardless: a comment pointing
+ *   at removed text is a state the author needs, not decoration. The
+ *   "not placed yet" chip goes with the marks it is about.
+ * - The change is announced (§5) in a live region that is always in the
+ *   DOM and only changes text.
+ */
+const visibility = useCommentsVisibility();
+const commentsHidden = visibility.hidden;
+const hasThreads = computed(() => comments.threads.value.length > 0);
+const mentions = usePageMentions(nodeId, workspaceId);
+watch(
+  [commentsHidden, workspaceId, hasThreads],
+  ([hidden, workspace, threads]) => {
+    if (hidden && workspace && threads) void mentions.load();
+  },
+  { immediate: true },
+);
+const visibilityAnnouncement = ref('');
+const commentsToggleLabel = computed(() => {
+  if (!commentsHidden.value) return 'Hide comments';
+  const count = mentions.count.value;
+  return count > 0 ? `Show comments — ${count} open thread${count === 1 ? '' : 's'} mention${count === 1 ? 's' : ''} you` : 'Show comments';
+});
+
+function toggleComments(): void {
+  visibility.toggle();
+  visibilityAnnouncement.value = commentsHidden.value ? 'Comments hidden.' : 'Comments shown.';
+}
+
 const panelOpen = ref(false);
 const focusBlockId = ref<string | null>(null);
 const busy = ref(false);
@@ -210,6 +255,29 @@ useSeoMeta({ title: () => (title.value ? `${title.value} — deep-wiki` : 'deep-
            since when — informational only, never a lock of any kind on
            this screen (docs/UI-CHECKLIST.md §4.8). -->
       <PresenceIndicator :editors="presence.editors.value" class="mr-2" />
+      <!-- The comments toggle (see the script's note): icon-only, so a name
+           and a tooltip both (§4.3); the name carries the mention count
+           while hidden, and the badge — `UChip`, M3's numbered badge
+           (§9.7) — says it at a glance. Before the page's other views, and
+           at the same size and emphasis as History beside it. -->
+      <UChip v-if="hasThreads" :show="commentsHidden && mentions.count.value > 0" color="info" size="xl" inset>
+        <template #content>
+          <span data-testid="comments-mention-badge">{{ mentions.count.value }}</span>
+        </template>
+        <UTooltip :text="commentsToggleLabel">
+          <UButton
+            :icon="commentsHidden ? 'i-lucide-message-square-off' : 'i-lucide-message-square'"
+            variant="ghost"
+            color="neutral"
+            size="sm"
+            square
+            :aria-label="commentsToggleLabel"
+            :aria-pressed="!commentsHidden"
+            @click="toggleComments"
+          />
+        </UTooltip>
+      </UChip>
+      <p data-testid="comments-visibility-status" role="status" aria-live="polite" class="sr-only">{{ visibilityAnnouncement }}</p>
       <!-- The way to this page's revision history. Until now `/pages/:id/
            history` was reachable only by typing the URL — a screen nobody
            can navigate to is not shipped, which is this repository's
@@ -360,14 +428,17 @@ useSeoMeta({ title: () => (title.value ? `${title.value} — deep-wiki` : 'deep-
       <!-- The overlay's degraded states, above the article they are about
            (see the script's own note). `role="status"` on the two the user
            navigated into; `alert` on the one that failed. -->
-      <div v-if="comments.orphaned.value.length > 0 || unplacedThreadCount > 0 || comments.status.value === 'network-error'" class="mb-4 space-y-2">
+      <div
+        v-if="comments.orphaned.value.length > 0 || (unplacedThreadCount > 0 && !commentsHidden) || comments.status.value === 'network-error'"
+        class="mb-4 space-y-2"
+      >
         <InlineNotice v-if="comments.orphaned.value.length > 0" data-testid="comments-orphaned" tier="chip" tone="warning">
           {{ plural(comments.orphaned.value.length, 'comment') }} point{{ comments.orphaned.value.length === 1 ? 's' : '' }} at text that is no longer on this page.
           <template #actions>
             <UButton size="sm" variant="ghost" color="neutral" icon="i-lucide-message-square" @click="openAll">Show</UButton>
           </template>
         </InlineNotice>
-        <InlineNotice v-if="unplacedThreadCount > 0" data-testid="comments-unplaced" tier="chip" tone="warning">
+        <InlineNotice v-if="unplacedThreadCount > 0 && !commentsHidden" data-testid="comments-unplaced" tier="chip" tone="warning">
           {{ plural(unplacedThreadCount, 'comment') }} can't be shown beside {{ unplacedThreadCount === 1 ? 'its' : 'their' }} text until this page is re-rendered.
           <template #actions>
             <UButton size="sm" variant="ghost" color="neutral" icon="i-lucide-message-square" @click="openAll">Show</UButton>
@@ -396,8 +467,8 @@ useSeoMeta({ title: () => (title.value ? `${title.value} — deep-wiki` : 'deep-
           :style="{ top: `${highlight.top}px`, height: `${highlight.height}px` }"
         />
         <!-- eslint-disable-next-line vue/no-v-html -- `html` is server-produced by remark-rehype + rehype-sanitize with an explicit allowlist (design.md D12); it is never client-supplied or user-editable at this route. -->
-        <article ref="articleEl" class="doc-body text-doc-body text-default" :class="placed.length > 0 ? 'pe-10 md:pe-0' : undefined" v-html="html" />
-        <CommentGutter :marks="placed" :active-block-id="panelOpen ? focusBlockId : null" @open="openBlock" />
+        <article ref="articleEl" class="doc-body text-doc-body text-default" :class="placed.length > 0 && !commentsHidden ? 'pe-10 md:pe-0' : undefined" v-html="html" />
+        <CommentGutter v-if="!commentsHidden" :marks="placed" :active-block-id="panelOpen ? focusBlockId : null" @open="openBlock" />
       </div>
 
       <CommentThreadPanel

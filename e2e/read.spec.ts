@@ -142,3 +142,146 @@ test('the read skeleton occupies the box the loaded document takes: title and fi
   expect(Math.abs(skeletonLine.height - loadedParagraphLine), `line box: skeleton ${skeletonLine.height}, prose ${loadedParagraphLine}`).toBeLessThanOrEqual(1);
 });
 
+
+/**
+ * The comments toggle (docs/UI-CHECKLIST.md Review Log, 2026-09-15: "the
+ * comments on the document should also be toggleable"). A display
+ * preference for someone who can comment, against a real backend: the
+ * commenter, the threads and the page are minted by
+ * `e2e/comments-fixtures.bun.ts`, as in `e2e/comments.spec.ts`, and the
+ * mention that puts a number on the toggle is a real reply posted through
+ * the panel — `@E2E Commenter` in a body is what the activity query reads.
+ *
+ * Two things a component test cannot hold are held here: that the marks
+ * and the badge are what the browser shows after a reload (the cookie),
+ * and — the invariant — that a read-only caller, whichever way the
+ * preference points, sees no toggle and no marks, because the API still
+ * answers them `{ threads: [] }` and the client still draws nothing.
+ */
+interface CommentFixtures {
+  readonly commenterSessionToken: string;
+  readonly commentsPageId: string;
+  readonly commentsPageTitle: string;
+}
+
+const SHOTS = process.env.DEEPWIKI_FRAME_SHOTS ?? '';
+
+async function shot(page: Page, name: string): Promise<void> {
+  if (!SHOTS) return;
+  await page.screenshot({ path: `${SHOTS}/frame2-${name}.png`, fullPage: false });
+}
+
+test.describe('the comments toggle', () => {
+  let comments: CommentFixtures;
+
+  test.beforeAll(async () => {
+    const { execFileSync } = await import('node:child_process');
+    const { join } = await import('node:path');
+    const seed: { workspaceId: string } = JSON.parse(readFileSync(new URL('.auth-fixtures.json', import.meta.url), 'utf8'));
+    const output = execFileSync('bun', ['run', 'e2e/comments-fixtures.bun.ts', seed.workspaceId], {
+      cwd: join(import.meta.dirname, '..'),
+      encoding: 'utf8',
+      env: { ...process.env, CHANGESET_WINDOW_MINUTES: '30' },
+    });
+    comments = JSON.parse(output.trim().split('\n').pop()!);
+  });
+
+  for (const theme of ['light', 'dark'] as const) {
+    test.describe(`1280x900 ${theme}`, () => {
+      test.use({ viewport: { width: 1280, height: 900 } });
+
+      test('a commenter hides the marks; while hidden the toggle counts the open threads that mention them; the choice survives a reload', async ({
+        page,
+        context,
+      }) => {
+        await signInAs(context, comments.commenterSessionToken);
+        await useTheme(page, theme);
+
+        await page.goto(`/pages/${comments.commentsPageId}`);
+        await expect(page.getByRole('heading', { level: 1, name: comments.commentsPageTitle })).toBeVisible({ timeout: 30000 });
+        const mark = page.getByRole('button', { name: /comments? on this block$/ });
+        await expect(mark).toBeVisible({ timeout: 30000 });
+
+        // A real mention, posted through the panel, so the count below is
+        // the server's answer and not a fixture's.
+        await mark.click();
+        const panel = page.getByRole('dialog', { name: 'Comments' });
+        await expect(panel).toBeVisible();
+        await panel.getByLabel('Reply').fill('@E2E Commenter please confirm the date.');
+        await panel.getByRole('button', { name: 'Reply' }).click();
+        await expect(panel.getByRole('status').filter({ hasText: 'Reply posted.' })).toBeVisible({ timeout: 30000 });
+        await page.keyboard.press('Escape');
+        await expect(panel).toBeHidden();
+
+        // Hide: the marks go, the toggle says what is hidden and how many
+        // threads name the person, and the change is announced.
+        const hide = page.getByRole('button', { name: 'Hide comments' });
+        await expect(hide).toBeVisible();
+        await hide.click();
+        await expect(page.getByRole('button', { name: /on this block$/ })).toHaveCount(0);
+        const show = page.getByRole('button', { name: 'Show comments — 1 open thread mentions you' });
+        await expect(show).toBeVisible({ timeout: 30000 });
+        await expect(page.getByTestId('comments-mention-badge')).toHaveText('1');
+        await expect(page.getByRole('status').filter({ hasText: 'Comments hidden.' })).toHaveCount(1);
+        // The article keeps its measure: the marks stood outside it.
+        const article = (await page.locator('article').boundingBox())!;
+        expect(Math.round(article.width * 10) / 10).toBeCloseTo(658.9, 0);
+
+        await shot(page, `read-comments-hidden-1280-${theme}`);
+
+        // Remembered.
+        await page.reload();
+        await expect(page.getByRole('heading', { level: 1, name: comments.commentsPageTitle })).toBeVisible({ timeout: 30000 });
+        await expect(page.getByRole('button', { name: /on this block$/ })).toHaveCount(0);
+        await expect(page.getByRole('button', { name: 'Show comments — 1 open thread mentions you' })).toBeVisible({ timeout: 30000 });
+
+        // And back.
+        await page.getByRole('button', { name: /^Show comments/ }).click();
+        await expect(page.getByRole('button', { name: /on this block$/ })).toHaveCount(1);
+        await expect(page.getByRole('button', { name: 'Hide comments' })).toBeVisible();
+        await expect(page.getByTestId('comments-mention-badge')).toHaveCount(0);
+      });
+    });
+  }
+
+  test.describe('320x900 light, the document alone', () => {
+    test.use({ viewport: { width: 320, height: 900 } });
+
+    test('hidden comments, focus mode persisted: the badge still counts, nothing scrolls sideways', async ({ page, context }) => {
+      await signInAs(context, comments.commenterSessionToken);
+      await useTheme(page, 'light');
+      await context.addCookies([
+        { name: 'dw-comments', value: 'hidden', domain: 'localhost', path: '/' },
+        { name: 'dw-frame-sidebar-workspace', value: encodeURIComponent(JSON.stringify({ size: 17.5, collapsed: true })), domain: 'localhost', path: '/' },
+      ]);
+
+      await page.goto(`/pages/${comments.commentsPageId}`);
+      await expect(page.getByRole('heading', { level: 1, name: comments.commentsPageTitle })).toBeVisible({ timeout: 30000 });
+      await expect(page.getByRole('button', { name: /on this block$/ })).toHaveCount(0);
+      await expect(page.getByRole('button', { name: /^Show comments — \d+ open thread/ })).toBeVisible({ timeout: 30000 });
+      const box = await page.evaluate(() => ({ scrollWidth: document.documentElement.scrollWidth, innerWidth: window.innerWidth }));
+      expect(box.scrollWidth).toBeLessThanOrEqual(box.innerWidth);
+
+      await shot(page, 'read-comments-hidden-320-light');
+    });
+  });
+
+  test.describe('the read-only invariant', () => {
+    test.use({ viewport: { width: 1280, height: 900 } });
+
+    for (const preference of ['hidden', 'shown'] as const) {
+      test(`a reader with read but not comment gets no toggle and no marks with the preference "${preference}"`, async ({ page, context }) => {
+        await signInAs(context, fixtures.readerSessionToken);
+        await context.addCookies([{ name: 'dw-comments', value: preference, domain: 'localhost', path: '/' }]);
+
+        await page.goto(`/pages/${comments.commentsPageId}`);
+        await expect(page.getByRole('heading', { level: 1, name: comments.commentsPageTitle })).toBeVisible({ timeout: 30000 });
+
+        await expect(page.locator('[data-block-id="E2ECMTTWO"]')).toHaveCount(1);
+        await expect(page.getByRole('button', { name: /on this block$/ })).toHaveCount(0);
+        await expect(page.getByRole('button', { name: /^(Hide|Show) comments/ })).toHaveCount(0);
+        expect(await page.content()).not.toContain('Is this paragraph still accurate');
+      });
+    }
+  });
+});

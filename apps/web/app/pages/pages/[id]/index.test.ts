@@ -5,18 +5,21 @@ import { computed, defineComponent, h, nextTick, ref } from 'vue';
 import type { CommentThread } from '@deep-wiki/contracts';
 import ReadPage from './index.vue';
 
-const { usePageReadMock, usePresenceStreamMock, usePageCommentsMock, useRouteMock, useWorkspaceTreeMock, useWorkspaceDirectoryMock } = vi.hoisted(() => ({
-  usePageReadMock: vi.fn(),
-  usePresenceStreamMock: vi.fn(),
-  usePageCommentsMock: vi.fn(),
-  useRouteMock: vi.fn(() => ({ params: { id: 'page-1' } })),
-  useWorkspaceTreeMock: vi.fn(),
-  useWorkspaceDirectoryMock: vi.fn(),
-}));
+const { usePageReadMock, usePresenceStreamMock, usePageCommentsMock, usePageMentionsMock, useRouteMock, useWorkspaceTreeMock, useWorkspaceDirectoryMock } =
+  vi.hoisted(() => ({
+    usePageReadMock: vi.fn(),
+    usePresenceStreamMock: vi.fn(),
+    usePageCommentsMock: vi.fn(),
+    usePageMentionsMock: vi.fn(),
+    useRouteMock: vi.fn(() => ({ params: { id: 'page-1' } })),
+    useWorkspaceTreeMock: vi.fn(),
+    useWorkspaceDirectoryMock: vi.fn(),
+  }));
 
 mockNuxtImport('usePageRead', () => usePageReadMock);
 mockNuxtImport('usePresenceStream', () => usePresenceStreamMock);
 mockNuxtImport('usePageComments', () => usePageCommentsMock);
+mockNuxtImport('usePageMentions', () => usePageMentionsMock);
 mockNuxtImport('useRoute', () => useRouteMock);
 mockNuxtImport('useWorkspaceTree', () => useWorkspaceTreeMock);
 mockNuxtImport('useWorkspaceDirectory', () => useWorkspaceDirectoryMock);
@@ -66,6 +69,7 @@ const PageInApp = defineComponent({
 const mounted: Awaited<ReturnType<typeof mountSuspended>>[] = [];
 
 async function mount() {
+  useCommentsVisibility().hidden.value = false;
   const wrapper = await mountSuspended(PageInApp);
   mounted.push(wrapper);
   return wrapper;
@@ -87,7 +91,15 @@ function mockRead(overrides: Partial<{ status: string; html: string; title: stri
   });
   mockPresence();
   mockComments();
+  mockMentions();
   mockFrame();
+  return load;
+}
+
+/** The mention count for the hidden state's badge, mocked at its boundary; `usePageMentions.test.ts` holds the derivation. */
+function mockMentions(count = 0) {
+  const load = vi.fn(async () => {});
+  usePageMentionsMock.mockReturnValue({ count: ref(count), status: ref(count > 0 ? 'success' : 'idle'), load });
   return load;
 }
 
@@ -429,6 +441,101 @@ describe('read-mode page', () => {
       document.body.querySelector<HTMLElement>('[role="dialog"] button[aria-label="Close"]')!.click();
       await settle();
       expect(component.find('[data-testid="comment-highlight"]').exists()).toBe(false);
+    });
+
+    /*
+     * The comments toggle. A display preference for someone who can
+     * comment: it hides the marks and the panel, not the request and not
+     * the orphan chip. The caller in every test below *has* threads — a
+     * toggle tested against `{ threads: [] }` exercises nothing, because
+     * a read-only caller gets no toggle and no marks whichever way the
+     * preference points, which is the invariant the last test holds.
+     */
+    describe('the comments toggle', () => {
+      test('is offered only to a caller with threads to hide, and hides the marks — the request is made either way', async () => {
+        mockRead({ status: 'success', title: 'A Page', html: ANCHORED_HTML });
+        const load = mockComments([commentThread({ id: 't1', blockId: 'b1' })]);
+        const component = await mount();
+        await settle();
+
+        const toggle = component.get('header button[aria-label="Hide comments"]');
+        expect(toggle.text()).toBe('');
+        expect(component.findAll('button[aria-label$="on this block"]')).toHaveLength(1);
+
+        await toggle.trigger('click');
+        await settle();
+
+        expect(component.findAll('button[aria-label$="on this block"]')).toHaveLength(0);
+        expect(component.find('header button[aria-label^="Show comments"]').exists()).toBe(true);
+        expect(component.get('[data-testid="comments-visibility-status"]').text()).toBe('Comments hidden.');
+        expect(load).toHaveBeenCalledTimes(1);
+      });
+
+      test('starts hidden when the preference says so, still fetches, and shows again on the toggle', async () => {
+        mockRead({ status: 'success', title: 'A Page', html: ANCHORED_HTML });
+        const load = mockComments([commentThread({ id: 't1', blockId: 'b1' })]);
+        useCommentsVisibility().hidden.value = true;
+        const wrapper = await mountSuspended(PageInApp);
+        mounted.push(wrapper);
+        await settle();
+
+        expect(load).toHaveBeenCalledTimes(1);
+        expect(wrapper.findAll('button[aria-label$="on this block"]')).toHaveLength(0);
+        await wrapper.get('header button[aria-label^="Show comments"]').trigger('click');
+        await settle();
+        expect(wrapper.findAll('button[aria-label$="on this block"]')).toHaveLength(1);
+        expect(wrapper.get('[data-testid="comments-visibility-status"]').text()).toBe('Comments shown.');
+      });
+
+      test('while hidden, open threads that mention the caller are counted on the toggle, in the name and as a badge', async () => {
+        mockRead({ status: 'success', title: 'A Page', html: ANCHORED_HTML, workspaceId: 'ws-1' });
+        mockComments([commentThread({ id: 't1', blockId: 'b1' })]);
+        const loadMentions = mockMentions(2);
+        useCommentsVisibility().hidden.value = true;
+        const wrapper = await mountSuspended(PageInApp);
+        mounted.push(wrapper);
+        await settle();
+
+        expect(loadMentions).toHaveBeenCalled();
+        const toggle = wrapper.get('header button[aria-label^="Show comments"]');
+        expect(toggle.attributes('aria-label')).toBe('Show comments — 2 open threads mention you');
+        expect(wrapper.get('[data-testid="comments-mention-badge"]').text()).toBe('2');
+
+        // Shown again: the badge has nothing to say.
+        await toggle.trigger('click');
+        await settle();
+        expect(wrapper.find('[data-testid="comments-mention-badge"]').exists()).toBe(false);
+      });
+
+      test('hiding keeps the orphan chip — a state the author needs — and drops the unplaced chip, which is about the hidden marks', async () => {
+        mockRead({ status: 'success', title: 'A Page', html: ANCHORED_HTML });
+        mockComments([commentThread({ id: 't1', blockId: 'b1' }), commentThread({ id: 't2', blockId: 'gone', orphaned: true }), commentThread({ id: 't3', blockId: 'unknown' })]);
+        useCommentsVisibility().hidden.value = true;
+        const wrapper = await mountSuspended(PageInApp);
+        mounted.push(wrapper);
+        await settle();
+
+        expect(wrapper.find('[data-testid="comments-orphaned"]').exists()).toBe(true);
+        expect(wrapper.find('[data-testid="comments-unplaced"]').exists()).toBe(false);
+      });
+
+      test('a read-only caller gets no toggle and no marks whichever way the preference points', async () => {
+        for (const hidden of [true, false]) {
+          mockRead({ status: 'success', title: 'A Page', html: ANCHORED_HTML });
+          const load = mockComments([]);
+          const loadMentions = mockMentions(0);
+          useCommentsVisibility().hidden.value = hidden;
+          const wrapper = await mountSuspended(PageInApp);
+          mounted.push(wrapper);
+          await settle();
+
+          expect(load, `hidden=${hidden}`).toHaveBeenCalledTimes(1);
+          expect(loadMentions, `hidden=${hidden}`).not.toHaveBeenCalled();
+          expect(wrapper.find('header button[aria-label*="comments"]').exists(), `hidden=${hidden}`).toBe(false);
+          expect(wrapper.find('button[aria-label$="on this block"]').exists(), `hidden=${hidden}`).toBe(false);
+          wrapper.unmount();
+        }
+      });
     });
 
     // comment-threads spec: "Orphan Is A First-Class State, Never An

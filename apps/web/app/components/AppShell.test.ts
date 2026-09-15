@@ -153,6 +153,23 @@ describe('AppShell', () => {
       expect(html.indexOf('aria-label="Hide sidebar"')).toBeLessThan(html.indexOf('aria-label="Where you are"'));
     });
 
+    // At 320 the bar holds the drawer toggle, up to four controls and the
+    // breadcrumb; measured on 2026-09-15 the workspace crumb rendered as
+    // "E." — clipped text (§6). Below `sm` only the last crumb is shown;
+    // the rest stay for assistive technology, and the workspace is one tap
+    // away in the drawer. What this holds is the classes; the 320 shot in
+    // the review material is what shows it.
+    test('below sm the breadcrumb shows the last crumb only, keeping the rest for screen readers', async () => {
+      const component = await mountShell({ workspaceId: 'ws-1', nodeId: 'page-1' });
+
+      const items = component.get('nav[aria-label="Where you are"]').findAll('[data-slot="item"]');
+      expect(items.length).toBeGreaterThan(1);
+      for (const item of items) expect(item.classes()).toEqual(expect.arrayContaining(['max-sm:sr-only', 'max-sm:last:not-sr-only']));
+      for (const separator of component.get('nav[aria-label="Where you are"]').findAll('[data-slot="separator"]')) {
+        expect(separator.classes()).toContain('max-sm:hidden');
+      }
+    });
+
     test('`header-end` is the contextual bar’s action area, beside the breadcrumb', async () => {
       const component = await mountShell({ workspaceId: 'ws-1' }, () => h('button', { type: 'button' }, 'Edit'));
 
