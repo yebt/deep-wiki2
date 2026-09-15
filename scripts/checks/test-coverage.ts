@@ -139,10 +139,6 @@ export const ALLOW_LIST: readonly Exemption[] = [
       'Coverage debt: only the argv/exit-code shell is untested.',
   },
   {
-    file: 'packages/db/src/permissions/grants.ts',
-    reason: 'Coverage debt: the permissions write path has no test of its own.',
-  },
-  {
     file: 'packages/contracts/src/comments.ts',
     reason:
       'Coverage debt, same shape as pages.ts above: the comment request/response schemas are exercised ' +
