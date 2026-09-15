@@ -98,7 +98,15 @@ watch(
   (value) => {
     if (value === 'ready' && session.value) {
       currentMarkdown.value = session.value.markdown;
-      savedContentHash.value = session.value.lock ? (contentHash.value ?? null) : null;
+      // page-content spec, D16: `useSavePage`'s `contentHash` genuinely
+      // starts `null`, and stays `null` until this session's own first
+      // Save resolves. Without seeding it from the edit-session response
+      // here, that first Save on an already-saved page sends
+      // `expectedContentHash: null` — which `savePage()` treats as a
+      // brand-new page and refuses with a stale-content 409 on every page
+      // that already has content (docs/TODO.md Finding, this task).
+      contentHash.value = session.value.contentHash;
+      savedContentHash.value = session.value.contentHash;
       isDirty.value = false;
       void heartbeat.start();
       if (myUserId.value === null) myUserId.value = session.value.lock.holderUserId;

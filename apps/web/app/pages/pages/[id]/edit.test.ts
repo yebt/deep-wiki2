@@ -137,6 +137,48 @@ describe('edit-mode page', () => {
     expect(back.find('[class*="i-lucide-eye"], .iconify').exists()).toBe(true);
   });
 
+  // The trap: `useSavePage`'s `contentHash` genuinely starts `null` — every
+  // OTHER test in this file gets away with `mockDefaults()`'s hardcoded
+  // `ref('hash-1')`, which is why none of them would have caught this.
+  // Loading an edit session for a page that already has content (an
+  // `expectedContentHash` of `null` only belongs to a brand-new page) must
+  // seed the real hash from the session so the first Save sends it, rather
+  // than the `null` that made every existing page unsavable from a real
+  // browser (docs/TODO.md Finding, this task).
+  test('seeds the first Save with the edit-session content hash, not null, on a page that already has content', async () => {
+    useLockHeartbeatMock.mockReturnValue({ status: ref('idle'), start: vi.fn(async () => {}), stop: vi.fn() });
+    const save = vi.fn(async () => {});
+    useSavePageMock.mockReturnValue({
+      status: ref('idle'),
+      contentHash: ref<string | null>(null),
+      canonical: ref(null),
+      corrected: ref(null),
+      anchors: ref([]),
+      message: ref(''),
+      save,
+    });
+    mockPresence();
+    mockSession({
+      status: 'ready',
+      session: {
+        markdown: '# Hi\n',
+        title: 'Hi',
+        workspaceId: 'ws-1',
+        contentHash: 'server-hash',
+        lock: { holderUserId: 'me', acquiredAt: 'x', heartbeatAt: 'x' },
+      },
+    });
+    const component = await mountSuspended(PageInApp, { global: { stubs: { EditorSurface: true } } });
+    const editorStub = component.findComponent({ name: 'EditorSurface' });
+    editorStub.vm.$emit('update', '# Hi\n\nedited\n');
+    await component.vm.$nextTick();
+
+    const saveButton = component.findAll('button').find((button) => /Save/.test(button.text()))!;
+    await saveButton.trigger('click');
+
+    expect(save).toHaveBeenCalledWith('# Hi\n\nedited\n', 'server-hash');
+  });
+
   test('renders both "Open read-only" and "Take over editing" simultaneously when locked', async () => {
     mockDefaults();
     mockSession({

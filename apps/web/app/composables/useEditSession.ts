@@ -4,6 +4,14 @@ export interface EditSessionReady {
   readonly markdown: string;
   readonly title: string;
   readonly workspaceId: string;
+  /**
+   * The row's `content_hash` (page-content spec, D16). edit.vue seeds
+   * `useSavePage`'s `contentHash` from this on the ready transition, so the
+   * first Save on an already-saved page sends a real
+   * `expectedContentHash` instead of `null` (docs/TODO.md Finding, this
+   * task).
+   */
+  readonly contentHash: string;
   readonly lock: { readonly holderUserId: string; readonly acquiredAt: string; readonly heartbeatAt: string };
 }
 

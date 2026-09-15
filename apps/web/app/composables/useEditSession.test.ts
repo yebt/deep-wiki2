@@ -7,11 +7,12 @@ function responseError(status: number, body: unknown) {
 }
 
 describe('useEditSession', () => {
-  test('starts idle and moves to ready with the markdown, title and lock', async () => {
+  test('starts idle and moves to ready with the markdown, title, content hash and lock', async () => {
     const fetcher = vi.fn(async () => ({
       markdown: '# Hi\n',
       title: 'Hi',
       workspaceId: 'ws-1',
+      contentHash: 'server-hash',
       lock: { holderUserId: 'me', acquiredAt: '2026-01-01T00:00:00Z', heartbeatAt: '2026-01-01T00:00:00Z' },
     }));
     const { status, session, load } = useEditSession('page-1', fetcher);
@@ -22,6 +23,9 @@ describe('useEditSession', () => {
     expect(status.value).toBe('ready');
     expect(session.value?.markdown).toBe('# Hi\n');
     expect(session.value?.workspaceId).toBe('ws-1');
+    // page-content spec, D16: the first Save on an existing page has no
+    // other source for this — it is the field docs/TODO.md's Finding names.
+    expect(session.value?.contentHash).toBe('server-hash');
   });
 
   test('a 409 with reason "locked" moves to the locked state with the holder', async () => {
@@ -87,6 +91,7 @@ describe('useEditSession', () => {
       markdown: '# Hi\n',
       title: 'Hi',
       workspaceId: 'ws-1',
+      contentHash: 'server-hash',
       lock: { holderUserId: 'me', acquiredAt: 'z', heartbeatAt: 'z' },
     }));
     const { status, load, takeOver } = useEditSession('page-1', fetcher, takeOverFetcher);
