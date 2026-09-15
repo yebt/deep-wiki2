@@ -163,9 +163,9 @@ Chain strategy: pending
 - [ ] 10.4 **STOP — owner review gate 2/6: page diff view.**
 - [x] 10.5 Build book-level changeset history + book diff, navigable between changed pages without returning to a list (§4.7); e2e coverage per §7.
 - [ ] 10.6 **STOP — owner review gate 3/6: book changeset history and diff.**
-- [ ] 10.7 Build the comment gutter + thread panel on the read screen (anchored-indicator display, reply, resolve), composed client-side over unchanged cached HTML per design.md Decision 5; e2e coverage including the permission-denied case (comment-indicator absent for `read`-only).
+- [x] 10.7 Build the comment gutter + thread panel on the read screen (anchored-indicator display, reply, resolve), composed client-side over unchanged cached HTML per design.md Decision 5; e2e coverage including the permission-denied case (comment-indicator absent for `read`-only).
 - [ ] 10.8 **STOP — owner review gate 4/6: comment gutter and thread panel.**
-- [ ] 10.9 Build the orphaned-comment surface as a first-class state (§4.7) — never a crash, never a silent vanish; wire the "no anchors known" degradation from Phase 6.9 into this surface explicitly.
+- [x] 10.9 Build the orphaned-comment surface as a first-class state (§4.7) — never a crash, never a silent vanish; wire the "no anchors known" degradation from Phase 6.9 into this surface explicitly.
 - [ ] 10.10 **STOP — owner review gate 5/6: orphaned-comment surface.**
 - [x] 10.11 Build presence indicators on read and edit screens (who + since when, expires visibly, never reads as a hard lock, §4.8); e2e coverage per §7 including the soft-lock-path scenario.
 - [ ] 10.12 **STOP — owner review gate 6/6: presence indicators.**

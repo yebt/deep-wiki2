@@ -43,12 +43,12 @@ describe('e2e/comments-fixtures.bun.ts', () => {
 
     const [commented] = await sql<{ rendered_html: string }[]>`SELECT rendered_html FROM page_content WHERE node_id = ${fixtures.commentsPageId}`;
     expect(commented!.rendered_html).toContain('data-block-id="E2ECMTTWO"');
-    const threads = await sql<{ block_id: string; quote: string; parent_id: string | null }[]>`
+    const threads = await sql<{ block_id: string | null; quote: string | null; parent_id: string | null }[]>`
       SELECT block_id, quote, parent_id FROM comments WHERE page_id = ${fixtures.commentsPageId} ORDER BY created_at
     `;
-    expect(threads.map((row) => [row.block_id, row.quote, row.parent_id === null])).toEqual([
-      ['E2ECMTTWO', fixtures.commentedQuote, true],
-      [null, null, false],
+    expect(threads.map((row) => ({ blockId: row.block_id, quote: row.quote, isRoot: row.parent_id === null }))).toEqual([
+      { blockId: 'E2ECMTTWO', quote: fixtures.commentedQuote, isRoot: true },
+      { blockId: null, quote: null, isRoot: false },
     ]);
 
     const [legacy] = await sql<{ rendered_html: string; pipeline_version: number }[]>`

@@ -88,6 +88,12 @@ describe('CommentThreadPanel', () => {
     expect(showAll?.textContent).toMatch(/Show all 4 comments/);
   });
 
+  test('“Show all” is not offered when the focused block’s threads are every thread there is', async () => {
+    await mountPanel({ focusBlockId: 'b1', threads: [thread({ id: 't1', blockId: 'b1' })] });
+
+    expect(body().querySelector('[data-testid="comments-show-all"]')).toBeNull();
+  });
+
   test('“Show all” asks the screen to drop the block focus', async () => {
     const mounted = await mountPanel({ focusBlockId: 'b2' });
     body().querySelector<HTMLElement>('[data-testid="comments-show-all"]')!.click();

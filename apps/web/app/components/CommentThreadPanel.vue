@@ -117,7 +117,9 @@ const description = computed(() => {
         {{ writeMessage }}
       </InlineNotice>
 
-      <div v-if="focusBlockId" class="flex justify-end">
+      <!-- Offered only while there is something more to show: on a page
+           whose one thread is the one already open, the offer is noise. -->
+      <div v-if="focusBlockId && visible.length < threads.length" class="flex justify-end">
         <UButton data-testid="comments-show-all" size="sm" variant="ghost" color="neutral" icon="i-lucide-list" @click="emit('showAll')">
           Show all {{ plural(threads.length, 'comment') }} on this page
         </UButton>
