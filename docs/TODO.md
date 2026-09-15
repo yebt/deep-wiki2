@@ -481,6 +481,72 @@ makes conventions portable across projects.
 
 Discoveries and constraints. Newest first.
 
+### 2026-09-15 — The frame is mounted once; focus mode; the comments toggle; `/` reopens the room
+
+**What happened.** The owner passed the workspace frame ("ha mejorado mucho la UI y UX… más
+profesional") with two requests — a sidebar toggle "para poder tener una interacción más limpia
+con el documento", and the same for the comments — and the batch also cleared the structural
+debt the frame's own report flagged. Four things shipped, each its own commit:
+
+- **The frame is mounted once.** `layouts/workspace.vue` mounts `WorkspaceFrame`
+  (`UDashboardGroup`, the skip link, `WorkspaceSidebar`) once and provides a context
+  (`useWorkspaceFrame`); a screen opts in with `definePageMeta({ layout: 'workspace' })` and
+  its `AppShell` renders only the content pane, handing the frame the node it is about. A
+  screen that has not opted in gets the same `WorkspaceFrame` from `AppShell` per route, so
+  `AppShell`'s props and slots are unchanged — opting in is one line. The dashboard and the
+  read page are in; **edit, history, diff, members, book history and book diff are not yet**
+  and still rebuild the sidebar per route. `e2e/frame.spec.ts` proves the claim the way a
+  component test cannot: after a click on a tree row the sidebar is the same DOM node, and
+  the tree keeps its scroll offset and a fold. There is deliberately no `layouts/default.vue`.
+- **`/` opens onto the last workspace** (Obsidian reopens the last vault). `useCurrentWorkspace`
+  writes a cookie (`dw-workspace`, one year, SameSite=Lax) and initialises from it; the
+  `last-workspace` middleware routes `/` on the server, so the list never flashes by. A cookie
+  rather than storage because the decision is made before any screen renders. It is the
+  browser's, not the account's — the same scope as the sidebar width — and a remembered
+  workspace the next person cannot open lands on the dashboard's own "does not exist" state.
+- **Focus mode.** The sidebar hides to nothing, not a rail: `WorkspaceSidebar` is `collapsible`
+  bound to `useFocusMode`, Nuxt UI persists the collapse beside the width in
+  `dw-frame-sidebar-workspace`, and the root is hidden outright from `lg` up while collapsed
+  (the library's collapse leaves a `min-w-16` rail). `SidebarToggle` stands at the sidebar's
+  edge of the contextual bar: name + tooltip, a live region that names the keys, and
+  `Ctrl`/`⌘`+`\` — Notion's binding and the default Obsidian's users ask for (Obsidian ships
+  it unbound; `Ctrl+B`, VS Code's, is bold in an editor). Focus that was in the sidebar moves
+  to the content bar. Below `lg` the drawer is unchanged.
+- **The comments toggle.** `useCommentsVisibility` (cookie `dw-comments`) hides the marks, the
+  panel and the "not placed yet" chip; the orphan chip stays. It changes nothing about what
+  is fetched — `GET /pages/:id/comments` runs on every read — and nothing a read-only caller
+  sees: the toggle is offered only when there are threads, and `e2e/read.spec.ts` drives a
+  reader with both cookie values. While hidden, the toggle counts the open threads on the page
+  that mention the caller (`usePageMentions`, read off `GET /workspaces/:id/activity`'s
+  `mentionsYou`, asked for only in that state), in its name and as a `UChip` badge.
+
+**What this leaves open, on purpose.**
+
+- **A user with no display name renders as "Someone" with a `?` avatar** in Recent changes.
+  Decision: display name should be required at registration — `PRODUCT.md` says a mixed team,
+  and "Someone" is a hole in the team's pulse. That is an API and registration-screen change
+  (`POST /auth/register`, the invitation-accept form) for the next batch; not done here.
+- **The contextual (third) pane is still an overlay.** The thread panel remains a `USlideover`;
+  §6's third pane at ≥1280 is not built.
+- **The mention count can under-report on a busy workspace.** `GET /workspaces/:id/activity`
+  caps threads at twenty across the workspace; a page's mentions beyond that are not counted.
+  A `mentionsYou` on the comments response itself would remove the cap and the second request,
+  and needs the API to know the caller's display name at that route.
+- **The sidebar's resize handle is pointer-only** (`UDashboardResizeHandle`, `role="separator"`
+  without a tab stop). Pre-existing since the first frame batch; §5 asks for a stated keyboard
+  equivalent. Double-click resets the width; nothing sets it by keyboard.
+- **The contextual bar's live region moved a test.** `edit.test.ts` grabbed the first
+  `[role="status"][aria-live="polite"]` on the page; the sidebar toggle's announcement now
+  precedes the save banner, so the three selectors are scoped to `main`. Any screen test that
+  counts live regions globally will meet the same thing.
+- **Below `sm` the breadcrumb shows the last crumb only.** At 320 the bar holds the drawer
+  toggle, up to four controls and the breadcrumb, and the workspace crumb rendered as "E."
+  (clipped text, §6). The ancestors stay `sr-only`; the workspace is one tap away in the
+  drawer. `e2e` does not measure it; the 320 screenshot in the review material shows it.
+- **Two-icon-pack requirement (§4.3)** still untested; only `lucide` is installed.
+
+---
+
 ### 2026-09-15 — The app frame was a document page, and the tree screen is gone
 
 **What happened.** Every screen was built as a document page — a centred 72ch column, a

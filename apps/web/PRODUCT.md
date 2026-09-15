@@ -57,7 +57,9 @@ creation with plan limits, members and grants, instance registration settings (S
 the navigation tree with create/rename/reorder/fold, read and edit with live-preview
 markdown, slash and mention menus, revision history, page and book diff with four change
 classes, changesets grouped by a thirty-minute window, block-anchored comment threads with
-orphan handling, presence chips.
+orphan handling, presence chips, the workspace frame (sidebar mounted once, `/` reopening the
+last workspace), focus mode (`Ctrl`/`⌘`+`\`) and a per-browser comments toggle on the read
+screen.
 
 Not yet: deleting anything (three open questions), starting a thread from read mode,
 self-registration that leads anywhere (no default plan), clickable wiki-links, backlinks or

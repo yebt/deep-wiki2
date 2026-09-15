@@ -238,6 +238,7 @@ The app shell is a three-pane wiki: navigation tree · document · contextual pa
 - [ ] **Diagrams scroll or scale inside their own container** and never overflow the document column.
 - [ ] **The navigation tree behaves sanely at depth.** Deep nesting (Shelf → Book → Chapter → Page) does not produce runaway indentation or horizontal scroll on narrow viewports; long titles truncate with the full title available on hover/focus.
 - [ ] **Panel widths are resizable where it matters** and the choice persists per user.
+- [ ] **A pane a person can put away comes back on the same control and the same keys, and hiding it never hides what is waiting on them.** The sidebar and the comment overlay are toggleable (2026-09-15 review); the state persists beside the pane's width; the change is announced; and a hidden surface that holds something addressed to the person — a thread that names them — still says so, with a count on the control that brings it back.
 - [ ] **No fixed-height containers that clip content** when the theme's font size or the user's browser zoom increases. Test at 200% zoom.
 - [ ] **Sticky headers and toolbars do not obscure content** when navigating to an anchor. Anchored scroll accounts for sticky chrome height.
 
@@ -898,6 +899,72 @@ unchanged in its own layout, which is the next batch after this review.
 Known before review, not fixed: the sidebar is rebuilt per route (no layout yet); the
 two-icon-pack requirement (§4.3) is still untested; §6's contextual (third) pane — comments,
 AI, presence — is still an overlay.
+
+---
+
+### 2026-09-15 — The workspace frame: owner review, and the batch that answered it
+
+**Reviewer:** Eduardo
+**Verdict:** Pass with follow-ups
+
+The owner's words: "ha mejorado mucho la UI y UX… más profesional." Two requests came with
+the pass; both shipped in the following batch, together with the structural debt the frame's
+own entry above flagged (the sidebar rebuilt per route). Measured in `e2e/frame.spec.ts` and
+`e2e/read.spec.ts` at 1280×900 in both themes and at 320×900; screenshots `frame2-*.png` in
+the session scratchpad.
+
+**Findings** (ordered by user impact)
+
+1. **"Que se pueda hacer toggle de la sidebar para poder tener una interacción más limpia con el documento."**
+   - *Observable evidence:* the sidebar was always present from `lg` up; a person reading a
+     long page had 280px of tree beside it with no way to put it away.
+   - *Root cause:* the frame shipped `UDashboardSidebar` resizable but not collapsible, and no
+     control in the contextual bar addressed the sidebar at all above `lg`.
+   - *Correction applied:* focus mode. `SidebarToggle` at the sidebar's edge of the bar —
+     accessible name and tooltip (§4.3), a live region announcing the change and naming the
+     keys (§5), `Ctrl`/`⌘`+`\` — hides the sidebar **to nothing**, not to a rail, and the
+     article's 72ch measure re-centres in the whole pane. Persisted in the same cookie as the
+     width. Measured: the content bar at x=0, the article unchanged in width and centred to
+     within 2px of the viewport, still hidden after a reload, back on the keys; focus that
+     was in the sidebar lands on the content bar. Below `lg` the drawer is unchanged.
+   - *Rule added:* §6 — a pane a person can put away comes back on the same control and the
+     same keys, its state persists with its width, and hiding it never hides what is waiting
+     on the person.
+
+2. **"Los comentarios sobre el documento… también debería ser posible togglearlos."**
+   - *Observable evidence:* the gutter marks appeared beside every commented block whenever
+     the caller could comment, with no way to read the page without them.
+   - *Root cause:* the overlay had a permission gate and no preference.
+   - *Correction applied:* a toggle in the same bar, persisted per browser (`dw-comments`),
+     offered only to a caller with threads to hide. It hides the marks, the panel and the
+     "not placed yet" chip; the orphan chip stays. **It changes nothing about what is fetched
+     or what a read-only caller sees** — `e2e/read.spec.ts` drives a reader with both cookie
+     values and finds no toggle and no marks either way. While hidden, the toggle carries the
+     count of open threads that mention the caller, in its name and as a badge, so "hidden"
+     never means "unaware" (§3's honesty rule applied to a preference).
+   - *Rule added:* §6, the same line as above — a hidden surface still says what waits on
+     the person.
+
+3. **The sidebar was rebuilt on every navigation** (the frame's own entry, above).
+   - *Observable evidence:* tree scroll position reset on every click; a resize mid-navigation
+     was lost.
+   - *Root cause:* every route mounted its own `AppShell`.
+   - *Correction applied:* `layouts/workspace.vue` mounts the frame once; the dashboard and
+     the read page opt in. Measured: after a click on a tree row the sidebar is the same DOM
+     node and the tree keeps its scroll offset and a fold. `/` now opens onto the last
+     workspace the person was in, from a cookie, decided on the server.
+   - *Rule added:* None — one-off, though the remaining screens must opt in before the
+     per-route frame in `AppShell` can go.
+
+**Follow-ups carried forward, not fixed**
+
+- Edit, history, diff, members, book history and book diff have not opted into the layout.
+- A user with no display name renders as "Someone"; display name should be required at
+  registration (`docs/TODO.md`, Findings). An API and registration-screen change.
+- The contextual (third) pane is still an overlay.
+- The sidebar's resize handle is pointer-only (§5); the mention count is capped by the
+  activity endpoint's twenty threads; below `sm` the breadcrumb shows only the last crumb.
+- The two-icon-pack requirement (§4.3) remains untested.
 
 ---
 
