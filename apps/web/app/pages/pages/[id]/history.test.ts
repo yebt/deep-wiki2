@@ -12,6 +12,12 @@ const { usePageHistoryMock, useRouteMock } = vi.hoisted(() => ({
 mockNuxtImport('usePageHistory', () => usePageHistoryMock);
 mockNuxtImport('useRoute', () => useRouteMock);
 
+// Every screen now renders inside the workspace frame. Its sidebar — the
+// tree, the switcher, the doors — is stubbed here so this file stays about
+// the screen it names; `AppShell.test.ts` and `WorkspaceSidebar.test.ts`
+// own the frame.
+const FRAME_STUBS = { global: { stubs: { WorkspaceSidebar: true } } };
+
 const PageInApp = defineComponent({
   name: 'PageInApp',
   setup: () => () => h(UApp, null, { default: () => h(HistoryPage) }),
@@ -54,16 +60,16 @@ describe('page-history screen', () => {
   // `e2e/history.spec.ts` ("the history skeleton occupies the box…").
   test('renders the loading skeleton, not a spinner, while the request is in flight', async () => {
     mockHistory({ status: 'loading' });
-    const component = await mountSuspended(PageInApp);
+    const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
     expect(component.find('[data-testid="history-skeleton"]').exists()).toBe(true);
   });
 
   test('renders every revision newest-first with its author, timestamp and changeset membership', async () => {
     mockHistory({ status: 'success', revisions: TWO_REVISIONS });
-    const component = await mountSuspended(PageInApp);
+    const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
-    const items = component.findAll('li');
+    const items = component.findAll('main li');
     expect(items).toHaveLength(2);
     expect(items[0]!.text()).toContain('Ada Lovelace');
     expect(items[0]!.text()).toContain('Part of a changeset');
@@ -80,12 +86,12 @@ describe('page-history screen', () => {
     // to sit in — cannot satisfy both halves.
     process.env.TZ = 'America/New_York';
     mockHistory({ status: 'success', revisions: TWO_REVISIONS });
-    const inNewYork = await mountSuspended(PageInApp);
+    const inNewYork = await mountSuspended(PageInApp, FRAME_STUBS);
     expect(inNewYork.findAll('time')[0]!.text()).toBe('Jan 1, 2026, 7:00 PM EST');
 
     process.env.TZ = 'Asia/Tokyo';
     mockHistory({ status: 'success', revisions: TWO_REVISIONS });
-    const inTokyo = await mountSuspended(PageInApp);
+    const inTokyo = await mountSuspended(PageInApp, FRAME_STUBS);
     expect(inTokyo.findAll('time')[0]!.text()).toBe('Jan 2, 2026, 9:00 AM GMT+9');
   });
 
@@ -95,7 +101,7 @@ describe('page-history screen', () => {
     // row, or a later diff view reads this, not the rendering above it.
     process.env.TZ = 'Asia/Tokyo';
     mockHistory({ status: 'success', revisions: TWO_REVISIONS });
-    const component = await mountSuspended(PageInApp);
+    const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
     const times = component.findAll('time');
     expect(times).toHaveLength(2);
@@ -107,9 +113,9 @@ describe('page-history screen', () => {
 
   test('a page with exactly one revision renders it as the initial version, not a comparison target', async () => {
     mockHistory({ status: 'success', revisions: [TWO_REVISIONS[1]!] });
-    const component = await mountSuspended(PageInApp);
+    const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
-    const items = component.findAll('li');
+    const items = component.findAll('main li');
     expect(items).toHaveLength(1);
     expect(items[0]!.text()).toMatch(/initial version/i);
     expect(items[0]!.find('button[aria-disabled="true"]').exists()).toBe(false);
@@ -119,7 +125,7 @@ describe('page-history screen', () => {
   // this revision and the one right before it, rather than being inert.
   test('the compare control links to the diff view between this revision and the one right before it', async () => {
     mockHistory({ status: 'success', revisions: TWO_REVISIONS });
-    const component = await mountSuspended(PageInApp);
+    const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
     const compare = component.get('a[href*="/diff"]');
     expect(compare.text()).toMatch(/compare with previous/i);
@@ -134,17 +140,17 @@ describe('page-history screen', () => {
       status: 'success',
       revisions: [{ id: 'rev-1', authorId: null, authorDisplayName: null, createdAt: '2026-01-01T00:00:00.000Z', changesetId: null }],
     });
-    const component = await mountSuspended(PageInApp);
+    const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
-    expect(component.get('li').text()).toMatch(/unknown author/i);
+    expect(component.get('main li').text()).toMatch(/unknown author/i);
   });
 
   test('renders a single not-found state — absence and denial are indistinguishable here', async () => {
     mockHistory({ status: 'not-found' });
-    const component = await mountSuspended(PageInApp);
+    const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
     expect(component.text()).toMatch(/does not exist/i);
-    expect(component.findAll('li')).toHaveLength(0);
+    expect(component.findAll('main li')).toHaveLength(0);
   });
 
 
@@ -155,7 +161,7 @@ describe('page-history screen', () => {
   // `error.vue`'s reviewed paragraph, verbatim, so one copy exists.
   test('the not-found notice offers the workspaces list and sign-in, with the error screen’s copy', async () => {
     mockHistory({ status: 'not-found' });
-    const component = await mountSuspended(PageInApp);
+    const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
     expect(component.find('main a[href="/workspaces"]').exists()).toBe(true);
     expect(component.find('main a[href="/login"]').exists()).toBe(true);
@@ -164,7 +170,7 @@ describe('page-history screen', () => {
 
   test('the app bar’s way to the page is "Read page" with the eye, the same chrome edit mode uses', async () => {
     mockHistory({ status: 'success' });
-    const component = await mountSuspended(PageInApp);
+    const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
     const back = component.get('header a[href="/pages/page-1"]');
     expect(back.text()).toBe('Read page');
@@ -172,7 +178,7 @@ describe('page-history screen', () => {
 
   test('the empty state names the object and offers a path forward, distinct from not-found', async () => {
     mockHistory({ status: 'success', revisions: [] });
-    const component = await mountSuspended(PageInApp);
+    const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
     expect(component.text()).toMatch(/no revisions yet/i);
     expect(component.find('a[href*="/edit"]').exists()).toBe(true);
@@ -180,7 +186,7 @@ describe('page-history screen', () => {
 
   test('renders a recoverable error state with a retry action that reloads', async () => {
     const load = mockHistory({ status: 'network-error', message: 'Cannot reach the server.' });
-    const component = await mountSuspended(PageInApp);
+    const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
     const retry = component.get('button[data-testid="history-retry"]');
     await retry.trigger('click');
@@ -190,7 +196,7 @@ describe('page-history screen', () => {
 
   test('renders exactly one h1 for the screen, at the same type role every state uses', async () => {
     mockHistory({ status: 'success', revisions: TWO_REVISIONS });
-    const component = await mountSuspended(PageInApp);
+    const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
     expect(component.findAll('h1')).toHaveLength(1);
   });

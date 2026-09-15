@@ -12,6 +12,12 @@ const { useBookHistoryMock, useRouteMock } = vi.hoisted(() => ({
 mockNuxtImport('useBookHistory', () => useBookHistoryMock);
 mockNuxtImport('useRoute', () => useRouteMock);
 
+// Every screen now renders inside the workspace frame. Its sidebar — the
+// tree, the switcher, the doors — is stubbed here so this file stays about
+// the screen it names; `AppShell.test.ts` and `WorkspaceSidebar.test.ts`
+// own the frame.
+const FRAME_STUBS = { global: { stubs: { WorkspaceSidebar: true } } };
+
 const PageInApp = defineComponent({
   name: 'PageInApp',
   setup: () => () => h(UApp, null, { default: () => h(HistoryPage) }),
@@ -79,16 +85,16 @@ afterEach(() => {
 describe('book-history screen', () => {
   test('renders the loading skeleton, not a spinner, while the request is in flight', async () => {
     mockHistory({ status: 'loading' });
-    const component = await mountSuspended(PageInApp);
+    const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
     expect(component.find('[data-testid="book-history-skeleton"]').exists()).toBe(true);
   });
 
   test('renders every changeset newest-first with its author, the pages it grouped, and its message when present', async () => {
     mockHistory({ status: 'success', changesets: TWO_CHANGESETS });
-    const component = await mountSuspended(PageInApp);
+    const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
-    const items = component.findAll('li');
+    const items = component.findAll('main li');
     expect(items).toHaveLength(2);
     // Newest first: cs-2's row comes before cs-1's.
     expect(items[0]!.text()).toContain('Ada Lovelace');
@@ -102,18 +108,18 @@ describe('book-history screen', () => {
   test("renders each changeset's timestamp in the viewer's own timezone, not UTC", async () => {
     process.env.TZ = 'America/New_York';
     mockHistory({ status: 'success', changesets: TWO_CHANGESETS });
-    const inNewYork = await mountSuspended(PageInApp);
+    const inNewYork = await mountSuspended(PageInApp, FRAME_STUBS);
     expect(inNewYork.findAll('time')[0]!.text()).toMatch(/EST|EDT/);
 
     process.env.TZ = 'Asia/Tokyo';
     mockHistory({ status: 'success', changesets: TWO_CHANGESETS });
-    const inTokyo = await mountSuspended(PageInApp);
+    const inTokyo = await mountSuspended(PageInApp, FRAME_STUBS);
     expect(inTokyo.findAll('time')[0]!.text()).toMatch(/GMT\+9/);
   });
 
   test('the <time> element carries the exact ISO instant', async () => {
     mockHistory({ status: 'success', changesets: TWO_CHANGESETS });
-    const component = await mountSuspended(PageInApp);
+    const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
     const times = component.findAll('time');
     expect(times[0]!.attributes('datetime')).toBe('2026-01-02T00:10:00.000Z');
@@ -121,7 +127,7 @@ describe('book-history screen', () => {
 
   test('each changeset links to the book diff since just before it started, never to a URL a keyboard user cannot reach', async () => {
     mockHistory({ status: 'success', changesets: TWO_CHANGESETS });
-    const component = await mountSuspended(PageInApp);
+    const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
     const link = component.findAll('a').find((a) => /view diff since/i.test(a.text()));
     expect(link).toBeTruthy();
@@ -131,22 +137,22 @@ describe('book-history screen', () => {
 
   test('renders a single not-found state — absence and denial are indistinguishable here', async () => {
     mockHistory({ status: 'not-found' });
-    const component = await mountSuspended(PageInApp);
+    const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
     expect(component.text()).toMatch(/does not exist/i);
-    expect(component.findAll('li')).toHaveLength(0);
+    expect(component.findAll('main li')).toHaveLength(0);
   });
 
   test('the empty state names the object and explains why, distinct from not-found', async () => {
     mockHistory({ status: 'success', changesets: [] });
-    const component = await mountSuspended(PageInApp);
+    const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
     expect(component.text()).toMatch(/no changes yet/i);
   });
 
   test('renders a recoverable error state with a retry action that reloads', async () => {
     const load = mockHistory({ status: 'network-error', message: 'Cannot reach the server.' });
-    const component = await mountSuspended(PageInApp);
+    const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
     const retry = component.get('button[data-testid="book-history-retry"]');
     await retry.trigger('click');
@@ -156,14 +162,14 @@ describe('book-history screen', () => {
 
   test('a changeset with no message renders without a message line, not an empty quote', async () => {
     mockHistory({ status: 'success', changesets: [TWO_CHANGESETS[0]!] });
-    const component = await mountSuspended(PageInApp);
+    const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
-    expect(component.get('li').text()).not.toContain('""');
+    expect(component.get('main li').text()).not.toContain('""');
   });
 
   test('renders exactly one h1 for the screen', async () => {
     mockHistory({ status: 'success', changesets: TWO_CHANGESETS });
-    const component = await mountSuspended(PageInApp);
+    const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
     expect(component.findAll('h1')).toHaveLength(1);
   });
@@ -173,18 +179,18 @@ describe('book-history screen', () => {
   // not offer a way forward — offers one: the book's own place in the tree.
   test('names the book in the heading and offers the way back to its tree', async () => {
     mockHistory({ status: 'success', changesets: TWO_CHANGESETS });
-    const component = await mountSuspended(PageInApp);
+    const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
     expect(component.get('h1').text()).toContain('E2E Handbook');
-    expect(component.find('a[href="/workspaces/ws-1/tree"]').exists()).toBe(true);
+    expect(component.find('a[href="/workspaces/ws-1"]').exists()).toBe(true);
   });
 
   test('the empty state has a way forward: the tree the book lives in', async () => {
     mockHistory({ status: 'success', changesets: [] });
-    const component = await mountSuspended(PageInApp);
+    const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
     expect(component.text()).toMatch(/no changes yet/i);
     const notice = component.get('[role="status"]');
-    expect(notice.find('a[href="/workspaces/ws-1/tree"]').exists()).toBe(true);
+    expect(notice.find('a[href="/workspaces/ws-1"]').exists()).toBe(true);
   });
 });

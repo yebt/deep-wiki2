@@ -125,9 +125,9 @@ const recovery = computed<Recovery>(() => {
   const workspace = new RegExp(`^/workspaces/(${UUID})(?:/|$)`).exec(route.path);
   if (workspace) {
     return {
-      to: `/workspaces/${workspace[1]}/tree`,
+      to: `/workspaces/${workspace[1]}`,
       label: 'Open this workspace',
-      icon: 'i-lucide-list-tree',
+      icon: 'i-lucide-house',
     };
   }
 

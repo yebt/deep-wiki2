@@ -46,17 +46,19 @@ test('a reader reaches book history from the tree, and book diff from history, e
   await signInAs(context, fixtures.readerSessionToken);
 
   // The one and only address this test types.
-  await page.goto(`/workspaces/${fixtures.workspaceId}/tree`, { timeout: 30000 });
-  await expect(page.getByRole('heading', { level: 1, name: 'Navigation tree' })).toBeVisible({ timeout: 30000 });
+  await page.goto(`/workspaces/${fixtures.workspaceId}`, { timeout: 30000 });
+  await expect(page.getByRole('heading', { level: 1, name: /E2E Workspace/ })).toBeVisible({ timeout: 30000 });
 
-  // Click 1 — the header affordance task 10.5 added to this screen. The
-  // tree's own data is fetched client-side after mount (`useTree`, like
-  // every other list screen in this suite), so the row/link only exists
-  // once that fetch resolves — the generous timeout belongs on this wait,
-  // not on the `goto` above, per e2e/history.spec.ts's identical note.
-  const bookHistoryLink = page.getByRole('link', { name: fixtures.bookHistoryBookTitle });
-  await expect(bookHistoryLink).toBeVisible({ timeout: 30000 });
-  await bookHistoryLink.click();
+  // Click 1 — the book row's context action in the sidebar's tree: a menu
+  // on the row, named for the book, not a chrome link. The tree's own data
+  // is fetched client-side after mount, so the row only exists once that
+  // fetch resolves — the generous timeout belongs on this wait, not on the
+  // `goto` above, per e2e/history.spec.ts's identical note.
+  const bookRow = page.getByRole('treeitem', { name: new RegExp(fixtures.bookHistoryBookTitle) });
+  await expect(bookRow).toBeVisible({ timeout: 30000 });
+  await bookRow.hover();
+  await page.getByRole('button', { name: `Actions for ${fixtures.bookHistoryBookTitle}` }).click();
+  await page.getByRole('menuitem', { name: 'Book history' }).click();
 
   await expect(page).toHaveURL(`/books/${fixtures.bookHistoryBookId}/history`, { timeout: 30000 });
   // The screen names the book it is about, not only what kind of screen it is.
@@ -64,7 +66,7 @@ test('a reader reaches book history from the tree, and book diff from history, e
 
   // Grouping is real: two changesets, not one flattened list of saves —
   // the trap this fixture exists to not-trivially pass.
-  const rows = page.getByRole('listitem');
+  const rows = page.getByRole('main').getByRole('listitem');
   await expect(rows).toHaveCount(2, { timeout: 30000 });
   // The newest changeset (row 0) grouped both pages together.
   await expect(rows.nth(0)).toContainText('2 pages changed');
@@ -127,8 +129,8 @@ test('a reader reaches book history from the tree, and book diff from history, e
   // Click 3 — the way back to the book's place in the tree, which the
   // response names now. A screen reached from the tree that could only go
   // back to history was one door short.
-  await page.getByRole('link', { name: 'Navigation tree' }).click();
-  await expect(page).toHaveURL(`/workspaces/${fixtures.workspaceId}/tree`, { timeout: 30000 });
+  await page.getByRole('link', { name: 'Workspace home' }).click();
+  await expect(page).toHaveURL(`/workspaces/${fixtures.workspaceId}`, { timeout: 30000 });
 });
 
 test('an outsider with no read grant sees the same not-found state a nonexistent book would render, for both screens', async ({

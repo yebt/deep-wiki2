@@ -169,7 +169,7 @@ useSeoMeta({ title: 'Page diff — deep-wiki' });
 </script>
 
 <template>
-  <AppShell>
+  <AppShell :workspace-id="null" :node-id="nodeId" :trail="[{ label: 'History', to: `/pages/${nodeId}/history` }, { label: 'Compare' }]">
     <template #header-end>
       <UButton icon="i-lucide-arrow-left" variant="ghost" color="neutral" size="sm" :to="`/pages/${nodeId}/history`">
         Back to history

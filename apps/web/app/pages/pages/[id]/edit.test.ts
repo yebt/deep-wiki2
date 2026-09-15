@@ -18,6 +18,12 @@ mockNuxtImport('useSavePage', () => useSavePageMock);
 mockNuxtImport('usePresenceStream', () => usePresenceStreamMock);
 mockNuxtImport('useRoute', () => useRouteMock);
 
+// Every screen now renders inside the workspace frame. Its sidebar — the
+// tree, the switcher, the doors — is stubbed here so this file stays about
+// the screen it names; `AppShell.test.ts` and `WorkspaceSidebar.test.ts`
+// own the frame.
+const FRAME_STUBS = { global: { stubs: { WorkspaceSidebar: true } } };
+
 const PageInApp = defineComponent({
   name: 'PageInApp',
   setup: () => () => h(UApp, null, { default: () => h(EditPage) }),
@@ -80,7 +86,7 @@ describe('edit-mode page', () => {
   test('renders the loading skeleton while the edit session is being requested', async () => {
     mockDefaults();
     mockSession({ status: 'loading' });
-    const component = await mountSuspended(PageInApp);
+    const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
     expect(component.find('[data-testid="edit-skeleton"]').exists()).toBe(true);
   });
@@ -88,7 +94,7 @@ describe('edit-mode page', () => {
   test('renders a permission-denied state with an "Open read-only" exit', async () => {
     mockDefaults();
     mockSession({ status: 'forbidden' });
-    const component = await mountSuspended(PageInApp);
+    const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
     expect(component.text()).toMatch(/don't have access to edit/i);
     expect(component.find('a[href="/pages/page-1"]').exists()).toBe(true);
@@ -104,7 +110,7 @@ describe('edit-mode page', () => {
     for (const status of ['forbidden', 'not-found'] as const) {
       mockDefaults();
       mockSession({ status });
-      const component = await mountSuspended(PageInApp);
+      const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
       expect(component.find('main a[href="/workspaces"]').exists(), status).toBe(true);
       expect(component.find('main a[href="/login"]').exists(), status).toBe(true);
@@ -115,7 +121,7 @@ describe('edit-mode page', () => {
   test('the not-found copy is the error screen’s, which says out loud that it does not disclose', async () => {
     mockDefaults();
     mockSession({ status: 'not-found' });
-    const component = await mountSuspended(PageInApp);
+    const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
     expect(component.text()).toMatch(/deliberately doesn't say which/);
   });
@@ -130,7 +136,7 @@ describe('edit-mode page', () => {
       status: 'ready',
       session: { markdown: '# Hi\n', title: 'Hi', workspaceId: 'ws-1', lock: { holderUserId: 'me', acquiredAt: 'x', heartbeatAt: 'x' } },
     });
-    const component = await mountSuspended(PageInApp, { global: { stubs: { EditorSurface: true } } });
+    const component = await mountSuspended(PageInApp, { global: { stubs: { EditorSurface: true, WorkspaceSidebar: true } } });
 
     const back = component.get('header a[href="/pages/page-1"]');
     expect(back.text()).toBe('Read page');
@@ -168,7 +174,7 @@ describe('edit-mode page', () => {
         lock: { holderUserId: 'me', acquiredAt: 'x', heartbeatAt: 'x' },
       },
     });
-    const component = await mountSuspended(PageInApp, { global: { stubs: { EditorSurface: true } } });
+    const component = await mountSuspended(PageInApp, { global: { stubs: { EditorSurface: true, WorkspaceSidebar: true } } });
     const editorStub = component.findComponent({ name: 'EditorSurface' });
     editorStub.vm.$emit('update', '# Hi\n\nedited\n');
     await component.vm.$nextTick();
@@ -185,7 +191,7 @@ describe('edit-mode page', () => {
       status: 'locked',
       refusal: { reason: 'locked', holder: { userId: 'other', acquiredAt: '2026-01-01T00:00:00Z', heartbeatAt: '2026-01-01T00:00:00Z' }, offeredExits: ['read_only', 'take_over'] },
     });
-    const component = await mountSuspended(PageInApp);
+    const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
     expect(component.text()).toMatch(/someone else is editing/i);
     expect(component.text()).toMatch(/open read-only/i);
@@ -198,7 +204,7 @@ describe('edit-mode page', () => {
       status: 'refused',
       refusal: { reason: 'unsupported_construct', construct: 'setext heading', line: 4, offeredExits: ['read_only', 'normalise'] },
     });
-    const component = await mountSuspended(PageInApp);
+    const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
     expect(component.text()).toMatch(/setext heading/i);
     expect(component.text()).toMatch(/line 4/i);
@@ -233,7 +239,7 @@ describe('edit-mode page', () => {
       status: 'ready',
       session: { markdown: '# Hi\n', title: 'Hi', workspaceId: 'ws-1', lock: { holderUserId: 'me', acquiredAt: 'x', heartbeatAt: 'x' } },
     });
-    const component = await mountSuspended(PageInApp, { global: { stubs: { EditorSurface: true } } });
+    const component = await mountSuspended(PageInApp, { global: { stubs: { EditorSurface: true, WorkspaceSidebar: true } } });
 
     expect(component.text()).toMatch(/deleted or merged/i);
     expect(component.text()).not.toMatch(/someone else saved a newer version/i);
@@ -257,7 +263,7 @@ describe('edit-mode page', () => {
       status: 'ready',
       session: { markdown: '# Hi\n', title: 'Hi', workspaceId: 'ws-1', lock: { holderUserId: 'me', acquiredAt: 'x', heartbeatAt: 'x' } },
     });
-    const component = await mountSuspended(PageInApp, { global: { stubs: { EditorSurface: true } } });
+    const component = await mountSuspended(PageInApp, { global: { stubs: { EditorSurface: true, WorkspaceSidebar: true } } });
 
     const banner = component.get('[role="alert"]');
     expect(banner.text()).toMatch(/not in its canonical form/i);
@@ -275,7 +281,7 @@ describe('edit-mode page', () => {
       status: 'ready',
       session: { markdown: '# Hi\n', title: 'Hi', workspaceId: 'ws-1', lock: { holderUserId: 'me', acquiredAt: 'x', heartbeatAt: 'x' } },
     });
-    const component = await mountSuspended(PageInApp, { global: { stubs: { EditorSurface: true } } });
+    const component = await mountSuspended(PageInApp, { global: { stubs: { EditorSurface: true, WorkspaceSidebar: true } } });
 
     const offerButton = component.findAll('button').find((button) => /canonical document/i.test(button.text()))!;
     await offerButton.trigger('click');
@@ -293,7 +299,7 @@ describe('edit-mode page', () => {
       status: 'ready',
       session: { markdown: '# Hi\n', title: 'Hi', workspaceId: 'ws-1', lock: { holderUserId: 'me', acquiredAt: 'x', heartbeatAt: 'x' } },
     });
-    const component = await mountSuspended(PageInApp, { global: { stubs: { EditorSurface: true } } });
+    const component = await mountSuspended(PageInApp, { global: { stubs: { EditorSurface: true, WorkspaceSidebar: true } } });
 
     expect(component.text()).toMatch(/Ana is editing/);
   });
@@ -309,7 +315,7 @@ describe('edit-mode page', () => {
       status: 'ready',
       session: { markdown: '# Hi\n', title: 'Hi', workspaceId: 'ws-1', lock: { holderUserId: 'me', acquiredAt: 'x', heartbeatAt: 'x' } },
     });
-    const component = await mountSuspended(PageInApp, { global: { stubs: { EditorSurface: true } } });
+    const component = await mountSuspended(PageInApp, { global: { stubs: { EditorSurface: true, WorkspaceSidebar: true } } });
 
     expect(component.text()).not.toMatch(/is editing/);
   });
@@ -328,7 +334,7 @@ describe('edit-mode page', () => {
     // verification against a real browser. Stubbed here so this test
     // verifies only what this PAGE is responsible for: which component it
     // renders, with which props, once the session is ready.
-    const component = await mountSuspended(PageInApp, { global: { stubs: { EditorSurface: true } } });
+    const component = await mountSuspended(PageInApp, { global: { stubs: { EditorSurface: true, WorkspaceSidebar: true } } });
 
     expect(component.findAll('h1')).toHaveLength(1);
     expect(component.get('h1').text()).toBe('Hi');
@@ -350,7 +356,7 @@ describe('edit-mode page', () => {
         offeredExits: ['read_only', 'take_over'],
       },
     });
-    const component = await mountSuspended(PageInApp);
+    const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
     const time = component.get('time');
     expect(time.attributes('datetime')).toBe('2026-01-01T00:00:00.000Z');
@@ -368,7 +374,7 @@ describe('edit-mode page', () => {
         status: 'ready',
         session: { markdown: '# Hi\n', title: 'Hi', workspaceId: 'ws-1', lock: { holderUserId: 'me', acquiredAt: 'x', heartbeatAt: 'x' } },
       });
-      const component = await mountSuspended(PageInApp, { global: { stubs: { EditorSurface: true } } });
+      const component = await mountSuspended(PageInApp, { global: { stubs: { EditorSurface: true, WorkspaceSidebar: true } } });
 
       const saveButton = component.findAll('button').find((button) => /Save/.test(button.text()))!;
       expect(saveButton.attributes('aria-disabled')).toBe('true');
@@ -381,7 +387,7 @@ describe('edit-mode page', () => {
         status: 'ready',
         session: { markdown: '# Hi\n', title: 'Hi', workspaceId: 'ws-1', lock: { holderUserId: 'me', acquiredAt: 'x', heartbeatAt: 'x' } },
       });
-      const component = await mountSuspended(PageInApp, { global: { stubs: { EditorSurface: true } } });
+      const component = await mountSuspended(PageInApp, { global: { stubs: { EditorSurface: true, WorkspaceSidebar: true } } });
       const editorStub = component.findComponent({ name: 'EditorSurface' });
       editorStub.vm.$emit('update', '# Hi\n\nedited\n');
       await component.vm.$nextTick();
@@ -402,7 +408,7 @@ describe('edit-mode page', () => {
         status: 'ready',
         session: { markdown: '# Hi\n', title: 'Hi', workspaceId: 'ws-1', lock: { holderUserId: 'me', acquiredAt: 'x', heartbeatAt: 'x' } },
       });
-      const component = await mountSuspended(PageInApp, { global: { stubs: { EditorSurface: true } } });
+      const component = await mountSuspended(PageInApp, { global: { stubs: { EditorSurface: true, WorkspaceSidebar: true } } });
 
       const chip = component.find('[role="alert"][data-notice-tier="chip"]');
       expect(chip.exists(), status).toBe(true);
@@ -421,7 +427,7 @@ describe('edit-mode page', () => {
       status: 'ready',
       session: { markdown: '# Hi\n', title: 'Hi', workspaceId: 'ws-1', lock: { holderUserId: 'me', acquiredAt: 'x', heartbeatAt: 'x' } },
     });
-    const component = await mountSuspended(PageInApp, { global: { stubs: { EditorSurface: true } } });
+    const component = await mountSuspended(PageInApp, { global: { stubs: { EditorSurface: true, WorkspaceSidebar: true } } });
     const editorStub = component.findComponent({ name: 'EditorSurface' });
     editorStub.vm.$emit('update', '# Hi\n\nedited\n');
     await component.vm.$nextTick();
@@ -454,7 +460,7 @@ describe('edit-mode page', () => {
       status: 'ready',
       session: { markdown: '# Hi\n', title: 'Hi', workspaceId: 'ws-1', lock: { holderUserId: 'me', acquiredAt: 'x', heartbeatAt: 'x' } },
     });
-    const component = await mountSuspended(PageInApp, { global: { stubs: { EditorSurface: true } } });
+    const component = await mountSuspended(PageInApp, { global: { stubs: { EditorSurface: true, WorkspaceSidebar: true } } });
 
     const banner = component.get('[role="alert"]');
     expect(banner.text()).toMatch(/don't have permission/i);
@@ -476,7 +482,7 @@ describe('edit-mode page', () => {
       status: 'ready',
       session: { markdown: '# Hi\n', title: 'Hi', workspaceId: 'ws-1', lock: { holderUserId: 'me', acquiredAt: 'x', heartbeatAt: 'x' } },
     });
-    const component = await mountSuspended(PageInApp, { global: { stubs: { EditorSurface: true } } });
+    const component = await mountSuspended(PageInApp, { global: { stubs: { EditorSurface: true, WorkspaceSidebar: true } } });
     // A network error leaves the buffer exactly as dirty as it was before
     // the failed attempt — `onSave` only clears `isDirty` on `success`
     // (edit.vue's own `onSave`), so this mirrors the real precondition
@@ -502,7 +508,7 @@ describe('edit-mode page', () => {
         status: 'ready',
         session: { markdown: '# Hi\n', title: 'My Page', workspaceId: 'ws-1', lock: { holderUserId: 'me', acquiredAt: 'x', heartbeatAt: 'x' } },
       });
-      const component = await mountSuspended(PageInApp, { global: { stubs: { EditorSurface: true } } });
+      const component = await mountSuspended(PageInApp, { global: { stubs: { EditorSurface: true, WorkspaceSidebar: true } } });
 
       const banner = component.get('[role="status"][aria-live="polite"]');
       expect(banner.text()).not.toBe('Saved.');
@@ -515,7 +521,7 @@ describe('edit-mode page', () => {
         status: 'ready',
         session: { markdown: '# Hi\n', title: 'My Page', workspaceId: 'ws-1', lock: { holderUserId: 'me', acquiredAt: 'x', heartbeatAt: 'x' } },
       });
-      const component = await mountSuspended(PageInApp, { global: { stubs: { EditorSurface: true } } });
+      const component = await mountSuspended(PageInApp, { global: { stubs: { EditorSurface: true, WorkspaceSidebar: true } } });
       expect(component.find('[role="status"][aria-live="polite"]').exists()).toBe(true);
 
       const editorStub = component.findComponent({ name: 'EditorSurface' });
@@ -536,7 +542,7 @@ describe('edit-mode page', () => {
       status: 'ready',
       session: { markdown: '# Hi\n', title: 'Hi', workspaceId: 'ws-1', lock: { holderUserId: 'me', acquiredAt: 'x', heartbeatAt: 'x' } },
     });
-    const component = await mountSuspended(PageInApp, { global: { stubs: { EditorSurface: true } } });
+    const component = await mountSuspended(PageInApp, { global: { stubs: { EditorSurface: true, WorkspaceSidebar: true } } });
 
     expect(component.find('header').text()).not.toMatch(/lock lost/i);
     expect(component.find('main').text()).toMatch(/lock lost/i);

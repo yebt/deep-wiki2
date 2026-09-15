@@ -50,7 +50,7 @@ test('a reader sees every revision newest-first, with its author and changeset m
   // note).
   await expect(page.getByRole('heading', { level: 1, name: 'Revision history' })).toBeVisible();
 
-  const rows = page.getByRole('listitem');
+  const rows = page.getByRole('main').getByRole('listitem');
   await expect(rows).toHaveCount(2, { timeout: 30000 });
 
   // Newest first: the second save is the first row, and it has a
@@ -103,7 +103,7 @@ test('the history screen is reachable from the read screen by its control, not o
   await expect(page.getByRole('heading', { level: 1, name: 'Revision history' })).toBeVisible();
   // Arrived at the history of *this* page, not merely at the route: the
   // seeded page has two revisions and the empty one has none.
-  await expect(page.getByRole('listitem')).toHaveCount(2, { timeout: 30000 });
+  await expect(page.getByRole('main').getByRole('listitem')).toHaveCount(2, { timeout: 30000 });
 });
 
 test('the history control is operable with the keyboard alone, and names itself on focus', async ({ page, context }) => {
@@ -117,16 +117,20 @@ test('the history control is operable with the keyboard alone, and names itself 
 
   // Tabbed to, not focused programmatically: `.focus()` would pass on a
   // control with `tabindex="-1"` that no keyboard user can ever reach.
-  // The bar is brand → history → Edit → theme toggle, so this lands on
-  // the second stop; the loop is bounded rather than fixed so a later
+  // Since 2026-09-15 the sidebar precedes the content pane, so the frame's
+  // first stop is "Skip to content"; from there the bar is breadcrumb →
+  // history → Edit. The loop is bounded rather than fixed so a later
   // chrome addition fails the *assertion* below instead of this line.
+  await page.keyboard.press('Tab');
+  await expect(page.getByRole('link', { name: 'Skip to content' })).toBeFocused();
+  await page.keyboard.press('Enter');
   let tabs = 0;
   while (tabs < 6 && !(await history.evaluate((element) => element === document.activeElement))) {
     await page.keyboard.press('Tab');
     tabs += 1;
   }
   await expect(history).toBeFocused();
-  expect(tabs).toBe(2);
+  expect(tabs, 'the history control is a few stops past the skip link, not the whole sidebar away').toBeLessThanOrEqual(4);
 
   // §4.3 wants both halves of an icon-only control. The accessible name
   // is asserted by the locator above; the tooltip is the other half, and
@@ -198,7 +202,7 @@ test("a revision's timestamp reads in each viewer's own timezone, and hydrates w
 
     await page.goto(`/pages/${fixtures.historyPageId}/history`);
 
-    const timestamp = page.getByRole('listitem').nth(0).locator('time');
+    const timestamp = page.getByRole('main').getByRole('listitem').nth(0).locator('time');
     await expect(timestamp).toBeVisible({ timeout: 30000 });
 
     const datetime = await timestamp.getAttribute('datetime');
@@ -241,7 +245,7 @@ test('the compare control is a real, keyboard-operable link, not a disabled plac
 
   await page.goto(`/pages/${fixtures.historyPageId}/history`);
 
-  const compare = page.getByRole('listitem').nth(0).getByRole('link', { name: /compare with previous/i });
+  const compare = page.getByRole('main').getByRole('listitem').nth(0).getByRole('link', { name: /compare with previous/i });
   await expect(compare).toBeVisible({ timeout: 30000 });
   await expect(compare).not.toHaveAttribute('aria-disabled', 'true');
   await expect(compare).toHaveAttribute(
@@ -259,7 +263,7 @@ test('a page that has never been saved shows the empty state with a path forward
   await page.goto(`/pages/${fixtures.emptyHistoryPageId}/history`);
 
   await expect(page.getByRole('heading', { name: /no revisions yet/i })).toBeVisible({ timeout: 30000 });
-  await expect(page.getByRole('listitem')).toHaveCount(0);
+  await expect(page.getByRole('main').getByRole('listitem')).toHaveCount(0);
   await expect(page.getByRole('link', { name: /start editing/i })).toBeVisible();
 });
 
@@ -273,7 +277,7 @@ test('an outsider with no read grant sees the same not-found state a nonexistent
   const deniedHtml = await page.content();
   expect(deniedHtml).not.toContain('E2E History Page');
   expect(deniedHtml).not.toContain('E2E Owner');
-  await expect(page.getByRole('listitem')).toHaveCount(0);
+  await expect(page.getByRole('main').getByRole('listitem')).toHaveCount(0);
 
   await page.goto(`/pages/${crypto.randomUUID()}/history`);
   await expect(page.getByRole('heading', { name: 'This page does not exist' })).toBeVisible({ timeout: 30000 });

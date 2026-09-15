@@ -5,17 +5,57 @@ import { computed, defineComponent, h, nextTick, ref } from 'vue';
 import type { CommentThread } from '@deep-wiki/contracts';
 import ReadPage from './index.vue';
 
-const { usePageReadMock, usePresenceStreamMock, usePageCommentsMock, useRouteMock } = vi.hoisted(() => ({
+const { usePageReadMock, usePresenceStreamMock, usePageCommentsMock, useRouteMock, useWorkspaceTreeMock, useWorkspaceDirectoryMock } = vi.hoisted(() => ({
   usePageReadMock: vi.fn(),
   usePresenceStreamMock: vi.fn(),
   usePageCommentsMock: vi.fn(),
   useRouteMock: vi.fn(() => ({ params: { id: 'page-1' } })),
+  useWorkspaceTreeMock: vi.fn(),
+  useWorkspaceDirectoryMock: vi.fn(),
 }));
 
 mockNuxtImport('usePageRead', () => usePageReadMock);
 mockNuxtImport('usePresenceStream', () => usePresenceStreamMock);
 mockNuxtImport('usePageComments', () => usePageCommentsMock);
 mockNuxtImport('useRoute', () => useRouteMock);
+mockNuxtImport('useWorkspaceTree', () => useWorkspaceTreeMock);
+mockNuxtImport('useWorkspaceDirectory', () => useWorkspaceDirectoryMock);
+
+/**
+ * The frame's own collaborators — the sidebar's tree and the workspace
+ * directory — are stubbed so this file stays about the read screen. The
+ * tree places `page-1` under a shelf and a book, which is what the
+ * breadcrumb test below reads.
+ */
+function mockFrame() {
+  useWorkspaceTreeMock.mockReturnValue({
+    status: ref('success'),
+    nodes: ref([]),
+    rootId: ref('root-1'),
+    message: ref(''),
+    collapsedIds: computed(() => new Set<string>()),
+    selectedId: ref(null),
+    load: vi.fn(async () => {}),
+    reorder: vi.fn(async () => true),
+    toggleCollapsed: vi.fn(),
+    reveal: vi.fn(),
+    pathTo: (id: string) =>
+      id === 'page-1'
+        ? [
+            { id: 'shelf-1', type: 'shelf', slug: 's', title: 'Engineering', position: 0, children: [] },
+            { id: 'book-1', type: 'book', slug: 'b', title: 'Handbook', position: 0, children: [] },
+            { id: 'page-1', type: 'page', slug: 'p', title: 'A Page', position: 0, children: [] },
+          ]
+        : [],
+  });
+  useWorkspaceDirectoryMock.mockReturnValue({
+    status: ref('success'),
+    workspaces: computed(() => [{ id: 'ws-1', name: 'Acme', slug: 'acme' }]),
+    ensure: vi.fn(async () => {}),
+    refresh: vi.fn(async () => {}),
+    nameOf: (id: string) => (id === 'ws-1' ? 'Acme' : null),
+  });
+}
 
 const PageInApp = defineComponent({
   name: 'PageInApp',
@@ -47,6 +87,7 @@ function mockRead(overrides: Partial<{ status: string; html: string; title: stri
   });
   mockPresence();
   mockComments();
+  mockFrame();
   return load;
 }
 
@@ -125,9 +166,13 @@ describe('read-mode page', () => {
     mockRead({ status: 'success', title: 'A Page', html: '<p>Hello from cache</p>' });
     const component = await mount();
 
+    // The workspace frame: the contextual bar is the pane's header, the
+    // column is the one main, and the sidebar is the navigation landmark.
+    // No footer — the frame's doors are in the sidebar.
     expect(component.find('header').exists()).toBe(true);
-    expect(component.find('main').exists()).toBe(true);
-    expect(component.find('footer').exists()).toBe(true);
+    expect(component.findAll('main')).toHaveLength(1);
+    expect(component.find('[role="navigation"][aria-label="Workspace"]').exists()).toBe(true);
+    expect(component.find('footer').exists()).toBe(false);
     expect(component.findAll('h1')).toHaveLength(1);
     expect(component.get('h1').text()).toBe('A Page');
     expect(component.html()).toContain('Hello from cache');
@@ -230,20 +275,34 @@ describe('read-mode page', () => {
     expect(history.attributes('data-state')).toBeDefined();
   });
 
+  /*
+   * Where the person is, above the article: workspace › shelf › book ›
+   * page, placed through the tree the sidebar already holds once the
+   * response has named the workspace — the page's title alone until then.
+   */
+  test('the breadcrumb walks from the workspace to this page once the response names the workspace', async () => {
+    mockRead({ status: 'success', title: 'A Page', html: '<p>Hello</p>', workspaceId: 'ws-1' });
+    const component = await mount();
+
+    const crumbs = component.get('nav[aria-label="Where you are"]').findAll('li').map((li) => li.text()).filter(Boolean);
+    expect(crumbs).toEqual(['Acme', 'Engineering', 'Handbook', 'A Page']);
+  });
+
   test('the history control keeps its own tab stop and precedes the higher-emphasis Edit transition', async () => {
     mockRead({ status: 'success', title: 'A Page', html: '<p>Hello from cache</p>' });
     const component = await mount();
 
     const header = component.get('header').element;
-    const links = Array.from(header.querySelectorAll('a')).map((anchor) => anchor.getAttribute('href'));
-    // Brand, then the quieter navigation, then the emphasised one — the
-    // order edit mode already uses for "Read page" before "Save"
-    // (docs/DESIGN-SYSTEM.md §9.1's emphasis ladder) — and then the
-    // shell's own chrome (the registration entry, `AppShell.vue`, added
-    // 2026-09-14) after every screen-specific control. Enumerated in
+    const links = Array.from(header.querySelectorAll('[data-slot="right"] a')).map((anchor) => anchor.getAttribute('href'));
+    // The contextual bar: this screen's own controls only — the quieter
+    // navigation, then the emphasised one, the order edit mode already
+    // uses for "Read page" before "Save" (docs/DESIGN-SYSTEM.md §9.1's
+    // emphasis ladder). The shell's doors (registration, the theme
+    // toggle) live in the sidebar's footer now, not in this bar; the
+    // breadcrumb's links are counted separately below. Enumerated in
     // full on purpose: this is what catches a control silently dropping
     // out of the sequence.
-    expect(links).toEqual(['/', '/pages/page-1/history', '/pages/page-1/edit', '/admin/registration']);
+    expect(links).toEqual(['/pages/page-1/history', '/pages/page-1/edit']);
     // A link, not a click handler: reachable and operable by keyboard
     // with no JavaScript of its own (checklist §5).
     expect(component.get('header a[href="/pages/page-1/history"]').element.tagName).toBe('A');
@@ -275,7 +334,9 @@ describe('read-mode page', () => {
     mockRead({ status: 'success', title: 'A Page', html: '<p>Hello</p>' });
     const component = await mount();
 
-    expect(component.find('[role="status"]').exists()).toBe(false);
+    // Scoped to the screen: the sidebar's tree toolbar keeps its own
+    // always-present live region for its own announcements.
+    expect(component.find('main [role="status"]').exists()).toBe(false);
   });
 
   // editing-presence spec: the stream is workspace-scoped

@@ -12,6 +12,12 @@ const { usePageDiffMock, useRouteMock } = vi.hoisted(() => ({
 mockNuxtImport('usePageDiff', () => usePageDiffMock);
 mockNuxtImport('useRoute', () => useRouteMock);
 
+// Every screen now renders inside the workspace frame. Its sidebar — the
+// tree, the switcher, the doors — is stubbed here so this file stays about
+// the screen it names; `AppShell.test.ts` and `WorkspaceSidebar.test.ts`
+// own the frame.
+const FRAME_STUBS = { global: { stubs: { WorkspaceSidebar: true } } };
+
 const PageInApp = defineComponent({
   name: 'PageInApp',
   setup: () => () => h(UApp, null, { default: () => h(DiffPage) }),
@@ -60,14 +66,14 @@ const MIXED_CHANGES: Change[] = [
 describe('page-diff screen', () => {
   test('renders the loading skeleton, not a spinner, while the request is in flight', async () => {
     mockDiff({ status: 'loading' });
-    const component = await mountSuspended(PageInApp);
+    const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
     expect(component.find('[data-testid="diff-skeleton"]').exists()).toBe(true);
   });
 
   test('renders a single not-found state — absence and denial are indistinguishable here', async () => {
     mockDiff({ status: 'not-found' });
-    const component = await mountSuspended(PageInApp);
+    const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
     expect(component.text()).toMatch(/does not exist/i);
   });
@@ -80,7 +86,7 @@ describe('page-diff screen', () => {
   // `error.vue`'s reviewed paragraph, verbatim, so one copy exists.
   test('the not-found notice offers the workspaces list and sign-in, with the error screen’s copy', async () => {
     mockDiff({ status: 'not-found' });
-    const component = await mountSuspended(PageInApp);
+    const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
     expect(component.find('main a[href="/workspaces"]').exists()).toBe(true);
     expect(component.find('main a[href="/login"]').exists()).toBe(true);
@@ -89,7 +95,7 @@ describe('page-diff screen', () => {
 
   test('renders a recoverable error state with a retry action that reloads', async () => {
     const load = mockDiff({ status: 'network-error', message: 'Cannot reach the server.' });
-    const component = await mountSuspended(PageInApp);
+    const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
     const retry = component.get('button[data-testid="diff-retry"]');
     await retry.trigger('click');
@@ -102,7 +108,7 @@ describe('page-diff screen', () => {
   // error branch.
   test('two revisions with no differences render a real empty state, not an error', async () => {
     mockDiff({ status: 'success', changes: [{ kind: 'unchanged', id: 'b1', slot: 0, text: 'Nothing changed here.' }] });
-    const component = await mountSuspended(PageInApp);
+    const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
     expect(component.text()).toMatch(/no differences/i);
     expect(component.find('[role="alert"]').exists()).toBe(false);
@@ -110,7 +116,7 @@ describe('page-diff screen', () => {
 
   test('each classification renders its own accessible label, isolated from the others in the same result', async () => {
     mockDiff({ status: 'success', changes: MIXED_CHANGES });
-    const component = await mountSuspended(PageInApp);
+    const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
     // Case-sensitive `.toContain`, not a case-insensitive regex: the
     // badge label "Removed" contains the literal substring "moved" (as in
@@ -118,24 +124,24 @@ describe('page-diff screen', () => {
     // pass for the wrong reason. The badges render Title Case and the
     // surrounding prose does not, so an exact-case check on the label
     // itself is the assertion that actually isolates one kind from another.
-    const removedRow = component.findAll('li').find((li) => li.text().includes('apples'))!;
+    const removedRow = component.findAll('main li').find((li) => li.text().includes('apples'))!;
     expect(removedRow.text()).toContain('Removed');
     expect(removedRow.text()).not.toContain('Added');
     expect(removedRow.text()).not.toContain('Modified');
     expect(removedRow.text()).not.toContain('Moved');
 
-    const modifiedRow = component.findAll('li').find((li) => li.text().includes('grapes'))!;
+    const modifiedRow = component.findAll('main li').find((li) => li.text().includes('grapes'))!;
     expect(modifiedRow.text()).toContain('Modified');
     expect(modifiedRow.text()).not.toContain('Added');
     expect(modifiedRow.text()).not.toContain('Removed');
 
-    const addedRow = component.findAll('li').find((li) => li.text().includes('kiwis'))!;
+    const addedRow = component.findAll('main li').find((li) => li.text().includes('kiwis'))!;
     expect(addedRow.text()).toContain('Added');
     expect(addedRow.text()).not.toContain('Removed');
     expect(addedRow.text()).not.toContain('Modified');
     expect(addedRow.text()).not.toContain('Moved');
 
-    const unchangedRow = component.findAll('li').find((li) => li.text().includes('pears'))!;
+    const unchangedRow = component.findAll('main li').find((li) => li.text().includes('pears'))!;
     expect(unchangedRow.text()).not.toContain('Added');
     expect(unchangedRow.text()).not.toContain('Removed');
     expect(unchangedRow.text()).not.toContain('Modified');
@@ -147,9 +153,9 @@ describe('page-diff screen', () => {
   // differently — asserted on the row's own classes, not just its text.
   test('a moved block gets a visual treatment distinct from added, removed and modified', async () => {
     mockDiff({ status: 'success', changes: MIXED_CHANGES });
-    const component = await mountSuspended(PageInApp);
+    const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
-    const rows = component.findAll('li');
+    const rows = component.findAll('main li');
     const movedRow = rows.find((li) => li.text().includes('bananas'))!;
     const addedRow = rows.find((li) => li.text().includes('kiwis'))!;
     const removedRow = rows.find((li) => li.text().includes('apples'))!;
@@ -181,7 +187,7 @@ describe('page-diff screen', () => {
       status: 'success',
       changes: [{ kind: 'moved', id: 'b1', fromSlot: 0, toSlot: 3, text: 'This paragraph moved later in the document.' }],
     });
-    const component = await mountSuspended(PageInApp);
+    const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
     expect(component.text()).toContain('Moved down');
     const iconNames = component.findAllComponents(UIcon).map((icon) => icon.props('name'));
@@ -194,7 +200,7 @@ describe('page-diff screen', () => {
       status: 'success',
       changes: [{ kind: 'moved', id: 'b1', fromSlot: 3, toSlot: 0, text: 'This paragraph moved earlier in the document.' }],
     });
-    const component = await mountSuspended(PageInApp);
+    const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
     expect(component.text()).toContain('Moved up');
     const iconNames = component.findAllComponents(UIcon).map((icon) => icon.props('name'));
@@ -209,7 +215,7 @@ describe('page-diff screen', () => {
         { kind: 'modified', id: 'b1', fromSlot: 0, toSlot: 2, moved: true, text: 'Edited and moved later.' },
       ],
     });
-    const component = await mountSuspended(PageInApp);
+    const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
     expect(component.text()).toContain('Modified · moved down');
     const iconNames = component.findAllComponents(UIcon).map((icon) => icon.props('name'));
@@ -218,7 +224,7 @@ describe('page-diff screen', () => {
 
   test("renders the block's own text content, not just its classification", async () => {
     mockDiff({ status: 'success', changes: MIXED_CHANGES });
-    const component = await mountSuspended(PageInApp);
+    const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
     expect(component.text()).toContain('Paragraph about kiwis, brand new.');
     expect(component.text()).toContain('Paragraph about apples, removed entirely.');
@@ -226,7 +232,7 @@ describe('page-diff screen', () => {
 
   test('renders exactly one h1 for the screen, at the same type role every state uses', async () => {
     mockDiff({ status: 'success', changes: MIXED_CHANGES });
-    const component = await mountSuspended(PageInApp);
+    const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
     expect(component.findAll('h1')).toHaveLength(1);
   });

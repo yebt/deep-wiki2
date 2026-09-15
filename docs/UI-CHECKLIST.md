@@ -879,4 +879,26 @@ ARIA ownership (Open Questions), the two-icon-pack requirement (§4.3), the thre
 
 ---
 
+### 2026-09-15 — The workspace frame: sidebar, contextual bar, dashboard — awaiting the owner's review
+
+**Reviewer:** none yet — this entry is what was shipped for review, not a review.
+**Verdict:** Pending
+
+Built from the owner's rejection of the tree screen (`docs/TODO.md` Findings, 2026-09-15)
+and `apps/web/PRODUCT.md`'s three answers: one workspace at a time, "what changed and who is
+here" first, a mixed team. `AppShell` gained the workspace frame; `pages/workspaces/[workspaceId]/index.vue`
+is the dashboard; `pages/pages/[id]/index.vue` renders inside the frame; `tree.vue` is gone.
+Measured, in `e2e/frame.spec.ts`, at 1280×900 in both themes and at 320×900: a 280px
+sidebar at x=0; the dashboard's changes list beside a side column at ≥ 1.8× its width; the
+read article at its 72ch measure, centred in the content pane to within 2px; no body scroll
+in either axis; below `lg` a focus-trapped drawer that closes on Escape. Screenshots
+`frame-*.png` in the session scratchpad. Every other screen renders inside the frame
+unchanged in its own layout, which is the next batch after this review.
+
+Known before review, not fixed: the sidebar is rebuilt per route (no layout yet); the
+two-icon-pack requirement (§4.3) is still untested; §6's contextual (third) pane — comments,
+AI, presence — is still an overlay.
+
+---
+
 *The next entry goes below this one.*

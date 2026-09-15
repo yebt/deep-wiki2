@@ -481,6 +481,51 @@ makes conventions portable across projects.
 
 Discoveries and constraints. Newest first.
 
+### 2026-09-15 — The app frame was a document page, and the tree screen is gone
+
+**What happened.** Every screen was built as a document page — a centred 72ch column, a
+`PageHeading`, a card — and that model was applied to the app frame, so the workspace's
+tree was a card in the middle of a wide viewport, the app bar was a global strip that
+accumulated "Book history: A B C" links wrapping onto two lines, and `/` led to a list of
+workspaces rather than into one. The owner rejected it on sight. The frame is now the
+workspace frame (`AppShell` with a `workspace-id`): a persistent sidebar (`WorkspaceSidebar`
+— switcher, `NavigationTree`, doors), a content pane, and a contextual top bar (breadcrumb +
+the screen's own `header-end` actions), built on Nuxt UI's `UDashboard*` set exactly as
+`docs/DESIGN-SYSTEM.md` §8.3 prescribed and nobody had built. The workspace root
+`/workspaces/:id` is a dashboard — `GET /workspaces/:id/activity` (new) plus the
+workspace-wide presence stream — and **`/workspaces/:id/tree` no longer exists**: the tree is
+the sidebar, on every screen. Links that pointed at it now point at the workspace root.
+
+**What this leaves open, on purpose.**
+
+- **Every route still mounts its own `AppShell`.** The tree, the fold state, the selection
+  and the workspace directory live in `useState` (`useWorkspaceTree`,
+  `useWorkspaceDirectory`, `useCurrentWorkspace`) so a navigation inside the workspace
+  shows the loaded tree at once and refreshes behind it — but the sidebar's DOM is still
+  rebuilt per route, so its scroll position resets and a resize-drag mid-navigation is
+  lost. The full fix is a Nuxt layout that mounts the frame once; that changes how all
+  thirteen screens compose and is the next batch's, not this one's.
+- **Only the dashboard and the read page were migrated.** Edit, history, diff, members,
+  book history and book diff render inside the frame (their `header-end` moved into the
+  contextual bar; page history and page diff learn no workspace from their responses and
+  stand on the last one the person was in) but keep their document-page layouts.
+- **There is no sign-out in the sidebar's footer** because there is no sign-out (PRODUCT.md,
+  "Not yet"). The footer holds Members, Registration settings and the theme toggle.
+- **"Threads for you" matches `@<display name>` as plain text.** Comments carry no
+  structured mentions; the dashboard says "Names you" and the API documents the convention.
+  A structured mention model would replace the `strpos` in `listOpenThreadsForUser`.
+- **`/` still redirects to the workspace list**, not to the last workspace the person was
+  in. Obsidian reopens the last vault; doing that here needs the current workspace
+  persisted beyond `useState`.
+- **`BookDiffBlockChanges.vue` carries `border-l-4` accents** (the impeccable detector's
+  one finding across `apps/web/app/components`, lines 123 and 138). Not this batch's
+  screen; recorded for the diff screen's own review.
+- **The keyboard path to a screen's actions now crosses the sidebar.** A "Skip to content"
+  link is the frame's first tab stop and focuses the contextual bar; measured in
+  `e2e/history.spec.ts` (skip → breadcrumb → history → Edit).
+
+---
+
 ### 2026-09-14 — The edit screen's e2e mocked the one endpoint the bug lived behind, and two more tests that could not see what they named
 
 **What happened.** "Edit mode cannot save an existing page from a browser" was reachable from

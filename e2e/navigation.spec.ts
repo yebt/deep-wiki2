@@ -8,7 +8,7 @@ import { expect, test, type BrowserContext, type Page } from '@playwright/test';
  * **Why every step is a click.** The defect this suite guards is that
  * nothing told a client which workspaces exist for it, so the tree could
  * only be reached by someone who already knew an id. A test that called
- * `page.goto('/workspaces/<id>/tree')` would therefore pass with the
+ * `page.goto('/workspaces/<id>')` would therefore pass with the
  * entire navigation deleted — it would be exercising the tree screen, not
  * the way there. Exactly one address is typed in the happy path below, and
  * it is `/`; everything after it is a link the product had to render.
@@ -79,10 +79,12 @@ test('a signed-in reader gets from the front door to a page by clicking, never b
   // Click 1 — the list row. If this link is deleted, the test stops here.
   await page.getByRole('link', { name: /E2E Workspace/ }).click();
 
-  await expect(page.getByRole('heading', { level: 1, name: 'Navigation tree' })).toBeVisible({ timeout: 30000 });
-  await expect(page).toHaveURL(/\/workspaces\/[0-9a-f-]+\/tree$/);
+  // The workspace's home: its name is the screen's heading, and its tree
+  // stands in the sidebar beside it rather than being a screen of its own.
+  await expect(page.getByRole('heading', { level: 1, name: 'E2E Workspace' })).toBeVisible({ timeout: 30000 });
+  await expect(page).toHaveURL(/\/workspaces\/[0-9a-f-]+$/);
 
-  // Click 2 — the tree row, which is what a workspace list is for.
+  // Click 2 — the tree row in the sidebar, which is what the sidebar is for.
   await page.getByRole('treeitem', { name: /E2E Read Page/ }).click();
 
   await expect(page.getByRole('heading', { level: 1, name: 'E2E Read Page' })).toBeVisible({ timeout: 30000 });
@@ -128,14 +130,14 @@ test('a signed-in member reaches the workspace members screen by clicking the tr
   // Click 1 — the list row, same as the happy-path test above.
   await page.getByRole('link', { name: /E2E Workspace/ }).click();
 
-  await expect(page.getByRole('heading', { level: 1, name: 'Navigation tree' })).toBeVisible({ timeout: 30000 });
+  await expect(page.getByRole('heading', { level: 1, name: 'E2E Workspace' })).toBeVisible({ timeout: 30000 });
 
-  // Click 2 — the Members link this task adds beside the book-history
-  // links. It renders for every caller who can open this tree at all
-  // (docs/TODO.md — no `manage` signal reaches this screen today), so a
-  // plain workspace member is enough to prove the click actually goes
-  // somewhere; the screen's own "Nothing to manage here" state is what
-  // would gate a caller without `manage`, not this link's visibility.
+  // Click 2 — the Members door in the sidebar's footer. It renders for
+  // every caller who can open this workspace at all (docs/TODO.md — no
+  // `manage` signal reaches the client today), so a plain workspace member
+  // is enough to prove the click actually goes somewhere; the screen's own
+  // "Nothing to manage here" state is what would gate a caller without
+  // `manage`, not this link's visibility.
   await page.getByRole('link', { name: 'Members' }).click();
 
   await expect(page.getByRole('heading', { level: 1, name: 'Members' })).toBeVisible({ timeout: 30000 });
@@ -225,12 +227,13 @@ test('the workspace list skeleton occupies the box the loaded rows take', async 
  * the user can see — nothing is selected until they pick one, and the
  * picked row carries the fill (docs/DESIGN-SYSTEM.md §5.2); and a shelf,
  * book or chapter row folds on Enter and on click instead of doing
- * nothing while claiming to be expanded.
+ * nothing while claiming to be expanded. The tree lives in the sidebar
+ * now; the contract is the same.
  */
 test('the tree toolbar is 32px, acts only on a row the user picked, and container rows fold on Enter', async ({ page, context }) => {
   await signInAs(context, fixtures.readerSessionToken);
 
-  await page.goto(`/workspaces/${fixtures.workspaceId}/tree`);
+  await page.goto(`/workspaces/${fixtures.workspaceId}`);
   const shelf = page.getByRole('treeitem', { name: new RegExp(fixtures.bookHistoryShelfTitle) });
   await expect(shelf).toBeVisible({ timeout: 30000 });
 

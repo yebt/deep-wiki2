@@ -128,7 +128,7 @@ describe('new workspace screen', () => {
     expect(component.get('[role="status"]').text()).toMatch(/Acme Handbook/);
     const hrefs = component.findAll('a').map((a) => a.attributes('href'));
     expect(hrefs).toContain('/workspaces/ws-9/members');
-    expect(hrefs).toContain('/workspaces/ws-9/tree');
+    expect(hrefs).toContain('/workspaces/ws-9');
     expect(component.find('form').exists()).toBe(false);
   });
 

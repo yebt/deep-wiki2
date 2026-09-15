@@ -95,19 +95,19 @@ useSeoMeta({ title: 'Members — deep-wiki' });
 </script>
 
 <template>
-  <AppShell>
+  <AppShell :workspace-id="workspaceId" title="Members">
     <template #header-end>
       <!-- Page-specific chrome at §7.2's 32px chrome height: the way back
            to the workspace's content, beside the theme toggle. -->
       <UButton
         v-if="status === 'success'"
-        :to="`/workspaces/${workspaceId}/tree`"
+        :to="`/workspaces/${workspaceId}`"
         variant="ghost"
         color="neutral"
         size="sm"
-        icon="i-lucide-folder-tree"
+        icon="i-lucide-house"
       >
-        Navigation tree
+        Workspace home
       </UButton>
     </template>
 

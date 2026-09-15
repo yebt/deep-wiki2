@@ -188,7 +188,10 @@ useSeoMeta({ title: () => (session.value?.title ? `Editing ${session.value.title
 </script>
 
 <template>
-  <AppShell>
+  <AppShell :workspace-id="session?.workspaceId ?? null" :node-id="nodeId" :title="session?.title || undefined" :trail="[{ label: 'Editing' }]">
+    <!-- Rendered inside the workspace frame so the mode switch does not
+         change the room around the text; the layout of this screen itself
+         is the next batch's. -->
     <template #header-end>
       <!-- One chrome for one destination: this and the history screen's
            app-bar control both lead to `/pages/:id`, and used to be

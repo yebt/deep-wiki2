@@ -82,21 +82,21 @@ useSeoMeta({ title: () => `${heading.value} — deep-wiki` });
 </script>
 
 <template>
-  <AppShell>
+  <AppShell :workspace-id="nav?.workspaceId.value ?? null" :node-id="bookId" :trail="[{ label: 'Book changes' }]">
     <template #header-end>
       <!-- The way back to the book's place in the tree, once the response
            has named the workspace — a screen reached from the tree that
            could only go back to history was one door short. Icon-only,
            with both halves §4.3 demands, because the bar at 320px already
            holds a labelled control. -->
-      <UTooltip v-if="nav?.workspaceId.value" text="Navigation tree">
+      <UTooltip v-if="nav?.workspaceId.value" text="Workspace home">
         <UButton
-          icon="i-lucide-list-tree"
+          icon="i-lucide-house"
           variant="ghost"
           color="neutral"
           size="sm"
-          aria-label="Navigation tree"
-          :to="`/workspaces/${nav.workspaceId.value}/tree`"
+          aria-label="Workspace home"
+          :to="`/workspaces/${nav.workspaceId.value}`"
         />
       </UTooltip>
       <UButton icon="i-lucide-arrow-left" variant="ghost" color="neutral" size="sm" :to="`/books/${bookId}/history`">

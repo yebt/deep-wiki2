@@ -69,19 +69,19 @@ useSeoMeta({ title: () => `${heading.value} — deep-wiki` });
 </script>
 
 <template>
-  <AppShell>
+  <AppShell :workspace-id="workspaceId" :node-id="bookId" :trail="[{ label: 'Book history' }]">
     <template #header-end>
       <!-- The way back to the book's place in the tree, once the response
            has named the workspace. Icon-only with both halves §4.3
            demands — the same control the book-diff screen carries. -->
-      <UTooltip v-if="workspaceId" text="Navigation tree">
+      <UTooltip v-if="workspaceId" text="Workspace home">
         <UButton
-          icon="i-lucide-list-tree"
+          icon="i-lucide-house"
           variant="ghost"
           color="neutral"
           size="sm"
-          aria-label="Navigation tree"
-          :to="`/workspaces/${workspaceId}/tree`"
+          aria-label="Workspace home"
+          :to="`/workspaces/${workspaceId}`"
         />
       </UTooltip>
     </template>
@@ -133,8 +133,8 @@ useSeoMeta({ title: () => `${heading.value} — deep-wiki` });
       This book hasn't been saved into yet. Once a page inside it is saved, its changesets will
       appear here, grouped by author and time.
       <template v-if="workspaceId" #actions>
-        <UButton variant="outline" color="neutral" icon="i-lucide-list-tree" :to="`/workspaces/${workspaceId}/tree`">
-          Open the book in the tree
+        <UButton variant="outline" color="neutral" icon="i-lucide-house" :to="`/workspaces/${workspaceId}`">
+          Open the workspace
         </UButton>
       </template>
     </PageNotice>

@@ -95,7 +95,8 @@ test('a fresh user creates a workspace by clicking, is handed the members screen
   await page.getByRole('link', { name: /invite your team/i }).click();
 
   await expect(page.getByRole('heading', { level: 1, name: 'Members' })).toBeVisible();
-  await expect(page.getByText(WORKSPACE_NAME)).toBeVisible();
+  // Scoped to the screen: the sidebar's switcher names the workspace too.
+  await expect(page.getByRole('main').getByText(WORKSPACE_NAME)).toBeVisible();
   workspaceUrl = page.url();
   expect(workspaceUrl).toMatch(/\/workspaces\/[0-9a-f-]{36}\/members$/);
 
@@ -132,21 +133,24 @@ test('the colleague accepts the mailed link, signs in, and lands on the tree', a
   await expect(page).toHaveURL(/\/workspaces$/);
 
   await page.getByRole('link', { name: new RegExp(WORKSPACE_NAME) }).click();
-  await expect(page.getByRole('heading', { level: 1, name: 'Navigation tree' })).toBeVisible();
-  await expect(page.getByRole('heading', { level: 2, name: /no shelves yet/i })).toBeVisible();
+  // The workspace's home, with its empty tree in the sidebar beside it.
+  await expect(page.getByRole('heading', { level: 1, name: new RegExp(WORKSPACE_NAME) })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 2, name: /nothing has happened here yet/i })).toBeVisible();
+  await expect(page.getByText(/no shelves yet/i)).toBeVisible();
 });
 
 test('a member without manage cannot see the members screen, and cannot tell it from a missing workspace', async ({ page }) => {
   await signIn(page, fixtures.colleagueEmail);
   await page.goto(workspaceUrl);
   await page.waitForLoadState('networkidle');
-  const denied = page.getByRole('status');
+  // Scoped to the screen: the sidebar's tree toolbar keeps its own live region.
+  const denied = page.getByRole('main').getByRole('status');
   await expect(denied).toContainText(/does not exist, or you do not manage it/i);
   await expect(page.getByRole('form')).toHaveCount(0);
 
   await page.goto(workspaceUrl.replace(/[0-9a-f-]{36}\/members$/, '00000000-0000-4000-8000-000000000000/members'));
   await page.waitForLoadState('networkidle');
-  await expect(page.getByRole('status')).toContainText(/does not exist, or you do not manage it/i);
+  await expect(page.getByRole('main').getByRole('status')).toContainText(/does not exist, or you do not manage it/i);
 });
 
 test('the founder at the plan limit is told the number, not shown a form', async ({ page }) => {

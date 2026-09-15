@@ -19,6 +19,12 @@ mockNuxtImport('useBookDiffNavigator', () => useBookDiffNavigatorMock);
 mockNuxtImport('useRoute', () => useRouteMock);
 mockNuxtImport('navigateTo', () => navigateToMock);
 
+// Every screen now renders inside the workspace frame. Its sidebar — the
+// tree, the switcher, the doors — is stubbed here so this file stays about
+// the screen it names; `AppShell.test.ts` and `WorkspaceSidebar.test.ts`
+// own the frame.
+const FRAME_STUBS = { global: { stubs: { WorkspaceSidebar: true } } };
+
 const PageInApp = defineComponent({
   name: 'PageInApp',
   setup: () => () => h(UApp, null, { default: () => h(DiffPage) }),
@@ -105,7 +111,7 @@ describe('book-diff screen', () => {
   test('a missing `since` query param renders a broken-link state without calling the API', async () => {
     useRouteMock.mockReturnValue({ params: { id: 'book-1' }, query: {} });
     const { load } = mockNavigator({});
-    const component = await mountSuspended(PageInApp);
+    const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
     expect(component.text()).toMatch(/does not exist|invalid|missing/i);
     expect(load).not.toHaveBeenCalled();
@@ -113,21 +119,21 @@ describe('book-diff screen', () => {
 
   test('renders the loading skeleton while the changed-page list is in flight', async () => {
     mockNavigator({}, { status: 'loading' });
-    const component = await mountSuspended(PageInApp);
+    const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
     expect(component.find('[data-testid="book-diff-skeleton"]').exists()).toBe(true);
   });
 
   test('renders a single not-found state — absence and denial are indistinguishable here', async () => {
     mockNavigator({}, { status: 'not-found' });
-    const component = await mountSuspended(PageInApp);
+    const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
     expect(component.text()).toMatch(/does not exist/i);
   });
 
   test('renders a recoverable network-error state with a retry that reloads', async () => {
     const { load } = mockNavigator({}, { status: 'network-error', message: 'Cannot reach the server.' });
-    const component = await mountSuspended(PageInApp);
+    const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
     const retry = component.get('button[data-testid="book-diff-retry"]');
     await retry.trigger('click');
@@ -137,7 +143,7 @@ describe('book-diff screen', () => {
 
   test('zero changed pages renders a real empty state naming the date, not an error', async () => {
     mockNavigator({}, { status: 'success', pageIds: [] });
-    const component = await mountSuspended(PageInApp);
+    const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
     expect(component.text()).toMatch(/no changes/i);
     expect(component.find('[role="alert"]').exists()).toBe(false);
@@ -148,7 +154,7 @@ describe('book-diff screen', () => {
       'page-1': { changes: [{ kind: 'added', id: 'b1', slot: 0, text: 'First page content.' }] },
       'page-2': { changes: [{ kind: 'removed', id: 'b2', slot: 0, text: 'Second page content.' }] },
     });
-    const component = await mountSuspended(PageInApp);
+    const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
     expect(component.text()).toContain('First page content.');
     expect(component.text()).not.toContain('Second page content.');
@@ -164,7 +170,7 @@ describe('book-diff screen', () => {
       'page-1': { changes: [{ kind: 'added', id: 'b1', slot: 0, text: 'First page content.' }] },
       'page-2': { changes: [{ kind: 'removed', id: 'b2', slot: 0, text: 'Second page content.' }] },
     });
-    const component = await mountSuspended(PageInApp);
+    const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
     const nextButton = component.get('button[aria-label="Next changed page"]');
     await nextButton.trigger('click');
@@ -181,7 +187,7 @@ describe('book-diff screen', () => {
       'page-1': { changes: [] },
       'page-2': { changes: [] },
     });
-    const component = await mountSuspended(PageInApp);
+    const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
     const prevButton = component.get('button[aria-label="Previous changed page"]');
     expect(prevButton.attributes('aria-disabled')).toBe('true');
@@ -197,7 +203,7 @@ describe('book-diff screen', () => {
       },
       { currentIndex: 1 },
     );
-    const component = await mountSuspended(PageInApp);
+    const component = await mountSuspended(PageInApp, FRAME_STUBS);
     expect(component.text()).toContain('Second page content.');
 
     await component.get('button[aria-label="Previous changed page"]').trigger('click');
@@ -209,7 +215,7 @@ describe('book-diff screen', () => {
 
   test('a page created during this window (no baseline) degrades gracefully with a link to its own full history, not a crash', async () => {
     mockNavigator({ 'page-1': { changes: [], baselineRevisionId: null } });
-    const component = await mountSuspended(PageInApp);
+    const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
     expect(component.text()).toMatch(/created during this window|no earlier revision/i);
     expect(component.find('a[href="/pages/page-1/history"]').exists()).toBe(true);
@@ -222,7 +228,7 @@ describe('book-diff screen', () => {
       'page-1': { changes: [{ kind: 'added', id: 'b1', slot: 0, text: 'First.' }], pageTitle: 'Alpha' },
       'page-2': { changes: [{ kind: 'added', id: 'b2', slot: 0, text: 'Second.' }], pageTitle: 'Beta' },
     });
-    const component = await mountSuspended(PageInApp);
+    const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
     expect(component.get('h1').text()).toContain('E2E Handbook');
     expect(component.get('h2').text()).toContain('Alpha');
@@ -235,15 +241,15 @@ describe('book-diff screen', () => {
 
   test('offers the way back to the book’s tree once the workspace is known, beside the way back to its history', async () => {
     mockNavigator({ 'page-1': { changes: [] } });
-    const component = await mountSuspended(PageInApp);
+    const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
-    expect(component.find('a[href="/workspaces/ws-1/tree"]').exists()).toBe(true);
+    expect(component.find('a[href="/workspaces/ws-1"]').exists()).toBe(true);
     expect(component.find('a[href="/books/book-1/history"]').exists()).toBe(true);
   });
 
   test('renders exactly one h1, even while the book’s title is not yet known', async () => {
     mockNavigator({}, { status: 'loading', title: '' });
-    const component = await mountSuspended(PageInApp);
+    const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
     expect(component.findAll('h1')).toHaveLength(1);
     expect(component.get('h1').text()).toMatch(/Book diff/);
@@ -251,14 +257,14 @@ describe('book-diff screen', () => {
 
   test('every change is unchanged renders a real "no differences" state for the focused page', async () => {
     mockNavigator({ 'page-1': { changes: [{ kind: 'unchanged', id: 'b1', slot: 0, text: 'Same.' }] } });
-    const component = await mountSuspended(PageInApp);
+    const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
     expect(component.text()).toMatch(/no differences/i);
   });
 
   test('renders exactly one h1 for the screen', async () => {
     mockNavigator({ 'page-1': { changes: [{ kind: 'added', id: 'b1', slot: 0, text: 'Content.' }] } });
-    const component = await mountSuspended(PageInApp);
+    const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
     expect(component.findAll('h1')).toHaveLength(1);
   });

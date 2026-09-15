@@ -1,0 +1,195 @@
+import { readFileSync } from 'node:fs';
+import { expect, test, type BrowserContext, type Page } from '@playwright/test';
+
+/**
+ * The workspace frame, measured in a real browser: a persistent sidebar
+ * carrying the tree beside a content pane whose top bar is contextual,
+ * a dashboard that uses the width in columns, the read page's article
+ * centred *inside* that pane, and — below `lg` — a drawer in place of
+ * the sidebar. happy-dom has no layout engine, so every number here is
+ * this file's to hold (docs/UI-CHECKLIST.md §6: measure the rendered
+ * box; never trust a screenshot for overflow).
+ *
+ * The screenshots this file writes are the owner's review material for
+ * the 2026-09-15 frame; the assertions are what keeps them honest.
+ */
+
+interface Fixtures {
+  readonly readPageId: string;
+  readonly workspaceId: string;
+  readonly readerSessionToken: string;
+}
+
+const fixtures: Fixtures = JSON.parse(readFileSync(new URL('.auth-fixtures.json', import.meta.url), 'utf8'));
+
+const SHOTS = process.env.DEEPWIKI_FRAME_SHOTS ?? '';
+
+/** §7.2: the navigation pane is 280px by default, resizable and persisted. */
+const SIDEBAR_WIDTH = 280;
+
+test.describe.configure({ mode: 'serial', timeout: 120_000 });
+
+async function signInAs(context: BrowserContext, token: string): Promise<void> {
+  await context.addCookies([
+    { name: 'session', value: token, domain: 'localhost', path: '/', httpOnly: true, secure: true, sameSite: 'Lax' },
+  ]);
+}
+
+async function useTheme(page: Page, theme: 'light' | 'dark'): Promise<void> {
+  await page.addInitScript((value) => localStorage.setItem('nuxt-color-mode', value), theme);
+}
+
+async function shot(page: Page, name: string): Promise<void> {
+  if (!SHOTS) return;
+  await page.screenshot({ path: `${SHOTS}/frame-${name}.png`, fullPage: false });
+}
+
+function overflow(page: Page) {
+  return page.evaluate(() => ({
+    scrollHeight: document.documentElement.scrollHeight,
+    innerHeight: window.innerHeight,
+    scrollWidth: document.documentElement.scrollWidth,
+    innerWidth: window.innerWidth,
+  }));
+}
+
+for (const theme of ['light', 'dark'] as const) {
+  test.describe(`1280x900 ${theme}`, () => {
+    test.use({ viewport: { width: 1280, height: 900 } });
+
+    test('the dashboard stands beside a 280px sidebar and lays its panels out in columns', async ({ page, context }) => {
+      await signInAs(context, fixtures.readerSessionToken);
+      await useTheme(page, theme);
+
+      await page.goto(`/workspaces/${fixtures.workspaceId}`);
+      await expect(page.getByRole('heading', { level: 1, name: 'E2E Workspace' })).toBeVisible({ timeout: 30000 });
+      await expect(page.locator('html')).toHaveClass(theme === 'dark' ? /dark/ : /light/);
+
+      // The sidebar: the tree is at hand, and it is the navigation landmark.
+      const sidebar = page.getByRole('navigation', { name: 'Workspace' });
+      await expect(sidebar).toBeVisible();
+      const sidebarBox = (await sidebar.boundingBox())!;
+      expect(sidebarBox.x).toBe(0);
+      expect(Math.abs(sidebarBox.width - SIDEBAR_WIDTH), `sidebar width ${sidebarBox.width}`).toBeLessThanOrEqual(1);
+      await expect(sidebar.getByRole('treeitem').first()).toBeVisible({ timeout: 30000 });
+
+      // The width goes to the columns: three of them, the changes list
+      // taking two.
+      const recent = page.getByRole('region', { name: 'Recent changes' });
+      const editing = page.getByRole('region', { name: 'Editing now' });
+      const threads = page.getByRole('region', { name: 'Threads for you' });
+      await expect(recent).toBeVisible();
+      const recentBox = (await recent.boundingBox())!;
+      const editingBox = (await editing.boundingBox())!;
+      const threadsBox = (await threads.boundingBox())!;
+      expect(recentBox.x, 'panels start right of the sidebar').toBeGreaterThan(SIDEBAR_WIDTH);
+      expect(editingBox.x, 'the side column stands beside the changes list').toBeGreaterThan(recentBox.x + recentBox.width);
+      expect(Math.abs(editingBox.y - recentBox.y), 'the two top panels share a top edge').toBeLessThanOrEqual(1);
+      expect(threadsBox.y, 'the side panels stack').toBeGreaterThan(editingBox.y + editingBox.height);
+      expect(recentBox.width / editingBox.width, 'the changes list is about twice a side panel').toBeGreaterThan(1.8);
+
+      // The frame is the viewport: nothing scrolls but the pane.
+      const box = await overflow(page);
+      expect(box.scrollHeight).toBe(box.innerHeight);
+      expect(box.scrollWidth).toBeLessThanOrEqual(box.innerWidth);
+
+      await shot(page, `dashboard-1280-${theme}`);
+    });
+
+    test('the read page keeps its 72ch article, centred in the content pane beside the tree, with the breadcrumb and Edit above it', async ({
+      page,
+      context,
+    }) => {
+      await signInAs(context, fixtures.readerSessionToken);
+      await useTheme(page, theme);
+
+      await page.goto(`/pages/${fixtures.readPageId}`);
+      const title = page.getByRole('heading', { level: 1, name: 'E2E Read Page' });
+      await expect(title).toBeVisible({ timeout: 30000 });
+
+      const sidebar = page.getByRole('navigation', { name: 'Workspace' });
+      await expect(sidebar.getByRole('treeitem', { name: /E2E Read Page/ })).toBeVisible({ timeout: 30000 });
+      // The open page is the current row.
+      await expect(sidebar.locator('[role="treeitem"][aria-current="page"]')).toHaveCount(1);
+
+      // The contextual bar: where the person is, then what they can do.
+      const crumbs = page.getByRole('navigation', { name: 'Where you are' });
+      await expect(crumbs).toContainText('E2E Read Page');
+      await expect(crumbs).toContainText('E2E Workspace');
+      await expect(page.getByRole('link', { name: 'Edit' })).toBeVisible();
+      await expect(page.getByRole('link', { name: 'Revision history' })).toBeVisible();
+
+      // The article: still the reading measure (§4.4), but centred in the
+      // pane — not at x=32 with the rest of the viewport empty, and not
+      // in the middle of nothing either.
+      const article = (await page.locator('article').boundingBox())!;
+      const sidebarBox = (await sidebar.boundingBox())!;
+      const paneLeft = sidebarBox.x + sidebarBox.width;
+      const paneWidth = 1280 - paneLeft;
+      expect(article.width, `article width ${article.width}`).toBeLessThan(720);
+      expect(article.width, `article width ${article.width}`).toBeGreaterThan(600);
+      const leftGap = article.x - paneLeft;
+      const rightGap = 1280 - (article.x + article.width);
+      expect(Math.abs(leftGap - rightGap), `centred in the pane: left ${leftGap}, right ${rightGap}`).toBeLessThanOrEqual(2);
+      expect(article.x, 'the article is inside the pane').toBeGreaterThan(paneLeft);
+      expect(paneWidth).toBeGreaterThan(article.width);
+
+      const box = await overflow(page);
+      expect(box.scrollWidth).toBeLessThanOrEqual(box.innerWidth);
+
+      await shot(page, `read-1280-${theme}`);
+    });
+  });
+}
+
+test.describe('320x900 light', () => {
+  test.use({ viewport: { width: 320, height: 900 } });
+
+  test('the sidebar collapses into a drawer opened from the top bar; the dashboard is one column; nothing scrolls sideways', async ({
+    page,
+    context,
+  }) => {
+    await signInAs(context, fixtures.readerSessionToken);
+    await useTheme(page, 'light');
+
+    await page.goto(`/workspaces/${fixtures.workspaceId}`);
+    await expect(page.getByRole('heading', { level: 1, name: 'E2E Workspace' })).toBeVisible({ timeout: 30000 });
+
+    // No persistent sidebar; the content takes the width.
+    const persistent = page.getByRole('navigation', { name: 'Workspace' });
+    await expect(persistent).toBeHidden();
+    const recent = page.getByRole('region', { name: 'Recent changes' });
+    const editing = page.getByRole('region', { name: 'Editing now' });
+    const recentBox = (await recent.boundingBox())!;
+    const editingBox = (await editing.boundingBox())!;
+    expect(recentBox.x).toBeLessThan(SIDEBAR_WIDTH);
+    expect(editingBox.y, 'one column: the panels stack').toBeGreaterThan(recentBox.y + recentBox.height);
+    expect(Math.abs(editingBox.x - recentBox.x)).toBeLessThanOrEqual(1);
+
+    let box = await overflow(page);
+    expect(box.scrollWidth, 'no horizontal body scroll at 320').toBeLessThanOrEqual(box.innerWidth);
+    expect(box.scrollHeight).toBe(box.innerHeight);
+
+    await shot(page, 'dashboard-320-light');
+
+    // The drawer: opened from the top bar, holds the same tree, traps
+    // focus, and closes on Escape (§6).
+    await page.getByRole('button', { name: 'Open sidebar' }).click();
+    const drawer = page.getByRole('dialog');
+    await expect(drawer).toBeVisible();
+    await expect(drawer.getByRole('treeitem').first()).toBeVisible({ timeout: 30000 });
+    await expect(drawer.getByRole('link', { name: 'Members' })).toBeVisible();
+    // Let the slide-in finish before measuring or photographing it.
+    await drawer.evaluate((el) => Promise.all(el.getAnimations({ subtree: true }).map((animation) => animation.finished)));
+    const drawerBox = (await drawer.boundingBox())!;
+    expect(drawerBox.x, 'the drawer is flush with the left edge').toBe(0);
+    expect(drawerBox.width, 'the drawer fits the viewport').toBeLessThanOrEqual(320);
+    box = await overflow(page);
+    expect(box.scrollWidth).toBeLessThanOrEqual(box.innerWidth);
+
+    await shot(page, 'drawer-320-light');
+
+    await page.keyboard.press('Escape');
+    await expect(drawer).toBeHidden();
+  });
+});

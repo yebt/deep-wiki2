@@ -69,7 +69,9 @@ useSeoMeta({ title: 'Revision history — deep-wiki' });
 </script>
 
 <template>
-  <AppShell>
+  <AppShell :workspace-id="null" :node-id="nodeId" :trail="[{ label: 'History' }]">
+    <!-- The history response names no workspace, so the frame stands on the
+         last one the person was in (`AppShell`, `workspace-id="null"`). -->
     <template #header-end>
       <!-- The same control edit mode carries for the same destination:
            "Read page" with the eye, never a second chrome for `/pages/:id`

@@ -193,7 +193,13 @@ useSeoMeta({ title: () => (title.value ? `${title.value} — deep-wiki` : 'deep-
 </script>
 
 <template>
-  <AppShell>
+  <AppShell :workspace-id="workspaceId" :node-id="nodeId" :title="title || undefined">
+    <!-- Inside the workspace frame: the sidebar's tree beside the article,
+         the breadcrumb above it (shelf › book › chapter › page — placed
+         through the tree once the response names the workspace, the title
+         alone until then), and this screen's actions in the contextual bar.
+         `workspaceId` is `null` until the page response names it; the frame
+         stands on the last workspace the person was in meanwhile. -->
     <template #header-end>
       <!-- editing-presence spec: who is editing this page right now, and
            since when — informational only, never a lock of any kind on
@@ -264,11 +270,13 @@ useSeoMeta({ title: () => (title.value ? `${title.value} — deep-wiki` : 'deep-
 
     <!-- The column is `AppShell`'s `measure`, its default: this screen is
          prose, and the reading measure is what prose takes
-         (docs/DESIGN-SYSTEM.md §2.4, checklist §4.4's 65-80 characters).
-         It holds for *every* state, not for the success branch alone —
-         before the column was one thing, the denied, missing and failed
-         panels rendered 1216px wide while the document beside them rendered
-         659px, so the screen changed width with its state. -->
+         (docs/DESIGN-SYSTEM.md §2.4, checklist §4.4's 65-80 characters) —
+         now centred in a content pane that has a sidebar beside it, rather
+         than in the middle of an empty viewport. It holds for *every*
+         state, not for the success branch alone — before the column was
+         one thing, the denied, missing and failed panels rendered 1216px
+         wide while the document beside them rendered 659px, so the screen
+         changed width with its state. -->
 
     <!-- Loading: a skeleton matched to the real layout, not a spinner —
          the document's shape is known in advance (docs/UI-CHECKLIST.md

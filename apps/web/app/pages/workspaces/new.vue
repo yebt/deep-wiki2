@@ -120,8 +120,8 @@ useSeoMeta({ title: 'New workspace — deep-wiki' });
         <UButton :to="`/workspaces/${workspace?.workspaceId}/members`" color="primary" variant="solid" size="lg" icon="i-lucide-user-plus">
           Invite your team
         </UButton>
-        <UButton :to="`/workspaces/${workspace?.workspaceId}/tree`" variant="outline" color="neutral" icon="i-lucide-folder-tree">
-          Open the navigation tree
+        <UButton :to="`/workspaces/${workspace?.workspaceId}`" variant="outline" color="neutral" icon="i-lucide-house">
+          Open the workspace
         </UButton>
       </template>
     </PageNotice>

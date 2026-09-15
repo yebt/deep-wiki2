@@ -47,7 +47,7 @@ test('a reader reaches the diff by clicking from history, and sees all four clas
   await page.goto(`/pages/${fixtures.historyPageId}/history`);
   await expect(page.getByRole('heading', { level: 1, name: 'Revision history' })).toBeVisible();
 
-  const rows = page.getByRole('listitem');
+  const rows = page.getByRole('main').getByRole('listitem');
   await expect(rows).toHaveCount(2, { timeout: 30000 });
 
   const compare = rows.nth(0).getByRole('link', { name: /compare with previous/i });

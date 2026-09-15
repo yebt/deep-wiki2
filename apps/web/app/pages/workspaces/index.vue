@@ -151,7 +151,7 @@ useSeoMeta({ title: 'Workspaces — deep-wiki' });
                  whatever ground it is drawn on, never a step to another
                  surface rung (§5.2). -->
             <ULink
-              :to="`/workspaces/${workspace.id}/tree`"
+              :to="`/workspaces/${workspace.id}`"
               class="dw-state-layer flex min-h-10 w-full items-center gap-2 rounded-md px-2 py-1 text-body-large text-default"
             >
               <UIcon name="i-lucide-library-big" class="size-5 shrink-0 text-muted" aria-hidden="true" />

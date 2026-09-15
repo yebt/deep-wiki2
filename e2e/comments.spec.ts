@@ -84,7 +84,13 @@ test('a commenter opens a thread from the mark beside its block, replies, and re
   expect(markBox.y).toBeLessThan(blockBox.y + blockBox.height);
   expect(markBox.x, 'the mark stands outside the column').toBeGreaterThanOrEqual(articleBox.x + articleBox.width);
   expect(Math.round(articleBox.width * 10) / 10, 'the column keeps its measure').toBeCloseTo(658.9, 0);
-  expect(Math.round(articleBox.x * 10) / 10, 'the column keeps its position').toBeCloseTo(310.5, 0);
+  // Since 2026-09-15 the column is centred in the content pane beside the
+  // sidebar, not in the viewport: its position is the pane's left edge
+  // plus half the pane's spare width.
+  const sidebarBox = (await page.getByRole('navigation', { name: 'Workspace' }).boundingBox())!;
+  const paneLeft = sidebarBox.x + sidebarBox.width;
+  const expectedX = paneLeft + (1280 - paneLeft - articleBox.width) / 2;
+  expect(Math.round(articleBox.x * 10) / 10, 'the column keeps its position').toBeCloseTo(expectedX, 0);
   expect(markBox.width, 'a 24px target with room to spare').toBeGreaterThanOrEqual(24);
   expect(markBox.height).toBeGreaterThanOrEqual(24);
 
