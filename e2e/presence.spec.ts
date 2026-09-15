@@ -106,7 +106,7 @@ test('a displaced editor is shown, by name and since when, who now holds the pag
   await expect(pageA.getByTestId('editor-surface')).toBeVisible({ timeout: 30000 });
 
   // Nobody else is editing yet: no presence indicator at all.
-  await expect(pageA.getByRole('status')).toHaveCount(0);
+  await expect(pageA.getByTestId('presence-indicator')).toHaveCount(0);
 
   const contextB = await browser.newContext();
   const pageB = await contextB.newPage();
@@ -149,10 +149,10 @@ test('a displaced editor is shown, by name and since when, who now holds the pag
   // the `retry:` hint above), it must learn this — appearing, named, with
   // a duration, never as a second silent lock.
   bHolder.current = { userId: 'user-b', userDisplayName: 'User B', since: takeOverSince };
-  await expect(pageA.getByRole('status')).toContainText('User B is editing since', { timeout: 10000 });
+  await expect(pageA.getByTestId('presence-indicator')).toContainText('User B is editing since', { timeout: 10000 });
   // §4.11: the zone is named in the string, and the exact instant is
   // preserved in `<time datetime>` regardless of how it is displayed.
-  await expect(pageA.getByRole('status').locator('time')).toHaveAttribute('datetime', takeOverSince);
+  await expect(pageA.getByTestId('presence-indicator').locator('time')).toHaveAttribute('datetime', takeOverSince);
 
   // §4.8: never a hard lock — A's own editing surface and its Save
   // affordance stay present and operable; another editor's presence is
@@ -206,7 +206,7 @@ test('stale presence expires visibly once its heartbeat window lapses, tied to t
 
   await page.goto(`/pages/${PAGE_ID}/edit`);
   await expect(page.getByTestId('editor-surface')).toBeVisible({ timeout: 30000 });
-  await expect(page.getByRole('status')).toContainText('User B is editing', { timeout: 10000 });
+  await expect(page.getByTestId('presence-indicator')).toContainText('User B is editing', { timeout: 10000 });
 
   // No renewing heartbeat arrives from here on (the mock keeps answering
   // with the same, un-refreshed `since`, which the composable only ever
@@ -215,7 +215,7 @@ test('stale presence expires visibly once its heartbeat window lapses, tied to t
   holder.current = null;
   await page.clock.fastForward('02:10');
 
-  await expect(page.getByRole('status')).toHaveCount(0);
+  await expect(page.getByTestId('presence-indicator')).toHaveCount(0);
   await context.close();
 });
 
@@ -242,8 +242,8 @@ test('a reader sees who is editing the page, and since when, without acquiring a
   await expect(page.getByRole('heading', { level: 1, name: 'Presence E2E Page' })).toBeVisible({ timeout: 30000 });
 
   // §4.8: who, and since when — named, with the exact instant preserved.
-  await expect(page.getByRole('status')).toContainText('User B is editing since', { timeout: 10000 });
-  await expect(page.getByRole('status').locator('time')).toHaveAttribute('datetime', since);
+  await expect(page.getByTestId('presence-indicator')).toContainText('User B is editing since', { timeout: 10000 });
+  await expect(page.getByTestId('presence-indicator').locator('time')).toHaveAttribute('datetime', since);
   // The read screen learned the workspace from the read response alone:
   // no edit-session probe, no lock, no heartbeat.
   expect(lockRequests).toEqual([]);

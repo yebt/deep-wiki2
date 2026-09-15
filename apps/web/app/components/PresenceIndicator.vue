@@ -29,7 +29,7 @@ defineExpose({ formatRevisionDate });
 </script>
 
 <template>
-  <div v-if="props.editors.length" class="flex items-center gap-2" role="status">
+  <div v-if="props.editors.length" class="flex items-center gap-2" role="status" data-testid="presence-indicator">
     <div
       v-for="editor in props.editors"
       :key="editor.userId"
