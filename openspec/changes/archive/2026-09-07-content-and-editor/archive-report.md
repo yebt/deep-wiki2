@@ -11,6 +11,26 @@ task_completion: 96/96
 
 # Archive Report: content-and-editor
 
+> **Correction, 2026-09-14.** This report is history and is left as written; two of its
+> claims were checked against the tree that day and are wrong, so read them with this note.
+>
+> 1. **Gap 3 says the GATE-2 step "within" `bun run check` executes.** It does not and never
+>    did: `gate-2-round-trip` is its own script (`package.json`: `bun test
+>    packages/editor/src/round-trip.test.ts`) and runs inside `bun run verify`, not inside
+>    `bun run check`. `bun run check` has never contained it — the gate is enforced before
+>    tagging, not at every commit. The rest of Gap 3 (no remote, so the workflow never runs)
+>    is correct and still true.
+> 2. **Gap 2 says the four unbuilt slash commands show "not yet implemented" stubs or are
+>    disabled.** No such stubs exist and none ever shipped. The command list in
+>    `packages/editor/src/mount/slash-plugin.ts` is exactly the eight that work — three
+>    heading levels, bulleted and numbered lists, quote, code block, divider — and table,
+>    diagram fence, callout and link-to-page appear nowhere in the menu. The user is not
+>    shown an empty slot; the commands are simply absent. The roadmap bullet in
+>    `docs/TODO.md` stays unticked either way.
+>
+> Also stale, for the reader who counts: the "All 8 gates" cell in Final State Authority
+> was true when written; `bun run check` runs eleven today (`CLAUDE.md` lists them).
+
 **Archived**: 2026-09-07
 **Change Name**: `content-and-editor`
 **Worktree**: `deep-wiki2-worktrees/content-editor`, branch `content-and-editor`
