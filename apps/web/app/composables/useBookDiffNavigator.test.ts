@@ -1,4 +1,5 @@
 import { describe, expect, test, vi } from 'vitest';
+import { nextTick, ref } from 'vue';
 import type { BookDiffResponse, ChangedPageDiffPayload } from '@deep-wiki/contracts';
 import { useBookDiffNavigator } from './useBookDiffNavigator';
 
@@ -174,5 +175,70 @@ describe('useBookDiffNavigator', () => {
     await nav.load();
 
     expect(nav.status.value).toBe('network-error');
+  });
+
+  /**
+   * `GET /books/:id/diff` orders changed pages by `page_id`
+   * (docs/TODO.md Findings, 2026-09-14), so the switcher needs its own
+   * order. `pageOrder` is the tree's; when it places every changed page,
+   * the API's own order is irrelevant. Deliberately NOT already-sorted in
+   * either the API response or the title order, so a navigator that
+   * ignored `pageOrder` and fell through to one of those would fail —
+   * the trap tasks.md names for an ordering test whose fixture happens to
+   * already be in the right order.
+   */
+  describe('page order', () => {
+    const banana = page('page-banana', { pageTitle: 'Banana' });
+    const apple = page('page-apple', { pageTitle: 'Apple' });
+    const cherry = page('page-cherry', { pageTitle: 'Cherry' });
+    // API order: Banana, Apple, Cherry. Title order: Apple, Banana, Cherry.
+    // Tree order (below): Cherry, Banana, Apple — distinct from both.
+    const apiOrderPages = [banana, apple, cherry];
+    const TREE_POSITION: Record<string, number> = { 'page-cherry': 0, 'page-banana': 1, 'page-apple': 2 };
+
+    test('orders by tree position when the tree places every changed page — not API order, not title order', async () => {
+      const deps = { ...makeDeps(apiOrderPages), pageOrder: (pageId: string) => TREE_POSITION[pageId] };
+      const nav = useBookDiffNavigator('book-1', SINCE, deps);
+
+      await nav.load();
+
+      expect(nav.pageIds.value).toEqual(['page-cherry', 'page-banana', 'page-apple']);
+    });
+
+    test('falls back to title order when the tree has not (yet) placed one of the changed pages', async () => {
+      // Missing 'page-apple' — the tree has not loaded it in yet.
+      const partial: Record<string, number> = { 'page-cherry': 0, 'page-banana': 1 };
+      const deps = { ...makeDeps(apiOrderPages), pageOrder: (pageId: string) => partial[pageId] };
+      const nav = useBookDiffNavigator('book-1', SINCE, deps);
+
+      await nav.load();
+
+      expect(nav.pageIds.value).toEqual(['page-apple', 'page-banana', 'page-cherry']);
+    });
+
+    test('falls back to title order when no pageOrder is supplied at all', async () => {
+      const nav = useBookDiffNavigator('book-1', SINCE, makeDeps(apiOrderPages));
+
+      await nav.load();
+
+      expect(nav.pageIds.value).toEqual(['page-apple', 'page-banana', 'page-cherry']);
+    });
+
+    test('re-sorts reactively once the tree places pages that were previously unplaced, keeping the focused page focused by id', async () => {
+      const order = ref<Record<string, number>>({ 'page-cherry': 0, 'page-banana': 1 });
+      const deps = { ...makeDeps(apiOrderPages), pageOrder: (pageId: string) => order.value[pageId] };
+      const nav = useBookDiffNavigator('book-1', SINCE, deps);
+      await nav.load();
+      // Falls back to title order first: Apple, Banana, Cherry — focused page is Apple.
+      expect(nav.currentPage.value?.pageId).toBe('page-apple');
+
+      // The tree finishes loading and now places every page.
+      order.value = { ...TREE_POSITION };
+      await nextTick();
+
+      expect(nav.pageIds.value).toEqual(['page-cherry', 'page-banana', 'page-apple']);
+      // Still Apple — the focus followed its id, not its old numeric slot.
+      expect(nav.currentPage.value?.pageId).toBe('page-apple');
+    });
   });
 });
