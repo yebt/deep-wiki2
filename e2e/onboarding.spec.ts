@@ -117,6 +117,63 @@ test('a fresh user creates a workspace by clicking, is handed the members screen
   await expect(pending).toContainText(/write/i);
 });
 
+/**
+ * docs/UI-CHECKLIST.md §6: verified at 320px, by measurement rather than a
+ * screenshot. Runs after the invite above (so a pending invitation is on
+ * the screen) and before the colleague accepts it (so it is still
+ * pending, not yet promoted to a member row). The screenshot is the
+ * owner's review material (`frame3-members-*.png`).
+ *
+ * `document.documentElement` never scrolls inside the workspace frame:
+ * `UDashboardPanel`'s generated body carries `overflow-y-auto`
+ * (`apps/web/.nuxt/ui/dashboard-panel.ts`), and per the CSS spec a
+ * non-`visible` `overflow-y` on an element whose `overflow-x` is
+ * `visible` computes that axis to `auto` too — so *that* div, the
+ * `[data-slot="body"]` ancestor of `#content-main` (AppShell's own
+ * `<main>`), is the real horizontal scroll container an overflowing pane
+ * clips into, invisibly to `document.documentElement.scrollWidth`. Both
+ * are asserted, so a fix that only satisfies the outer one is still caught.
+ */
+const SHOTS = process.env.DEEPWIKI_FRAME_SHOTS ?? '';
+
+async function shot3(page: Page, name: string): Promise<void> {
+  if (!SHOTS) return;
+  await page.screenshot({ path: `${SHOTS}/frame3-members-${name}.png`, fullPage: false });
+}
+
+function overflow(page: Page) {
+  return page.evaluate(() => {
+    const main = document.getElementById('content-main');
+    const pane = main ? main.closest('[data-slot="body"]') : null;
+    return {
+      scrollWidth: document.documentElement.scrollWidth,
+      innerWidth: window.innerWidth,
+      paneScrollWidth: pane ? pane.scrollWidth : null,
+      paneClientWidth: pane ? pane.clientWidth : null,
+    };
+  });
+}
+
+test('the members screen fits at 320px with a pending invitation on it', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 900 });
+  await signIn(page, fixtures.founderEmail);
+  await goto(page, new URL(workspaceUrl).pathname);
+
+  await expect(page.getByRole('heading', { level: 1, name: 'Members' })).toBeVisible();
+  await expect(page.getByText(fixtures.colleagueEmail)).toBeVisible();
+
+  const box = await overflow(page);
+  expect(box.scrollWidth, `document.documentElement.scrollWidth ${box.scrollWidth} vs innerWidth ${box.innerWidth}`).toBe(
+    box.innerWidth,
+  );
+  expect(
+    box.paneScrollWidth,
+    `the content pane scrolls sideways: scrollWidth ${box.paneScrollWidth} vs clientWidth ${box.paneClientWidth}`,
+  ).toBeLessThanOrEqual(box.paneClientWidth ?? 0);
+
+  await shot3(page, '320-light');
+});
+
 test('the colleague accepts the mailed link, signs in, and lands on the tree', async ({ page }) => {
   const link = await acceptLinkMailedTo(fixtures.colleagueEmail);
   await goto(page, new URL(link).pathname + new URL(link).search);

@@ -173,7 +173,14 @@ useSeoMeta({ title: 'Members — deep-wiki' });
            produces — with the member roster beside them from `@2xl`, both
            stacked in reading order below it. -->
       <div class="grid items-start gap-6 @2xl:grid-cols-2">
-        <div class="space-y-8">
+        <!-- `min-w-0`: a grid item's automatic minimum size is its
+             content's, not its track's (docs/DESIGN-SYSTEM.md §7). Without
+             it this column stayed at its form's intrinsic width and the
+             288px pane track never won, pushing the whole card — the
+             intro paragraph, the radio descriptions, the email input and
+             the submit button — past the viewport at 320px with nothing
+             wrapping (checklist §6). -->
+        <div class="min-w-0 space-y-8">
           <!-- ── Invite ────────────────────────────────────────────────── -->
           <section aria-labelledby="invite-heading">
             <h2 id="invite-heading" class="text-headline-small text-highlighted mb-4">Invite someone</h2>
@@ -248,7 +255,7 @@ useSeoMeta({ title: 'Members — deep-wiki' });
         </div>
 
         <!-- ── Members ─────────────────────────────────────────────────── -->
-        <section aria-labelledby="members-heading">
+        <section aria-labelledby="members-heading" class="min-w-0">
           <h2 id="members-heading" class="text-headline-small text-highlighted mb-4">Members</h2>
           <p v-if="listing.members.length === 0" class="text-body-medium text-muted">No members yet.</p>
           <UCard v-else variant="soft" :ui="{ body: 'p-2' }">

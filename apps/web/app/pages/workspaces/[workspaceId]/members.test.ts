@@ -107,6 +107,14 @@ describe('workspace members screen', () => {
     const grid = inviteColumn!.parentElement!;
     expect(membersColumn!.parentElement).toBe(grid);
     expect(grid.className).toMatch(/@2xl:grid-cols-2/);
+    // Without it a grid item's automatic minimum size is its content's,
+    // not its track's: at 320px (single column, §6) the invite card's own
+    // intrinsic width won and pushed the whole card — the intro
+    // paragraph, the radio descriptions, the email input and the submit
+    // button — past the viewport with nothing wrapping (owner review,
+    // 2026-09-15, `frame3-members-320-light.png`).
+    expect(inviteColumn!.classList.contains('min-w-0'), 'invite column needs min-w-0 to respect the grid track').toBe(true);
+    expect(membersColumn!.classList.contains('min-w-0'), 'members column needs min-w-0 to respect the grid track').toBe(true);
     // Walked by hand rather than `closest('.@container')`: happy-dom's
     // selector engine does not accept an unescaped `@` in a class selector.
     let ancestor: HTMLElement | null = grid;
