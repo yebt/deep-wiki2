@@ -79,14 +79,29 @@ test('a reader reaches book history from the tree, and book diff from history, e
   await expect(page).toHaveURL(new RegExp(`^.*/books/${fixtures.bookHistoryBookId}/diff\\?since=`), { timeout: 30000 });
   await expect(page.getByRole('heading', { level: 1, name: `${fixtures.bookHistoryBookTitle} — book diff` })).toBeVisible({ timeout: 30000 });
 
-  // Two pages changed; the switcher says so, the focused page is named by
-  // its title (the route carries it now — no more eight characters of an
-  // id), and the first page's own content is what's showing.
+  // Two pages changed; the switcher says so, and the focused page is named
+  // by its title (the route carries it now — no more eight characters of
+  // an id). The route orders changed pages by page id, which the seed
+  // mints at random, so which of the two comes first is read off the
+  // screen rather than assumed — the earlier version of this test assumed
+  // Alpha first and passed or failed on the coin toss.
   await expect(page.getByText(/page 1 of 2/i)).toBeVisible({ timeout: 30000 });
-  await expect(page.getByRole('heading', { level: 2, name: 'E2E Book Page Alpha' })).toBeVisible();
-  await expect(page.getByText('pineapples', { exact: false })).toBeVisible();
-  await expect(page.getByText('Added', { exact: true })).toBeVisible();
-  await expect(page.getByText('Moved down', { exact: true })).toBeVisible();
+  const focused = page.getByRole('heading', { level: 2 }).first();
+  await expect(focused).toHaveText(/E2E Book Page (Alpha|Beta)/);
+  const firstTitle = (await focused.textContent())!.trim();
+  // What each page's own diff shows and the other's does not: Alpha gained
+  // a paragraph and moved one; Beta's one paragraph was edited in place.
+  const own = {
+    'E2E Book Page Alpha': { text: 'pineapples', badge: 'Moved down' },
+    'E2E Book Page Beta': { text: '## Book page beta', badge: 'Modified' },
+  } as const;
+  const [first, second] = firstTitle === 'E2E Book Page Alpha'
+    ? ['E2E Book Page Alpha', 'E2E Book Page Beta'] as const
+    : ['E2E Book Page Beta', 'E2E Book Page Alpha'] as const;
+
+  await expect(page.getByText(own[first].text, { exact: false })).toBeVisible();
+  await expect(page.getByText(own[first].badge, { exact: true })).toBeVisible();
+  await expect(page.getByText(own[second].text, { exact: false })).toHaveCount(0);
 
   // The trap named explicitly in tasks.md 10.5: a test that only checks
   // the FIRST page proves nothing about navigation. Click "Next" and
@@ -96,16 +111,18 @@ test('a reader reaches book history from the tree, and book diff from history, e
   await nextButton.click();
 
   await expect(page.getByText(/page 2 of 2/i)).toBeVisible({ timeout: 30000 });
-  await expect(page.getByRole('heading', { level: 2, name: 'E2E Book Page Beta' })).toBeVisible();
-  await expect(page.getByText('Book page beta', { exact: false })).toBeVisible();
-  await expect(page.getByText('pineapples', { exact: false })).toHaveCount(0);
+  await expect(page.getByRole('heading', { level: 2, name: second })).toBeVisible();
+  await expect(page.getByText(own[second].text, { exact: false })).toBeVisible();
+  await expect(page.getByText(own[second].badge, { exact: true })).toBeVisible();
+  await expect(page.getByText(own[first].text, { exact: false })).toHaveCount(0);
 
   // "Previous" restores the first page's own content.
   const prevButton = page.getByRole('button', { name: 'Previous changed page' });
   await prevButton.click();
 
   await expect(page.getByText(/page 1 of 2/i)).toBeVisible({ timeout: 30000 });
-  await expect(page.getByText('pineapples', { exact: false })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 2, name: first })).toBeVisible();
+  await expect(page.getByText(own[first].text, { exact: false })).toBeVisible();
 
   // Click 3 — the way back to the book's place in the tree, which the
   // response names now. A screen reached from the tree that could only go
