@@ -79,6 +79,17 @@ describe('readPageMarkdown (edit mode)', () => {
     expect(result?.markdown).toBe('# Hello\n\nBody text.\n');
   });
 
+  // The edit-session route's only source for the content_hash it must hand
+  // back to the browser (page-content spec, D16) — without it, the first
+  // Save on an already-saved page has no real hash to send.
+  test('returns the row’s content_hash alongside the markdown', async () => {
+    const ref = await seedSavedPage('# Hello\n\nBody text.\n');
+
+    const result = await readPageMarkdown(sql, ref);
+
+    expect(result?.contentHash).toMatch(/^[0-9a-f]{64}$/);
+  });
+
   test('does not return the rendered html', async () => {
     const ref = await seedSavedPage('# Hello\n');
 

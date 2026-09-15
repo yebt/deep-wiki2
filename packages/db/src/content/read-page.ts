@@ -17,6 +17,8 @@ export interface PageHtml {
 
 export interface PageMarkdown {
   readonly markdown: string;
+  /** The row's content_hash, so the edit-session route (page-content spec, D16) can hand it back for the first Save. */
+  readonly contentHash: string;
 }
 
 /** Read mode: cached HTML only. No parser call happens here. */
@@ -29,8 +31,8 @@ export async function readPageHtml(sql: postgres.Sql, ref: PageContentRef): Prom
 
 /** Edit mode: canonical Markdown only. */
 export async function readPageMarkdown(sql: postgres.Sql, ref: PageContentRef): Promise<PageMarkdown | undefined> {
-  const [row] = await sql<{ markdown: string }[]>`
-    SELECT markdown FROM page_content WHERE node_id = ${ref.nodeId} AND workspace_id = ${ref.workspaceId}
+  const [row] = await sql<{ markdown: string; content_hash: string }[]>`
+    SELECT markdown, content_hash FROM page_content WHERE node_id = ${ref.nodeId} AND workspace_id = ${ref.workspaceId}
   `;
-  return row ? { markdown: row.markdown } : undefined;
+  return row ? { markdown: row.markdown, contentHash: row.content_hash } : undefined;
 }
