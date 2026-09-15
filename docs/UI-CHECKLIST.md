@@ -125,7 +125,7 @@ Derived from this project's actual stack and domain.
 - [ ] Read mode renders pre-rendered HTML and does **not** boot the editor. Verify: the ProseMirror bundle must not load on a read-mode page view.
 - [ ] Entering edit mode when someone else holds the soft lock shows the presence state before the editor opens, not after.
 
-### 4.6 Editor — ProseMirror / Milkdown
+### 4.6 Editor — ProseMirror (built directly on it; no Milkdown, see `docs/SPECS.md` §5.1)
 
 - [ ] `@` mentions and `/` slash commands are **keyboard-first**: arrow keys navigate, Enter selects, Escape dismisses, Tab does something sane and documented.
 - [ ] The active item in a mention/command menu has a visible selected state distinct from hover.
@@ -808,6 +808,74 @@ content.
 - No new colour pair was introduced, so contrast was not re-audited; the
   error screen reuses `error-container`/`on-error-container`, already in use
   on the refused and network-error notices.
+
+---
+
+### 2026-09-14 — Shipped since the last review, un-reviewed: ten surfaces waiting on the owner's gates
+
+**Reviewer:** none yet — this entry is the backlog, not a review. It exists because §1 says
+no screen is done until the owner reviews it and work does not continue on top of an
+unreviewed screen, and the log's last entry was 2026-09-07 while all of the below landed
+between 2026-09-08 and 2026-09-14.
+**Verdict:** Pending — six gates open
+
+**The gates are the owner's.** `openspec/changes/versioning-and-collaboration/tasks.md`
+places one STOP per surface — **10.2** page history, **10.4** page diff, **10.6** book
+changeset history and diff, **10.8** comment gutter and thread panel, **10.10** orphaned-
+comment surface, **10.12** presence indicators — and every one is still `[ ]`. Nothing here
+was reviewed by the owner against this checklist or `docs/DESIGN-SYSTEM.md`; the audits
+named below were an agent's cross-screen pass and are inputs to the review, not a
+substitute for it.
+
+**What shipped, in commit order, with where it lives:**
+
+1. **Page history** — `apps/web/app/pages/pages/[id]/history.vue` over
+   `GET /pages/:id/history`. Gate 10.2. Added the timestamp rule §4.11 (2026-09-08) after
+   shipping with a decision this file had no rule for.
+2. **Page diff** — `pages/pages/[id]/diff.vue` over `GET /pages/:id/diff?from=&to=`;
+   added / removed / modified / moved treated distinctly (§4.7). Gate 10.4. The audit read
+   it as "a highlighter pass over source, not a document" and laid out directions (a)–(c);
+   (b) shipped in part, (a) and (c) are in `docs/TODO.md` Open Questions for the owner.
+3. **Book changeset history** — `pages/books/[id]/history.vue`. Gate 10.6.
+4. **Book diff** — `pages/books/[id]/diff.vue`, navigable between changed pages without
+   returning to the list (§4.7). Gate 10.6. Page order is the database's, not a declared
+   one (`docs/TODO.md` Findings 2026-09-14).
+5. **Comment gutter and thread panel on the read screen** — `pages/pages/[id]/index.vue`,
+   `CommentGutter`/`CommentThreadPanel`/`CommentThreadItem`, composed over unchanged cached
+   HTML; reply and resolve; indicator absent for `read`-only (e2e against a real backend,
+   `e2e/comments.spec.ts`). Gate 10.8. **No affordance to start a new thread** — recorded as
+   out of scope in the screen's own contract and in `docs/TODO.md`.
+6. **Orphaned and unplaced comment surface** — first-class states on the same screen: an
+   orphaned thread is shown, never dropped; a thread whose block the cached HTML does not
+   yet name ("no anchors known", pre-backfill) is counted in a chip. Gate 10.10.
+7. **Presence indicators** on read and edit — `PresenceIndicator.vue` over
+   `usePresenceStream.ts`: who, since when, never a hard lock (§4.8). Gate 10.12.
+8. **New workspace** — `pages/workspaces/new.vue` and the way to it from the list. No gate
+   in the Phase 3 change; owner review still owed under §1.
+9. **Members and invitations** — `pages/workspaces/[workspaceId]/members.vue`, reached from
+   the tree by a link that renders for every caller (no `manage` signal reaches the client;
+   `docs/TODO.md` Open Questions). Review owed.
+10. **Instance registration** — `pages/admin/registration.vue` for the Super Root, reached
+    from the app chrome by a link that renders for every caller for the same reason.
+    Review owed.
+
+**Cross-cutting changes in the same window that touch every screen above and the five
+already-reviewed ones**, each to be looked at once rather than per screen:
+
+- Every tonal control gained a 1px inset accent ring (`DESIGN-SYSTEM.md` §9.1/§9.7
+  deviation, §14) after `soft` measured 1.00–1.09:1 on containers.
+- Notices consolidated to three tiers in `InlineNotice.vue` (§14).
+- The tree's selection made visible, container rows folded, the workspace skeleton put in
+  the loaded box (`4b2fcd3`); the read and history skeletons occupy the loaded box
+  (`347a0c5`) — but the tree skeleton still omits the toolbar row (`docs/TODO.md` Findings
+  2026-09-14).
+- Auth results take focus and are announced; links meet the 24px target (`9a44460`).
+- The app bar now carries four controls beside the brand on the read screen; the 320px
+  measurement in that screen's comment covers three and predates the fourth.
+
+**Known-but-unreviewed items carried from earlier entries, unchanged:** the mention menu's
+ARIA ownership (Open Questions), the two-icon-pack requirement (§4.3), the three-pane shell
+(§6), no e2e for the server-error state.
 
 ---
 
