@@ -50,12 +50,18 @@ bun run db:seed
 This starts five containers: `postgres` (with the `pgvector` extension enabled),
 `mailpit` (dev SMTP capture — SMTP on `1025`, web UI on `8025`), `minio` (S3-compatible
 object storage), and `kroki` with its `mermaid` sidecar (server-side diagram rendering —
-`kroki` alone cannot render Mermaid; see `compose.yaml`). `bun run db:migrate` runs the
-Phase 1 tenancy and permissions schema (`packages/db/drizzle/`: nodes, workspaces,
-users, cells, permissions, sessions, password resets, registration and invitations).
-`bun run db:seed` remains a no-op — Phase 1 has no producer that authors baseline rows
-yet (see `docs/TODO.md`, "Migrate `plans`...") — but it stays a stable entry point for
-when one lands.
+`kroki` alone cannot render Mermaid; see `compose.yaml`). `bun run db:migrate` applies every
+migration in `packages/db/drizzle/` — tenancy and permissions (nodes, workspaces, users,
+cells, permissions, sessions, password resets, registration, invitations), content
+(`page_content`, `page_blocks`, `links`, `page_tags`, `page_locks`) and versioning and
+collaboration (`page_revision`, `changeset`, `comments`, the `presence` view). `bun run
+db:seed` (`packages/db/seed.ts`) is idempotent and gives you something to look at: one plan,
+one Super Root account (`owner@deep-wiki.local` / `deep-wiki-dev`, overridable with
+`SEED_EMAIL`/`SEED_PASSWORD`), one workspace with a `manage` grant at its root, and a content
+tree of **2 shelves, 4 books, 4 chapters and 7 pages** saved through the real `savePage`
+transaction so they carry block ids, links and tags like any page a person saves. It prints
+the workspace and page ids it created as URLs. Re-running it never resets a password you
+changed or a page you edited.
 
 Tear the stack down with `podman compose down -v` (the `-v` also removes the named
 volumes, so the next `up` starts from a clean database).
@@ -72,17 +78,24 @@ Run from the repository root:
 | `bun run typecheck` | Type-checks every workspace member and the root scripts |
 | `bun run lint` | ESLint across the repository |
 | `bun run test` | Runs the test suite for every package and app. Database-backed suites in `packages/db` auto-provision a disposable test Postgres — see below |
-| `bun run check` | Structural checks: workspace shape, test coverage, core purity, env drift, compose portability |
+| `bun run check` | Eleven structural checks — workspace shape, per-file test coverage, core purity, env-template drift and secrets, compose portability, query boundaries, single markdown parser, diff-input purity, bundle isolation, routes mounted, single-source hierarchy. What each enforces is listed in `CLAUDE.md` |
+| `bun run verify` | Every gate in one run: `check`, `env:check`, `lint`, `typecheck`, `test`, `gate-2-round-trip`, `check:bundle`, `e2e`. Run before tagging; not in the commit hook |
 | `bun run env:check` | Verifies your local `.env`'s ports agree with what compose publishes |
 | `bun run db:migrate` | Runs Drizzle migrations against `DATABASE_URL` |
 | `bun run db:seed` | Runs the seed script against `DATABASE_URL` |
 | `bun run compose:smoke` | Against a running compose stack: sends a real message over Mailpit's SMTP port and retrieves it via its API, and renders a real Mermaid diagram through Kroki — proves those two services actually work, not merely that they started |
 
-`bun run check` is the guard rail. It fails when a package has no real test, when
-`packages/core` gains a framework import, when the second test runner spreads beyond
-`apps/web`, when `env.example` drifts from the schema, or when `compose.yaml` uses a
-Docker/Podman-specific extension, an unlabelled bind mount, or a published port below
-1024.
+`bun run check` is the guard rail, and it is what `.githooks/pre-commit` runs (`bun run
+setup:hooks` once per clone). It fails when a source file has no test that names it, when a
+package has no executing test, when `packages/core` gains a framework import or an ambient
+runtime global, when the second test runner spreads beyond `apps/web`, when `env.example`
+drifts from the schema or carries something that is not an agreed placeholder under a
+secret-shaped key, when a compose file uses a Docker-specific extension, an unlabelled bind
+mount or a port below 1024, when something outside `packages/db/src/permissions` reads the
+`permissions` table, when a second markdown parser or a second `unified()` pipeline appears,
+when a diff caller reads the stored `block_index`, when read mode can reach the editor
+bundle, when a route module is never mounted, or when the node hierarchy is written down
+twice. The full list, with what each check actually measures, is in `CLAUDE.md`.
 
 ### Database-backed tests
 
@@ -147,6 +160,10 @@ podman compose down -v          # tear down, including volumes
 
 The published host ports default to the conventional ones (5432, 1025, 8025, 9000, 9001, 8000).
 **`podman compose up` fails on a port collision before any service starts**, so if your machine
+already runs another project on one of them, move the published port in `.env` — the variables
+are at the top of `env.example`. The container-side ports never change, so nothing else needs
+adjusting.
+
 **If you move `POSTGRES_HOST_PORT`, move the port inside `DATABASE_URL` to match**, and likewise
 `MAILPIT_SMTP_HOST_PORT` with `SMTP_PORT`. Each pair is the same fact written twice: one tells
 compose where to publish, the other tells the app where to connect. Change only one and the app
@@ -154,10 +171,6 @@ connects to whatever else owns the old port — the error then comes back from *
 naming a database and a role you never configured. `bun run env:check` catches it in a second and
 names both values. It runs in `bun run verify` but deliberately not in the pre-commit hook, since
 `.env` is your local state rather than the repository's.
-
-already runs another project on one of them, move the published port in `.env` — the variables
-are at the top of `env.example`. The container-side ports never change, so nothing else needs
-adjusting.
 
 Note that `bun run test` provisions its own throwaway containers on separate ports and leaves
 them running for reuse. Run `podman ps` if a port you expected to be free is not.
@@ -171,7 +184,7 @@ today is local:
 | When | What runs | Cost |
 |---|---|---|
 | Every commit | `bun run check` via the `.githooks/pre-commit` hook | under a second |
-| Before tagging a milestone | `bun run verify` — check, lint, typecheck, test | about 76 seconds |
+| Before tagging a milestone | `bun run verify` — check, env:check, lint, typecheck, test, gate-2-round-trip, check:bundle, e2e | minutes: it builds `apps/web` and runs the Playwright suite against a real backend |
 
 Enable the hook once per clone:
 
@@ -193,7 +206,7 @@ manual one.
 | `packages/core` | Domain entities, use cases and ports. **Zero framework imports** |
 | `packages/markdown` | The single shared unified/remark pipeline |
 | `packages/contracts` | Shared zod schemas, including the environment schema |
-| `packages/editor` | Milkdown/ProseMirror integration and round-trip guarantees |
+| `packages/editor` | The editor, built directly on ProseMirror (no Milkdown): schema, markdown round trip, mount entry |
 | `packages/db` | Drizzle schema, migrations and the query layer |
 
 `packages/core` is the keystone: it holds the business rules and imports no framework, so
