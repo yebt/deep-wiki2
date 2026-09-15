@@ -43,6 +43,14 @@ export const EditSessionResponseSchema = z.object({
   title: z.string(),
   /** Needed client-side for the `@` mention endpoints, which are scoped by workspace. */
   workspaceId: z.string(),
+  /**
+   * The `content_hash` of the row this response just read (D16 — optimistic
+   * concurrency). Without it, the first `PUT /pages/:id` from this session
+   * has no `expectedContentHash` to send but `null`, which `savePage()`
+   * treats as a brand-new page and refuses with a stale-content 409 on
+   * every page that already has content (docs/TODO.md Finding, this task).
+   */
+  contentHash: z.string(),
   lock: z.object({ holderUserId: z.string(), acquiredAt: z.string(), heartbeatAt: z.string() }),
 });
 export type EditSessionResponse = z.infer<typeof EditSessionResponseSchema>;
