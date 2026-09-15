@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { expect, test, type BrowserContext } from '@playwright/test';
+import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 
 /**
  * Book-level changeset history and book diff (changesets spec: "Book-Level
@@ -31,12 +31,24 @@ interface Fixtures {
 
 const fixtures: Fixtures = JSON.parse(readFileSync(new URL('.auth-fixtures.json', import.meta.url), 'utf8'));
 
+/** e2e/frame.spec.ts's own review-material convention, reused here rather than invented again (docs/UI-CHECKLIST.md §4.1). */
+const SHOTS = process.env.DEEPWIKI_BOOK_SHOTS ?? '';
+
 test.describe.configure({ mode: 'serial' });
 
 async function signInAs(context: BrowserContext, token: string): Promise<void> {
   await context.addCookies([
     { name: 'session', value: token, domain: 'localhost', path: '/', httpOnly: true, secure: true, sameSite: 'Lax' },
   ]);
+}
+
+async function useTheme(page: Page, theme: 'light' | 'dark'): Promise<void> {
+  await page.addInitScript((value) => localStorage.setItem('nuxt-color-mode', value), theme);
+}
+
+async function shot(page: Page, name: string): Promise<void> {
+  if (!SHOTS) return;
+  await page.screenshot({ path: `${SHOTS}/frame3-book-${name}.png`, fullPage: false });
 }
 
 test('a reader reaches book history from the tree, and book diff from history, entirely by clicking — and Next/Previous show each page\'s own content', async ({
@@ -61,8 +73,13 @@ test('a reader reaches book history from the tree, and book diff from history, e
   await page.getByRole('menuitem', { name: 'Book history' }).click();
 
   await expect(page).toHaveURL(`/books/${fixtures.bookHistoryBookId}/history`, { timeout: 30000 });
-  // The screen names the book it is about, not only what kind of screen it is.
+  // The screen names the book it is about, not only what kind of screen it
+  // is — an `<h1>` for the accessibility tree; the frame's own breadcrumb
+  // carries the same name beside it, for sighted readers.
   await expect(page.getByRole('heading', { level: 1, name: `${fixtures.bookHistoryBookTitle} — book history` })).toBeVisible({ timeout: 30000 });
+  const crumbs = page.getByRole('navigation', { name: 'Where you are' });
+  await expect(crumbs).toContainText(fixtures.bookHistoryBookTitle);
+  await expect(crumbs).toContainText('History');
 
   // Grouping is real: two changesets, not one flattened list of saves —
   // the trap this fixture exists to not-trivially pass.
@@ -70,6 +87,11 @@ test('a reader reaches book history from the tree, and book diff from history, e
   await expect(rows).toHaveCount(2, { timeout: 30000 });
   // The newest changeset (row 0) grouped both pages together.
   await expect(rows.nth(0)).toContainText('2 pages changed');
+
+  // "Compare since…", in the contextual bar, is the same transition as the
+  // newest changeset's own "View diff since here" — reachable without
+  // scrolling to the top row.
+  await expect(page.getByRole('link', { name: /compare since/i })).toBeVisible({ timeout: 30000 });
 
   // Click 2 — "View diff since here" on the newest changeset, which is
   // exactly the boundary between the two changesets: everything in
@@ -80,30 +102,33 @@ test('a reader reaches book history from the tree, and book diff from history, e
 
   await expect(page).toHaveURL(new RegExp(`^.*/books/${fixtures.bookHistoryBookId}/diff\\?since=`), { timeout: 30000 });
   await expect(page.getByRole('heading', { level: 1, name: `${fixtures.bookHistoryBookTitle} — book diff` })).toBeVisible({ timeout: 30000 });
+  await expect(crumbs).toContainText(fixtures.bookHistoryBookTitle);
+  await expect(crumbs).toContainText('History');
+  await expect(crumbs).toContainText(/changes since/i);
 
-  // Two pages changed; the switcher says so, and the focused page is named
-  // by its title (the route carries it now — no more eight characters of
-  // an id). The route orders changed pages by page id, which the seed
-  // mints at random, so which of the two comes first is read off the
-  // screen rather than assumed — the earlier version of this test assumed
-  // Alpha first and passed or failed on the coin toss.
-  await expect(page.getByText(/page 1 of 2/i)).toBeVisible({ timeout: 30000 });
-  const focused = page.getByRole('heading', { level: 2 }).first();
-  await expect(focused).toHaveText(/E2E Book Page (Alpha|Beta)/);
-  const firstTitle = (await focused.textContent())!.trim();
+  // Two pages changed; the switcher — previous / current page name / next,
+  // in the contextual bar so the pane below is the diff alone — names the
+  // focused page by its title (the route carries it now — no more eight
+  // characters of an id) and its position among the changed pages. The
+  // route itself orders changed pages by page id, which the seed mints at
+  // random, but the switcher now orders by the pages' own tree position
+  // (`useBookDiffNavigator`'s `pageOrder`), and the seed places Alpha
+  // before Beta under the book — so which comes first is asserted, not
+  // read off the screen the way the previous version of this test had to.
+  const focused = page.getByRole('link', { name: /E2E Book Page (Alpha|Beta)/ });
+  await expect(focused).toBeVisible({ timeout: 30000 });
+  await expect(focused).toHaveText(/E2E Book Page Alpha \(1\/2\)/);
+
   // What each page's own diff shows and the other's does not: Alpha gained
   // a paragraph and moved one; Beta's one paragraph was edited in place.
   const own = {
     'E2E Book Page Alpha': { text: 'pineapples', badge: 'Moved down' },
     'E2E Book Page Beta': { text: '## Book page beta', badge: 'Modified' },
   } as const;
-  const [first, second] = firstTitle === 'E2E Book Page Alpha'
-    ? ['E2E Book Page Alpha', 'E2E Book Page Beta'] as const
-    : ['E2E Book Page Beta', 'E2E Book Page Alpha'] as const;
 
-  await expect(page.getByText(own[first].text, { exact: false })).toBeVisible();
-  await expect(page.getByText(own[first].badge, { exact: true })).toBeVisible();
-  await expect(page.getByText(own[second].text, { exact: false })).toHaveCount(0);
+  await expect(page.getByText(own['E2E Book Page Alpha'].text, { exact: false })).toBeVisible();
+  await expect(page.getByText(own['E2E Book Page Alpha'].badge, { exact: true })).toBeVisible();
+  await expect(page.getByText(own['E2E Book Page Beta'].text, { exact: false })).toHaveCount(0);
 
   // The trap named explicitly in tasks.md 10.5: a test that only checks
   // the FIRST page proves nothing about navigation. Click "Next" and
@@ -112,24 +137,22 @@ test('a reader reaches book history from the tree, and book diff from history, e
   await expect(nextButton).toBeVisible();
   await nextButton.click();
 
-  await expect(page.getByText(/page 2 of 2/i)).toBeVisible({ timeout: 30000 });
-  await expect(page.getByRole('heading', { level: 2, name: second })).toBeVisible();
-  await expect(page.getByText(own[second].text, { exact: false })).toBeVisible();
-  await expect(page.getByText(own[second].badge, { exact: true })).toBeVisible();
-  await expect(page.getByText(own[first].text, { exact: false })).toHaveCount(0);
+  await expect(page.getByRole('link', { name: /E2E Book Page Beta \(2\/2\)/ })).toBeVisible({ timeout: 30000 });
+  await expect(page.getByText(own['E2E Book Page Beta'].text, { exact: false })).toBeVisible();
+  await expect(page.getByText(own['E2E Book Page Beta'].badge, { exact: true })).toBeVisible();
+  await expect(page.getByText(own['E2E Book Page Alpha'].text, { exact: false })).toHaveCount(0);
 
   // "Previous" restores the first page's own content.
   const prevButton = page.getByRole('button', { name: 'Previous changed page' });
   await prevButton.click();
 
-  await expect(page.getByText(/page 1 of 2/i)).toBeVisible({ timeout: 30000 });
-  await expect(page.getByRole('heading', { level: 2, name: first })).toBeVisible();
-  await expect(page.getByText(own[first].text, { exact: false })).toBeVisible();
+  await expect(page.getByRole('link', { name: /E2E Book Page Alpha \(1\/2\)/ })).toBeVisible({ timeout: 30000 });
+  await expect(page.getByText(own['E2E Book Page Alpha'].text, { exact: false })).toBeVisible();
 
-  // Click 3 — the way back to the book's place in the tree, which the
-  // response names now. A screen reached from the tree that could only go
-  // back to history was one door short.
-  await page.getByRole('link', { name: 'Workspace home' }).click();
+  // Click 3 — the way back to the workspace, which the breadcrumb's own
+  // first crumb now carries (the screen's own hand-built "Workspace home"
+  // button duplicated it and is gone).
+  await crumbs.getByRole('link', { name: /E2E Workspace/ }).click();
   await expect(page).toHaveURL(`/workspaces/${fixtures.workspaceId}`, { timeout: 30000 });
 });
 
@@ -166,3 +189,32 @@ test('a broken book-diff link with no `since` renders a real explanation, not a 
 
   await expect(page.getByRole('heading', { name: /missing its date/i })).toBeVisible({ timeout: 30000 });
 });
+
+/**
+ * Review material for the owner (docs/UI-CHECKLIST.md §4.2: at least two
+ * contrasting themes, one dark; §6: 320/1280). No-ops unless
+ * `DEEPWIKI_BOOK_SHOTS` is set — the same gate `e2e/frame.spec.ts` uses for
+ * its own screenshots, so a normal `bun run e2e` run pays nothing extra.
+ */
+for (const [width, themes] of [[1280, ['light', 'dark']], [320, ['light']]] as const) {
+  test.describe(`${width}px`, () => {
+    test.use({ viewport: { width, height: 900 } });
+
+    for (const theme of themes) {
+      test(`book history and book diff, ${theme}`, async ({ page, context }) => {
+        await signInAs(context, fixtures.readerSessionToken);
+        await useTheme(page, theme);
+
+        await page.goto(`/books/${fixtures.bookHistoryBookId}/history`);
+        await expect(page.getByRole('heading', { level: 1 })).toBeVisible({ timeout: 30000 });
+        await expect(page.getByRole('main').getByRole('listitem').first()).toBeVisible({ timeout: 30000 });
+        await shot(page, `history-${width}-${theme}`);
+
+        await page.getByRole('link', { name: /compare since/i }).click();
+        await expect(page).toHaveURL(new RegExp(`^.*/books/${fixtures.bookHistoryBookId}/diff\\?since=`), { timeout: 30000 });
+        await expect(page.getByRole('link', { name: /E2E Book Page/ })).toBeVisible({ timeout: 30000 });
+        await shot(page, `diff-${width}-${theme}`);
+      });
+    }
+  });
+}
