@@ -3,7 +3,7 @@
  * one plan, one Super Root account, one workspace, a `manage` grant at
  * the workspace root, and — new in this batch — a small, realistic
  * content tree so the Phase 2 screens (`/pages/:id`, `/pages/:id/edit`,
- * `/workspaces/:id/tree`) have shelves, books, chapters and pages to
+ * `/workspaces/:id` with its sidebar tree) have shelves, books, chapters and pages to
  * render instead of their empty states.
  *
  * Idempotent — safe to re-run. It never overwrites an existing account's
@@ -436,7 +436,7 @@ async function main(): Promise<void> {
     console.log('seed: ready');
     console.log(`  sign in at /login with  ${SEED_EMAIL}  /  ${SEED_PASSWORD}`);
     console.log(`  workspace "Demo workspace" (${workspace.workspaceId}), manage granted at its root`);
-    console.log(`  tree:  /workspaces/${workspace.workspaceId}/tree`);
+    console.log(`  open:  /workspaces/${workspace.workspaceId}`);
     console.log(`  page "${featured.title}" (${featured.nodeId}):`);
     console.log(`    read:  /pages/${featured.nodeId}`);
     console.log(`    edit:  /pages/${featured.nodeId}/edit`);

@@ -1,6 +1,6 @@
 /**
  * The workspaces a caller may open, for `GET /workspaces` — the answer to
- * "which `:id` can I put in `/workspaces/:id/tree`", which nothing told a
+ * "which `:id` can I put in `/workspaces/:id`", which nothing told a
  * client before.
  *
  * Authorisation is the shape of the query, not a filter applied after it:

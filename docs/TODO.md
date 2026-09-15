@@ -564,9 +564,9 @@ lost, only the two extraneous lines between them.
 - **`packages/db/seed.ts` still prints a dead URL.** Its `tree:` line
   (`console.log(\`  tree:  /workspaces/${workspace.workspaceId}/tree\`)`) advertises
   `/workspaces/<uuid>/tree`, the frontend page route this batch's predecessor deleted; the
-  workspace's tree now lives in the sidebar at `/workspaces/<uuid>` (the dashboard). `docs/RUNNING.md`
-  §1 now flags this next to the quoted output; the seed script itself is unchanged — fixing the
-  printed line is a one-line `packages/db` change owed to the next batch that touches it.
+  workspace's tree now lives in the sidebar at `/workspaces/<uuid>` (the dashboard). Fixed the same
+  day: the seed now prints `open:  /workspaces/<uuid>`, and the two `packages/db` header comments
+  that still named the route (`readable-workspaces.ts`, `list-readable-workspaces.ts`) follow it.
 
 ---
 

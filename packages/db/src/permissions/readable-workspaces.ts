@@ -1,7 +1,7 @@
 /**
  * "Which workspaces may this subject read anything in" — the question
  * `GET /workspaces` asks so a client can be told which `:id` to put in
- * `/workspaces/:id/tree`. It lives here, beside `can-many.ts`, because
+ * `/workspaces/:id`. It lives here, beside `can-many.ts`, because
  * `scripts/checks/query-boundaries.ts` rule 1 confines every reference to
  * the grant table to this one directory: `decide()` stays the single
  * decision path, and a list endpoint does not get a second one.

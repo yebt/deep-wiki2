@@ -50,16 +50,13 @@ a working URL rather than hunt for one:
 seed: ready
   sign in at /login with  owner@deep-wiki.local  /  deep-wiki-dev
   workspace "Demo workspace" (<uuid>), manage granted at its root
-  tree:  /workspaces/<uuid>/tree
+  open:  /workspaces/<uuid>
   page "Local Development Setup" (<uuid>):
     read:  /pages/<uuid>
     edit:  /pages/<uuid>/edit
 ```
 
-That `tree:` line is stale as of the 2026-09-15 workspace-frame batch: `packages/db/seed.ts`
-still prints `/workspaces/<uuid>/tree`, a page route that no longer exists (`docs/TODO.md`
-Findings, 2026-09-15) — open `/workspaces/<uuid>` instead, the workspace's dashboard, with the
-tree in its sidebar.
+The `open:` line is the workspace's dashboard; the tree is in its sidebar.
 
 **Do not pass `--port` to the web server.** It used to be required, and forgetting it is what
 broke sign-in for a day — see §3. `apps/web/nuxt.config.ts` now declares `devServer.port`, so

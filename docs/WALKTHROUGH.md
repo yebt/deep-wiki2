@@ -211,7 +211,7 @@ breadcrumb's own crumbs are the links. Each changed page is named, in tree order
 
 ## 12. Instance settings — `/admin/registration`
 
-**Do:** as the operator (Super Root), the gear in the app bar.
+**Do:** as the operator (Super Root), the shield icon in the sidebar footer ("Registration settings").
 
 **See:** registration mode (closed / invitation-only / open), the domain allowlist, and an SMTP
 test send. `open` needs a **successful** test send first; the screen says so and shows the
