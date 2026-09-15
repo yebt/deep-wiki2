@@ -158,7 +158,9 @@ describe('book-diff screen', () => {
 
     expect(component.text()).toContain('First page content.');
     expect(component.text()).not.toContain('Second page content.');
-    expect(component.text()).toMatch(/1 of 2/);
+    // The switcher's own label now carries the position (moved into the
+    // contextual bar, "previous / current page name / next").
+    expect(component.text()).toMatch(/\(1\/2\)/);
   });
 
   // The trap named explicitly in tasks.md 10.5: a test that only checks
@@ -179,7 +181,25 @@ describe('book-diff screen', () => {
     expect(next).toHaveBeenCalled();
     expect(component.text()).toContain('Second page content.');
     expect(component.text()).not.toContain('First page content.');
-    expect(component.text()).toMatch(/2 of 2/);
+    expect(component.text()).toMatch(/\(2\/2\)/);
+  });
+
+  /*
+   * The switcher — previous / current page name / next — is this screen's
+   * own control, so it lives in the contextual bar (`header`), not in the
+   * pane: "so the pane is the diff alone" (task instructions). It is
+   * findable by role regardless of exactly where in the bar it sits.
+   */
+  test('the page switcher lives in the contextual bar, not the document pane', async () => {
+    mockNavigator({
+      'page-1': { changes: [{ kind: 'added', id: 'b1', slot: 0, text: 'First page content.' }] },
+      'page-2': { changes: [{ kind: 'removed', id: 'b2', slot: 0, text: 'Second page content.' }] },
+    });
+    const component = await mountSuspended(PageInApp, FRAME_STUBS);
+
+    expect(component.get('header').find('button[aria-label="Next changed page"]').exists()).toBe(true);
+    expect(component.get('header').find('button[aria-label="Previous changed page"]').exists()).toBe(true);
+    expect(component.get('main').find('button[aria-label="Next changed page"]').exists()).toBe(false);
   });
 
   test('the "Previous" control is disabled on the first page and the "Next" control is disabled on the last', async () => {
@@ -222,8 +242,10 @@ describe('book-diff screen', () => {
   });
 
   // The route names the book and each page now; before it did, the screen
-  // identified a page by eight characters of its id (a filed finding).
-  test('names the book in the heading and the focused page by its title, and the title follows the navigation', async () => {
+  // identified a page by eight characters of its id (a filed finding). The
+  // focused page's name now lives in the switcher itself (the contextual
+  // bar's own control), not a separate `<h2>` in the pane.
+  test('names the book in the heading and the focused page by its title in the switcher, and the title follows the navigation', async () => {
     mockNavigator({
       'page-1': { changes: [{ kind: 'added', id: 'b1', slot: 0, text: 'First.' }], pageTitle: 'Alpha' },
       'page-2': { changes: [{ kind: 'added', id: 'b2', slot: 0, text: 'Second.' }], pageTitle: 'Beta' },
@@ -231,20 +253,55 @@ describe('book-diff screen', () => {
     const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
     expect(component.get('h1').text()).toContain('E2E Handbook');
-    expect(component.get('h2').text()).toContain('Alpha');
+    expect(component.get('header').text()).toContain('Alpha');
     expect(component.text()).not.toMatch(/page-1/);
 
     await component.get('button[aria-label="Next changed page"]').trigger('click');
     await component.vm.$nextTick();
-    expect(component.get('h2').text()).toContain('Beta');
+    expect(component.get('header').text()).toContain('Beta');
+    expect(component.get('header').text()).not.toContain('Alpha');
   });
 
-  test('offers the way back to the book’s tree once the workspace is known, beside the way back to its history', async () => {
+  /*
+   * The frame's breadcrumb now carries "… › book › History › Changes since
+   * <date>" through the tree the sidebar already holds — its first crumb
+   * is already a link to `/workspaces/ws-1`, and this screen's own trail
+   * adds a real link back to book history. The hand-built "Workspace home"
+   * and "Back to history" buttons this screen used to carry duplicated
+   * both doors (checklist §4.1); they are gone.
+   */
+  test('the breadcrumb carries the way back to the workspace and to book history; no separate buttons duplicate it', async () => {
     mockNavigator({ 'page-1': { changes: [] } });
     const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
-    expect(component.find('a[href="/workspaces/ws-1"]').exists()).toBe(true);
-    expect(component.find('a[href="/books/book-1/history"]').exists()).toBe(true);
+    const crumbs = component.get('nav[aria-label="Where you are"]');
+    expect(crumbs.find('a[href="/workspaces/ws-1"]').exists()).toBe(true);
+    expect(crumbs.find('a[href="/books/book-1/history"]').exists()).toBe(true);
+    expect(component.find('[aria-label="Workspace home"]').exists()).toBe(false);
+    expect(component.findAll('a').filter((a) => /back to history/i.test(a.text())).length).toBe(0);
+  });
+
+  test('the breadcrumb names the point compared from once it is known', async () => {
+    mockNavigator({ 'page-1': { changes: [] } });
+    const component = await mountSuspended(PageInApp, FRAME_STUBS);
+
+    const crumbs = component.get('nav[aria-label="Where you are"]');
+    expect(crumbs.text()).toMatch(/changes since/i);
+  });
+
+  /*
+   * `GET /books/:id/diff` orders changed pages by `page_id`
+   * (docs/TODO.md Findings, 2026-09-14) — a client-side order is this
+   * screen's responsibility, sourced from the tree the frame already
+   * holds. The wiring is asserted here at its boundary;
+   * `useBookDiffNavigator.test.ts` holds the ordering behaviour itself.
+   */
+  test('wires a tree-position order function into the navigator', async () => {
+    mockNavigator({ 'page-1': { changes: [] } });
+    await mountSuspended(PageInApp, FRAME_STUBS);
+
+    const deps = useBookDiffNavigatorMock.mock.calls[0]![2] as { pageOrder?: unknown };
+    expect(typeof deps.pageOrder).toBe('function');
   });
 
   test('renders exactly one h1, even while the book’s title is not yet known', async () => {
@@ -267,5 +324,13 @@ describe('book-diff screen', () => {
     const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
     expect(component.findAll('h1')).toHaveLength(1);
+  });
+
+  test('stands inside the workspace layout', async () => {
+    mockNavigator({ 'page-1': { changes: [] } });
+    await mountSuspended(PageInApp, FRAME_STUBS);
+    const { useRouter } = await import('#imports');
+
+    expect(useRouter().getRoutes().find((route) => route.path === '/books/:id()/diff')?.meta.layout).toBe('workspace');
   });
 });

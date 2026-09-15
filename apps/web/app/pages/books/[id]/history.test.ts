@@ -195,4 +195,54 @@ describe('book-history screen', () => {
     const notice = component.get('main [role="status"]');
     expect(notice.find('a[href="/workspaces/ws-1"]').exists()).toBe(true);
   });
+
+  /*
+   * The screen opts into the workspace layout, so the sidebar around it is
+   * the one the layout mounted and survives the navigation that brought
+   * the person here (`apps/web/app/pages/pages/[id]/index.test.ts`'s own
+   * convention — the record is read from the application's router).
+   */
+  test('stands inside the workspace layout', async () => {
+    mockHistory({ status: 'success', changesets: TWO_CHANGESETS });
+    await mountSuspended(PageInApp, FRAME_STUBS);
+    const { useRouter } = await import('#imports');
+
+    expect(useRouter().getRoutes().find((route) => route.path === '/books/:id()/history')?.meta.layout).toBe('workspace');
+  });
+
+  /*
+   * The frame's breadcrumb now carries "workspace › shelf › book › History"
+   * through the tree the sidebar already holds — its own first crumb is
+   * already a link to `/workspaces/ws-1`. A second, hand-built "Workspace
+   * home" button in the contextual bar duplicated that door (checklist
+   * §4.1: a control matches the nearest existing one rather than inventing
+   * a second); it is gone.
+   */
+  test('carries no separate "Workspace home" control now that the breadcrumb is one', async () => {
+    mockHistory({ status: 'success', changesets: TWO_CHANGESETS });
+    const component = await mountSuspended(PageInApp, FRAME_STUBS);
+
+    expect(component.find('[aria-label="Workspace home"]').exists()).toBe(false);
+  });
+
+  /*
+   * "Compare since…" — the newest changeset's own "View diff since here"
+   * transition, exposed in the contextual bar so it needs no scroll to the
+   * top row (checklist §4.1: the nearest existing control, generalised).
+   */
+  test('offers "Compare since…" in the contextual bar, to the diff since the newest changeset', async () => {
+    mockHistory({ status: 'success', changesets: TWO_CHANGESETS });
+    const component = await mountSuspended(PageInApp, FRAME_STUBS);
+
+    const compare = component.get('header a[href^="/books/book-1/diff?since="]');
+    expect(compare.text()).toMatch(/compare since/i);
+    expect(compare.attributes('href')).toBe(`/books/book-1/diff?since=${encodeURIComponent('2026-01-01T23:59:59.999Z')}`);
+  });
+
+  test('offers no "Compare since…" control when there is nothing to compare', async () => {
+    mockHistory({ status: 'success', changesets: [] });
+    const component = await mountSuspended(PageInApp, FRAME_STUBS);
+
+    expect(component.find('header a[href^="/books/book-1/diff?since="]').exists()).toBe(false);
+  });
 });
