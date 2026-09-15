@@ -61,13 +61,12 @@ function mockMembers(
 }
 
 describe('workspace members screen', () => {
-  test('renders one h1 with the workspace named above it, and the shell landmarks', async () => {
+  test('renders one bare h1 and the shell landmarks — the breadcrumb, not an eyebrow, names the workspace now', async () => {
     mockMembers({ status: 'success', listing });
     const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
     expect(component.findAll('h1')).toHaveLength(1);
     expect(component.get('h1').text()).toBe('Members');
-    expect(component.text()).toContain('Acme Handbook');
     expect(component.find('header').exists()).toBe(true);
     expect(component.find('main').exists()).toBe(true);
     // Inside the workspace frame there is no footer: the doors are the sidebar's.
@@ -80,6 +79,46 @@ describe('workspace members screen', () => {
 
     expect(component.find('[data-testid="members-skeleton"]').exists()).toBe(true);
     expect(component.find('form').exists()).toBe(false);
+  });
+
+  // The pane's width decides the columns, not the viewport's — the
+  // dashboard's own rule (docs/DESIGN-SYSTEM.md, "Columns come from the
+  // content pane's width"), since the sidebar can be resized or hidden.
+  // A unit test cannot measure the breakpoint firing; what it can hold is
+  // that the invite form and the member list share one `@container` grid
+  // rather than a viewport-driven one, in both the skeleton and the loaded
+  // screen, so the two boxes agree the way the workspace list's skeleton
+  // and its loaded card do (see workspaces/index.test.ts).
+  test('the invite form and the member list stand in one pane-width grid, matched between the skeleton and the loaded screen', async () => {
+    mockMembers({ status: 'loading' });
+    const loading = await mountSuspended(PageInApp, FRAME_STUBS);
+    const skeleton = loading.get('[data-testid="members-skeleton"]');
+    expect(skeleton.classes()).toContain('@container');
+
+    mockMembers({ status: 'success', listing });
+    const loaded = await mountSuspended(PageInApp, FRAME_STUBS);
+    const inviteHeading = loaded.get('#invite-heading');
+    const membersHeading = loaded.get('#members-heading');
+    const inviteColumn = inviteHeading.element.closest('.grid > *');
+    const membersColumn = membersHeading.element.closest('.grid > *');
+    expect(inviteColumn).not.toBeNull();
+    expect(membersColumn).not.toBeNull();
+    expect(inviteColumn).not.toBe(membersColumn);
+    const grid = inviteColumn!.parentElement!;
+    expect(membersColumn!.parentElement).toBe(grid);
+    expect(grid.className).toMatch(/@2xl:grid-cols-2/);
+    // Walked by hand rather than `closest('.@container')`: happy-dom's
+    // selector engine does not accept an unescaped `@` in a class selector.
+    let ancestor: HTMLElement | null = grid;
+    let foundContainer = false;
+    while (ancestor) {
+      if (ancestor.classList.contains('@container')) {
+        foundContainer = true;
+        break;
+      }
+      ancestor = ancestor.parentElement;
+    }
+    expect(foundContainer).toBe(true);
   });
 
   test('lists the members with their emails, and the pending invitation with its access and an ISO-carrying expiry', async () => {
@@ -170,7 +209,7 @@ describe('workspace members screen', () => {
     expect(component.findAll('a').find((a) => /sign in/i.test(a.text()))?.attributes('href')).toBe('/login');
   });
 
-  test('offers the way back to the workspace\'s home', async () => {
+  test('the breadcrumb offers the way back to the workspace\'s home', async () => {
     mockMembers({ status: 'success', listing });
     const component = await mountSuspended(PageInApp, FRAME_STUBS);
 

@@ -95,8 +95,12 @@ test('a fresh user creates a workspace by clicking, is handed the members screen
   await page.getByRole('link', { name: /invite your team/i }).click();
 
   await expect(page.getByRole('heading', { level: 1, name: 'Members' })).toBeVisible();
-  // Scoped to the screen: the sidebar's switcher names the workspace too.
-  await expect(page.getByRole('main').getByText(WORKSPACE_NAME)).toBeVisible();
+  // The breadcrumb names the workspace now — the screen's own heading is a
+  // bare "Members" once it stands inside the frame (§4.4), the same
+  // contract every other screen in the frame keeps. Scoped to the
+  // breadcrumb specifically: the sidebar's switcher names the workspace
+  // too, and an unscoped query would match both.
+  await expect(page.getByRole('navigation', { name: 'Where you are' }).getByText(WORKSPACE_NAME)).toBeVisible();
   workspaceUrl = page.url();
   expect(workspaceUrl).toMatch(/\/workspaces\/[0-9a-f-]{36}\/members$/);
 
