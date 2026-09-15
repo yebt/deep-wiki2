@@ -312,8 +312,13 @@ function applyWriteError(
          sideways (checklist §6). This is a toolbar, so its controls are
          §7.2's 32px chrome height (`size="sm"`), not the 40px of a
          content-area action — measured at 40px on 2026-09-14. -->
-    <div class="mb-4 flex flex-wrap items-center gap-3">
-      <UButton size="sm" icon="i-lucide-plus" data-testid="tree-create-open" @click="openCreate">New…</UButton>
+    <!-- Tonal, not filled: since 2026-09-15 this toolbar stands in the
+         sidebar on every screen, and a filled button there would be a
+         second primary beside whatever the screen's own is (checklist §2,
+         one primary per view). The two read as one group — tonal and
+         outlined — apart from the screen's actions in the top bar. -->
+    <div class="mb-2 flex flex-wrap items-center gap-2">
+      <UButton size="sm" variant="soft" icon="i-lucide-plus" data-testid="tree-create-open" @click="openCreate">New…</UButton>
 
       <!-- `aria-disabled`, never `disabled`: the attribute would take the
            control out of the tab order and put its own explanation behind
@@ -331,17 +336,23 @@ function applyWriteError(
           Rename…
         </UButton>
       </UTooltip>
-      <UButton
-        v-else
-        size="sm"
-        variant="outline"
-        color="neutral"
-        icon="i-lucide-pencil-line"
-        data-testid="tree-rename-open"
-        @click="openRename"
-      >
-        Rename “{{ renameTarget.title }}”…
-      </UButton>
+      <!-- The target is in the control's name and its tooltip, not in its
+           visible label: "Rename “A long page title”…" wrapped onto two
+           lines in a 280px pane (measured 2026-09-15), and the row it
+           names is already the one drawn with the fill. -->
+      <UTooltip v-else :text="`Rename “${renameTarget.title}”`">
+        <UButton
+          size="sm"
+          variant="outline"
+          color="neutral"
+          icon="i-lucide-pencil-line"
+          :aria-label="`Rename “${renameTarget.title}”…`"
+          data-testid="tree-rename-open"
+          @click="openRename"
+        >
+          Rename…
+        </UButton>
+      </UTooltip>
       <p id="tree-rename-reason" class="sr-only">Select a row in the tree to rename it.</p>
     </div>
 

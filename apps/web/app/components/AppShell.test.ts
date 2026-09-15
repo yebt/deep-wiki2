@@ -1,8 +1,46 @@
 import { UApp } from '#components';
-import { mountSuspended } from '@nuxt/test-utils/runtime';
-import { describe, expect, test } from 'vitest';
-import { defineComponent, h, type VNode } from 'vue';
+import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime';
+import { describe, expect, test, vi } from 'vitest';
+import { computed, defineComponent, h, ref, type VNode } from 'vue';
 import AppShell from './AppShell.vue';
+import WorkspaceSidebar from './WorkspaceSidebar.vue';
+
+const { useWorkspaceTreeMock, useWorkspaceDirectoryMock } = vi.hoisted(() => ({
+  useWorkspaceTreeMock: vi.fn(),
+  useWorkspaceDirectoryMock: vi.fn(),
+}));
+mockNuxtImport('useWorkspaceTree', () => useWorkspaceTreeMock);
+mockNuxtImport('useWorkspaceDirectory', () => useWorkspaceDirectoryMock);
+
+const PATH = [
+  { id: 'shelf-1', type: 'shelf', slug: 's', title: 'Engineering', position: 0, children: [] },
+  { id: 'book-1', type: 'book', slug: 'b', title: 'Handbook', position: 0, children: [] },
+  { id: 'page-1', type: 'page', slug: 'p', title: 'Onboarding', position: 0, children: [] },
+];
+
+function mockFrameCollaborators() {
+  useWorkspaceTreeMock.mockReturnValue({
+    status: ref('success'),
+    nodes: ref([]),
+    rootId: ref('root-1'),
+    message: ref(''),
+    collapsedIds: computed(() => new Set<string>()),
+    selectedId: ref(null),
+    load: vi.fn(async () => {}),
+    reorder: vi.fn(async () => true),
+    toggleCollapsed: vi.fn(),
+    reveal: vi.fn(),
+    pathTo: (id: string) => (id === 'page-1' ? PATH : []),
+  });
+  useWorkspaceDirectoryMock.mockReturnValue({
+    status: ref('success'),
+    workspaces: computed(() => [{ id: 'ws-1', name: 'Acme', slug: 'acme' }]),
+    ensure: vi.fn(async () => {}),
+    refresh: vi.fn(async () => {}),
+    nameOf: (id: string) => (id === 'ws-1' ? 'Acme' : null),
+  });
+}
+mockFrameCollaborators();
 
 /**
  * `AppShell` owns two things no screen may restate: the chrome (the
@@ -52,6 +90,85 @@ function columnOf(component: Awaited<ReturnType<typeof mountShell>>): HTMLElemen
 }
 
 describe('AppShell', () => {
+  /*
+   * The workspace frame: sidebar, content pane, contextual top bar. Chosen
+   * by the screen naming a workspace — a string, or `null` while it is
+   * still learning which — and never by a screen that names none.
+   */
+  describe('the workspace frame', () => {
+    test('a screen inside a workspace gets the sidebar and the contextual bar, not the global app bar or the footer', async () => {
+      const component = await mountShell({ workspaceId: 'ws-1' });
+
+      const sidebar = component.findComponent(WorkspaceSidebar);
+      expect(sidebar.exists()).toBe(true);
+      expect(sidebar.props('workspaceId')).toBe('ws-1');
+      expect(component.findAll('footer')).toHaveLength(0);
+      expect(component.find('header a[href="/"]').exists()).toBe(false);
+      // Still exactly one main landmark, and the column stands in it.
+      expect(component.findAll('main')).toHaveLength(1);
+      expect(component.get('main').element.contains(columnOf(component))).toBe(true);
+    });
+
+    test('a screen that names no workspace keeps the document frame', async () => {
+      const component = await mountShell();
+
+      expect(component.findComponent(WorkspaceSidebar).exists()).toBe(false);
+      expect(component.findAll('footer')).toHaveLength(1);
+    });
+
+    test('the breadcrumb walks workspace › shelf › book › chapter › page, linking the workspace and the page only', async () => {
+      const component = await mountShell({ workspaceId: 'ws-1', nodeId: 'page-1' });
+
+      const nav = component.get('nav[aria-label="Where you are"]');
+      const labels = nav.findAll('li').map((li) => li.text()).filter((text) => text.length > 0);
+      expect(labels).toEqual(['Acme', 'Engineering', 'Handbook', 'Onboarding']);
+      expect(nav.get('a[href="/workspaces/ws-1"]').text()).toBe('Acme');
+      expect(nav.get('a[href="/pages/page-1"]').text()).toBe('Onboarding');
+      expect(nav.find('a[href*="shelf-1"]').exists()).toBe(false);
+    });
+
+    test('a trail extends the breadcrumb past the node, and a title stands in when the tree cannot place it', async () => {
+      const withTrail = await mountShell({ workspaceId: 'ws-1', nodeId: 'page-1', trail: [{ label: 'History' }] });
+      const trailLabels = withTrail.get('nav[aria-label="Where you are"]').findAll('li').map((li) => li.text()).filter(Boolean);
+      expect(trailLabels).toEqual(['Acme', 'Engineering', 'Handbook', 'Onboarding', 'History']);
+
+      const withTitle = await mountShell({ workspaceId: 'ws-1', nodeId: 'unplaced', title: 'Members' });
+      const titleLabels = withTitle.get('nav[aria-label="Where you are"]').findAll('li').map((li) => li.text()).filter(Boolean);
+      expect(titleLabels).toEqual(['Acme', 'Members']);
+    });
+
+    test('`header-end` is the contextual bar’s action area, beside the breadcrumb', async () => {
+      const component = await mountShell({ workspaceId: 'ws-1' }, () => h('button', { type: 'button' }, 'Edit'));
+
+      // The breadcrumb is itself a `data-slot="root"`; the bar is the next one up.
+      const bar = component.get('nav[aria-label="Where you are"]').element.parentElement!.closest('[data-slot="root"]')!;
+      const edit = component.findAll('button').find((button) => button.text() === 'Edit')!;
+      expect(bar.contains(edit.element)).toBe(true);
+    });
+
+    // The sidebar precedes the content in reading order, so without this a
+    // keyboard user crosses the switcher, the toolbar, the tree and the
+    // doors before reaching the screen's own actions (§5). Measured in
+    // `e2e/history.spec.ts`: Skip, then breadcrumb → history → Edit.
+    test('the frame’s first focusable element skips to the contextual bar, and the bar can take focus', async () => {
+      const component = await mountShell({ workspaceId: 'ws-1' });
+
+      const focusables = component.findAll('a, button, [tabindex="0"]');
+      expect(focusables[0]!.text()).toBe('Skip to content');
+      expect(focusables[0]!.attributes('href')).toBe('#content-bar');
+      const bar = component.get('#content-bar');
+      expect(bar.element.tagName).toBe('HEADER');
+      expect(bar.attributes('tabindex')).toBe('-1');
+    });
+
+    test('naming a workspace enters it, so the next screen that has not learned its own starts from this one', async () => {
+      await mountShell({ workspaceId: 'ws-1' });
+      const component = await mountShell({ workspaceId: null });
+
+      expect(component.findComponent(WorkspaceSidebar).props('workspaceId')).toBe('ws-1');
+    });
+  });
+
   describe('the content column', () => {
     test('the measure column is centred, not merely capped', async () => {
       const component = await mountShell({ column: 'measure' });

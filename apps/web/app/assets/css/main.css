@@ -433,6 +433,11 @@
   --text-body-large-emphasized--letter-spacing: 0.009375rem;
   --text-body-large-emphasized--font-weight: 500;
 
+  --text-body-medium-emphasized: 0.875rem;
+  --text-body-medium-emphasized--line-height: 1.25rem;
+  --text-body-medium-emphasized--letter-spacing: 0.015625rem;
+  --text-body-medium-emphasized--font-weight: 500;
+
   --text-label-large-emphasized: 0.875rem;
   --text-label-large-emphasized--line-height: 1.25rem;
   --text-label-large-emphasized--letter-spacing: 0.00625rem;

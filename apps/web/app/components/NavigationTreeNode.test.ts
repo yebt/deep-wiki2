@@ -63,6 +63,7 @@ interface NodeProps {
   activeId: string | null;
   selectedId: string | null;
   collapsedIds: ReadonlySet<string>;
+  currentId?: string | null;
 }
 
 /**
@@ -70,7 +71,7 @@ interface NodeProps {
  * inside the `<ul role="tree">` it actually ships in — which also makes
  * the root row reachable by the same query as its children.
  */
-async function mountNode(overrides: Partial<NodeProps> = {}) {
+async function mountNode(overrides: Partial<NodeProps> = {}, slots: Record<string, (scope: { node: TreeNode; active: boolean }) => ReturnType<typeof h>> = {}) {
   const props: NodeProps = {
     node: SHELF,
     depth: 0,
@@ -85,7 +86,7 @@ async function mountNode(overrides: Partial<NodeProps> = {}) {
   const wrapper = await mountSuspended(
     defineComponent({
       name: 'TreeHarness',
-      setup: () => () => h('ul', { role: 'tree' }, [h(NavigationTreeNode, props)]),
+      setup: () => () => h('ul', { role: 'tree' }, [h(NavigationTreeNode, props, slots)]),
     }),
   );
   return { dom: wrapper.element as HTMLElement, row: wrapper.findComponent(NavigationTreeNode) };
@@ -347,6 +348,57 @@ describe('NavigationTreeNode', () => {
       for (const id of ['shelf-1', 'page-1', 'page-2']) {
         expect(rowOf(component.dom, id).classList.contains('bg-secondary-container'), id).toBe(false);
       }
+    });
+  });
+
+  /*
+   * The sidebar houses the tree, and a book's history is a context action
+   * on the book's own row rather than a chrome link (it used to be a strip
+   * of "Book history: A B C" in the app bar). The row rents out a slot at
+   * its end; what stands there is the tree's decision, but the row owes it
+   * two things: a click there must not fold or open the row, and a key
+   * pressed there must not move the tree's focus.
+   */
+  describe('row actions', () => {
+    test('the slot renders at the end of every row, with the node and whether the row holds the tab stop', async () => {
+      const component = await mountNode(
+        { activeId: 'page-1' },
+        { 'row-actions': ({ node, active }) => h('button', { type: 'button', 'data-testid': `act-${node.id}`, 'data-active': String(active) }, 'More') },
+      );
+
+      expect(component.dom.querySelector('[data-testid="act-shelf-1"]')!.getAttribute('data-active')).toBe('false');
+      expect(component.dom.querySelector('[data-testid="act-page-1"]')!.getAttribute('data-active')).toBe('true');
+      expect(component.dom.querySelector('[data-testid="act-page-2"]')).not.toBeNull();
+    });
+
+    test('a click on the action neither opens nor folds the row, and a key pressed there does not reach the tree', async () => {
+      const component = await mountNode(
+        {},
+        { 'row-actions': ({ node }) => h('button', { type: 'button', 'data-testid': `act-${node.id}` }, 'More') },
+      );
+
+      const action = component.dom.querySelector<HTMLElement>('[data-testid="act-page-1"]')!;
+      action.click();
+      await nextTick();
+      expect(component.row.emitted('open')).toBeUndefined();
+      expect(component.row.emitted('toggle')).toBeUndefined();
+
+      fire(action, 'keydown', { key: 'ArrowDown' });
+      await nextTick();
+      expect(component.row.emitted('keydown')).toBeUndefined();
+    });
+  });
+
+  describe('the current page', () => {
+    // The row of the page that is open is the one the sidebar exists to
+    // point at: marked for assistive technology as the current page, on the
+    // page row alone.
+    test('the row of the open page carries aria-current, and no other row does', async () => {
+      const component = await mountNode({ currentId: 'page-2' });
+
+      expect(itemOf(component.dom, 'page-2').getAttribute('aria-current')).toBe('page');
+      expect(itemOf(component.dom, 'page-1').getAttribute('aria-current')).toBeNull();
+      expect(itemOf(component.dom, 'shelf-1').getAttribute('aria-current')).toBeNull();
     });
   });
 

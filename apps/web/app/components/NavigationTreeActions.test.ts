@@ -282,7 +282,10 @@ describe('NavigationTreeActions — renaming', () => {
     const mounted = await mountActions({ selectedId: 'page-1', renameFetcher });
     const button = byTestId(mounted, 'tree-rename-open')!;
     expect(button.getAttribute('aria-disabled')).toBeNull();
-    expect(button.textContent).toContain('Day one');
+    // The target is in the accessible name; the visible label stays short
+    // enough for a 280px pane.
+    expect(button.getAttribute('aria-label')).toBe('Rename “Day one”…');
+    expect(button.textContent).toContain('Rename…');
 
     button.click();
     await settle();

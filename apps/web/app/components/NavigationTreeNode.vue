@@ -67,6 +67,19 @@ const props = defineProps<{
   selectedId: string | null;
   /** Containers the user folded; everything else is open. */
   collapsedIds: ReadonlySet<string>;
+  /** The page that is open on screen — marked `aria-current`, on the page row alone. */
+  currentId?: string | null;
+}>();
+
+/**
+ * What stands at the end of a row — a book's context menu, in the sidebar.
+ * The row rents the space out and owes its tenant two things: a click there
+ * neither opens nor folds the row, and a key pressed there never reaches the
+ * tree's own handler (see `onKeydown`). The slot is threaded through every
+ * recursive level so one `<template #row-actions>` covers the whole tree.
+ */
+defineSlots<{
+  'row-actions'?: (scope: { node: TreeNode; active: boolean }) => unknown;
 }>();
 
 const emit = defineEmits<{
@@ -95,6 +108,7 @@ const isNavigable = computed(() => props.node.type === 'page');
 const isContainer = computed(() => props.node.children.length > 0);
 const isExpanded = computed(() => isContainer.value && !props.collapsedIds.has(props.node.id));
 const isSelected = computed(() => props.selectedId === props.node.id);
+const isCurrent = computed(() => props.node.type === 'page' && props.currentId === props.node.id);
 
 /** A click is the row's one activation: a page opens, a container folds. */
 function onClick(): void {
@@ -157,7 +171,12 @@ function onChildReorder(payload: { draggedId: string; newParentId: string; newIn
  * the row that contains it rather than fall silent.
  */
 function onKeydown(event: KeyboardEvent): void {
-  if ((event.target as HTMLElement | null)?.closest('[role="treeitem"]') !== event.currentTarget) return;
+  const target = event.target as HTMLElement | null;
+  if (target?.closest('[role="treeitem"]') !== event.currentTarget) return;
+  // A key pressed inside the row's action (a menu trigger) is that
+  // control's to handle — Enter opens the menu, it must not also open the
+  // page; an arrow must not also move the tree's focus.
+  if (target?.closest('[data-row-actions]')) return;
   emit('keydown', { event, node: props.node, parentId: props.parentId, index: props.index });
 }
 </script>
@@ -171,14 +190,15 @@ function onKeydown(event: KeyboardEvent): void {
     :aria-setsize="setSize"
     :aria-expanded="isContainer ? isExpanded : undefined"
     :aria-selected="isSelected"
+    :aria-current="isCurrent ? 'page' : undefined"
     :tabindex="activeId === node.id ? 0 : -1"
-    class="dw-tree-item"
+    class="dw-tree-item group"
     @keydown="onKeydown"
     @focus="emit('activate', node.id)"
   >
     <div
       draggable="true"
-      class="dw-tree-row dw-state-layer flex h-10 min-h-10 items-center gap-2 rounded-md text-body-large text-default"
+      class="dw-tree-row dw-state-layer flex h-10 min-h-10 items-center gap-2 rounded-md pe-1 text-body-medium text-default"
       :class="[
         // Every row does something on click now — open or fold — so every
         // row is a pointer target; the grab cursor promised a drag and
@@ -220,6 +240,11 @@ function onKeydown(event: KeyboardEvent): void {
            available on hover once a long one truncates (§6). -->
       <span class="sr-only">{{ node.type }}:</span>
       <span class="truncate" :title="node.title">{{ node.title }}</span>
+      <!-- `@click.stop`: the row's click is its activation (open or fold),
+           and a click on the action is neither. -->
+      <span v-if="$slots['row-actions']" data-row-actions class="ms-auto flex shrink-0 items-center" @click.stop>
+        <slot name="row-actions" :node="node" :active="activeId === node.id" />
+      </span>
     </div>
     <ul v-if="isExpanded" role="group">
       <NavigationTreeNode
@@ -233,12 +258,17 @@ function onKeydown(event: KeyboardEvent): void {
         :active-id="activeId"
         :selected-id="selectedId"
         :collapsed-ids="collapsedIds"
+        :current-id="currentId"
         @reorder="onChildReorder"
         @activate="emit('activate', $event)"
         @open="emit('open', $event)"
         @toggle="emit('toggle', $event)"
         @keydown="emit('keydown', $event)"
-      />
+      >
+        <template v-if="$slots['row-actions']" #row-actions="scope">
+          <slot name="row-actions" v-bind="scope" />
+        </template>
+      </NavigationTreeNode>
     </ul>
   </li>
 </template>
