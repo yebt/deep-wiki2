@@ -6,18 +6,28 @@
   "scripts": {
     "start": "bun run src/index.ts",
     "test": "bun test",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "ai:rekey": "bun run src/ai/rekey-cli.ts",
+    "ai:probe": "bun run src/ai/probe-cli.ts",
+    "ai:conformance": "bun run src/ai/conformance-cli.ts"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "4.0.49",
+    "@ai-sdk/deepseek": "3.0.39",
+    "@ai-sdk/google": "4.0.64",
+    "@ai-sdk/openai": "4.0.60",
     "@deep-wiki/contracts": "workspace:*",
     "@deep-wiki/core": "workspace:*",
     "@deep-wiki/db": "workspace:*",
     "@deep-wiki/editor": "workspace:*",
     "@deep-wiki/markdown": "workspace:*",
+    "@openrouter/ai-sdk-provider": "3.0.0",
+    "ai": "7.0.93",
     "hono": "^4.6.16",
     "nodemailer": "^9.1.1",
     "postgres": "^3.4.5",
-    "sharp": "^0.35.4"
+    "sharp": "^0.35.4",
+    "zod": "3.25.76"
   },
   "devDependencies": {
     "@types/nodemailer": "^8.0.1"

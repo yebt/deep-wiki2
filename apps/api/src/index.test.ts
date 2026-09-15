@@ -1,8 +1,26 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import type { PresenceBroadcaster, PresenceEvent, PresenceSubscriber } from '@deep-wiki/core';
+import type {
+  BlobStore,
+  MailSender,
+  PasswordHasher,
+  PresenceBroadcaster,
+  PresenceEvent,
+  PresenceSubscriber,
+  Result,
+} from '@deep-wiki/core';
+import { ok } from '@deep-wiki/core';
+import { createSession } from '@deep-wiki/db';
 import { provisionTestDatabase, type ProvisionedTestDatabase } from '@deep-wiki/db/testing/provision';
 import postgres from 'postgres';
-import { createApp } from './index';
+import { AesGcmCredentialCipher } from './adapters/ai/cipher/aes-gcm-cipher';
+import { EnvKeyProvider } from './adapters/ai/key-provider/env-key-provider';
+import type { MailDispatcher } from './adapters/mail/background-mail-dispatcher';
+import generateFixture from './ai/gateway/providers/__fixtures__/anthropic-generate.json';
+import { jsonFetch } from './ai/gateway/providers/test-support';
+import { createVercelAiValidationProbe } from './ai/gateway/validation-probe';
+import { SESSION_COOKIE_NAME } from './middleware/session';
+import { PresenceStreamRegistry } from './presence/registry';
+import { composeApp, createApp } from './index';
 import { createDiffRoutes } from './routes/diff';
 import { createPresenceRoutes } from './routes/presence';
 import { createRevisionRoutes } from './routes/revisions';
@@ -129,5 +147,124 @@ describe('GET /workspaces/:workspaceId/presence/stream — mounted like every ot
 
     expect(res.headers.get('Access-Control-Allow-Origin')).toBe(WEB_ORIGIN);
     expect(res.headers.get('Access-Control-Allow-Credentials')).toBe('true');
+  });
+});
+
+// Regression, second occurrence: Phase 1 shipped `admin`, `invitations`
+// and `uploads` fully implemented and unit-tested while `createApp()`'s
+// caller never mounted them. Phase 5 shipped `ai-credentials` the exact
+// same way. Every test up to here calls the route factory directly and
+// never traverses `composeApp()` — this suite is the one that does,
+// through `app.request()`, so a route the composition root forgets fails
+// here rather than in a browser.
+class NoopMailSender implements MailSender {
+  async send(): Promise<Result<void, { reason: string }>> {
+    return ok(undefined);
+  }
+}
+
+class NoopMailDispatcher implements MailDispatcher {
+  dispatch(): void {}
+}
+
+class NoopPasswordHasher implements PasswordHasher {
+  async hash(plaintext: string): Promise<string> {
+    return `hashed:${plaintext}`;
+  }
+  async verify(): Promise<boolean> {
+    return false;
+  }
+}
+
+class NoopBlobStore implements BlobStore {
+  async put(): Promise<Result<void, { reason: string }>> {
+    return ok(undefined);
+  }
+  async get(): Promise<Result<Uint8Array, { reason: string }>> {
+    return ok(new Uint8Array());
+  }
+  async delete(): Promise<Result<void, { reason: string }>> {
+    return ok(undefined);
+  }
+}
+
+describe('composeApp — the credential route and its real gateway-backed probe, reached through app.request()', () => {
+  let db: ProvisionedTestDatabase;
+  let sql: postgres.Sql;
+
+  beforeAll(async () => {
+    db = await provisionTestDatabase();
+    sql = postgres(db.url, { max: 5 });
+  });
+
+  afterAll(async () => {
+    await sql.end({ timeout: 1 }).catch(() => {});
+    await db.drop();
+  });
+
+  test('a provider-accepted key persists through the fully composed app, never through the route factory', async () => {
+    const [owner] = await sql<{ id: string }[]>`
+      INSERT INTO users (email, password_hash, display_name)
+      VALUES (${`owner-${crypto.randomUUID()}@example.com`}, 'hash', 'Owner') RETURNING id
+    `;
+    const [ws] = await sql<{ id: string }[]>`
+      INSERT INTO workspaces (owner_id, name, slug) VALUES (${owner!.id}, 'WS', ${`ws-${crypto.randomUUID()}`}) RETURNING id
+    `;
+    const [root] = await sql<{ id: string }[]>`
+      INSERT INTO nodes (workspace_id, parent_id, type, path, position, slug, title)
+      VALUES (${ws!.id}, NULL, 'workspace', '', 0, 'root', 'Root') RETURNING id
+    `;
+    await sql`
+      INSERT INTO permissions (workspace_id, subject_type, subject_id, resource_id, action, effect)
+      VALUES (${ws!.id}, 'user', ${owner!.id}, ${root!.id}, 'manage', 'allow')
+    `;
+    const { token } = await createSession(sql, { userId: owner!.id, idleTimeoutMinutes: 30, absoluteTimeoutDays: 30 });
+
+    const app = composeApp(
+      {
+        sql,
+        mailSender: new NoopMailSender(),
+        mailDispatcher: new NoopMailDispatcher(),
+        passwordHasher: new NoopPasswordHasher(),
+        blobStore: new NoopBlobStore(),
+        smtpConfigHash: 'test-hash',
+        presenceBroadcaster: new NoopBroadcaster(),
+        presenceStreamRegistry: new PresenceStreamRegistry(),
+        cipher: new AesGcmCredentialCipher(new EnvKeyProvider(new Map([['k1', Buffer.alloc(32, 7)]]), 'k1')),
+        // The real Vercel AI SDK-backed probe (`./ai/gateway/validation-probe.ts`),
+        // fixture-replayed — this is what proves the gateway's own provider
+        // adapters are reachable from a running server, not only from their
+        // own unit tests.
+        validationProbe: createVercelAiValidationProbe(jsonFetch(200, generateFixture)),
+      },
+      {
+        appUrl: WEB_ORIGIN,
+        sessionIdleTimeoutMinutes: 30,
+        sessionAbsoluteTimeoutDays: 30,
+        passwordResetTtlMinutes: 30,
+        invitationTtlDays: 7,
+        maxUploadBytes: 1024,
+        pageLockTtlSeconds: 120,
+        pageLockHeartbeatSeconds: 20,
+        changesetWindowMinutes: 30,
+      },
+    );
+
+    const apiKey = `sk-live-${crypto.randomUUID()}`;
+    const res = await app.request(`/workspaces/${ws!.id}/ai-credentials`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie: `${SESSION_COOKIE_NAME}=${token}` },
+      body: JSON.stringify({ provider: 'anthropic', apiKey }),
+    });
+
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { ok: true; lastFour: string };
+    expect(body.lastFour).toBe(apiKey.slice(-4));
+
+    const [row] = await sql<{ ciphertext: Buffer }[]>`
+      SELECT ciphertext FROM workspace_ai_credentials WHERE workspace_id = ${ws!.id} AND provider = 'anthropic'
+    `;
+    expect(row).toBeDefined();
+    expect(row!.ciphertext.toString('utf8').includes(apiKey)).toBe(false);
   });
 });

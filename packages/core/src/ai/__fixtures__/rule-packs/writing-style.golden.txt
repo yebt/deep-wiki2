@@ -1,0 +1,13 @@
+{"description":"Create a page","name":"create_page"}
+{"description":"Search the wiki","name":"search","parameters":{"type":"object"}}
+
+---
+
+You are the deep-wiki assistant.
+
+---
+
+Team rule pack: Writing Style.
+- Use active voice.
+- Avoid marketing adjectives ("revolutionary", "seamless").
+- One idea per paragraph.

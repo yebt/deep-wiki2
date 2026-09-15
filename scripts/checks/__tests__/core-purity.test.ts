@@ -55,6 +55,33 @@ describe('type-only imports (D19: no mdast type crosses into core)', () => {
   });
 });
 
+// ai-provider-foundation design.md D16 measured the same elision against the
+// Vercel AI SDK's `ai` package: `import type { X } from 'ai'` and
+// `import { type X } from 'ai'` both vanish from scanImports(). The static
+// specifier sweep reads the bytes on disk, so both are caught whatever the
+// clause says.
+describe('raw-source specifier scan (rule 3 — closes the type-only import hole)', () => {
+  test('flags a whole-clause type-only import from a non-relative specifier', () => {
+    const result = checkCorePurity(join(FIXTURES_DIR, 'type-only-imports'));
+
+    expect(result.ok).toBe(false);
+    expect(result.errors.some((e) => e.includes('whole-type-only.ts') && e.includes('ai'))).toBe(true);
+  });
+
+  test('flags an inline type-only specifier import from a non-relative specifier', () => {
+    const result = checkCorePurity(join(FIXTURES_DIR, 'type-only-imports'));
+
+    expect(result.ok).toBe(false);
+    expect(result.errors.some((e) => e.includes('inline-type-only.ts') && e.includes('ai'))).toBe(true);
+  });
+
+  test('a relative import type still passes', () => {
+    const result = checkCorePurity(join(FIXTURES_DIR, 'type-only-imports'));
+
+    expect(result.errors.some((e) => e.includes('relative-type-only.ts'))).toBe(false);
+  });
+});
+
 // scanImports() elides type-only imports (measured), so an `import type` from a
 // framework is invisible to the AST scan. If that framework were declared only
 // under devDependencies, nothing checked it either. Both holes had to be open at

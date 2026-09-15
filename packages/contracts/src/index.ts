@@ -1,5 +1,5 @@
-export { envSchema, parseEnv, refineEnv } from './env';
-export type { Env, EnvIssue } from './env';
+export { envSchema, parseEnv, parseKeyring, refineEnv } from './env';
+export type { Env, EnvIssue, ParsedKeyring } from './env';
 
 export { ErrorResponseSchema } from './errors';
 export type { ErrorResponse } from './errors';
@@ -174,3 +174,14 @@ export {
   WorkspaceActivityResponseSchema,
 } from './activity';
 export type { ActivityChangeCounts, OwnEdit, RecentChange, ThreadForYou, WorkspaceActivityResponse } from './activity';
+
+export { SaveAiCredentialRequestSchema } from './ai-credentials-request';
+export type { SaveAiCredentialRequest } from './ai-credentials-request';
+
+export {
+  AiCredentialProviderSchema,
+  AiCredentialSummarySchema,
+  ListAiCredentialsResponseSchema,
+  SaveAiCredentialResponseSchema,
+} from './ai-credentials';
+export type { AiCredentialProvider, AiCredentialSummary, ListAiCredentialsResponse, SaveAiCredentialResponse } from './ai-credentials';

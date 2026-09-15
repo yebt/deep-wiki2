@@ -544,6 +544,45 @@ AI credentials are per-workspace and supplied by the workspace:
 - **Never exposed to the client.** The frontend calls deep-wiki's own endpoint;
   deep-wiki's backend calls the model provider.
 
+#### Operator runbook: key rotation and revocation
+
+Each credential row records the id of the envelope master key (KEK) that wraps its
+per-credential data key (DEK). Rotation re-wraps that DEK; it never re-encrypts the
+credential's ciphertext, and it never reads the plaintext key back out.
+
+- **Routine rotation** (e.g. moving off a KEK nearing a scheduled retirement date):
+  add the new key to `AI_KEK_KEYRING`, then run
+  `bun run -F @deep-wiki/api ai:rekey --to <newKeyId>`. Every stored credential still
+  wrapped under a different key is re-wrapped onto the new one; a credential already at
+  the target is skipped, so the command is safe to re-run and resumes cleanly after a
+  partial failure (e.g. a target key id that turns out to be missing from the keyring).
+  Only retire the old key from `AI_KEK_KEYRING` once a rerun of `ai:rekey --to <newKeyId>`
+  reports zero rows rewrapped.
+- **Compromised master key**: run `bun run -F @deep-wiki/api ai:rekey --to <newKeyId> --compromised`.
+  This performs the same re-wrap, and additionally stamps `compromised_at` and clears
+  `validated_at` on every row it moves — the product then asks the workspace to re-enter
+  that provider's credential rather than continuing to serve calls with a key that must be
+  revoked at the provider. **Rotation is not revocation**: rotating the KEK stops deep-wiki
+  from being able to leak that *specific stored copy* of the provider key going forward, but
+  the provider key itself was valid and in use up to that point. The operator (or the
+  workspace owner, once re-entry is required) must still revoke the old key **at the
+  provider's own console** — no automation in this codebase can do that on the provider's
+  behalf.
+- **After a rollback that reverted this AI provider layer**: `proposal.md`'s Rollback Plan
+  is explicit that reverting code does not undo the fact that credentials were, for some
+  window, stored and decryptable server-side. The master key itself is never deleted by a
+  rollback (a rotated-away key would make any surviving ciphertext permanently unreadable),
+  but the system that stored those credentials was rolled back and **cannot prove they were
+  never exposed** — the logs that would prove it are part of what was reverted. The
+  instruction is unconditional, not "if you are worried": after such a rollback, every
+  workspace owner must re-enter their provider keys, and should revoke the previously-stored
+  keys at the provider.
+- **Boot-time check**: the server refuses to start if any stored credential references a
+  `key_id` absent from the configured `AI_KEK_KEYRING` (`assertKeyringComplete`,
+  `apps/api/src/config.ts`) — discovering an unreadable credential mid-request, one tenant at
+  a time, is the failure this prevents. Run `ai:rekey` for any row this reports **before**
+  removing the old key from the keyring, not after.
+
 ### 8.7 Cost accounting
 
 Every model call is logged with provider, model, input/output tokens, computed cost,

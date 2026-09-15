@@ -1,0 +1,3 @@
+{
+  "error": { "message": "Rate limited by upstream provider.", "code": 429 }
+}

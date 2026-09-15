@@ -120,6 +120,41 @@
       "when": 1735689600016,
       "tag": "0016_page_blocks_no_resurrection",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1735689600017,
+      "tag": "0017_ai_settings_and_credentials",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1735689600018,
+      "tag": "0018_ai_usage_ledger",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1735689600019,
+      "tag": "0019_ai_capability_observations",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1735689600020,
+      "tag": "0020_embedding_indexes_and_chunks",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1735689600021,
+      "tag": "0021_embedding_reindex_jobs",
+      "breakpoints": true
     }
   ]
 }

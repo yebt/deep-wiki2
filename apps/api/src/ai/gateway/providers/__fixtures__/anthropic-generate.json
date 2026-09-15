@@ -1,0 +1,10 @@
+{
+  "id": "msg_fixture_01",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-3-5-sonnet-20241022",
+  "content": [{ "type": "text", "text": "Hello from the recorded Anthropic fixture." }],
+  "stop_reason": "end_turn",
+  "stop_sequence": null,
+  "usage": { "input_tokens": 24, "output_tokens": 9 }
+}

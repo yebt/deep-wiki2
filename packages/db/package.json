@@ -14,7 +14,8 @@
     "migrate": "bun run migrate.ts",
     "seed": "bun run seed.ts",
     "backfill:render": "bun run backfill-render.ts",
-    "verify:paths": "bun run verify-paths.ts"
+    "verify:paths": "bun run verify-paths.ts",
+    "ai:reindex": "bun run ai-reindex.ts"
   },
   "dependencies": {
     "@deep-wiki/core": "workspace:*",

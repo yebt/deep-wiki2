@@ -128,3 +128,4 @@ export { reorderNode } from './nodes/reorder';
 export type { ReorderNodeInput } from './nodes/reorder';
 export { listActivePresence } from './presence/queries';
 export type { ListActivePresenceInput, PresenceRow } from './presence/queries';
+export { createPostgresUsageLedger } from './ai/ledger';

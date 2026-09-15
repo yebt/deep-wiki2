@@ -118,6 +118,22 @@ export const envSchema = z.object({
   BLOB_STORE_S3_ACCESS_KEY_ID: z.string().optional(),
   BLOB_STORE_S3_SECRET_ACCESS_KEY: z.string().optional(),
   BLOB_STORE_FS_ROOT: z.string().optional(),
+
+  // Envelope-encryption key provider (environment-config delta —
+  // "Envelope Master Key Validated at Startup"; ai-provider-foundation
+  // design.md — "Credentials: envelope encryption a self-hoster can
+  // operate"). `env` is the default adapter: an operator-supplied
+  // keyring read from the environment. `AI_KEK_KEYRING` is
+  // `id:base64key[,id:base64key…]` — two static variable names rather
+  // than one per key, so `scripts/checks/env-example.ts` (which reads
+  // `Object.keys(envSchema.shape)`) still catches drift. `refineEnv()`
+  // requires the keyring to parse, every key to decode to exactly 32
+  // bytes, and `AI_KEK_ACTIVE_ID` to name a key present in it. `kms`
+  // swaps only wrap/unwrap and requires `AI_KEK_KMS_KEY_ID` instead.
+  AI_KEK_DRIVER: z.enum(['env', 'kms']).default('env'),
+  AI_KEK_KEYRING: z.string().optional(),
+  AI_KEK_ACTIVE_ID: z.string().optional(),
+  AI_KEK_KMS_KEY_ID: z.string().optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;
@@ -261,6 +277,58 @@ const REQUIRED_S3_VARS = [
   'BLOB_STORE_S3_SECRET_ACCESS_KEY',
 ] as const satisfies readonly (keyof Env)[];
 
+const KEK_LENGTH_BYTES = 32;
+
+export type ParsedKeyring =
+  | { readonly ok: true; readonly keys: ReadonlyMap<string, Uint8Array> }
+  | { readonly ok: false; readonly message: string };
+
+/**
+ * `id:base64key[,id:base64key…]`. Every entry must parse, and every key
+ * must decode to exactly 32 bytes — AES-256-GCM's key length
+ * (design.md — "Credentials: envelope encryption a self-hoster can
+ * operate"). Exported so `apps/api`'s `EnvKeyProvider` adapter (Phase 7)
+ * builds its runtime keyring from the same parser `refineEnv()` already
+ * validated against at startup, rather than a second implementation.
+ */
+export function parseKeyring(raw: string): ParsedKeyring {
+  const entries = raw
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+
+  if (entries.length === 0) {
+    return { ok: false, message: 'must contain at least one id:base64key entry' };
+  }
+
+  const keys = new Map<string, Uint8Array>();
+
+  for (const entry of entries) {
+    const separatorIndex = entry.indexOf(':');
+    if (separatorIndex <= 0 || separatorIndex === entry.length - 1) {
+      return { ok: false, message: `entry "${entry}" is malformed — expected id:base64key` };
+    }
+
+    const id = entry.slice(0, separatorIndex);
+    const base64Key = entry.slice(separatorIndex + 1);
+
+    let decoded: Buffer;
+    try {
+      decoded = Buffer.from(base64Key, 'base64');
+    } catch {
+      return { ok: false, message: `key "${id}" is not valid base64` };
+    }
+
+    if (decoded.length !== KEK_LENGTH_BYTES) {
+      return { ok: false, message: `key "${id}" must decode to exactly ${KEK_LENGTH_BYTES} bytes, got ${decoded.length}` };
+    }
+
+    keys.set(id, decoded);
+  }
+
+  return { ok: true, keys };
+}
+
 /**
  * Conditional validation that cannot live on `envSchema` itself (see the
  * module doc comment). Runs after a successful `envSchema` parse.
@@ -311,6 +379,28 @@ export function refineEnv(env: Env): Result<Env, EnvIssue[]> {
         'least twice PAGE_LOCK_HEARTBEAT_SECONDS, or a single late heartbeat — ordinary network jitter, not a ' +
         `bug — can let an active editor's lock lapse. ${TEMPLATE} shows values that satisfy this.`,
     });
+  }
+
+  if (env.AI_KEK_DRIVER === 'env') {
+    if (!env.AI_KEK_KEYRING) {
+      issues.push({ variable: 'AI_KEK_KEYRING', message: 'required when AI_KEK_DRIVER=env' });
+    } else {
+      const parsed = parseKeyring(env.AI_KEK_KEYRING);
+      if (!parsed.ok) {
+        issues.push({ variable: 'AI_KEK_KEYRING', message: parsed.message });
+      } else if (!env.AI_KEK_ACTIVE_ID) {
+        issues.push({ variable: 'AI_KEK_ACTIVE_ID', message: 'required when AI_KEK_DRIVER=env' });
+      } else if (!parsed.keys.has(env.AI_KEK_ACTIVE_ID)) {
+        issues.push({
+          variable: 'AI_KEK_ACTIVE_ID',
+          message: `must name a key id present in AI_KEK_KEYRING (got "${env.AI_KEK_ACTIVE_ID}")`,
+        });
+      }
+    }
+  } else if (env.AI_KEK_DRIVER === 'kms') {
+    if (!env.AI_KEK_KMS_KEY_ID) {
+      issues.push({ variable: 'AI_KEK_KMS_KEY_ID', message: 'required when AI_KEK_DRIVER=kms' });
+    }
   }
 
   if (issues.length > 0) {

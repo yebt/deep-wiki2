@@ -1,0 +1,7 @@
+{
+  "candidates": [
+    { "content": { "role": "model", "parts": [{ "text": "Hello from the recorded Gemini fixture." }] }, "finishReason": "STOP", "index": 0 }
+  ],
+  "usageMetadata": { "promptTokenCount": 16, "candidatesTokenCount": 7, "totalTokenCount": 23 },
+  "modelVersion": "gemini-1.5-pro"
+}

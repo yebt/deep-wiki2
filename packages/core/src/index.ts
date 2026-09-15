@@ -42,3 +42,55 @@ export type { Revision } from './content/revision';
 export type { Changeset } from './content/changeset';
 export type { CommentAnchor } from './content/comment';
 export type { BlockChange, BlockDiff } from './content/diff';
+export type { InvalidModelId, InvalidModelIdReason, ModelRef, ProviderId } from './ai/ids';
+export { parseModelId } from './ai/ids';
+export type { ModelCapabilities, ModelPricing, StructuredOutputLevel, UnknownModel } from './ai/registry';
+export { capabilitiesOf, MODEL_REGISTRY } from './ai/registry';
+export { degrade } from './ai/degrade';
+export type { ChatUsage } from './ai/pricing';
+export { computeCostMicroUsd } from './ai/pricing';
+export type {
+  AdmissionInput,
+  BudgetPeriod,
+  BudgetRefusal,
+  Reservation,
+  ReservationState,
+  VoidReason,
+} from './ai/budget';
+export { outstandingMicroUsd, reserve, settle, voidReservation } from './ai/budget';
+export type { StablePrefix, StablePrefixInput } from './ai/prefix';
+export { buildPrefix } from './ai/prefix';
+export type { CredentialAad } from './ai/aad';
+export { buildAad } from './ai/aad';
+export type {
+  ChatFinishReason,
+  ChatModelPort,
+  ChatRequest,
+  ChatResult,
+  ChatStream,
+  CipherError,
+  CredentialCipher,
+  EmbedRequest,
+  EmbedResult,
+  EmbeddingModelPort,
+  KeyError,
+  KeyProvider,
+  LedgerAdmissionInput,
+  LedgerError,
+  LedgerOperation,
+  ProviderError,
+  ProviderErrorCode,
+  PromptPart,
+  SealedCredential,
+  UsageLedger,
+} from './ai/ports';
+export type {
+  EmbeddingModelCandidate,
+  EmbeddingRegistrationRefusal,
+  EmbeddingRegistrationRefusalReason,
+  LocalFallbackResult,
+  RegisteredEmbeddingModel,
+} from './ai/embedding-registration';
+export { EMBEDDING_DIMENSION, registerEmbeddingModel, resolveLocalFallback } from './ai/embedding-registration';
+export type { EffectiveEmbeddingProvider, EmbeddingConfigurationInput } from './ai/embedding-configuration';
+export { offeredEmbeddingProviderIds, resolveEffectiveEmbeddingProvider } from './ai/embedding-configuration';

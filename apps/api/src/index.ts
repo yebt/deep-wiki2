@@ -1,17 +1,23 @@
 import { createHash } from 'node:crypto';
+import type { BlobStore, CredentialCipher, MailSender, PasswordHasher, PresenceBroadcaster } from '@deep-wiki/core';
 import { guardDatabaseIdentity } from '@deep-wiki/db';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import postgres from 'postgres';
+import { buildKeyProvider } from './adapters/ai/key-provider/build-key-provider';
+import { buildCipher } from './adapters/ai/credentials/build-cipher';
+import type { CredentialValidationProbe } from './adapters/ai/credentials/validation-probe';
 import { Argon2idPasswordHasher } from './adapters/crypto/argon2id-password-hasher';
 import { createBlobStore } from './adapters/blob';
-import { BackgroundMailDispatcher } from './adapters/mail/background-mail-dispatcher';
+import { BackgroundMailDispatcher, type MailDispatcher } from './adapters/mail/background-mail-dispatcher';
 import { SmtpMailSender } from './adapters/mail/smtp-mail-sender';
-import { loadConfig } from './config';
+import { createVercelAiValidationProbe } from './ai/gateway/validation-probe';
+import { assertKeyringComplete, loadConfig } from './config';
 import { InMemoryPresenceBroadcaster } from './presence/broadcaster';
 import { PresenceStreamRegistry } from './presence/registry';
 import { createActivityRoutes } from './routes/activity';
 import { createAdminRoutes } from './routes/admin';
+import { createAiCredentialRoutes } from './routes/ai-credentials';
 import { createAuthRoutes } from './routes/auth';
 import { createCommentRoutes } from './routes/comments';
 import { createInvitationRoutes } from './routes/invitations';
@@ -86,10 +92,155 @@ const DEFAULT_MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 /** How long a shutdown waits for mail already handed off to leave. */
 const SHUTDOWN_MAIL_DRAIN_MS = 2_000;
 
+/**
+ * Every adapter `composeApp` mounts routes against. Grouped apart from
+ * `AppSettings` below because these carry behaviour (a `sql` connection,
+ * a cipher, a probe, a broadcaster), not configuration values.
+ */
+export interface AppAdapters {
+  readonly sql: postgres.Sql;
+  readonly mailSender: MailSender;
+  readonly mailDispatcher: MailDispatcher;
+  readonly passwordHasher: PasswordHasher;
+  readonly blobStore: BlobStore;
+  readonly smtpConfigHash: string;
+  readonly presenceBroadcaster: PresenceBroadcaster;
+  readonly presenceStreamRegistry: PresenceStreamRegistry;
+  readonly cipher: CredentialCipher;
+  readonly validationProbe: CredentialValidationProbe;
+}
+
+export interface AppSettings {
+  readonly appUrl: string;
+  readonly sessionIdleTimeoutMinutes: number;
+  readonly sessionAbsoluteTimeoutDays: number;
+  readonly passwordResetTtlMinutes: number;
+  readonly invitationTtlDays: number;
+  readonly maxUploadBytes: number;
+  readonly pageLockTtlSeconds: number;
+  readonly pageLockHeartbeatSeconds: number;
+  readonly changesetWindowMinutes: number;
+}
+
+/**
+ * The actual composition root: every route module the repository ships
+ * gets mounted here, and nowhere else. `apps/api/src/index.test.ts`
+ * exercises this function through `app.request()`, not the individual
+ * route factories — that is what makes an unmounted route fail a test
+ * instead of only `scripts/checks/routes-mounted.ts`'s static "is the
+ * factory name mentioned" check (which `admin`, `invitations`, `uploads`
+ * and `ai-credentials` all satisfied while being unreachable, per
+ * docs/TODO.md's 2026-09-06 Finding).
+ */
+export function composeApp(adapters: AppAdapters, settings: AppSettings): Hono {
+  const app = createApp({ appUrl: settings.appUrl });
+  const { sql, mailSender, mailDispatcher, passwordHasher, blobStore, smtpConfigHash } = adapters;
+  const { presenceBroadcaster, presenceStreamRegistry, cipher, validationProbe } = adapters;
+  const { sessionIdleTimeoutMinutes, changesetWindowMinutes } = settings;
+
+  app.route(
+    '/',
+    createAuthRoutes({
+      sql,
+      passwordHasher,
+      sessionIdleTimeoutMinutes,
+      sessionAbsoluteTimeoutDays: settings.sessionAbsoluteTimeoutDays,
+      mailDispatcher,
+      passwordResetTtlMinutes: settings.passwordResetTtlMinutes,
+      appUrl: settings.appUrl,
+    }),
+  );
+
+  app.route(
+    '/',
+    createAdminRoutes({
+      sql,
+      passwordHasher,
+      mailSender,
+      smtpConfigHash,
+      sessionIdleTimeoutMinutes,
+    }),
+  );
+
+  app.route(
+    '/',
+    createInvitationRoutes({
+      sql,
+      passwordHasher,
+      mailDispatcher,
+      appUrl: settings.appUrl,
+      invitationTtlDays: settings.invitationTtlDays,
+      sessionIdleTimeoutMinutes,
+    }),
+  );
+
+  app.route(
+    '/',
+    createUploadRoutes({
+      sql,
+      blobStore,
+      sessionIdleTimeoutMinutes,
+      maxUploadBytes: settings.maxUploadBytes,
+    }),
+  );
+
+  app.route(
+    '/',
+    createPageRoutes({
+      sql,
+      sessionIdleTimeoutMinutes,
+      pageLockTtlSeconds: settings.pageLockTtlSeconds,
+      changesetWindowMinutes,
+      broadcaster: presenceBroadcaster,
+    }),
+  );
+
+  app.route('/', createLinkRoutes({ sql, sessionIdleTimeoutMinutes }));
+  app.route('/', createTagRoutes({ sql, sessionIdleTimeoutMinutes }));
+  app.route('/', createMentionRoutes({ sql, sessionIdleTimeoutMinutes }));
+  app.route('/', createWorkspaceRoutes({ sql, sessionIdleTimeoutMinutes }));
+  app.route('/', createTreeRoutes({ sql, sessionIdleTimeoutMinutes }));
+  app.route(
+    '/',
+    createCommentRoutes({
+      sql,
+      mailSender,
+      sessionIdleTimeoutMinutes,
+      changesetWindowMinutes,
+    }),
+  );
+  app.route(
+    '/',
+    createPresenceRoutes({
+      sql,
+      sessionIdleTimeoutMinutes,
+      broadcaster: presenceBroadcaster,
+      pageLockTtlSeconds: settings.pageLockTtlSeconds,
+      keepAliveSeconds: settings.pageLockHeartbeatSeconds,
+      registry: presenceStreamRegistry,
+    }),
+  );
+  app.route('/', createRevisionRoutes({ sql, sessionIdleTimeoutMinutes }));
+  app.route('/', createActivityRoutes({ sql, sessionIdleTimeoutMinutes }));
+  app.route('/', createDiffRoutes({ sql, sessionIdleTimeoutMinutes }));
+
+  app.route(
+    '/',
+    createAiCredentialRoutes({
+      sql,
+      cipher,
+      validationProbe,
+      sessionIdleTimeoutMinutes,
+    }),
+  );
+
+  return app;
+}
+
 // Config and every real adapter are only constructed (and can only fail
 // fast) when this module is run as the actual server entry point — not
-// merely imported, e.g. by tests exercising `app` directly against an
-// in-memory request.
+// merely imported, e.g. by tests exercising `app`/`composeApp` directly
+// against an in-memory request.
 if (import.meta.main) {
   const config = loadConfig();
   // The one long-lived application client. Guarded so that the first
@@ -99,7 +250,7 @@ if (import.meta.main) {
   // that comes back wrong. See packages/db/src/database-identity.ts.
   const sql = guardDatabaseIdentity(postgres(config.DATABASE_URL));
 
-  const app = createApp({ appUrl: config.APP_URL });
+  await assertKeyringComplete(sql, config);
 
   // `refineEnv()` (packages/contracts) already guarantees these are set —
   // `loadConfig()` above would have thrown otherwise.
@@ -123,92 +274,34 @@ if (import.meta.main) {
   // what keeps correctness from depending on that assumption.
   const presenceBroadcaster = new InMemoryPresenceBroadcaster();
   const presenceStreamRegistry = new PresenceStreamRegistry();
+  const cipher = buildCipher(buildKeyProvider(config));
+  const validationProbe = createVercelAiValidationProbe();
 
-  app.route(
-    '/',
-    createAuthRoutes({
+  const app = composeApp(
+    {
       sql,
+      mailSender,
+      mailDispatcher,
       passwordHasher,
+      blobStore,
+      smtpConfigHash,
+      presenceBroadcaster,
+      presenceStreamRegistry,
+      cipher,
+      validationProbe,
+    },
+    {
+      appUrl: config.APP_URL,
       sessionIdleTimeoutMinutes: config.SESSION_IDLE_TIMEOUT_MINUTES,
       sessionAbsoluteTimeoutDays: config.SESSION_ABSOLUTE_TIMEOUT_DAYS,
-      mailDispatcher,
       passwordResetTtlMinutes: config.PASSWORD_RESET_TTL_MINUTES,
-      appUrl: config.APP_URL,
-    }),
-  );
-
-  app.route(
-    '/',
-    createAdminRoutes({
-      sql,
-      passwordHasher,
-      mailSender,
-      smtpConfigHash,
-      sessionIdleTimeoutMinutes: config.SESSION_IDLE_TIMEOUT_MINUTES,
-    }),
-  );
-
-  app.route(
-    '/',
-    createInvitationRoutes({
-      sql,
-      passwordHasher,
-      mailDispatcher,
-      appUrl: config.APP_URL,
       invitationTtlDays: config.INVITATION_TTL_DAYS,
-      sessionIdleTimeoutMinutes: config.SESSION_IDLE_TIMEOUT_MINUTES,
-    }),
-  );
-
-  app.route(
-    '/',
-    createUploadRoutes({
-      sql,
-      blobStore,
-      sessionIdleTimeoutMinutes: config.SESSION_IDLE_TIMEOUT_MINUTES,
       maxUploadBytes: DEFAULT_MAX_UPLOAD_BYTES,
-    }),
-  );
-
-  app.route(
-    '/',
-    createPageRoutes({
-      sql,
-      sessionIdleTimeoutMinutes: config.SESSION_IDLE_TIMEOUT_MINUTES,
       pageLockTtlSeconds: config.PAGE_LOCK_TTL_SECONDS,
+      pageLockHeartbeatSeconds: config.PAGE_LOCK_HEARTBEAT_SECONDS,
       changesetWindowMinutes: config.CHANGESET_WINDOW_MINUTES,
-      broadcaster: presenceBroadcaster,
-    }),
+    },
   );
-
-  app.route('/', createLinkRoutes({ sql, sessionIdleTimeoutMinutes: config.SESSION_IDLE_TIMEOUT_MINUTES }));
-  app.route('/', createTagRoutes({ sql, sessionIdleTimeoutMinutes: config.SESSION_IDLE_TIMEOUT_MINUTES }));
-  app.route('/', createMentionRoutes({ sql, sessionIdleTimeoutMinutes: config.SESSION_IDLE_TIMEOUT_MINUTES }));
-  app.route('/', createWorkspaceRoutes({ sql, sessionIdleTimeoutMinutes: config.SESSION_IDLE_TIMEOUT_MINUTES }));
-  app.route('/', createTreeRoutes({ sql, sessionIdleTimeoutMinutes: config.SESSION_IDLE_TIMEOUT_MINUTES }));
-  app.route(
-    '/',
-    createCommentRoutes({
-      sql,
-      mailSender,
-      sessionIdleTimeoutMinutes: config.SESSION_IDLE_TIMEOUT_MINUTES,
-      changesetWindowMinutes: config.CHANGESET_WINDOW_MINUTES,
-    }),
-  );
-  app.route(
-    '/',
-    createPresenceRoutes({
-      sql,
-      sessionIdleTimeoutMinutes: config.SESSION_IDLE_TIMEOUT_MINUTES,
-      broadcaster: presenceBroadcaster,
-      pageLockTtlSeconds: config.PAGE_LOCK_TTL_SECONDS,
-      keepAliveSeconds: config.PAGE_LOCK_HEARTBEAT_SECONDS,
-      registry: presenceStreamRegistry,
-    }),
-  );
-  app.route('/', createRevisionRoutes({ sql, sessionIdleTimeoutMinutes: config.SESSION_IDLE_TIMEOUT_MINUTES }));
-  app.route('/', createActivityRoutes({ sql, sessionIdleTimeoutMinutes: config.SESSION_IDLE_TIMEOUT_MINUTES }));
-  app.route('/', createDiffRoutes({ sql, sessionIdleTimeoutMinutes: config.SESSION_IDLE_TIMEOUT_MINUTES }));
 
   console.log(`apps/api: listening on port ${config.PORT}`);
   Bun.serve({ port: config.PORT, fetch: app.fetch });
