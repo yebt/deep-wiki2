@@ -17,7 +17,6 @@ import { expect, test, type BrowserContext, type Page } from '@playwright/test';
  */
 
 interface SeedFixtures {
-  readonly apiUrl: string;
   readonly workspaceId: string;
   readonly readerSessionToken: string;
 }
@@ -31,8 +30,6 @@ interface CommentFixtures {
   readonly orphanPageId: string;
   readonly orphanPageTitle: string;
   readonly orphanQuote: string;
-  readonly orphanPageWithoutQuote: string;
-  readonly orphanPageContentHash: string;
   readonly legacyPageId: string;
   readonly legacyPageTitle: string;
   readonly legacyQuote: string;
@@ -146,29 +143,41 @@ test('a reader with read but not comment sees the page and nothing of the overla
 });
 
 /**
- * The block is deleted through the real API by a second user's session,
- * not through the edit screen, and not by a mock: `PUT /pages/:id` runs
- * the same `savePage()` transaction the editor's Save does, and save-time
- * reconciliation is what orphans the thread (comment-threads spec:
- * "Tombstoned block always orphans").
+ * The block is deleted through the real edit screen by a second user's
+ * session, not by a mock and not by calling `PUT /pages/:id` directly:
+ * driving Save is what actually proves the edit screen's real save path,
+ * and save-time reconciliation inside that same `savePage()` transaction
+ * is what orphans the thread (comment-threads spec: "Tombstoned block
+ * always orphans").
  *
- * Not the edit screen, because that screen cannot currently save an
- * existing page at all: `GET /pages/:id/edit-session` carries no
- * `contentHash`, so the screen's first Save sends `expectedContentHash:
- * null`, which `savePage()` treats as a first save (`INSERT ... ON
- * CONFLICT DO NOTHING`) and refuses with 409 "Someone else saved a newer
- * version" — reproduced here on 2026-09-14 and filed for docs/TODO.md.
- * `e2e/editor.spec.ts` mocks that route, which is how the defect stayed
- * green. Drive this step through the edit screen once that lands.
+ * Until this task, the edit screen could not save an existing page at
+ * all: `GET /pages/:id/edit-session` carried no `contentHash`, so the
+ * screen's first Save sent `expectedContentHash: null`, which
+ * `savePage()` treats as a first save (`INSERT ... ON CONFLICT DO
+ * NOTHING`) and refuses with 409 "Someone else saved a newer version" —
+ * reproduced on 2026-09-14 and filed for docs/TODO.md, fixed by carrying
+ * the hash through `useEditSession` into `edit.vue`. This test used to
+ * work around that by calling `PUT /pages/:id` directly.
  */
 test('a thread whose paragraph another user deleted is shown as orphaned, with its excerpt, never lost', async ({ browser }) => {
-  // Context A: the editor removes the commented paragraph, for real.
+  // Context A: the editor removes the commented paragraph, for real,
+  // through the edit screen.
   const editorContext = await browser.newContext();
+  const editorPage = await editorContext.newPage();
   await signInAs(editorContext, fixtures.editorSessionToken);
-  const saved = await editorContext.request.put(`${seed.apiUrl}/pages/${fixtures.orphanPageId}`, {
-    data: { markdown: fixtures.orphanPageWithoutQuote, expectedContentHash: fixtures.orphanPageContentHash },
-  });
-  expect(saved.status(), await saved.text()).toBe(200);
+  await editorPage.goto(`/pages/${fixtures.orphanPageId}/edit`);
+  const editSurface = editorPage.getByTestId('editor-surface');
+  await expect(editSurface).toBeVisible({ timeout: 30000 });
+  await expect(editSurface).toContainText(fixtures.orphanQuote, { timeout: 30000 });
+
+  const orphanParagraph = editSurface.locator('p', { hasText: fixtures.orphanQuote });
+  await orphanParagraph.click({ clickCount: 3 });
+  await editorPage.keyboard.press('Backspace');
+  await editorPage.keyboard.press('Backspace');
+  await expect(editSurface).not.toContainText(fixtures.orphanQuote);
+
+  await editorPage.getByRole('button', { name: /Save/ }).click();
+  await expect(editorPage.getByRole('status').filter({ hasText: /Saved/ })).toBeVisible({ timeout: 30000 });
   await editorContext.close();
 
   // Context B: the commenter reads the page. The paragraph is gone; the

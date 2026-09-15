@@ -1,11 +1,14 @@
+import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import { API_URL } from './ports';
 
 /**
  * Edit mode (document-editor spec: live preview renders in place;
  * document-modes spec: "Take Over" And "Open Read-Only" Are Always Both
- * Offered). Unlike e2e/read.spec.ts, this suite mocks the API at the
- * network boundary (`page.route`) rather than seeding a real backend:
+ * Offered). Unlike e2e/read.spec.ts, most of this suite mocks the API at
+ * the network boundary (`page.route`) rather than seeding a real backend:
  * the scenarios here are about the EDITOR's own behaviour (live preview,
  * lock-contention chrome), not about permission resolution, which
  * apps/api's route tests (routes/pages.test.ts) and e2e/read.spec.ts's
@@ -13,12 +16,21 @@ import { API_URL } from './ports';
  * the page's own auth-adjacent chrome renders normally; its value is
  * never checked by these mocked routes.
  *
+ * The one exception is the real-backend Save test below: mocking
+ * `GET /pages/:id/edit-session` and `PUT /pages/:id` is exactly what let
+ * the edit screen ship unable to save any page that already had content
+ * (docs/TODO.md Finding, this task) — every mock here answered
+ * `expectedContentHash` requests the same way regardless of what the
+ * client actually sent, which a fake server can do and a real one cannot.
+ * That test drives both routes for real, against a page seeded with real
+ * content, the same way e2e/read.spec.ts and e2e/comments.spec.ts do.
+ *
  * Real-backend verification for edit mode: apps/api/src/routes/pages.test.ts
- * (13 tests, includes edit-session/lock/take-over behind can()). Browser
- * rendering (live preview, keyboard-first menus, lock-contention chrome,
- * refusal UI) was additionally verified manually against this exact dev
- * server with a throwaway screenshot harness — see the WU-16 commit
- * message and the UI review brief for what was captured.
+ * (includes edit-session/lock/take-over behind can()) and the real-backend
+ * Save test below. Browser rendering (live preview, keyboard-first menus,
+ * lock-contention chrome, refusal UI) was additionally verified manually
+ * against this exact dev server with a throwaway screenshot harness — see
+ * the WU-16 commit message and the UI review brief for what was captured.
  */
 
 // Serial, not parallel — see e2e/read.spec.ts's identical note: two
@@ -27,6 +39,27 @@ import { API_URL } from './ports';
 test.describe.configure({ mode: 'serial' });
 
 const PAGE_ID = '33333333-3333-3333-3333-333333333333';
+
+interface SeedFixtures {
+  readonly workspaceId: string;
+}
+
+interface EditorFixtures {
+  readonly writerSessionToken: string;
+  readonly editablePageId: string;
+  readonly editablePageTitle: string;
+  readonly editablePageMarkdown: string;
+}
+
+const seed: SeedFixtures = JSON.parse(readFileSync(new URL('.auth-fixtures.json', import.meta.url), 'utf8'));
+const REPO_ROOT = join(import.meta.dirname, '..');
+
+let editorFixtures: EditorFixtures;
+
+test.beforeAll(() => {
+  const output = execFileSync('bun', ['run', 'e2e/editor-fixtures.bun.ts', seed.workspaceId], { cwd: REPO_ROOT, encoding: 'utf8' });
+  editorFixtures = JSON.parse(output.trim().split('\n').pop()!);
+});
 
 /**
  * `API_URL` (e2e/ports.ts) is the same per-worktree-derived address
@@ -48,6 +81,40 @@ async function signIn(page: Page): Promise<void> {
     { name: 'session', value: 'e2e-editor-spec-token', domain: 'localhost', path: '/', httpOnly: true, secure: true, sameSite: 'Lax' },
   ]);
 }
+
+async function signInAs(page: Page, token: string): Promise<void> {
+  await page.context().addCookies([{ name: 'session', value: token, domain: 'localhost', path: '/', httpOnly: true, secure: true, sameSite: 'Lax' }]);
+}
+
+// The regression test: real edit-session, real Save, real backend — no
+// `page.route` anywhere in it. Before this task, `GET /pages/:id/edit-session`
+// carried no `contentHash`, so this exact flow, against this exact
+// already-saved fixture, 409'd on the first Save with "Someone else saved a
+// newer version" (docs/TODO.md Finding, this task).
+test('saving an already-saved page persists the edit and reads back for real, with no mocked route', async ({ page }) => {
+  test.setTimeout(60000);
+  await signInAs(page, editorFixtures.writerSessionToken);
+
+  await page.goto(`/pages/${editorFixtures.editablePageId}/edit`);
+  const editor = page.getByTestId('editor-surface');
+  await expect(editor).toBeVisible({ timeout: 30000 });
+  await expect(editor).toContainText(editorFixtures.editablePageMarkdown.trim(), { timeout: 30000 });
+
+  await editor.click();
+  await page.keyboard.press('End');
+  await page.keyboard.type(' Edited for real, through the real backend.');
+
+  await page.getByRole('button', { name: /Save/ }).click();
+  await expect(page.getByRole('status').filter({ hasText: /Saved/ })).toBeVisible({ timeout: 30000 });
+
+  // The saved markdown came back: reload triggers a fresh, real
+  // `GET /pages/:id/edit-session`, so this is what the row actually holds,
+  // not what the tab optimistically kept in memory.
+  await page.reload();
+  const editorAfterReload = page.getByTestId('editor-surface');
+  await expect(editorAfterReload).toBeVisible({ timeout: 30000 });
+  await expect(editorAfterReload).toContainText('Edited for real, through the real backend.', { timeout: 30000 });
+});
 
 test('typing markdown syntax renders the formatted result inline, with no separate preview pane', async ({ page }) => {
   test.setTimeout(60000);
