@@ -172,18 +172,19 @@ test.describe('the sidebar survives a navigation', () => {
     const tree = sidebar.getByRole('tree');
     await expect(tree.getByRole('treeitem').first()).toBeVisible({ timeout: 30000 });
 
-    // Fold one book, scroll the list as far as it goes, and mark the
-    // sidebar's element.
+    // Fold one book, scroll the list by half a row — so the second row is
+    // fully in view whatever the list's length — and mark the sidebar's
+    // element.
     const book = tree.getByRole('treeitem', { name: /E2E Book History Handbook/ });
     await expect(book).toHaveAttribute('aria-expanded', 'true');
     await book.getByText('E2E Book History Handbook', { exact: true }).click();
     await expect(book).toHaveAttribute('aria-expanded', 'false');
     const scrolled = await tree.evaluate((el) => {
-      el.scrollTop = el.scrollHeight;
+      el.scrollTop = 20;
       return { scrollTop: el.scrollTop, scrollable: el.scrollHeight > el.clientHeight };
     });
     expect(scrolled.scrollable, 'the tree has something to scroll at this height').toBe(true);
-    expect(scrolled.scrollTop).toBeGreaterThan(0);
+    expect(scrolled.scrollTop).toBe(20);
     await sidebar.evaluate((el) => {
       (el as HTMLElement & { __dwFrameProbe?: string }).__dwFrameProbe = 'mounted-once';
     });
@@ -364,7 +365,9 @@ test.describe('320x900 light', () => {
     await expect(drawer.getByRole('treeitem').first()).toBeVisible({ timeout: 30000 });
     await expect(drawer.getByRole('link', { name: 'Members' })).toBeVisible();
     // Let the slide-in finish before measuring or photographing it.
-    await drawer.evaluate((el) => Promise.all(el.getAnimations({ subtree: true }).map((animation) => animation.finished)));
+    // `allSettled`: an animation a re-render cancels midway rejects its
+    // `finished`, and a cancelled animation is as done as a finished one.
+    await drawer.evaluate((el) => Promise.allSettled(el.getAnimations({ subtree: true }).map((animation) => animation.finished)));
     const drawerBox = (await drawer.boundingBox())!;
     expect(drawerBox.x, 'the drawer is flush with the left edge').toBe(0);
     expect(drawerBox.width, 'the drawer fits the viewport').toBeLessThanOrEqual(320);
