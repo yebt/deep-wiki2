@@ -56,9 +56,11 @@ import { z } from 'zod';
 import { formatRevisionDate } from '~/utils/format-revision-date';
 
 // Inside the workspace layout: the frame is mounted once and this screen
-// renders only its pane, so the sidebar's tree keeps its scroll and its
-// folds when the person arrives here from a row (`layouts/workspace.vue`).
-definePageMeta({ layout: 'workspace' });
+// renders only its pane (`layouts/workspace.vue`). A management screen:
+// the sidebar beside it switches from the tree to everything that is
+// management — this door among them, marked current — and back to the
+// tree when the person returns to the workspace (`useSidebarMode`).
+definePageMeta({ layout: 'workspace', sidebar: 'management' });
 
 const route = useRoute();
 const workspaceId = route.params.workspaceId as string;

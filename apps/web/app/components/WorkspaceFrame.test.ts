@@ -43,13 +43,14 @@ useWorkspaceDirectoryMock.mockReturnValue({
  * keeps its scroll across a navigation is a measurement only a browser
  * can make: `e2e/frame.spec.ts`, "the sidebar survives a navigation".
  */
-function mount(nodeId: string | null = null) {
+function mount(nodeId: string | null = null, route = '/') {
   useCurrentWorkspace().enter('ws-1');
   return mountSuspended(
     defineComponent({
       name: 'FrameInApp',
       setup: () => () => h(UApp, null, { default: () => h(WorkspaceFrame, { nodeId }, { default: () => h('p', { 'data-testid': 'pane' }, 'the pane') }) }),
     }),
+    { route },
   );
 }
 
@@ -60,6 +61,14 @@ describe('WorkspaceFrame', () => {
     const sidebar = component.findComponent(WorkspaceSidebar);
     expect(sidebar.props('workspaceId')).toBe('ws-1');
     expect(sidebar.props('currentNodeId')).toBe('page-1');
+  });
+
+  test('hands the sidebar the region the route asks for: the tree by default, management on a management screen', async () => {
+    const dashboard = await mount(null, '/workspaces/ws-1');
+    expect(dashboard.findComponent(WorkspaceSidebar).props('mode')).toBe('tree');
+
+    const members = await mount(null, '/workspaces/ws-1/members');
+    expect(members.findComponent(WorkspaceSidebar).props('mode')).toBe('management');
   });
 
   test('the first tab stop skips past the sidebar to the content bar, and the pane renders after the sidebar', async () => {

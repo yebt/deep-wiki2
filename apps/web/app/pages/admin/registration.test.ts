@@ -3,6 +3,8 @@ import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime';
 import { flushPromises } from '@vue/test-utils';
 import { describe, expect, test, vi } from 'vitest';
 import { defineComponent, h, ref } from 'vue';
+import WorkspaceSidebar from '~/components/WorkspaceSidebar.vue';
+import { LAST_WORKSPACE_COOKIE } from '~/composables/useCurrentWorkspace';
 import RegistrationPage from './registration.vue';
 
 const { useInstanceSettingsMock } = vi.hoisted(() => ({ useInstanceSettingsMock: vi.fn() }));
@@ -57,7 +59,8 @@ function mockSettings(
 }
 
 describe('instance registration screen', () => {
-  test('renders one h1 and the shell landmarks', async () => {
+  test('with no workspace remembered: one h1 and the document frame\'s landmarks', async () => {
+    document.cookie = `${LAST_WORKSPACE_COOKIE}=; path=/; max-age=0`;
     mockSettings({ status: 'success', settings: unverified });
     const component = await mountSuspended(PageInApp);
 
@@ -65,6 +68,26 @@ describe('instance registration screen', () => {
     expect(component.find('header').exists()).toBe(true);
     expect(component.find('main').exists()).toBe(true);
     expect(component.find('footer').exists()).toBe(true);
+    expect(component.findComponent(WorkspaceSidebar).exists()).toBe(false);
+  });
+
+  // An operator who is in a workspace keeps their room around them: the
+  // workspace frame, with the management sidebar — this screen's door
+  // marked current under "Instance" — rather than a different product
+  // for one screen. The eyebrow stays: neither the h1 nor a breadcrumb
+  // that starts with the workspace's name says "the instance's".
+  test('with a workspace remembered: the workspace frame, its sidebar in management mode, the eyebrow kept', async () => {
+    document.cookie = `${LAST_WORKSPACE_COOKIE}=ws-1; path=/`;
+    mockSettings({ status: 'success', settings: unverified });
+    const component = await mountSuspended(PageInApp, { global: { stubs: { WorkspaceSidebar: true } }, route: '/admin/registration' });
+
+    expect(component.findAll('h1')).toHaveLength(1);
+    expect(component.find('footer').exists()).toBe(false);
+    const sidebar = component.findComponent(WorkspaceSidebar);
+    expect(sidebar.props('mode')).toBe('management');
+    expect(sidebar.props('workspaceId')).toBe('ws-1');
+    expect(component.text()).toContain('Instance');
+    document.cookie = `${LAST_WORKSPACE_COOKIE}=; path=/; max-age=0`;
   });
 
   test('renders a skeleton while it loads and no form', async () => {

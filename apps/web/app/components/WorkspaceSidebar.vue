@@ -36,10 +36,20 @@
  * before the first render, so a person who chose the document alone gets
  * it on the next visit without a flash. Below `lg` the collapse has no
  * effect: the sidebar is a drawer there either way.
+ *
+ * **Management mode.** On a management screen (`definePageMeta({ sidebar:
+ * 'management' })`, read by `WorkspaceFrame` through `useSidebarMode`) the
+ * middle region is `ManagementSidebar` instead of the tree, and the two
+ * footer doors it now holds as sections — Members and Registration
+ * settings — step out of the footer so they stand once. The header and the
+ * theme toggle are the same in both modes: the person is still in the
+ * workspace, and the pane keeps its shape.
  */
 defineProps<{
   workspaceId: string | null;
   currentNodeId?: string | null;
+  /** Which region stands in the middle: the tree (default), or everything that is management (`useSidebarMode`). */
+  mode?: SidebarMode;
 }>();
 
 const { collapsed } = useFocusMode();
@@ -84,7 +94,8 @@ const SIDEBAR_ELEMENT_ID = 'dw-frame-sidebar-workspace';
       />
     </template>
 
-    <NavigationTree v-if="workspaceId" :workspace-id="workspaceId" :current-node-id="currentNodeId" />
+    <ManagementSidebar v-if="workspaceId && mode === 'management'" :workspace-id="workspaceId" />
+    <NavigationTree v-else-if="workspaceId" :workspace-id="workspaceId" :current-node-id="currentNodeId" />
     <!-- No workspace yet: a real state with a way forward, in the
          product's words, rather than an empty pane (checklist §3). -->
     <div v-else data-testid="sidebar-no-workspace" class="space-y-3 px-2 py-2">
@@ -97,7 +108,7 @@ const SIDEBAR_ELEMENT_ID = 'dw-frame-sidebar-workspace';
            its label: it is a door people open. The two icon-only controls
            carry a name and a tooltip both (§4.3). -->
       <UButton
-        v-if="workspaceId"
+        v-if="workspaceId && mode !== 'management'"
         :to="`/workspaces/${workspaceId}/members`"
         size="sm"
         variant="ghost"
@@ -107,7 +118,7 @@ const SIDEBAR_ELEMENT_ID = 'dw-frame-sidebar-workspace';
         Members
       </UButton>
       <span class="ms-auto flex items-center gap-1">
-        <UTooltip text="Registration settings">
+        <UTooltip v-if="mode !== 'management'" text="Registration settings">
           <UButton size="sm" variant="ghost" color="neutral" icon="i-lucide-shield" square aria-label="Registration settings" to="/admin/registration" />
         </UTooltip>
         <UTooltip text="Toggle color theme">

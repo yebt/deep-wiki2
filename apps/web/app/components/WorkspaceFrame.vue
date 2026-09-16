@@ -30,6 +30,8 @@ defineProps<{
 }>();
 
 const { workspaceId } = useCurrentWorkspace();
+/** The sidebar's region for the current screen — the tree, or everything that is management (`definePageMeta({ sidebar })`). */
+const sidebarMode = useSidebarMode();
 
 /**
  * Moves focus to the content pane's top bar, so the next Tab lands on
@@ -58,7 +60,7 @@ function skipToContent(): void {
     >
       Skip to content
     </a>
-    <WorkspaceSidebar :workspace-id="workspaceId" :current-node-id="nodeId" />
+    <WorkspaceSidebar :workspace-id="workspaceId" :current-node-id="nodeId" :mode="sidebarMode" />
     <slot />
   </UDashboardGroup>
 </template>
