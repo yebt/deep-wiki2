@@ -1,4 +1,5 @@
-import { describe, expect, test, vi } from 'vitest';
+import { beforeAll, describe, expect, test, vi } from 'vitest';
+import { useNuxtApp } from '#imports';
 import { useWorkspaceMembers } from './useWorkspaceMembers';
 
 function responseError(status: number, data?: unknown) {
@@ -21,21 +22,38 @@ const listing = {
   truncated: false,
 };
 
+/**
+ * Every test reads its own id: the read layer (`useApiRead`) keeps one
+ * answer per key across screens — that is the cache — so two tests sharing
+ * an id would share an answer. And the test app never leaves hydration on
+ * its own (there is no server render to resolve), so each file says it is
+ * on the client, where `load()` fetches.
+ */
+let ids = 0;
+function nextId(prefix: string): string {
+  ids += 1;
+  return `${prefix}-${ids}`;
+}
+
+beforeAll(() => {
+  useNuxtApp().isHydrating = false;
+});
+
 describe('useWorkspaceMembers — load', () => {
   test('starts idle and loads the members and pending invitations on success', async () => {
     const fetchMembers = vi.fn(async () => listing);
-    const { status, listing: data, load } = useWorkspaceMembers('ws-1', { fetchMembers });
+    const { status, listing: data, load } = useWorkspaceMembers(nextId('ws'), { fetchMembers });
 
     expect(status.value).toBe('idle');
     await load();
 
     expect(status.value).toBe('success');
     expect(data.value).toEqual(listing);
-    expect(fetchMembers).toHaveBeenCalledWith('ws-1');
+    expect(fetchMembers).toHaveBeenCalledWith(expect.stringMatching(/^ws-\d+$/));
   });
 
   test('a 404 is the not-found state — which is also what a workspace the caller cannot manage answers', async () => {
-    const { status, load } = useWorkspaceMembers('ws-1', {
+    const { status, load } = useWorkspaceMembers(nextId('ws'), {
       fetchMembers: vi.fn(async () => {
         throw responseError(404);
       }),
@@ -47,7 +65,7 @@ describe('useWorkspaceMembers — load', () => {
   });
 
   test('a 401 is its own state, so the screen can offer sign-in instead of a retry', async () => {
-    const { status, load } = useWorkspaceMembers('ws-1', {
+    const { status, load } = useWorkspaceMembers(nextId('ws'), {
       fetchMembers: vi.fn(async () => {
         throw responseError(401);
       }),
@@ -59,7 +77,7 @@ describe('useWorkspaceMembers — load', () => {
   });
 
   test('an unreachable server is a recoverable error carrying a message the user can act on', async () => {
-    const { status, message, load } = useWorkspaceMembers('ws-1', {
+    const { status, message, load } = useWorkspaceMembers(nextId('ws'), {
       fetchMembers: vi.fn(async () => {
         throw new Error('fetch failed');
       }),
@@ -76,7 +94,8 @@ describe('useWorkspaceMembers — invite', () => {
   test('a valid invitation is posted against the workspace root and the listing is reloaded so it appears as pending', async () => {
     const fetchMembers = vi.fn(async () => listing);
     const postInvitation = vi.fn(async () => ({ ok: true as const }));
-    const { inviteStatus, inviteMessage, load, invite } = useWorkspaceMembers('ws-1', { fetchMembers, postInvitation });
+    const workspaceId = nextId('ws');
+    const { inviteStatus, inviteMessage, load, invite } = useWorkspaceMembers(workspaceId, { fetchMembers, postInvitation });
     await load();
     fetchMembers.mockClear();
 
@@ -85,7 +104,7 @@ describe('useWorkspaceMembers — invite', () => {
     expect(inviteStatus.value).toBe('sent');
     expect(inviteMessage.value).toMatch(/newbie@example\.com/i);
     expect(postInvitation).toHaveBeenCalledWith({
-      workspaceId: 'ws-1',
+      workspaceId,
       email: 'newbie@example.com',
       startingGrants: [{ resourceId: 'root-1', action: 'write' }],
     });
@@ -94,7 +113,7 @@ describe('useWorkspaceMembers — invite', () => {
 
   test('a malformed email is refused before any request is made', async () => {
     const postInvitation = vi.fn(async () => ({ ok: true as const }));
-    const { inviteStatus, load, invite } = useWorkspaceMembers('ws-1', { fetchMembers: vi.fn(async () => listing), postInvitation });
+    const { inviteStatus, load, invite } = useWorkspaceMembers(nextId('ws'), { fetchMembers: vi.fn(async () => listing), postInvitation });
     await load();
 
     await invite({ email: 'not-an-email', action: 'read' });
@@ -105,7 +124,7 @@ describe('useWorkspaceMembers — invite', () => {
 
   test('a refused invitation is a recoverable error and the listing is left as it was', async () => {
     const fetchMembers = vi.fn(async () => listing);
-    const { inviteStatus, inviteMessage, load, invite } = useWorkspaceMembers('ws-1', {
+    const { inviteStatus, inviteMessage, load, invite } = useWorkspaceMembers(nextId('ws'), {
       fetchMembers,
       postInvitation: vi.fn(async () => {
         throw new Error('fetch failed');
@@ -122,7 +141,7 @@ describe('useWorkspaceMembers — invite', () => {
   });
 
   test('a 404 on send means the workspace is no longer the caller\'s to manage, and the screen is told so', async () => {
-    const { inviteStatus, load, invite } = useWorkspaceMembers('ws-1', {
+    const { inviteStatus, load, invite } = useWorkspaceMembers(nextId('ws'), {
       fetchMembers: vi.fn(async () => listing),
       postInvitation: vi.fn(async () => {
         throw responseError(404);
