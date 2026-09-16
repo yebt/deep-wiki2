@@ -1,4 +1,5 @@
-import { describe, expect, test, vi } from 'vitest';
+import { beforeAll, describe, expect, test, vi } from 'vitest';
+import { useNuxtApp } from '#imports';
 import { nextTick, ref } from 'vue';
 import type { BookDiffResponse, ChangedPageDiffPayload } from '@deep-wiki/contracts';
 import { useBookDiffNavigator } from './useBookDiffNavigator';
@@ -18,6 +19,23 @@ import { useBookDiffNavigator } from './useBookDiffNavigator';
  * every navigation test below drives to a second (or later) page and
  * asserts ITS OWN content — the trap named in tasks.md 10.5.
  */
+/**
+ * Every test reads its own id: the read layer (`useApiRead`) keeps one
+ * answer per key across screens — that is the cache — so two tests sharing
+ * an id would share an answer. And the test app never leaves hydration on
+ * its own (there is no server render to resolve), so each file says it is
+ * on the client, where `load()` fetches.
+ */
+let ids = 0;
+function nextId(prefix: string): string {
+  ids += 1;
+  return `${prefix}-${ids}`;
+}
+
+beforeAll(() => {
+  useNuxtApp().isHydrating = false;
+});
+
 describe('useBookDiffNavigator', () => {
   const SINCE = '2026-01-02T00:00:00.000Z';
 
@@ -50,7 +68,7 @@ describe('useBookDiffNavigator', () => {
 
   test('load() fetches the book diff exactly once, names the book, and focuses the first page with its own text', async () => {
     const deps = makeDeps();
-    const nav = useBookDiffNavigator('book-1', SINCE, deps);
+    const nav = useBookDiffNavigator(nextId('book'), SINCE, deps);
 
     await nav.load();
 
@@ -66,7 +84,7 @@ describe('useBookDiffNavigator', () => {
 
   test('next() moves to the second page and shows ITS OWN diff — with no further request of any kind', async () => {
     const deps = makeDeps();
-    const nav = useBookDiffNavigator('book-1', SINCE, deps);
+    const nav = useBookDiffNavigator(nextId('book'), SINCE, deps);
     await nav.load();
 
     nav.next();
@@ -79,7 +97,7 @@ describe('useBookDiffNavigator', () => {
   });
 
   test('prev() from the second page returns to the first with its own content restored', async () => {
-    const nav = useBookDiffNavigator('book-1', SINCE, makeDeps());
+    const nav = useBookDiffNavigator(nextId('book'), SINCE, makeDeps());
     await nav.load();
     nav.next();
 
@@ -90,7 +108,7 @@ describe('useBookDiffNavigator', () => {
   });
 
   test('hasNext/hasPrev report the boundaries, and moving past an edge is a no-op', async () => {
-    const nav = useBookDiffNavigator('book-1', SINCE, makeDeps());
+    const nav = useBookDiffNavigator(nextId('book'), SINCE, makeDeps());
     await nav.load();
 
     expect(nav.hasPrev.value).toBe(false);
@@ -106,7 +124,7 @@ describe('useBookDiffNavigator', () => {
   });
 
   test('goTo jumps directly to an arbitrary changed page', async () => {
-    const nav = useBookDiffNavigator('book-1', SINCE, makeDeps([page('page-1'), page('page-2'), page('page-3')]));
+    const nav = useBookDiffNavigator(nextId('book'), SINCE, makeDeps([page('page-1'), page('page-2'), page('page-3')]));
     await nav.load();
 
     nav.goTo(2);
@@ -116,7 +134,7 @@ describe('useBookDiffNavigator', () => {
   });
 
   test('an initial page id deep-links to that page instead of the first one', async () => {
-    const nav = useBookDiffNavigator('book-1', SINCE, { ...makeDeps(), initialPageId: 'page-2' });
+    const nav = useBookDiffNavigator(nextId('book'), SINCE, { ...makeDeps(), initialPageId: 'page-2' });
 
     await nav.load();
 
@@ -125,7 +143,7 @@ describe('useBookDiffNavigator', () => {
   });
 
   test('an initial page id absent from the changed set falls back to the first page rather than a dead state', async () => {
-    const nav = useBookDiffNavigator('book-1', SINCE, { ...makeDeps(), initialPageId: 'not-a-changed-page' });
+    const nav = useBookDiffNavigator(nextId('book'), SINCE, { ...makeDeps(), initialPageId: 'not-a-changed-page' });
 
     await nav.load();
 
@@ -136,14 +154,14 @@ describe('useBookDiffNavigator', () => {
   // against: the route says so with `baselineRevisionId: null`, and that is
   // the screen's "created during this window" state, not a crash.
   test('a page with no baseline revision is reported as such through the page itself', async () => {
-    const nav = useBookDiffNavigator('book-1', SINCE, makeDeps([page('page-1', { baselineRevisionId: null, diff: { changes: [] } })]));
+    const nav = useBookDiffNavigator(nextId('book'), SINCE, makeDeps([page('page-1', { baselineRevisionId: null, diff: { changes: [] } })]));
     await nav.load();
 
     expect(nav.currentPage.value?.baselineRevisionId).toBeNull();
   });
 
   test('zero changed pages resolves to success with an empty, navigable-nowhere state, not an error', async () => {
-    const nav = useBookDiffNavigator('book-1', SINCE, makeDeps([]));
+    const nav = useBookDiffNavigator(nextId('book'), SINCE, makeDeps([]));
 
     await nav.load();
 
@@ -158,7 +176,7 @@ describe('useBookDiffNavigator', () => {
     const bookDiffFetcher = vi.fn(async () => {
       throw { response: { status: 404 } };
     });
-    const nav = useBookDiffNavigator('book-1', SINCE, { bookDiffFetcher });
+    const nav = useBookDiffNavigator(nextId('book'), SINCE, { bookDiffFetcher });
 
     await nav.load();
 
@@ -170,7 +188,7 @@ describe('useBookDiffNavigator', () => {
     const bookDiffFetcher = vi.fn(async () => {
       throw new Error('fetch failed');
     });
-    const nav = useBookDiffNavigator('book-1', SINCE, { bookDiffFetcher });
+    const nav = useBookDiffNavigator(nextId('book'), SINCE, { bookDiffFetcher });
 
     await nav.load();
 
@@ -198,7 +216,7 @@ describe('useBookDiffNavigator', () => {
 
     test('orders by tree position when the tree places every changed page — not API order, not title order', async () => {
       const deps = { ...makeDeps(apiOrderPages), pageOrder: (pageId: string) => TREE_POSITION[pageId] };
-      const nav = useBookDiffNavigator('book-1', SINCE, deps);
+      const nav = useBookDiffNavigator(nextId('book'), SINCE, deps);
 
       await nav.load();
 
@@ -209,7 +227,7 @@ describe('useBookDiffNavigator', () => {
       // Missing 'page-apple' — the tree has not loaded it in yet.
       const partial: Record<string, number> = { 'page-cherry': 0, 'page-banana': 1 };
       const deps = { ...makeDeps(apiOrderPages), pageOrder: (pageId: string) => partial[pageId] };
-      const nav = useBookDiffNavigator('book-1', SINCE, deps);
+      const nav = useBookDiffNavigator(nextId('book'), SINCE, deps);
 
       await nav.load();
 
@@ -217,7 +235,7 @@ describe('useBookDiffNavigator', () => {
     });
 
     test('falls back to title order when no pageOrder is supplied at all', async () => {
-      const nav = useBookDiffNavigator('book-1', SINCE, makeDeps(apiOrderPages));
+      const nav = useBookDiffNavigator(nextId('book'), SINCE, makeDeps(apiOrderPages));
 
       await nav.load();
 
@@ -227,7 +245,7 @@ describe('useBookDiffNavigator', () => {
     test('re-sorts reactively once the tree places pages that were previously unplaced, keeping the focused page focused by id', async () => {
       const order = ref<Record<string, number>>({ 'page-cherry': 0, 'page-banana': 1 });
       const deps = { ...makeDeps(apiOrderPages), pageOrder: (pageId: string) => order.value[pageId] };
-      const nav = useBookDiffNavigator('book-1', SINCE, deps);
+      const nav = useBookDiffNavigator(nextId('book'), SINCE, deps);
       await nav.load();
       // Falls back to title order first: Apple, Banana, Cherry — focused page is Apple.
       expect(nav.currentPage.value?.pageId).toBe('page-apple');
