@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   CONTAINER_STATE_PS_FORMAT,
+  containerRuntimeEnv,
   listProjectContainers,
   parseContainerStates,
   restartStalledStack,
@@ -15,6 +16,28 @@ const PROJECT = 'deep-wiki-test-bee1d08f';
 const created: ProjectContainer = { name: `${PROJECT}_postgres_1`, project: PROJECT, state: 'created' };
 const running: ProjectContainer = { name: `${PROJECT}_postgres_1`, project: PROJECT, state: 'running' };
 const exited: ProjectContainer = { name: `${PROJECT}_mailpit_1`, project: PROJECT, state: 'exited' };
+
+describe('containerRuntimeEnv', () => {
+  test('drops every node_modules/.bin segment from PATH and keeps the rest in order', () => {
+    const env = containerRuntimeEnv({
+      PATH: '/repo/node_modules/.bin:/usr/local/bin:/repo/packages/db/node_modules/.bin:/usr/bin:/bin',
+      HOME: '/home/someone',
+    });
+    expect(env.PATH).toBe('/usr/local/bin:/usr/bin:/bin');
+    expect(env.HOME).toBe('/home/someone');
+  });
+
+  test('a PATH without any node_modules/.bin is returned unchanged, and a missing PATH stays missing', () => {
+    expect(containerRuntimeEnv({ PATH: '/usr/bin:/bin' }).PATH).toBe('/usr/bin:/bin');
+    expect('PATH' in containerRuntimeEnv({ HOME: '/home/someone' })).toBe(false);
+  });
+
+  test('never mutates the environment it was given', () => {
+    const given = { PATH: '/repo/node_modules/.bin:/usr/bin' };
+    containerRuntimeEnv(given);
+    expect(given.PATH).toBe('/repo/node_modules/.bin:/usr/bin');
+  });
+});
 
 describe('parseContainerStates', () => {
   test('reads one container per line in the fixed ps format, and skips anything shorter', () => {
@@ -86,7 +109,7 @@ describe('startContainers', () => {
       return '';
     });
 
-    expect(started).toBe(true);
+    expect(started).toEqual({ started: true });
     expect(calls).toEqual([['podman', 'start', created.name, exited.name]]);
   });
 
@@ -97,16 +120,26 @@ describe('startContainers', () => {
         asked = true;
         return '';
       }),
-    ).toBe(false);
+    ).toEqual({ started: false, reason: 'nothing to start' });
     expect(asked).toBe(false);
   });
 
-  test('reports a start the runtime refused as not started', () => {
-    expect(
-      startContainers('podman', [created.name], () => {
-        throw new Error('podman start: exit 125');
-      }),
-    ).toBe(false);
+  test('a start the runtime refused is reported with the runtime’s own stderr, so the reason is never lost again', () => {
+    const outcome = startContainers('podman', [created.name], () => {
+      const error = new Error('Command failed: podman start') as Error & { stderr?: string };
+      error.stderr = 'Error: unable to start container "0a02": netavark: nftables error: got invalid json: EOF while parsing a value at line 1 column 0\n';
+      throw error;
+    });
+
+    if (outcome.started) throw new Error('expected the start to be refused');
+    expect(outcome.reason).toContain('netavark: nftables error');
+  });
+
+  test('a start that failed without any stderr still carries the error message as its reason', () => {
+    const outcome = startContainers('podman', [created.name], () => {
+      throw new Error('spawnSync podman ETIMEDOUT');
+    });
+    expect(outcome).toEqual({ started: false, reason: 'spawnSync podman ETIMEDOUT' });
   });
 });
 
@@ -124,7 +157,7 @@ function makeDeps(overrides: Partial<RestartStalledDeps> = {}): TestDeps {
     projectContainers: () => [],
     startContainers: (_binary, names) => {
       started.push([...names]);
-      return true;
+      return { started: true };
     },
     reachable: async () => false,
     log: (message) => {
@@ -138,7 +171,7 @@ function makeDeps(overrides: Partial<RestartStalledDeps> = {}): TestDeps {
 describe('restartStalledStack', () => {
   test('a stack compose never created is not something to start: nothing happens and the caller still fails', async () => {
     const deps = makeDeps();
-    expect(await restartStalledStack('podman', PROJECT, 100, deps)).toBe(false);
+    expect(await restartStalledStack('podman', PROJECT, 100, deps)).toEqual({ healed: false, reason: `no container of ${PROJECT} exists` });
     expect(deps.started).toEqual([]);
     expect(deps.logged).toEqual([]);
   });
@@ -151,7 +184,7 @@ describe('restartStalledStack', () => {
       startContainers: (_binary, names) => {
         startedAt = probes;
         deps.started.push([...names]);
-        return true;
+        return { started: true };
       },
       reachable: async () => {
         probes += 1;
@@ -159,7 +192,7 @@ describe('restartStalledStack', () => {
       },
     });
 
-    expect(await restartStalledStack('podman', PROJECT, 1_000, deps)).toBe(true);
+    expect(await restartStalledStack('podman', PROJECT, 1_000, deps)).toEqual({ healed: true });
     expect(deps.started).toEqual([[created.name]]);
     expect(deps.logged).toHaveLength(1);
     expect(deps.logged[0]).toMatch(/created/i);
@@ -176,24 +209,27 @@ describe('restartStalledStack', () => {
       },
     });
 
-    expect(await restartStalledStack('podman', PROJECT, 1_000, deps)).toBe(true);
+    expect(await restartStalledStack('podman', PROJECT, 1_000, deps)).toEqual({ healed: true });
     expect(deps.started).toEqual([]);
     expect(deps.logged).toHaveLength(1);
     expect(probes).toBe(3);
   });
 
-  test('a start the runtime refuses is a genuine failure: no wait, not healed', async () => {
+  test('a start the runtime refuses is a genuine failure: no wait, not healed, and the runtime’s reason is handed back', async () => {
     let probes = 0;
     const deps = makeDeps({
       projectContainers: () => [created],
-      startContainers: () => false,
+      startContainers: () => ({ started: false, reason: 'Error: unable to start container: netavark: nftables error: got invalid json' }),
       reachable: async () => {
         probes += 1;
         return true;
       },
     });
 
-    expect(await restartStalledStack('podman', PROJECT, 1_000, deps)).toBe(false);
+    const outcome = await restartStalledStack('podman', PROJECT, 1_000, deps);
+    if (outcome.healed) throw new Error('expected the stack not to be healed');
+    expect(outcome.reason).toContain('netavark: nftables error');
+    expect(outcome.reason).toContain(created.name);
     expect(probes).toBe(0);
   });
 
@@ -207,7 +243,10 @@ describe('restartStalledStack', () => {
       },
     });
 
-    expect(await restartStalledStack('podman', PROJECT, 100, deps)).toBe(false);
+    expect(await restartStalledStack('podman', PROJECT, 100, deps)).toEqual({
+      healed: false,
+      reason: `${created.name} was started but did not answer within 100ms`,
+    });
     expect(deps.started).toEqual([[created.name]]);
     expect(waits.length).toBeGreaterThan(0);
     expect(waits.reduce((sum, ms) => sum + ms, 0)).toBeLessThanOrEqual(100);

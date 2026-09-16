@@ -534,6 +534,72 @@ makes conventions portable across projects.
 
 Discoveries and constraints. Newest first.
 
+### 2026-09-16 — The self-healing provisioning did not heal because the cause was this process's `PATH`: `bun run` puts `@vercel/nft`'s `nft` in front of nftables' and netavark ran the wrong one
+
+**What happened.** The very next full verification after `2d10af6` ("start a container compose
+left in `Created`") hit the same `podman compose exited with code 125`, the same containers in
+`Created`, and needed the same manual `podman compose up -d --wait` — the mechanism had been
+proven against injected fakes and never against the failure. Investigated on
+`fix/editor-flake-and-heal` (worktree `fb-fix3`) by reproducing the real path, not by reading
+the fakes.
+
+**What was actually wrong.** Not load, not a transient runtime hiccup, and not the label
+filter (podman-compose 1.6.0 stamps both `com.docker.compose.project` and
+`io.podman.compose.project`, verified with `podman inspect`). A shim `podman` script on `PATH`
+that logged every invocation's argv, exit code and stderr showed compose's own `podman start`
+and the heal's `podman start` failing identically within a second of each other, each with the
+message both provisioners had been discarding through `stderr: 'ignore'`:
+
+    Error: unable to start container "…": netavark: nftables error: got invalid json:
+    EOF while parsing a value at line 1 column 0
+
+`bun run <script>` prepends `node_modules/.bin` to `PATH` for the script and every child it
+spawns. Nuxt → nitropack → `@vercel/nft@1.11.0` installs a binary named `nft` there
+(`node_modules/.bin/nft -> ../@vercel/nft/out/cli.js`, present since `e068da6`, 2026-09-03).
+Rootless podman hands network setup to netavark (1.17.2, nftables driver, Fedora 44), which runs
+`nft` by name through that `PATH` — and got Vercel's Node File Trace CLI, which prints
+`Error: File …/list does not exist` on stderr and exits 0 with nothing on stdout; netavark
+parses the empty stdout as JSON and reports exactly the error above. So `podman start` fails
+from any process `bun run` started — `bun run -F @deep-wiki/db test`, `bun run e2e` →
+`e2e/seed.bun.ts`, and the "heal" itself, which ran with the same `PATH` — and succeeds from a
+shell, whose `PATH` has no `node_modules/.bin`. That is the whole of "running the printed
+command by hand started it in three seconds". It only ever showed on a fresh worktree or after
+a reboot because a stack that is already up is never started; the main checkout's containers
+had been up for days. Reproduced deterministically with `CHANGESET_WINDOW_MINUTES=30 bun run
+e2e/seed.bun.ts` alone on a torn-down stack, 3/3; not reproduced by CPU load (eight busy loops),
+by a cold `nuxt dev` compile beside it, or by `Bun.spawn`'s `stdout`/`stderr` mode. The
+2026-09-16 entry below that blamed "the race between `packages/db` and `apps/api` both running
+`podman compose up`" was this same failure, misread for lack of the message.
+
+**What changed.** `packages/db/testing/containers.ts` gains `containerRuntimeEnv()`: the
+environment with every `node_modules/.bin` segment removed from `PATH`, everything else
+untouched; every spawn of the runtime in both provisioners — compose, `ps`, `start` — goes out
+with it (`composeProcessEnv()` in `provision.ts` and `services.ts`). Compose's stderr is
+captured (tail-bounded to 2000 characters) and raised with the failure under "`podman compose
+said:`"; `startContainers` returns `{ started: false, reason }` carrying the runtime's stderr
+instead of a bare `false`, and `restartStalledStack` returns `{ healed: false, reason }` which
+the thrown error ends with ("The one retry did not help: …"). The one retry stays, for the case
+it is honestly good for (compose killed at the bound with the container already created), and
+its comments no longer claim the cause was load. `createProvisionDeps({ identity, env })`
+builds the real dependencies for any worktree identity; `defaultProvisionDeps` is that for the
+running one. The injected tests are kept and extended (stderr in the error, the retry's reason
+in the error, `composeProcessEnv` strips `.bin` and carries the compose variables), and one
+integration test, `packages/db/testing/provision.integration.test.ts`, runs only with `podman`
+on `PATH` (skipped loudly otherwise): it plants its own `node_modules/.bin/nft` that exits 0
+saying nothing, puts it first on `PATH` exactly as `bun run` would, leaves a throwaway compose
+project's postgres in `Created` with `podman compose up -d --no-start`, and drives the real
+`resolveAdminUrl` through real compose, real `ps`, real `start` and the real probe to a running
+server on its own free port, tearing the stack down after itself. Red with the old spawn
+(`netavark: nftables error: got invalid json`, 31 s), green with the fix (6.6 s). The first
+`bun run -F @deep-wiki/db test` on this worktree provisioned its own postgres from nothing,
+which no `bun run` had managed on this host before.
+
+**Not fixed here.** `worktree.ts`'s `listPortOwners` still spawns `podman ps` with the raw
+`PATH` — `ps` never reaches netavark, so it does not matter, and `worktree.ts` is kept free of
+imports for Playwright's Node process. The `-1` that `podman wait --condition=healthy` prints
+on stdout for a healthy container (seen in every successful compose run) is podman-compose's,
+not ours, and is why compose's exit code was already distrusted in `services.ts`.
+
 ### 2026-09-16 — Three e2e failures left on `main` after the regression batch: a stale smoke test, a drag the focus handoff killed, and a compose stack that stayed `Created`
 
 **What happened.** `main` at `d6dcb8a` still failed two e2e specs alone, and the harness that

@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   assertTestDatabaseName,
   buildComposeUpArgs,
+  composeProcessEnv,
   detectContainerRuntime,
   dropTestDatabase,
   localTestUrl,
@@ -113,12 +114,12 @@ function makeDeps(overrides: Partial<ResolveAdminUrlDeps> = {}): ResolveAdminUrl
     env: {},
     probe: async () => false,
     detectRuntime: () => undefined,
-    runCompose: async () => ({ code: 0, timedOut: false }) as SpawnResult,
+    runCompose: async () => ({ code: 0, timedOut: false, stderr: '' }) as SpawnResult,
     identity: MAIN_ID,
     portOwners: () => '',
     serverOwners: async () => [],
     projectContainers: () => [],
-    startContainers: () => false,
+    startContainers: () => ({ started: false, reason: 'not started' }),
     log: () => {},
     ...overrides,
   };
@@ -154,7 +155,7 @@ describe('resolveAdminUrl', () => {
       detectRuntime: () => 'podman',
       runCompose: async () => {
         composeCalled = true;
-        return { code: 0, timedOut: false };
+        return { code: 0, timedOut: false, stderr: '' };
       },
     });
 
@@ -261,7 +262,7 @@ describe('resolveAdminUrl — a worktree collision names itself', () => {
     const deps = makeDeps({
       identity: WORKTREE_ID,
       detectRuntime: () => 'podman',
-      runCompose: async () => ({ code: 1, timedOut: false }),
+      runCompose: async () => ({ code: 1, timedOut: false, stderr: '' }),
       portOwners: () =>
         `someone-elses-postgres\tunrelated-project\t0.0.0.0:${WORKTREE_ID.ports.postgres}->5432/tcp`,
     });
@@ -287,7 +288,7 @@ describe('resolveAdminUrl — a container compose left behind is started once', 
     const deps = makeDeps({
       identity: WORKTREE_ID,
       detectRuntime: () => 'podman',
-      runCompose: async () => ({ code: 0, timedOut: false }),
+      runCompose: async () => ({ code: 0, timedOut: false, stderr: '' }),
       probe: async () => {
         probes += 1;
         return probes > 1;
@@ -308,12 +309,12 @@ describe('resolveAdminUrl — a container compose left behind is started once', 
     const deps = makeDeps({
       identity: WORKTREE_ID,
       detectRuntime: () => 'podman',
-      runCompose: async () => ({ code: 125, timedOut: false }),
+      runCompose: async () => ({ code: 125, timedOut: false, stderr: '' }),
       probe: async () => started.length > 0,
       projectContainers: () => [stalled],
       startContainers: (_binary, names) => {
         started.push([...names]);
-        return true;
+        return { started: true };
       },
       log: (message) => {
         logged.push(message);
@@ -332,7 +333,7 @@ describe('resolveAdminUrl — a container compose left behind is started once', 
     const deps = makeDeps({
       identity: WORKTREE_ID,
       detectRuntime: () => 'podman',
-      runCompose: async () => ({ code: null, timedOut: true }),
+      runCompose: async () => ({ code: null, timedOut: true, stderr: '' }),
       probe: async () => {
         probes += 1;
         return probes >= 3;
@@ -340,7 +341,7 @@ describe('resolveAdminUrl — a container compose left behind is started once', 
       projectContainers: () => [{ ...stalled, state: 'running' }],
       startContainers: () => {
         started = true;
-        return true;
+        return { started: true };
       },
     });
 
@@ -352,7 +353,7 @@ describe('resolveAdminUrl — a container compose left behind is started once', 
     const deps = makeDeps({
       identity: WORKTREE_ID,
       detectRuntime: () => 'podman',
-      runCompose: async () => ({ code: 125, timedOut: false }),
+      runCompose: async () => ({ code: 125, timedOut: false, stderr: '' }),
       projectContainers: () => [],
     });
 
@@ -365,9 +366,9 @@ describe('resolveAdminUrl — a container compose left behind is started once', 
     const deps = makeDeps({
       identity: WORKTREE_ID,
       detectRuntime: () => 'podman',
-      runCompose: async () => ({ code: 125, timedOut: false }),
+      runCompose: async () => ({ code: 125, timedOut: false, stderr: '' }),
       projectContainers: () => [stalled],
-      startContainers: () => true,
+      startContainers: () => ({ started: true }),
     });
 
     await expect(resolveAdminUrl(deps, 50)).rejects.toThrow(/code 125/);
@@ -378,14 +379,76 @@ describe('resolveAdminUrl — a container compose left behind is started once', 
     const deps = makeDeps({
       identity: WORKTREE_ID,
       detectRuntime: () => 'podman',
-      runCompose: async () => ({ code: 125, timedOut: false }),
+      runCompose: async () => ({ code: 125, timedOut: false, stderr: '' }),
       probe: async () => true,
       projectContainers: () => [stalled],
-      startContainers: () => true,
+      startContainers: () => ({ started: true }),
       serverOwners: async () => ['dw_owner_someone_else'],
     });
 
     await expect(resolveAdminUrl(deps, 200)).rejects.toThrow(/belongs to a different worktree/);
+  });
+});
+
+describe('resolveAdminUrl — the failure says why, in the runtime’s own words', () => {
+  const stalled = { name: `${WORKTREE_ID.dbProjectName}_postgres_1`, project: WORKTREE_ID.dbProjectName, state: 'created' };
+  const NETAVARK =
+    'Error: unable to start container "0a02": netavark: nftables error: got invalid json: EOF while parsing a value at line 1 column 0';
+
+  test('compose’s stderr is in the thrown error, not discarded — the 2026-09-16 non-heal was invisible for a day without it', async () => {
+    const deps = makeDeps({
+      identity: WORKTREE_ID,
+      detectRuntime: () => 'podman',
+      runCompose: async () => ({ code: 125, timedOut: false, stderr: `>>>> Executing external compose provider\n${NETAVARK}\n` }),
+      projectContainers: () => [],
+    });
+
+    await expect(resolveAdminUrl(deps, 200)).rejects.toThrow(/netavark: nftables error: got invalid json/);
+    await expect(resolveAdminUrl(deps, 200)).rejects.toThrow(/code 125/);
+  });
+
+  test('the reason the one retry did not heal is in the thrown error too', async () => {
+    const deps = makeDeps({
+      identity: WORKTREE_ID,
+      detectRuntime: () => 'podman',
+      runCompose: async () => ({ code: 125, timedOut: false, stderr: '' }),
+      projectContainers: () => [stalled],
+      startContainers: () => ({ started: false, reason: NETAVARK }),
+    });
+
+    await expect(resolveAdminUrl(deps, 200)).rejects.toThrow(/podman start .* failed: .*netavark: nftables error/);
+  });
+
+  test('a compose that timed out still prints whatever it had said so far', async () => {
+    const deps = makeDeps({
+      identity: WORKTREE_ID,
+      detectRuntime: () => 'podman',
+      runCompose: async () => ({ code: null, timedOut: true, stderr: 'waiting for all containers to be running|healthy\n' }),
+      projectContainers: () => [],
+    });
+
+    await expect(resolveAdminUrl(deps, 50)).rejects.toThrow(/timed out/);
+    await expect(resolveAdminUrl(deps, 50)).rejects.toThrow(/waiting for all containers/);
+  });
+});
+
+describe('composeProcessEnv', () => {
+  test('carries the worktree’s compose variables and a PATH with no node_modules/.bin, whatever `bun run` prepended', () => {
+    const env = composeProcessEnv(WORKTREE_ID, {
+      PATH: '/repo/node_modules/.bin:/usr/bin:/bin',
+      HOME: '/home/dev',
+    });
+
+    expect(env.PATH).toBe('/usr/bin:/bin');
+    expect(env.HOME).toBe('/home/dev');
+    expect(env.COMPOSE_PROJECT_NAME).toBe(WORKTREE_ID.dbProjectName);
+    expect(env.DEEPWIKI_TEST_PG_PORT).toBe(String(WORKTREE_ID.ports.postgres));
+    expect(env.DEEPWIKI_TEST_OWNER_DB).toBe(WORKTREE_ID.ownerDatabase);
+  });
+
+  test('the compose variables win over anything already in the environment under the same name', () => {
+    const env = composeProcessEnv(WORKTREE_ID, { COMPOSE_PROJECT_NAME: 'something-else', PATH: '/usr/bin' });
+    expect(env.COMPOSE_PROJECT_NAME).toBe(WORKTREE_ID.dbProjectName);
   });
 });
 
