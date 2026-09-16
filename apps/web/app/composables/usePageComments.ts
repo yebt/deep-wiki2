@@ -1,20 +1,31 @@
-import type { CommentIndicator, CommentThread, PageCommentsResponse } from '@deep-wiki/contracts';
+import type { CommentIndicator, CommentThread, CreateCommentRequest, CreateCommentResponse, PageCommentsResponse } from '@deep-wiki/contracts';
+import type { NewThreadRequest } from './useNewThread';
 
 export type PageCommentsStatus = 'idle' | 'loading' | 'success' | 'hidden' | 'network-error';
 
 export type PageCommentsFetcher = (pageId: string) => Promise<PageCommentsResponse>;
 export type CommentReplyFetcher = (pageId: string, body: { parentId: string; body: string }) => Promise<{ id: string }>;
 export type ThreadResolveFetcher = (threadId: string, body: { resolved: boolean }) => Promise<{ ok: boolean }>;
+export type CommentCreateFetcher = (pageId: string, body: CreateCommentRequest) => Promise<CreateCommentResponse>;
+
+export type CreateOutcome = { readonly ok: true; readonly blockId: string } | { readonly ok: false };
 
 export interface UsePageCommentsDeps {
   readonly fetcher?: PageCommentsFetcher;
   readonly replyFetcher?: CommentReplyFetcher;
   readonly resolveFetcher?: ThreadResolveFetcher;
+  readonly createFetcher?: CommentCreateFetcher;
+  /** The server minted a persisted anchor for the derived id a new thread named — told before the reload, so the screen can name the block the new way. */
+  readonly onAnchorMinted?: (derivedBlockId: string, persistedBlockId: string) => void;
 }
 
 export interface UsePageCommentsResult {
   readonly status: Ref<PageCommentsStatus>;
   readonly threads: Ref<readonly CommentThread[]>;
+  /** The caller's own grant, from the response — `false` until it says otherwise. The screen offers no way to start a thread before then. */
+  readonly canComment: Ref<boolean>;
+  /** Threads posted and not yet confirmed by the server — shown, counted, and not yet repliable. */
+  readonly pendingThreadIds: ComputedRef<readonly string[]>;
   /** One mark per anchored block, reply-inclusive count — what the gutter draws (docs/UI-CHECKLIST.md §4.7: several threads on one block collapse into one mark). */
   readonly indicators: ComputedRef<readonly CommentIndicator[]>;
   /** Threads whose block is gone (comment-threads spec: "Orphan Is A First-Class State"). */
@@ -25,7 +36,11 @@ export interface UsePageCommentsResult {
   readonly load: () => Promise<void>;
   readonly reply: (threadId: string, body: string) => Promise<boolean>;
   readonly setResolved: (threadId: string, resolved: boolean) => Promise<boolean>;
+  /** Starts a thread, optimistically: see the note on `create` below. */
+  readonly create: (input: NewThreadRequest) => Promise<CreateOutcome>;
 }
+
+const PENDING_PREFIX = 'pending:';
 
 /**
  * The comment overlay's one read (comment-overlay spec: "The Client
@@ -83,11 +98,21 @@ export function usePageComments(pageId: string, deps: UsePageCommentsDeps = {}):
       const config = useRuntimeConfig();
       return $fetch<{ ok: boolean }>(`${config.public.apiBaseUrl}/comments/${threadId}/resolved`, { method: 'PATCH', credentials: 'include', body });
     });
+  const createFetcher: CommentCreateFetcher =
+    deps.createFetcher ??
+    ((id, body) => {
+      const config = useRuntimeConfig();
+      return $fetch<CreateCommentResponse>(`${config.public.apiBaseUrl}/pages/${id}/comments`, { method: 'POST', credentials: 'include', body });
+    });
 
   const status = ref<PageCommentsStatus>('idle');
   const threads = ref<readonly CommentThread[]>([]);
+  const canComment = ref(false);
   const message = ref('');
   const writeMessage = ref<string | null>(null);
+  let pendingSequence = 0;
+
+  const pendingThreadIds = computed(() => threads.value.filter((thread) => thread.id.startsWith(PENDING_PREFIX)).map((thread) => thread.id));
 
   const indicators = computed<readonly CommentIndicator[]>(() => {
     const byBlock = new Map<string, number>();
@@ -107,6 +132,7 @@ export function usePageComments(pageId: string, deps: UsePageCommentsDeps = {}):
     try {
       const response = await fetcher(pageId);
       threads.value = response.threads;
+      canComment.value = response.canComment;
       status.value = 'success';
       message.value = '';
     } catch (error) {
@@ -126,6 +152,65 @@ export function usePageComments(pageId: string, deps: UsePageCommentsDeps = {}):
     if (code === 403) return `You don't have permission to ${verb} here. Ask a workspace admin for comment access.`;
     if (code === 404) return 'This thread is no longer here. Reload the page to see what changed.';
     return `Couldn't ${verb}. Check your connection and try again.`;
+  }
+
+  /**
+   * Starting a thread, optimistically (docs/UI-CHECKLIST.md §3, "Success"
+   * confirmed visibly; §4.7, the mark appears beside the block): a
+   * provisional thread goes into the list the moment it is posted — the
+   * gutter counts it, the panel shows it marked pending — and the server's
+   * own list replaces it on success, exactly as a reply's reload does.
+   *
+   * The block the thread names may be a derived id (`data-derived-block-id`,
+   * `utils/block-element.ts`), which the server turns into a persisted
+   * anchor as part of the same request and re-renders the page around. The
+   * DOM this screen holds still names the block the old way, so before the
+   * reload — whose thread will carry the *new* id — `onAnchorMinted` lets
+   * the screen adopt it; otherwise the thread just posted would come back
+   * as "not placed yet" until a reload.
+   *
+   * On failure the provisional thread is withdrawn and the message says
+   * what survived: the composer keeps the text (§3, "Error — fatal …
+   * preserves any unsaved user input and says explicitly whether the work
+   * was lost or preserved"). A 409 is the one failure that is not a
+   * retry: the page changed under the reader, and the honest next step is
+   * a reload.
+   */
+  async function create(input: NewThreadRequest): Promise<CreateOutcome> {
+    writeMessage.value = null;
+    const provisional: CommentThread = {
+      id: `${PENDING_PREFIX}${++pendingSequence}`,
+      body: input.body,
+      author: { id: null, displayName: 'You' },
+      createdAt: new Date().toISOString(),
+      anchor: { blockId: input.blockId, offsetStart: 0, offsetEnd: input.excerpt.length, quote: input.excerpt, orphaned: false },
+      resolved: false,
+      resolvedAt: null,
+      replies: [],
+    };
+    threads.value = [...threads.value, provisional];
+
+    let response: CreateCommentResponse;
+    try {
+      response = await createFetcher(pageId, {
+        blockId: input.blockId,
+        ...(input.quote === null ? {} : { quote: input.quote }),
+        body: input.body,
+        mentionedUserIds: [...input.mentionedUserIds],
+      });
+    } catch (error) {
+      threads.value = threads.value.filter((thread) => thread.id !== provisional.id);
+      writeMessage.value =
+        httpStatusOf(error) === 409
+          ? 'This block has changed since you opened the page. Your text is still here — reload the page to comment on its current text.'
+          : `${describeWriteFailure(error, 'post this comment')} Your text is still here.`;
+      return { ok: false };
+    }
+
+    const blockId = response.blockId ?? input.blockId;
+    if (blockId !== input.blockId) deps.onAnchorMinted?.(input.blockId, blockId);
+    await load();
+    return { ok: true, blockId };
   }
 
   async function reply(threadId: string, body: string): Promise<boolean> {
@@ -152,5 +237,5 @@ export function usePageComments(pageId: string, deps: UsePageCommentsDeps = {}):
     return true;
   }
 
-  return { status, threads, indicators, orphaned, message, writeMessage, load, reply, setResolved };
+  return { status, threads, canComment, pendingThreadIds, indicators, orphaned, message, writeMessage, load, reply, setResolved, create };
 }

@@ -1,4 +1,12 @@
 import type { CommentIndicator } from '@deep-wiki/contracts';
+import { COMMENTABLE_BLOCK_SELECTOR, blockIdOf, blockSelector } from '../utils/block-element';
+
+/** A block a thread could be started on — the gutter's "+" slot — whichever identity it carries. */
+export interface PlacedBlock {
+  readonly blockId: string;
+  /** The block's top edge, in px, relative to the article's positioned wrapper. */
+  readonly top: number;
+}
 
 export interface PlacedMark {
   readonly blockId: string;
@@ -12,6 +20,8 @@ export interface UseBlockPlacementResult {
   readonly placed: Ref<readonly PlacedMark[]>;
   /** Block ids no element on screen carries — the "no anchors known" input (design.md Decision 6). Empty until the article exists. */
   readonly unplaced: Ref<readonly string[]>;
+  /** Every commentable block in document order (`utils/block-element.ts`), with its top — where a thread could be started. */
+  readonly blocks: Ref<readonly PlacedBlock[]>;
   /** Re-run the measurement, for a caller that knows the layout moved. */
   readonly measure: () => void;
 }
@@ -45,18 +55,21 @@ export function useBlockPlacement(
 ): UseBlockPlacementResult {
   const placed = ref<readonly PlacedMark[]>([]);
   const unplaced = ref<readonly string[]>([]);
+  const blocks = ref<readonly PlacedBlock[]>([]);
 
   function measure(): void {
     const root = article.value;
     if (!root) {
       placed.value = [];
       unplaced.value = [];
+      blocks.value = [];
       return;
     }
+    blocks.value = [...root.querySelectorAll<HTMLElement>(COMMENTABLE_BLOCK_SELECTOR)].map((element) => ({ blockId: blockIdOf(element)!, top: element.offsetTop }));
     const marks: PlacedMark[] = [];
     const missing: string[] = [];
     for (const indicator of indicators.value) {
-      const element = root.querySelector<HTMLElement>(`[data-block-id="${CSS.escape(indicator.blockId)}"]`);
+      const element = root.querySelector<HTMLElement>(blockSelector(indicator.blockId));
       if (element) marks.push({ blockId: indicator.blockId, count: indicator.count, top: element.offsetTop });
       else missing.push(indicator.blockId);
     }
@@ -64,8 +77,8 @@ export function useBlockPlacement(
     // is read top to bottom. `offsetTop` ties are broken by DOM position.
     marks.sort((a, b) => {
       if (a.top !== b.top) return a.top - b.top;
-      const first = root.querySelector(`[data-block-id="${CSS.escape(a.blockId)}"]`)!;
-      const second = root.querySelector(`[data-block-id="${CSS.escape(b.blockId)}"]`)!;
+      const first = root.querySelector(blockSelector(a.blockId))!;
+      const second = root.querySelector(blockSelector(b.blockId))!;
       return first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1;
     });
     placed.value = marks;
@@ -98,5 +111,5 @@ export function useBlockPlacement(
     });
   }
 
-  return { placed, unplaced, measure };
+  return { placed, unplaced, blocks, measure };
 }

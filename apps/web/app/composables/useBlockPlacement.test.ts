@@ -84,4 +84,32 @@ describe('useBlockPlacement', () => {
     expect(placed.value.map((mark) => mark.blockId)).toEqual(['b1', 'b2']);
     expect(placed.value.every((mark) => typeof mark.top === 'number')).toBe(true);
   });
+
+  // A block with no persisted anchor carries `data-derived-block-id`
+  // instead (render.ts): a provisional thread on such a block — the
+  // optimistic one, before the server has minted — is placed by it too.
+  test('places an indicator whose block carries only a derived identity', async () => {
+    const article = ref<HTMLElement | null>(articleWith('<p data-derived-block-id="d:0123456789ab#0">One</p>'));
+    const indicators = ref<readonly CommentIndicator[]>([{ blockId: 'd:0123456789ab#0', count: 1 }]);
+    const { placed, unplaced } = useBlockPlacement(article, indicators);
+    await nextTick();
+
+    expect(placed.value.map((mark) => mark.blockId)).toEqual(['d:0123456789ab#0']);
+    expect(unplaced.value).toEqual([]);
+  });
+
+  // Every block a thread could be started on — the gutter's "+" slots —
+  // whichever identity it carries, in document order, with its top; a
+  // block with neither attribute (a list, a code block, a pre-backfill
+  // render) is not one.
+  test('lists every commentable block in document order', async () => {
+    const article = ref<HTMLElement | null>(
+      articleWith('<h2 data-derived-block-id="d:0123456789ab#0">H</h2><p data-block-id="abc">One</p><ul><li>x</li></ul><p>plain</p>'),
+    );
+    const { blocks } = useBlockPlacement(article, ref<readonly CommentIndicator[]>([]));
+    await nextTick();
+
+    expect(blocks.value.map((block) => block.blockId)).toEqual(['d:0123456789ab#0', 'abc']);
+    expect(blocks.value.every((block) => typeof block.top === 'number')).toBe(true);
+  });
 });

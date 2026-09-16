@@ -241,40 +241,19 @@ defineExpose({
          checklist §4.2 names. The selected row keeps its opaque
          `secondary-container` fill, so selected and hovered stay
          unmistakably different (§4.6). -->
-    <!-- @ mention menu. The `<ul>` between the listbox and its options is
-         `role="presentation"`, so the options are the listbox's own
-         children to assistive technology. Rows confirm on click as well as
-         on Enter; `mousedown.prevent` keeps focus in the editor across the
-         click (the menu is outside the contenteditable). -->
-    <div
+    <!-- @ mention menu: `MentionMenu`, shared with the comment composer
+         (§4.1). Rows confirm on click as well as on Enter; the menu keeps
+         focus in the editor across the click. -->
+    <MentionMenu
       v-if="mentionState?.active"
       :id="MENTION_MENU_ID"
-      role="listbox"
-      aria-label="Mention suggestions"
-      class="fixed z-10 min-w-56 rounded-md bg-accented p-1 shadow-lg ring ring-default"
-      :style="mentionCaretRect ? { top: `${mentionCaretRect.top}px`, left: `${mentionCaretRect.left}px` } : {}"
-    >
-      <p v-if="mentionState.query === '' && mentionState.candidates.length === 0" class="px-3 py-2 text-body-small text-muted">
-        Type to search people and pages…
-      </p>
-      <p v-else-if="mentionState.candidates.length === 0" class="px-3 py-2 text-body-small text-muted">No matches</p>
-      <ul v-else role="presentation">
-        <li
-          v-for="(candidate, index) in mentionState.candidates"
-          :id="`dw-mention-option-${index}`"
-          :key="candidate.id"
-          role="option"
-          :aria-selected="index === mentionState.selectedIndex"
-          class="dw-state-layer flex cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-body-medium"
-          :class="index === mentionState.selectedIndex ? 'bg-secondary-container text-on-secondary-container' : 'text-default'"
-          @mousedown.prevent
-          @click="confirmMentionAt(index)"
-        >
-          <UIcon :name="candidate.type === 'page' ? 'i-lucide-file-text' : 'i-lucide-user'" class="size-4 shrink-0" aria-hidden="true" />
-          {{ candidate.label }}
-        </li>
-      </ul>
-    </div>
+      :candidates="mentionState.candidates"
+      :selected-index="mentionState.selectedIndex"
+      :query="mentionState.query"
+      option-id-prefix="dw-mention-option-"
+      :position="mentionCaretRect"
+      @select="confirmMentionAt"
+    />
 
     <!-- The chip tier (`InlineNotice`): one line about the editor above it. -->
     <InlineNotice v-if="mentionMismatch" tier="chip" tone="error" role="alert" class="mt-2">
