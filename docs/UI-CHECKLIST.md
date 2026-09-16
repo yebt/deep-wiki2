@@ -1016,6 +1016,7 @@ substitute for the owner's review against this checklist and `docs/DESIGN-SYSTEM
 ---
 
 ### 2026-09-16 — Starting a thread from read mode — awaiting the owner's eye
+### 2026-09-16 — The navigation tree's context menu and filter — awaiting the owner's eye
 
 **Reviewer:** none yet — this entry is what was shipped for review, not a review.
 **Verdict:** Pending
@@ -1061,6 +1062,53 @@ typed Post explains itself, and a 12,000-word page's two hundred slots are one t
   anchor cannot live on them today, so a "+" there would fail at the mint.
 - A provisional thread is authored "You" until the server answers; the client has no `me`.
 - Gate **10.8** is still `[ ]`; this batch is what makes it exercisable.
+Two of the owner's review items on the tree, one commit each, on
+`feat/tree-context-menu-filter` (`docs/TODO.md` Findings, 2026-09-16, has the detail).
+The sidebar's toolbar row is untouched; a parallel branch owns it.
+
+**Pre-build contract (§2), both items.** *Who:* a workspace member in the room, reading
+more than editing, who wants to act on a row without leaving the tree or to find one among
+hundreds. *What:* "rename this / add a page here / move it up" and "show me the pages
+with *auth* in the name". *Primary action:* the menu's — Rename…; the filter's — type.
+*Data:* `GET /workspaces/:id/tree` (id, type, title, children) and `LEGAL_PARENT_TYPES`
+through `legalChildTypes()`; no per-node permission exists (Open Questions). *Not:*
+delete (three open questions), a command palette (`Ctrl`+`K` is reserved), a search of
+page bodies. *Empty / too much:* the filter is not offered on an empty tree; a 400-page
+book filters to matches and their ancestors, and a menu on any of its rows is the same
+one menu.
+
+**Walked (§3–§6), and what holds it:**
+
+- **Menu** — every row: right-click, `⋯` (name *and* tooltip, §4.3; 24px target, §5),
+  `Shift+F10` and `ContextMenu` (§5, keyboard equivalent stated in the `?` help). Items
+  from the one hierarchy table; unavailable ones stay in the menu `aria-disabled` with the
+  reason as visible description (§3 "Disabled", §5). Arrow-navigable; Escape closes and
+  focus returns to the row (§5, measured in `e2e/tree.spec.ts`). Menu on the `bg-accented`
+  rung at `rounded-md` (`DESIGN-SYSTEM.md` §9.6, §3.4). Inside the viewport at 1280 and
+  320, measured, with reasons wrapping rather than truncating. "New…"/"Rename…" open the
+  toolbar's own dialogs — one component, not one copy per surface (§4.1). Copy link
+  confirms in a live region (§3 "Success", §5).
+- **Filter** — toggle with `aria-expanded`/`aria-controls`, name and tooltip with the
+  keys; `Ctrl`/`⌘`+`Shift`+`F` only while the sidebar has focus; the field is a `UInput`
+  (§4.1) with a programmatic label (§5), 16px text (§9.5) at `h-10` (§7.2, recorded in
+  `DESIGN-SYSTEM.md` §14); matches marked in an opaque secondary pair, never yellow, never
+  alpha (§4.2); the count in a live region always in the DOM (§5); filtered-empty distinct
+  from first-run empty with "Clear filter" beside it (§3); Escape clears, hides and
+  returns focus to the tree (§5); folds restored on clear (unit-tested by construction).
+- **Both** — no hardcoded colour literal (grep clean); screenshots at 1280 light, 1280
+  dark and 320 light (`fb-tree-{menu,filter,filter-empty}-*.png` in the session
+  scratchpad); `expectNoHorizontalOverflow` at every width (§6); `prefers-reduced-motion`
+  through the global override (§5).
+
+**Findings against my own work, fixed before review:** `group` on the tree item lit
+every ancestor's `⋯` (moved to the row); the menu ran to x=474 at 320 (capped at the
+popper's available width). Both in `docs/TODO.md`.
+
+**Known before review, not fixed:** a `read`-only member sees "Rename…" live and is
+refused by the server — no `write` signal per node reaches the client (Open Questions,
+amended); SSR renders the sidebar's no-workspace state under the dashboard and hydrates
+the tree over it, with console mismatches (`AppShell`, not this branch's file); the
+two-icon-pack requirement (§4.3) remains untested.
 
 ---
 

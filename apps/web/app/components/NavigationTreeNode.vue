@@ -53,6 +53,7 @@
  * (that table's "default" density row height).
  */
 import type { TreeNode } from '~/composables/useTree';
+import { highlightSegments } from '~/composables/useTreeFilter';
 
 const props = defineProps<{
   node: TreeNode;
@@ -69,6 +70,8 @@ const props = defineProps<{
   collapsedIds: ReadonlySet<string>;
   /** The page that is open on screen — marked `aria-current`, on the page row alone. */
   currentId?: string | null;
+  /** The tree filter's query, if one is active: the matched part of the title is marked. */
+  highlight?: string;
 }>();
 
 /**
@@ -109,6 +112,8 @@ const isContainer = computed(() => props.node.children.length > 0);
 const isExpanded = computed(() => isContainer.value && !props.collapsedIds.has(props.node.id));
 const isSelected = computed(() => props.selectedId === props.node.id);
 const isCurrent = computed(() => props.node.type === 'page' && props.currentId === props.node.id);
+/** The title in pieces, the matched one marked — one piece and no mark when nothing is being filtered. */
+const titleSegments = computed(() => highlightSegments(props.node.title, props.highlight ?? ''));
 
 /** A click is the row's one activation: a page opens, a container folds. */
 function onClick(): void {
@@ -192,13 +197,16 @@ function onKeydown(event: KeyboardEvent): void {
     :aria-selected="isSelected"
     :aria-current="isCurrent ? 'page' : undefined"
     :tabindex="activeId === node.id ? 0 : -1"
-    class="dw-tree-item group"
+    class="dw-tree-item"
     @keydown="onKeydown"
     @focus="emit('activate', node.id)"
   >
+    <!-- `group` on the row, not the `<li>`: the item element holds the
+         whole subtree, so a `group-hover` there lit every ancestor's `⋯`
+         when a page three levels down was hovered (seen 2026-09-16). -->
     <div
       draggable="true"
-      class="dw-tree-row dw-state-layer flex h-10 min-h-10 items-center gap-2 rounded-md pe-1 text-body-medium text-default"
+      class="dw-tree-row dw-state-layer group flex h-10 min-h-10 items-center gap-2 rounded-md pe-1 text-body-medium text-default"
       :class="[
         // Every row does something on click now — open or fold — so every
         // row is a pointer target; the grab cursor promised a drag and
@@ -239,7 +247,20 @@ function onKeydown(event: KeyboardEvent): void {
            accessible name says it in words. `title` keeps the full title
            available on hover once a long one truncates (§6). -->
       <span class="sr-only">{{ node.type }}:</span>
-      <span class="truncate" :title="node.title">{{ node.title }}</span>
+      <!-- A filter match is marked in the secondary family — the container
+           pair on an ordinary row, the accent itself on the selected row,
+           whose fill *is* `secondary-container` (docs/DESIGN-SYSTEM.md
+           §1.2); both opaque, so the mark reads the same in either theme.
+           `mark` alone would be the browser's yellow. -->
+      <span class="truncate" :title="node.title">
+        <template v-for="(segment, segmentIndex) in titleSegments" :key="segmentIndex">
+          <mark
+            v-if="segment.match"
+            :class="isSelected || dropIndicator === 'on' ? 'bg-secondary text-inverted' : 'bg-secondary-container text-on-secondary-container'"
+          >{{ segment.text }}</mark>
+          <template v-else>{{ segment.text }}</template>
+        </template>
+      </span>
       <!-- `@click.stop`: the row's click is its activation (open or fold),
            and a click on the action is neither. -->
       <span v-if="$slots['row-actions']" data-row-actions class="ms-auto flex shrink-0 items-center" @click.stop>
@@ -259,6 +280,7 @@ function onKeydown(event: KeyboardEvent): void {
         :selected-id="selectedId"
         :collapsed-ids="collapsedIds"
         :current-id="currentId"
+        :highlight="highlight"
         @reorder="onChildReorder"
         @activate="emit('activate', $event)"
         @open="emit('open', $event)"
