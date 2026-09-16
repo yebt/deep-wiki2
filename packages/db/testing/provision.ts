@@ -32,7 +32,14 @@ import { join } from 'node:path';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
-import { listProjectContainers, restartStalledStack, startContainers, type ProjectContainer } from './containers';
+import {
+  containerRuntimeEnv,
+  listProjectContainers,
+  restartStalledStack,
+  startContainers,
+  type ProjectContainer,
+  type StartOutcome,
+} from './containers';
 import {
   composeEnvPrefix,
   dbComposeEnv,
@@ -100,6 +107,21 @@ export type ContainerRuntime = 'podman' | 'docker';
 export interface SpawnResult {
   readonly code: number | null;
   readonly timedOut: boolean;
+  /**
+   * What compose wrote to stderr, tail-bounded. Never `'ignore'`d again:
+   * the 2026-09-16 exit-125 sat undiagnosed for a day with the cause —
+   * `netavark: nftables error: got invalid json` — on this stream.
+   */
+  readonly stderr: string;
+}
+
+/** How much of compose's stderr a failure message carries: the end, where the error is. */
+export const COMPOSE_STDERR_TAIL_CHARS = 2_000;
+
+/** The last `limit` characters of `text`, trimmed. */
+export function stderrTail(text: string, limit: number = COMPOSE_STDERR_TAIL_CHARS): string {
+  const trimmed = text.trim();
+  return trimmed.length <= limit ? trimmed : `…${trimmed.slice(-limit)}`;
 }
 
 /**
@@ -119,6 +141,11 @@ export function detectContainerRuntime(which: (bin: string) => string | null = (
 }
 
 /**
+ * The environment the compose process runs with: `env` with every
+ * `node_modules/.bin` removed from `PATH` (`containerRuntimeEnv` — the
+ * `nft` that netavark must not find), plus this worktree's compose
+ * variables on top.
+ *
  * The compose project name travels in `COMPOSE_PROJECT_NAME` rather than a
  * `-p` flag, so `buildComposeUpArgs` stays the fixed, token-free vector it
  * has always been. Verified against this host's provider (podman-compose
@@ -127,12 +154,16 @@ export function detectContainerRuntime(which: (bin: string) => string | null = (
  * files interpolate the same variable into their own `name:` as well, so
  * `config` and `up` agree.
  */
-async function defaultRunCompose(binary: ContainerRuntime, timeoutMs: number): Promise<SpawnResult> {
+export function composeProcessEnv(id: HarnessIdentity, env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  return { ...containerRuntimeEnv(env), ...dbComposeEnv(id) };
+}
+
+async function runComposeFor(id: HarnessIdentity, env: NodeJS.ProcessEnv, binary: ContainerRuntime, timeoutMs: number): Promise<SpawnResult> {
   const proc = Bun.spawn(buildComposeUpArgs(binary) as string[], {
     cwd: COMPOSE_DIR,
-    env: { ...process.env, ...dbComposeEnv(harnessIdentity()) },
+    env: composeProcessEnv(id, env),
     stdout: 'ignore',
-    stderr: 'ignore',
+    stderr: 'pipe',
   });
 
   let timedOut = false;
@@ -141,9 +172,12 @@ async function defaultRunCompose(binary: ContainerRuntime, timeoutMs: number): P
     proc.kill();
   }, timeoutMs);
 
-  const code = await proc.exited;
+  // Read stderr while the process runs, never after: a compose that fills
+  // the pipe and blocks on it would otherwise wait for a reader that is
+  // itself waiting for the exit.
+  const [code, stderr] = await Promise.all([proc.exited, new Response(proc.stderr).text()]);
   clearTimeout(timer);
-  return { code, timedOut };
+  return { code, timedOut, stderr: stderrTail(stderr) };
 }
 
 async function defaultProbe(url: string): Promise<boolean> {
@@ -171,8 +205,8 @@ export interface ResolveAdminUrlDeps {
   portOwners?(): string;
   /** This project's containers in any state, asked only once compose has already failed. */
   projectContainers?(binary: ContainerRuntime): ProjectContainer[];
-  /** `podman|docker start <names>`: true when the runtime accepted it. */
-  startContainers?(binary: ContainerRuntime, names: readonly string[]): boolean;
+  /** `podman|docker start <names>`: whether the runtime accepted it, and its stderr when it did not. */
+  startContainers?(binary: ContainerRuntime, names: readonly string[]): StartOutcome;
   /** Where the one retry announces itself. */
   log?(message: string): void;
 }
@@ -207,17 +241,39 @@ function defaultPortOwners(): string {
   return cachedPortOwners;
 }
 
-export const defaultProvisionDeps: ResolveAdminUrlDeps = {
-  env: process.env,
-  probe: defaultProbe,
-  detectRuntime: () => detectContainerRuntime(),
-  runCompose: defaultRunCompose,
-  serverOwners: defaultServerOwners,
-  portOwners: defaultPortOwners,
-  projectContainers: (binary) => listProjectContainers(binary, harnessIdentity().dbProjectName),
-  startContainers,
-  log: (message) => console.warn(`packages/db/testing: ${message}`),
-};
+export interface ProvisionDepsOptions {
+  /** The worktree to provision for. Defaults to the running one. */
+  readonly identity?: HarnessIdentity;
+  /** The environment compose and the runtime are spawned from. Defaults to this process's. */
+  readonly env?: NodeJS.ProcessEnv;
+}
+
+/**
+ * The real dependencies — real compose, real `ps`/`start`, real probe —
+ * bound to one worktree identity. `defaultProvisionDeps` is this for the
+ * running worktree; `provision.integration.test.ts` builds a second set
+ * for a throwaway project so it can drive the genuine path against a
+ * container it deliberately left in `Created`, without touching the
+ * Postgres the rest of the suite is using.
+ */
+export function createProvisionDeps(options: ProvisionDepsOptions = {}): ResolveAdminUrlDeps {
+  const env = options.env ?? process.env;
+  const identityOf = (): HarnessIdentity => options.identity ?? harnessIdentity();
+  return {
+    env,
+    probe: defaultProbe,
+    detectRuntime: () => detectContainerRuntime(),
+    runCompose: (binary, timeoutMs) => runComposeFor(identityOf(), env, binary, timeoutMs),
+    serverOwners: defaultServerOwners,
+    portOwners: defaultPortOwners,
+    ...(options.identity ? { identity: options.identity } : {}),
+    projectContainers: (binary) => listProjectContainers(binary, identityOf().dbProjectName),
+    startContainers,
+    log: (message) => console.warn(`packages/db/testing: ${message}`),
+  };
+}
+
+export const defaultProvisionDeps: ResolveAdminUrlDeps = createProvisionDeps();
 
 /**
  * The manual command, carrying the environment that makes it mean the
@@ -242,17 +298,24 @@ function noAutostartMessage(id: HarnessIdentity): string {
   );
 }
 
-function timeoutMessage(binary: ContainerRuntime, timeoutMs: number, id: HarnessIdentity): string {
+/** Compose's own last words, when it had any, as a paragraph the failure message can end with. */
+function composeSaid(binary: ContainerRuntime, stderr: string): string {
+  return stderr ? `\n${binary} compose said:\n${stderr}` : '';
+}
+
+function timeoutMessage(binary: ContainerRuntime, timeoutMs: number, id: HarnessIdentity, stderr: string): string {
   return (
     `${binary} compose did not report postgres healthy within ${timeoutMs}ms (timed out). ` +
-    `Run ${manualCommand(id, binary)} manually to see the underlying error.`
+    `Run ${manualCommand(id, binary)} manually to see the underlying error.` +
+    composeSaid(binary, stderr)
   );
 }
 
-function composeFailedMessage(binary: ContainerRuntime, code: number | null, id: HarnessIdentity): string {
+function composeFailedMessage(binary: ContainerRuntime, code: number | null, id: HarnessIdentity, stderr: string): string {
   return (
     `${binary} compose exited with code ${code}. ` +
-    `Run ${manualCommand(id, binary)} manually to see the underlying error.`
+    `Run ${manualCommand(id, binary)} manually to see the underlying error.` +
+    composeSaid(binary, stderr)
   );
 }
 
@@ -336,26 +399,25 @@ export async function resolveAdminUrl(deps: ResolveAdminUrlDeps, timeoutMs: numb
 
   const result = await deps.runCompose(binary, timeoutMs);
   let failure: string | undefined;
-  if (result.timedOut) failure = timeoutMessage(binary, timeoutMs, id);
-  else if (result.code !== 0) failure = composeFailedMessage(binary, result.code, id);
-  else if (!(await deps.probe(url))) failure = composeFailedMessage(binary, result.code, id);
+  if (result.timedOut) failure = timeoutMessage(binary, timeoutMs, id, result.stderr);
+  else if (result.code !== 0) failure = composeFailedMessage(binary, result.code, id, result.stderr);
+  else if (!(await deps.probe(url))) failure = composeFailedMessage(binary, result.code, id, result.stderr);
 
-  // Seen 2026-09-16 under load: compose exits 125 (or is killed at the
-  // bound) with the container created and never started, and every later
-  // `up` against the same project name fails the same way. What the
-  // human then did by hand — start the container that is already there —
-  // is done here once before the failure, with its manual command, is
-  // raised.
+  // Compose can come back with the container created and never started —
+  // killed at the bound, or (2026-09-16) refused by the runtime for a
+  // reason that also sinks the retry below, see containers.ts. The one
+  // retry is kept for the first case; for the second, its reason now
+  // rides along in the failure instead of vanishing into a `false`.
   if (failure !== undefined) {
-    const healed = await restartStalledStack(binary, id.dbProjectName, timeoutMs, {
+    const outcome = await restartStalledStack(binary, id.dbProjectName, timeoutMs, {
       projectContainers: (bin) => deps.projectContainers?.(bin) ?? [],
-      startContainers: (bin, names) => deps.startContainers?.(bin, names) ?? false,
+      startContainers: (bin, names) => deps.startContainers?.(bin, names) ?? { started: false, reason: 'no runtime access' },
       reachable: () => deps.probe(url),
       log: (message) => deps.log?.(message),
     });
-    if (!healed) {
+    if (!outcome.healed) {
       assertPortIsOurs();
-      throw new ProvisioningError(failure);
+      throw new ProvisioningError(`${failure}\nThe one retry did not help: ${outcome.reason}`);
     }
   }
 

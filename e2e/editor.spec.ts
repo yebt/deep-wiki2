@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import { DEFAULT_HEARTBEAT_INTERVAL_MS } from '../apps/web/app/composables/useLockHeartbeat';
 import { API_URL } from './ports';
 import { expectNoHorizontalOverflow } from './overflow';
@@ -100,6 +100,38 @@ async function signIn(page: Page): Promise<void> {
   );
 }
 
+/**
+ * Puts the caret after the last character of the document's last block
+ * and returns once ProseMirror has read it. `editor.click()` + `End` +
+ * a key is what these tests did, and it is a race: Chrome delivers
+ * `selectionchange` at the next rendering opportunity, so ProseMirror
+ * learns where the click put the caret one frame later — and a key sent
+ * inside that frame is handled at the caret ProseMirror still holds, the
+ * start of the document on a fresh mount. Measured 2026-09-16: `Enter`
+ * split the paragraph at its START in 15 of 20 unthrottled runs —
+ * `"SecondStart."` in the h2, a table above `Before the table.` and a
+ * "not canonical" refusal on Save — and a page-side event log showed no
+ * `selectionchange` at all between `mouseup` and `keydown Enter` in every
+ * run that split there. Six-times CPU throttling, which stretches the
+ * frame past Playwright's next key, made it 0 of 20. No hand is that
+ * fast; the harness is (docs/TODO.md Findings, 2026-09-16).
+ *
+ * So: click just inside the block's right edge, which is where `End` was
+ * taking the caret, and wait for the surface's `data-transactions` — the
+ * count the view reports after every transaction, the pointer's
+ * selection-only one included — to move past what it was before the
+ * click. That is ProseMirror saying it has the caret; a timeout would be
+ * a guess about the frame.
+ */
+async function caretToEnd(editor: Locator): Promise<void> {
+  const before = (await editor.getAttribute('data-transactions')) ?? '0';
+  const last = editor.locator(':scope > *').last();
+  const box = await last.boundingBox();
+  if (!box) throw new Error('caretToEnd: the editor has no block to click');
+  await last.click({ position: { x: Math.max(1, box.width - 2), y: box.height / 2 } });
+  await expect(editor, 'ProseMirror has read the caret the click placed').not.toHaveAttribute('data-transactions', before);
+}
+
 async function signInAs(page: Page, token: string): Promise<void> {
   await page.context().addCookies([{ name: 'session', value: token, domain: 'localhost', path: '/', httpOnly: true, secure: true, sameSite: 'Lax' }]);
 }
@@ -118,8 +150,7 @@ test('saving an already-saved page persists the edit and reads back for real, wi
   await expect(editor).toBeVisible({ timeout: 30000 });
   await expect(editor).toContainText(editorFixtures.editablePageMarkdown.trim(), { timeout: 30000 });
 
-  await editor.click();
-  await page.keyboard.press('End');
+  await caretToEnd(editor);
   await page.keyboard.type(' Edited for real, through the real backend.');
 
   // The buffer reports 300ms after the last keystroke; Save enabling is
@@ -162,8 +193,7 @@ test('leaving a dirty editor by clicking a tree row asks in the product\'s dialo
   const otherRow = sidebar.getByRole('treeitem', { name: new RegExp(editorFixtures.editablePageTitle) });
   await expect(otherRow).toBeVisible({ timeout: 30000 });
 
-  await editor.click();
-  await page.keyboard.press('End');
+  await caretToEnd(editor);
   await page.keyboard.type(' Not saved yet.');
   await expect(editor).toContainText('Not saved yet.');
   // The editor reports its document 300ms after the last keystroke
@@ -229,8 +259,7 @@ test('typing markdown syntax renders the formatted result inline, with no separa
   // for a longer timeout on the assertion three lines down, which would
   // have been waiting for a keystroke that was never delivered.
   await expect(editor).toContainText('Start.', { timeout: 30000 });
-  await editor.click();
-  await page.keyboard.press('End');
+  await caretToEnd(editor);
   await page.keyboard.type(' **bold**');
 
   // The formatted result renders inline, at the cursor, inside the one
@@ -316,8 +345,7 @@ test('a save refused as "not canonical" offers the canonical document back, and 
   const editor = page.getByTestId('editor-surface');
   await expect(editor).toBeVisible({ timeout: 30000 });
   await expect(editor).toContainText('Not canonical', { timeout: 30000 });
-  await editor.click();
-  await page.keyboard.press('End');
+  await caretToEnd(editor);
   await page.keyboard.type(' edited');
 
   await expect(page.getByRole('button', { name: /Save/ })).not.toHaveAttribute('aria-disabled');
@@ -366,8 +394,7 @@ test('clicking the second slash command runs it, closes the menu and leaves the 
   await page.goto(`/pages/${PAGE_ID}/edit`);
   const editor = page.getByTestId('editor-surface');
   await expect(editor).toContainText('Start.', { timeout: 30000 });
-  await editor.click();
-  await page.keyboard.press('End');
+  await caretToEnd(editor);
   await page.keyboard.press('Enter');
   await page.keyboard.type('/');
 
@@ -439,8 +466,7 @@ test('Undo and Redo stand beside Save: disabled with a reason until there is his
   await expect(page.locator(`#${describedBy}`)).toContainText('Z');
   await expect(undo).toHaveAttribute('aria-keyshortcuts', /Z$/);
 
-  await editor.click();
-  await page.keyboard.press('End');
+  await caretToEnd(editor);
   await page.keyboard.type(' Then more.');
   await expect(editor).toContainText('Start. Then more.');
   await expect(undo).not.toHaveAttribute('aria-disabled');
@@ -756,8 +782,7 @@ test.describe('the / menu against the real backend', () => {
     const block = await seedBlockPage(page, 'Before the table.\n');
     const editor = await openBlockPage(page, block, 'Before the table.');
 
-    await editor.click();
-    await page.keyboard.press('End');
+    await caretToEnd(editor);
     await page.keyboard.press('Enter');
     await page.keyboard.type('/tab');
     const menu = page.getByRole('listbox', { name: 'Block commands' });
@@ -781,8 +806,7 @@ test.describe('the / menu against the real backend', () => {
     const block = await seedBlockPage(page, 'A claim worth a note.\n');
     const editor = await openBlockPage(page, block, 'A claim worth a note.');
 
-    await editor.click();
-    await page.keyboard.press('End');
+    await caretToEnd(editor);
     // The trigger fires after whitespace or at a line's start, never mid-word.
     await page.keyboard.type(' /foot');
     const menu = page.getByRole('listbox', { name: 'Block commands' });
@@ -1033,8 +1057,7 @@ test.describe('inside the workspace frame, focus mode', () => {
     const save = page.getByRole('button', { name: /^Save/ });
     await expect(save).toHaveAttribute('aria-disabled', 'true');
 
-    await editor.click();
-    await page.keyboard.press('End');
+    await caretToEnd(editor);
     await page.keyboard.press('Control+\\');
 
     await expect(sidebar).toBeHidden();
@@ -1230,8 +1253,7 @@ for (const { theme, width } of [
       await page.goto(`/pages/${editorFixtures.editablePageId}/edit`);
       const editor = page.getByTestId('editor-surface');
       await expect(editor).toContainText(editorFixtures.editablePageMarkdown.trim(), { timeout: 30000 });
-      await editor.click();
-      await page.keyboard.press('End');
+      await caretToEnd(editor);
       await page.keyboard.type(' Not saved yet.');
       await expect(page.locator('#content-bar').getByRole('button', { name: /^Save/ })).not.toHaveAttribute('aria-disabled');
 

@@ -1,17 +1,37 @@
 /**
- * What to do when `compose up -d --wait` comes back without a stack.
+ * What to do when `compose up -d --wait` comes back without a stack —
+ * and, since the second 2026-09-16 finding, how to spawn the container
+ * runtime so that it comes back WITH one.
  *
- * Seen on this host on 2026-09-16, three times in one day, under load:
- * `podman compose up -d --wait` exits 125 (or is killed at the
- * `COMPOSE_TIMEOUT_MS` bound) having *created* the container but never
- * started it. The container then sits in `Created` under the worktree's
- * deterministic compose project name, and every later `up` against the
- * same name failed the same way in seconds — until somebody ran the
- * printed manual command by hand, which started it in three seconds and
- * reported it healthy. The fix the human applied was `start the container
- * that is already there`, so this module does exactly that, once, and
- * says so: the honest failure with the manual command is still the
- * answer when there is nothing to start or starting it does not help.
+ * The failure this module was written against: `podman compose up -d
+ * --wait` exits 125 having *created* the container but never started it,
+ * the container sits in `Created` under the worktree's deterministic
+ * compose project name, every later `up` fails the same way, and the
+ * printed manual command — pasted into a shell — starts it in seconds.
+ * The first fix (`restartStalledStack`, below) assumed a transient
+ * runtime hiccup and started the container once more from the same
+ * process. It never healed anything, because the cause was not
+ * transient and not the runtime's: it was this process's `PATH`.
+ *
+ * `bun run <script>` prepends every `node_modules/.bin` on the way up to
+ * the workspace root to `PATH`, for the script and everything it spawns.
+ * Nuxt → nitropack → `@vercel/nft` installs a binary named `nft` there.
+ * Rootless podman hands network setup to netavark, whose nftables
+ * driver runs `nft` by name — and found Vercel's Node File Trace CLI,
+ * which exits 0 with nothing on stdout. The runtime's own words for
+ * that, which `stderr: 'ignore'` had been throwing away:
+ *
+ *     Error: unable to start container "…": netavark: nftables error:
+ *     got invalid json: EOF while parsing a value at line 1 column 0
+ *
+ * So `podman start` fails from any process `bun run` started — the
+ * test suites, the e2e seed, and the first "heal" — and succeeds from a
+ * shell, whose `PATH` has no `node_modules/.bin`. `containerRuntimeEnv`
+ * is the fix: every spawn of the runtime here goes out with that
+ * segment removed. `restartStalledStack` stays for the case it was
+ * honestly good for — compose killed at the bound with the container
+ * already created — and now hands back the runtime's reason instead of
+ * `false`, so the next wrong guess is at least a visible one.
  *
  * Shared by `packages/db/testing/provision.ts` (Postgres) and
  * `apps/api/testing/services.ts` (Mailpit/MinIO), which are the two
@@ -19,6 +39,34 @@
  * rule — so Playwright's Node process can load whatever imports it.
  */
 import { execFileSync } from 'node:child_process';
+import { delimiter, sep } from 'node:path';
+
+/**
+ * The environment the container runtime is spawned with: the given one,
+ * with every `node_modules/.bin` segment removed from `PATH`. Everything
+ * else passes through untouched — the runtime still needs `HOME`,
+ * `XDG_RUNTIME_DIR`, `DBUS_SESSION_BUS_ADDRESS` and the rest to find
+ * its rootless storage. See the module comment for why: netavark
+ * resolves `nft` through this `PATH`, and `@vercel/nft` wins under
+ * `bun run`.
+ */
+export function containerRuntimeEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const copy: NodeJS.ProcessEnv = { ...env };
+  const path = env.PATH;
+  if (path === undefined) return copy;
+  copy.PATH = path
+    .split(delimiter)
+    .filter((segment) => !isNodeModulesBin(segment))
+    .join(delimiter);
+  return copy;
+}
+
+const NODE_MODULES_BIN_SUFFIX = `${sep}node_modules${sep}.bin`;
+
+function isNodeModulesBin(segment: string): boolean {
+  const trimmed = segment.endsWith(sep) ? segment.slice(0, -sep.length) : segment;
+  return trimmed.endsWith(NODE_MODULES_BIN_SUFFIX);
+}
 
 /**
  * The `--format` string whose output `parseContainerStates` reads. Fixed
@@ -67,13 +115,18 @@ export function stalledContainers(containers: readonly ProjectContainer[], proje
   return containers.filter((c) => c.project === project && STALLED_STATES.has(c.state)).map((c) => c.name);
 }
 
-/** Runs one fixed argument vector — no shell — and returns its stdout. */
+/**
+ * Runs one fixed argument vector — no shell — and returns its stdout. On
+ * failure it throws; an error carrying a `stderr` string is what
+ * `startContainers` turns into the reason it reports.
+ */
 export type ContainerExec = (args: readonly string[], timeoutMs: number) => string;
 
 const defaultExec: ContainerExec = (args, timeoutMs) =>
   execFileSync(args[0] as string, args.slice(1) as string[], {
     encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'ignore'],
+    env: containerRuntimeEnv(),
+    stdio: ['ignore', 'pipe', 'pipe'],
     timeout: timeoutMs,
   });
 
@@ -94,20 +147,41 @@ export function listProjectContainers(binary: string, project: string, exec: Con
   }
 }
 
-/** `<binary> start <names>`: true when the runtime accepted it. */
-export function startContainers(binary: string, names: readonly string[], exec: ContainerExec = defaultExec): boolean {
-  if (names.length === 0) return false;
+export type StartOutcome = { readonly started: true } | { readonly started: false; readonly reason: string };
+
+/** What a failed exec has to say for itself: its stderr when it captured any, its message otherwise. */
+export function failureReason(error: unknown): string {
+  if (error && typeof error === 'object') {
+    const stderr = (error as { stderr?: unknown }).stderr;
+    if (typeof stderr === 'string' && stderr.trim()) return stderr.trim();
+    if (stderr instanceof Uint8Array && stderr.length > 0) {
+      const text = new TextDecoder().decode(stderr).trim();
+      if (text) return text;
+    }
+    const message = (error as { message?: unknown }).message;
+    if (typeof message === 'string' && message) return message;
+  }
+  return String(error);
+}
+
+/**
+ * `<binary> start <names>`. A refusal carries the runtime's own stderr:
+ * the 2026-09-16 non-heal stayed a mystery for a full day because this
+ * returned a bare `false` over a message that named the cause.
+ */
+export function startContainers(binary: string, names: readonly string[], exec: ContainerExec = defaultExec): StartOutcome {
+  if (names.length === 0) return { started: false, reason: 'nothing to start' };
   try {
     exec([binary, 'start', ...names], CONTAINER_START_TIMEOUT_MS);
-    return true;
-  } catch {
-    return false;
+    return { started: true };
+  } catch (error) {
+    return { started: false, reason: failureReason(error) };
   }
 }
 
 export interface RestartStalledDeps<Binary extends string = string> {
   projectContainers(binary: Binary): ProjectContainer[];
-  startContainers(binary: Binary, names: readonly string[]): boolean;
+  startContainers(binary: Binary, names: readonly string[]): StartOutcome;
   /** Whether the stack answers — the same probe the caller trusts on the happy path. */
   reachable(): Promise<boolean>;
   /** Where "compose left X unstarted; starting it" goes: this is a retry a human should be able to see. */
@@ -117,11 +191,15 @@ export interface RestartStalledDeps<Binary extends string = string> {
 
 const defaultSleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
+export type HealOutcome = { readonly healed: true } | { readonly healed: false; readonly reason: string };
+
 /**
  * One bounded retry after a failed `compose up`. Starts whatever compose
  * left behind unstarted, then waits up to `timeoutMs` for the stack to
- * answer. `true` means it does; `false` means the caller's original
- * failure, with its manual command, is the right thing to raise.
+ * answer. `healed` means it does; otherwise the caller's original
+ * failure, with its manual command, is the right thing to raise — with
+ * the `reason` here appended, because a retry that fails silently is
+ * what made the first version of this look like it had worked.
  *
  * Nothing left behind is not retried: there is nothing to start, and
  * `compose up` a second time is what the human already gets told to do.
@@ -131,9 +209,9 @@ export async function restartStalledStack<Binary extends string>(
   project: string,
   timeoutMs: number,
   deps: RestartStalledDeps<Binary>,
-): Promise<boolean> {
+): Promise<HealOutcome> {
   const containers = deps.projectContainers(binary);
-  if (containers.length === 0) return false;
+  if (containers.length === 0) return { healed: false, reason: `no container of ${project} exists` };
 
   const stalled = stalledContainers(containers, project);
   if (stalled.length > 0) {
@@ -141,7 +219,10 @@ export async function restartStalledStack<Binary extends string>(
       `${project}: ${binary} compose left ${stalled.join(', ')} created but not running; ` +
         `starting ${stalled.length === 1 ? 'it' : 'them'} once and waiting up to ${timeoutMs}ms.`,
     );
-    if (!deps.startContainers(binary, stalled)) return false;
+    const outcome = deps.startContainers(binary, stalled);
+    if (!outcome.started) {
+      return { healed: false, reason: `${binary} start ${stalled.join(' ')} failed: ${outcome.reason}` };
+    }
   } else {
     deps.log(
       `${project}: ${binary} compose returned before ${containers.map((c) => c.name).join(', ')} answered; ` +
@@ -153,9 +234,15 @@ export async function restartStalledStack<Binary extends string>(
   const interval = Math.max(10, Math.min(1_000, Math.floor(timeoutMs / 10)));
   const deadline = Date.now() + timeoutMs;
   let waited = 0;
+  const names = containers.map((c) => c.name).join(', ');
   while (true) {
-    if (await deps.reachable()) return true;
-    if (waited + interval > timeoutMs || Date.now() + interval > deadline) return false;
+    if (await deps.reachable()) return { healed: true };
+    if (waited + interval > timeoutMs || Date.now() + interval > deadline) {
+      return {
+        healed: false,
+        reason: `${names} ${stalled.length > 0 ? 'was started but ' : ''}did not answer within ${timeoutMs}ms`,
+      };
+    }
     await sleep(interval);
     waited += interval;
   }

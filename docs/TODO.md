@@ -534,6 +534,138 @@ makes conventions portable across projects.
 
 Discoveries and constraints. Newest first.
 
+### 2026-09-16 — `e2e/editor.spec.ts`'s "flake" was one race, and it is the harness's: a key sent within the frame after a click is handled at the caret ProseMirror still holds
+
+**What happened.** The v0.5.0 verification saw `:754` (`/table`) time out waiting for "Saved"
+and, rerun alone with `--workers 1`, `:347` produce `"SecondStart."` in the new heading. Both
+sit on the slash-menu path `feat/editor-block-ui` and `feat/editor-block-commands` touched, so
+the suspects were a click running a command against a stale `view.state`, a debounce/`flush`
+race, or the host's capture-phase Enter handler swallowing a key. Measured first, on
+`fix/editor-flake-and-heal` (worktree `fb-fix3`), then read.
+
+**Measured.** `bun run e2e -- e2e/editor.spec.ts --repeat-each 5 --workers 1` on the idle
+machine: `:347` failed 4 of 5 repeats with `"SecondStart."`, and in the one repeat it passed,
+`:754` failed instead — the spec is `serial`, so each failure skipped the rest of that repeat
+(33 passed, 5 failed, 106 skipped). `:754`'s error-context snapshot shows the editor holding an
+*empty paragraph, then the table, then `Before the table.`* and Save refused as "not canonical"
+— the table was inserted above the text, not below it. Both failures are one shape: `Enter`
+after `editor.click()` + `End` split the paragraph at its START, so `/` was typed at the start
+and the block command ran on the paragraph holding the original text — `"Second"` typed at the
+start of `Start.` in one case, a table above `Before the table.` in the other. A throwaway spec
+doing only click, `End`, `Enter` on `Start.` split at the start in **15 of 20** unthrottled runs
+and **0 of 20** under six-times CPU throttling. A page-side event log on the failing runs shows
+why, byte for byte:
+
+    mousedown, setTimeout(20) [ProseMirror's focus timer], focusin, mouseup,
+    keydown End, keyup End, keydown Enter, keyup Enter,
+    selectionchange anchor=#text:0            ← the first one, after Enter, at offset 0
+
+and on the passing runs `selectionchange anchor=#text:6` lands ~14 ms after `mouseup`, before
+`End`. Chrome delivers `selectionchange` at the next rendering opportunity; ProseMirror reads
+the browser's caret only from that event (`prosemirror-view`'s `DOMObserver.onSelectionChange`
+→ `flush()`; its `keydown` handler's `forceFlush()` flushes only a flush that was already
+scheduled). Playwright's `mouseup`, `End` and `Enter` arrive ~1 ms apart — inside one frame —
+so ProseMirror handles `Enter` with the selection it had at mount, the start of the document,
+then writes that selection to the DOM, which is the `#text:0` above. Throttling stretches the
+frame past the next key, hence 0 of 20. No hand is that fast. None of the suspects was it:
+`confirmSlashAt` reads `slashState`, which the plugin view's `update` sets synchronously with
+`view.state`; `flush()` is called before Save; the capture handler returns before touching an
+event with no menu open. Not a stale-state dispatch in this code — a synthetic key inside the
+frame ProseMirror needs.
+
+**What changed.** `EditorSurface.vue` exposes `data-transactions` on the editor root: the count
+the view reports after every transaction (`EditorUpdate.transactionCount`), the pointer's
+selection-only one included. `e2e/editor.spec.ts` replaces every `editor.click()` + `End` with
+`caretToEnd(editor)`: click just inside the last block's right edge — where `End` was taking the
+caret — then wait for `data-transactions` to move past its value before the click. That is
+ProseMirror saying it has read the caret; no timeout, and no longer wait papering over anything.
+The same throwaway spec with that sequence: 0 of 20 at both throttles. `EditorSurface.test.ts`
+proves the attribute follows every reported transaction.
+
+**After.** `bun run e2e -- e2e/editor.spec.ts --repeat-each 5 --workers 1`, same idle machine:
+130 passed, 0 failed, 0 skipped in 10.6 minutes — every test, all five repeats — against
+33 passed, 5 failed, 106 skipped before. `--repeat-each 3`: see the verification line in the
+commit.
+
+**Not fixed here.** `bun run e2e -- e2e/editor.spec.ts --repeat-each 3` (parallel workers, the
+default): 75 passed, 1 failed, 2 did not run on the first invocation; 78 passed on the second.
+The one failure is unrelated to the caret: `:1203` ("the drawer's toolbar row fills its width",
+320x900) measured `Rename…` 17.17 px off the row's edge *after* its own `expect.poll` had just
+seen the difference at ≤ 1 — the poll accepts a single settled-looking sample mid-animation and
+the next measurement disagrees. A poll that requires two consecutive samples with the same row
+width would close it; left as found, it is not on this branch's path. `e2e/comments.spec.ts:332`
+presses `End` on a focused gutter control, not in the editor — a different `End`, no race. The 20 ms focus timer ProseMirror schedules
+(`handlers.focus`: push its selection to the DOM if the two disagree) never fired first in any
+logged run, but it is the other half of the same frame arithmetic and would produce the same
+outcome by a different route; `caretToEnd` covers both because it waits for the transaction
+rather than for either event.
+
+### 2026-09-16 — The self-healing provisioning did not heal because the cause was this process's `PATH`: `bun run` puts `@vercel/nft`'s `nft` in front of nftables' and netavark ran the wrong one
+
+**What happened.** The very next full verification after `2d10af6` ("start a container compose
+left in `Created`") hit the same `podman compose exited with code 125`, the same containers in
+`Created`, and needed the same manual `podman compose up -d --wait` — the mechanism had been
+proven against injected fakes and never against the failure. Investigated on
+`fix/editor-flake-and-heal` (worktree `fb-fix3`) by reproducing the real path, not by reading
+the fakes.
+
+**What was actually wrong.** Not load, not a transient runtime hiccup, and not the label
+filter (podman-compose 1.6.0 stamps both `com.docker.compose.project` and
+`io.podman.compose.project`, verified with `podman inspect`). A shim `podman` script on `PATH`
+that logged every invocation's argv, exit code and stderr showed compose's own `podman start`
+and the heal's `podman start` failing identically within a second of each other, each with the
+message both provisioners had been discarding through `stderr: 'ignore'`:
+
+    Error: unable to start container "…": netavark: nftables error: got invalid json:
+    EOF while parsing a value at line 1 column 0
+
+`bun run <script>` prepends `node_modules/.bin` to `PATH` for the script and every child it
+spawns. Nuxt → nitropack → `@vercel/nft@1.11.0` installs a binary named `nft` there
+(`node_modules/.bin/nft -> ../@vercel/nft/out/cli.js`, present since `e068da6`, 2026-09-03).
+Rootless podman hands network setup to netavark (1.17.2, nftables driver, Fedora 44), which runs
+`nft` by name through that `PATH` — and got Vercel's Node File Trace CLI, which prints
+`Error: File …/list does not exist` on stderr and exits 0 with nothing on stdout; netavark
+parses the empty stdout as JSON and reports exactly the error above. So `podman start` fails
+from any process `bun run` started — `bun run -F @deep-wiki/db test`, `bun run e2e` →
+`e2e/seed.bun.ts`, and the "heal" itself, which ran with the same `PATH` — and succeeds from a
+shell, whose `PATH` has no `node_modules/.bin`. That is the whole of "running the printed
+command by hand started it in three seconds". It only ever showed on a fresh worktree or after
+a reboot because a stack that is already up is never started; the main checkout's containers
+had been up for days. Reproduced deterministically with `CHANGESET_WINDOW_MINUTES=30 bun run
+e2e/seed.bun.ts` alone on a torn-down stack, 3/3; not reproduced by CPU load (eight busy loops),
+by a cold `nuxt dev` compile beside it, or by `Bun.spawn`'s `stdout`/`stderr` mode. The
+2026-09-16 entry below that blamed "the race between `packages/db` and `apps/api` both running
+`podman compose up`" was this same failure, misread for lack of the message.
+
+**What changed.** `packages/db/testing/containers.ts` gains `containerRuntimeEnv()`: the
+environment with every `node_modules/.bin` segment removed from `PATH`, everything else
+untouched; every spawn of the runtime in both provisioners — compose, `ps`, `start` — goes out
+with it (`composeProcessEnv()` in `provision.ts` and `services.ts`). Compose's stderr is
+captured (tail-bounded to 2000 characters) and raised with the failure under "`podman compose
+said:`"; `startContainers` returns `{ started: false, reason }` carrying the runtime's stderr
+instead of a bare `false`, and `restartStalledStack` returns `{ healed: false, reason }` which
+the thrown error ends with ("The one retry did not help: …"). The one retry stays, for the case
+it is honestly good for (compose killed at the bound with the container already created), and
+its comments no longer claim the cause was load. `createProvisionDeps({ identity, env })`
+builds the real dependencies for any worktree identity; `defaultProvisionDeps` is that for the
+running one. The injected tests are kept and extended (stderr in the error, the retry's reason
+in the error, `composeProcessEnv` strips `.bin` and carries the compose variables), and one
+integration test, `packages/db/testing/provision.integration.test.ts`, runs only with `podman`
+on `PATH` (skipped loudly otherwise): it plants its own `node_modules/.bin/nft` that exits 0
+saying nothing, puts it first on `PATH` exactly as `bun run` would, leaves a throwaway compose
+project's postgres in `Created` with `podman compose up -d --no-start`, and drives the real
+`resolveAdminUrl` through real compose, real `ps`, real `start` and the real probe to a running
+server on its own free port, tearing the stack down after itself. Red with the old spawn
+(`netavark: nftables error: got invalid json`, 31 s), green with the fix (6.6 s). The first
+`bun run -F @deep-wiki/db test` on this worktree provisioned its own postgres from nothing,
+which no `bun run` had managed on this host before.
+
+**Not fixed here.** `worktree.ts`'s `listPortOwners` still spawns `podman ps` with the raw
+`PATH` — `ps` never reaches netavark, so it does not matter, and `worktree.ts` is kept free of
+imports for Playwright's Node process. The `-1` that `podman wait --condition=healthy` prints
+on stdout for a healthy container (seen in every successful compose run) is podman-compose's,
+not ours, and is why compose's exit code was already distrusted in `services.ts`.
+
 ### 2026-09-16 — Three e2e failures left on `main` after the regression batch: a stale smoke test, a drag the focus handoff killed, and a compose stack that stayed `Created`
 
 **What happened.** `main` at `d6dcb8a` still failed two e2e specs alone, and the harness that

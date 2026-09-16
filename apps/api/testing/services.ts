@@ -3,19 +3,24 @@
  * directory) is reachable, bringing it up via `podman|docker compose` if
  * neither is. Mirrors packages/db/testing/provision.ts's fixed-argument-
  * vector, bounded-timeout compose invocation (no shell, no user-supplied
- * token) — and, since 2026-09-16, its one bounded retry: a container
- * compose created and never started is started before the failure is
- * raised (`@deep-wiki/db/testing/containers`). There is nothing to
+ * token), its one bounded retry for a container compose created and
+ * never started, and — the part that actually mattered on 2026-09-16 —
+ * its `PATH`: the runtime is spawned without any `node_modules/.bin`,
+ * because netavark resolves `nft` through it and `@vercel/nft` sits
+ * there under `bun run` (`@deep-wiki/db/testing/containers`). Compose's
+ * stderr is kept and raised with the failure. There is nothing to
  * provision per-suite or drop here, both containers are stateless dev
  * tooling.
  */
 import { createHash, createHmac } from 'node:crypto';
 import { connect } from 'node:net';
 import {
+  containerRuntimeEnv,
   listProjectContainers,
   restartStalledStack,
   startContainers,
   type ProjectContainer,
+  type StartOutcome,
 } from '@deep-wiki/db/testing/containers';
 import {
   apiComposeEnv,
@@ -23,6 +28,7 @@ import {
   findForeignPortOwner,
   harnessIdentity,
   listPortOwners,
+  type HarnessIdentity,
 } from '@deep-wiki/db/testing/worktree';
 
 export const COMPOSE_DIR = import.meta.dir;
@@ -115,6 +121,25 @@ function manualCommand(binary: ContainerRuntime): string {
 export interface SpawnResult {
   readonly code: number | null;
   readonly timedOut: boolean;
+  /** What compose wrote to stderr, tail-bounded — the cause of an exit 125 lives here, never on stdout. */
+  readonly stderr: string;
+}
+
+/** How much of compose's stderr a failure message carries: the end, where the error is. */
+const COMPOSE_STDERR_TAIL_CHARS = 2_000;
+
+function stderrTail(text: string): string {
+  const trimmed = text.trim();
+  return trimmed.length <= COMPOSE_STDERR_TAIL_CHARS ? trimmed : `…${trimmed.slice(-COMPOSE_STDERR_TAIL_CHARS)}`;
+}
+
+/**
+ * The environment the compose process runs with: `env` with every
+ * `node_modules/.bin` removed from `PATH` (`containerRuntimeEnv`), plus
+ * this worktree's compose variables on top.
+ */
+export function composeProcessEnv(id: HarnessIdentity, env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  return { ...containerRuntimeEnv(env), ...apiComposeEnv(id) };
 }
 
 /** Every touch of the host, injectable so the retry logic is testable without a container runtime. */
@@ -125,8 +150,8 @@ export interface EnsureTestServicesDeps {
   runCompose(binary: ContainerRuntime, timeoutMs: number): Promise<SpawnResult>;
   /** This project's containers in any state, asked only once compose has already failed. */
   projectContainers(binary: ContainerRuntime): ProjectContainer[];
-  /** `podman|docker start <names>`: true when the runtime accepted it. */
-  startContainers(binary: ContainerRuntime, names: readonly string[]): boolean;
+  /** `podman|docker start <names>`: whether the runtime accepted it, and its stderr when it did not. */
+  startContainers(binary: ContainerRuntime, names: readonly string[]): StartOutcome;
   /** `podman|docker ps` output, used only to name a port's real owner. */
   portOwners(binary: ContainerRuntime): string;
   /** Where the one retry announces itself. */
@@ -140,9 +165,9 @@ async function defaultRunCompose(binary: ContainerRuntime, timeoutMs: number): P
     // flag: verified honoured at `up` time by this host's provider
     // (podman-compose 1.6.0). The compose file interpolates the same
     // variable into its own `name:` so the two can never disagree.
-    env: { ...process.env, ...apiComposeEnv(HARNESS) },
+    env: composeProcessEnv(HARNESS),
     stdout: 'ignore',
-    stderr: 'ignore',
+    stderr: 'pipe',
   });
 
   let timedOut = false;
@@ -150,9 +175,12 @@ async function defaultRunCompose(binary: ContainerRuntime, timeoutMs: number): P
     timedOut = true;
     proc.kill();
   }, timeoutMs);
-  const code = await proc.exited;
+  // Read stderr while the process runs, never after: a compose that fills
+  // the pipe and blocks on it would otherwise wait for a reader that is
+  // itself waiting for the exit.
+  const [code, stderr] = await Promise.all([proc.exited, new Response(proc.stderr).text()]);
   clearTimeout(timer);
-  return { code, timedOut };
+  return { code, timedOut, stderr: stderrTail(stderr) };
 }
 
 export const defaultServiceDeps: EnsureTestServicesDeps = {
@@ -174,10 +202,10 @@ export const defaultServiceDeps: EnsureTestServicesDeps = {
  * reliable success signal on this host (observed returning a nonzero
  * code even once both containers report healthy) — the only trustworthy
  * signal is whether the services actually answer. And when they do not,
- * what compose left behind is started once before giving up: seen
- * 2026-09-16 under load, `up` exited 125 with both containers in
- * `Created`, and every later `up` against the same project name failed
- * the same way until a human ran the printed command.
+ * what compose left behind is started once before giving up, and the
+ * failure carries compose's stderr and the retry's own reason: the
+ * 2026-09-16 exit 125 (both containers in `Created`, every later `up`
+ * the same) was the wrong `nft` on `PATH`, and nothing said so.
  */
 export async function ensureTestServices(
   deps: EnsureTestServicesDeps = defaultServiceDeps,
@@ -200,22 +228,26 @@ export async function ensureTestServices(
     return;
   }
 
-  const healed = await restartStalledStack(binary, HARNESS.apiProjectName, timeoutMs, {
+  const outcome = await restartStalledStack(binary, HARNESS.apiProjectName, timeoutMs, {
     projectContainers: deps.projectContainers,
     startContainers: deps.startContainers,
     reachable: deps.reachable,
     log: deps.log,
   });
-  if (healed) {
+  if (outcome.healed) {
     return;
   }
 
   const collision = foreignOwnerMessage(binary, deps.portOwners(binary));
+  const verdict = result.timedOut
+    ? `${binary} compose did not bring up a reachable Mailpit/MinIO within ${timeoutMs}ms`
+    : `${binary} compose exited with code ${result.code} and Mailpit/MinIO do not answer`;
+  const said = result.stderr ? `\n${binary} compose said:\n${result.stderr}` : '';
   throw new Error(
     collision
       ? `apps/api/testing: ${collision}`
-      : `apps/api/testing: ${binary} compose did not bring up a reachable Mailpit/MinIO within ` +
-        `${timeoutMs}ms. Run ${manualCommand(binary)} manually to see the underlying error.`,
+      : `apps/api/testing: ${verdict}. Run ${manualCommand(binary)} manually to see the underlying error.` +
+        `${said}\nThe one retry did not help: ${outcome.reason}`,
   );
 }
 
