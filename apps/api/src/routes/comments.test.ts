@@ -4,8 +4,8 @@
  * `comment`; creation mints a persisted anchor for an unanchored block;
  * mentions notify only a recipient who can already read the page.
  */
-import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { can, createSession } from '@deep-wiki/db';
+import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
+import { can, createSession, savePage } from '@deep-wiki/db';
 import { provisionTestDatabase, type ProvisionedTestDatabase } from '@deep-wiki/db/testing/provision';
 import { ok, type MailSendError, type MailSender, type Result, type SendMailInput } from '@deep-wiki/core';
 import { sliceBlocks, parse } from '@deep-wiki/markdown';
@@ -367,6 +367,155 @@ describe('POST /pages/:id/comments — anchor minting', () => {
   });
 });
 
+/**
+ * `mintBlockId` fills ten bytes from `crypto.getRandomValues`; filling every
+ * byte with `n` yields `ALPHABET[n % 32]` ten times over
+ * (`packages/markdown/src/mint-anchor.test.ts` drives it the same way).
+ * Deterministic minting is the only way to assert the exclusion set is a
+ * mechanism rather than a bet on the 32^10 id space.
+ */
+const REAL_GET_RANDOM_VALUES = crypto.getRandomValues.bind(crypto);
+
+function stubMintSequence(fillBytes: readonly number[]): void {
+  let call = 0;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (crypto as any).getRandomValues = (bytes: Uint8Array) => {
+    bytes.fill(fillBytes[Math.min(call, fillBytes.length - 1)]!);
+    call++;
+    return bytes;
+  };
+}
+
+afterEach(() => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (crypto as any).getRandomValues = REAL_GET_RANDOM_VALUES;
+});
+
+// docs/TODO.md (2026-09-13, "Still open"): the comment route's mint did not
+// receive the page's known ids, so a fresh anchor could collide with a
+// tombstoned or superseded one by chance and the save inside the same
+// request would refuse it as a dead anchor — a 500 for a legitimate
+// comment. The reserved set is the page's full registry, every status.
+describe('POST /pages/:id/comments — the mint avoids the page\'s retired ids', () => {
+  test('a fresh anchor never takes a tombstoned id, and the request succeeds', async () => {
+    const fixture = await buildFixture();
+    const markdown = 'A paragraph with no persisted anchor yet.\n';
+    await sql`
+      INSERT INTO page_content (node_id, workspace_id, markdown, content_hash)
+      VALUES (${fixture.pageId}, ${fixture.workspaceId}, ${markdown}, 'hash')
+    `;
+    // A retired id nothing in the current markdown mentions: byte 1 → '1'.
+    await sql`
+      INSERT INTO page_blocks (page_id, workspace_id, block_id, excerpt, status, content_hash)
+      VALUES (${fixture.pageId}, ${fixture.workspaceId}, '1111111111', 'gone', 'tombstoned', 'deadhash')
+    `;
+    // First draw collides with the tombstone; the second ('2222222222') is free.
+    stubMintSequence([1, 2]);
+    const [derivedBlock] = sliceBlocks(parse(markdown), markdown);
+
+    const app = buildApp();
+    const res = await app.request(`/pages/${fixture.pageId}/comments`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie: fixture.commenterCookie },
+      body: JSON.stringify({ blockId: derivedBlock!.id, quote: 'A paragraph', body: 'On a fresh block.' }),
+    });
+
+    expect(res.status).toBe(201);
+    const created = (await res.json()) as { id: string; blockId: string };
+    expect(created.blockId).toBe('2222222222');
+    const [row] = await sql<{ markdown: string }[]>`SELECT markdown FROM page_content WHERE node_id = ${fixture.pageId}`;
+    expect(row!.markdown).toContain('^2222222222');
+    expect(row!.markdown).not.toContain('^1111111111');
+  });
+});
+
+// The client reads the block id off the cached HTML it was served. A page
+// saved since then has re-rendered, and a derived id — a hash of the
+// block's text — no longer resolves. That used to fall through to
+// `createRootComment` with the unresolved id and trip `comments_block_fk`:
+// a 500 for what is an ordinary stale-page conflict.
+describe('POST /pages/:id/comments — a block id that no longer resolves', () => {
+  test('answers 409 in the caller\'s terms, and writes nothing', async () => {
+    const fixture = await buildFixture();
+    await sql`
+      INSERT INTO page_content (node_id, workspace_id, markdown, content_hash)
+      VALUES (${fixture.pageId}, ${fixture.workspaceId}, 'The text the reader was served has since changed.\n', 'hash')
+    `;
+
+    const app = buildApp();
+    const res = await app.request(`/pages/${fixture.pageId}/comments`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie: fixture.commenterCookie },
+      body: JSON.stringify({ blockId: 'd:000000000000#0', quote: 'The text', body: 'Too late.' }),
+    });
+
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toMatch(/changed since/i);
+    const [count] = await sql<{ n: string }[]>`SELECT count(*)::text AS n FROM comments WHERE page_id = ${fixture.pageId}`;
+    expect(count!.n).toBe('0');
+  });
+});
+
+// The anchor is the server\'s to compute: the client selects *visible* text
+// off cached HTML and has no offsets into the canonical source to offer.
+// The stored quote must be a substring of the block\'s source, or save-time
+// reconciliation\'s exact rows never apply to it (`locateQuoteInBlock`).
+describe('POST /pages/:id/comments — the anchor is located in the block\'s source', () => {
+  async function seedAndPost(markdown: string, body: Record<string, unknown>) {
+    const fixture = await buildFixture();
+    // A real save, so an anchor already in the markdown has its
+    // `page_blocks` row — `comments_block_fk` names it.
+    await savePage(sql, {
+      nodeId: fixture.pageId,
+      workspaceId: fixture.workspaceId,
+      markdown,
+      expectedContentHash: null,
+      updatedBy: fixture.commenterUserId,
+      changesetWindowMinutes: 30,
+    });
+    const [block] = sliceBlocks(parse(markdown), markdown);
+    const app = buildApp();
+    const res = await app.request(`/pages/${fixture.pageId}/comments`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie: fixture.commenterCookie },
+      body: JSON.stringify({ blockId: block!.id, body: 'A note.', ...body }),
+    });
+    expect(res.status).toBe(201);
+    const created = (await res.json()) as { id: string; blockId: string };
+    const [row] = await sql<{ offset_start: number; offset_end: number; quote: string }[]>`
+      SELECT offset_start, offset_end, quote FROM comments WHERE id = ${created.id}
+    `;
+    const [saved] = await sql<{ markdown: string }[]>`SELECT markdown FROM page_content WHERE node_id = ${fixture.pageId}`;
+    const [savedBlock] = sliceBlocks(parse(saved!.markdown), saved!.markdown);
+    return { row: row!, blockText: savedBlock!.text, created };
+  }
+
+  test('a selection of visible text that spans inline markup is stored as the source window it covers, without offsets from the client', async () => {
+    const { row, blockText } = await seedAndPost('Hello __world__, and more. ^anch01\n', { quote: 'Hello world' });
+    expect(row.quote).toBe('Hello __world');
+    expect(blockText.slice(row.offset_start, row.offset_end)).toBe(row.quote);
+  });
+
+  test('a comment on the block as a whole stores the block\'s source without its anchor, on a block minted in the same request', async () => {
+    const { row, blockText, created } = await seedAndPost('A fresh paragraph, _emphasised_.\n', {});
+    expect(row.quote).toBe('A fresh paragraph, _emphasised_.');
+    expect(row.offset_start).toBe(0);
+    expect(row.offset_end).toBe(row.quote.length);
+    // The mint appended ` ^id` after the excerpt; the excerpt excludes it
+    // and the offsets still index the saved source.
+    expect(blockText).toBe(`A fresh paragraph, _emphasised_. ^${created.blockId}`);
+    expect(blockText.slice(row.offset_start, row.offset_end)).toBe(row.quote);
+  });
+
+  test('offsets the client does send are a hint between repeated occurrences, never the stored truth', async () => {
+    const { row } = await seedAndPost('one two one two one ^rep001\n', { quote: 'one', offsetStart: 9, offsetEnd: 12 });
+    expect(row.offset_start).toBe(8);
+    expect(row.offset_end).toBe(11);
+    expect(row.quote).toBe('one');
+  });
+});
+
 // A reply's `parentId` arrives in the request body while its page comes
 // from the URL, and nothing reconciled the two: the route gated
 // `can('comment')` on the URL's page only, and `comments_parent_fk` keyed
@@ -532,8 +681,44 @@ describe('GET /pages/:id/comments', () => {
 
     expect(res.status).toBe(200);
     const bodyText = await res.text();
-    expect(JSON.parse(bodyText)).toEqual({ threads: [] });
+    expect(JSON.parse(bodyText)).toEqual({ threads: [], canComment: false });
     expectNoDisclosure(JSON.parse(bodyText), { id: comment!.id, values: ['blockk', 'a secret comment body'] }, res.headers);
+  });
+
+  // `canComment` is the caller's *own* grant, which they can learn anyway
+  // by trying to post (403). What the non-disclosure guarantee protects is
+  // the page's comments: for a read-only caller a page with threads and a
+  // page with none answer byte-identically. Without the flag the read
+  // screen could not tell a commenter on a page with no threads yet from a
+  // reader, and the first thread on any page could never be started.
+  test('canComment reports the caller\'s own grant and reveals nothing about the page\'s threads', async () => {
+    const withThreads = await buildFixture();
+    await sql`
+      INSERT INTO page_content (node_id, workspace_id, markdown, content_hash)
+      VALUES (${withThreads.pageId}, ${withThreads.workspaceId}, 'Some text. ^blockk\n', 'hash')
+    `;
+    await sql`
+      INSERT INTO page_blocks (page_id, workspace_id, block_id, status, content_hash, excerpt)
+      VALUES (${withThreads.pageId}, ${withThreads.workspaceId}, 'blockk', 'active', 'h', 'excerpt')
+    `;
+    await sql`
+      INSERT INTO comments (workspace_id, page_id, body, block_id, offset_start, offset_end, quote, quote_hash, status)
+      VALUES (${withThreads.workspaceId}, ${withThreads.pageId}, 'a secret comment body', 'blockk', 0, 4, 'Some', 'h', 'anchored')
+    `;
+    const withoutThreads = await buildFixture();
+    await sql`
+      INSERT INTO page_content (node_id, workspace_id, markdown, content_hash)
+      VALUES (${withoutThreads.pageId}, ${withoutThreads.workspaceId}, 'Some text.\n', 'hash')
+    `;
+    const app = buildApp();
+
+    const readerOnThreads = await (await app.request(`/pages/${withThreads.pageId}/comments`, { headers: { cookie: withThreads.readerCookie } })).text();
+    const readerOnEmpty = await (await app.request(`/pages/${withoutThreads.pageId}/comments`, { headers: { cookie: withoutThreads.readerCookie } })).text();
+    expect(readerOnThreads).toBe(readerOnEmpty);
+    expect(JSON.parse(readerOnEmpty)).toEqual({ threads: [], canComment: false });
+
+    const commenterOnEmpty = await app.request(`/pages/${withoutThreads.pageId}/comments`, { headers: { cookie: withoutThreads.commenterCookie } });
+    expect(await commenterOnEmpty.json()).toEqual({ threads: [], canComment: true });
   });
 
   test('a subject with no read grant receives the same 404 as a nonexistent page', async () => {

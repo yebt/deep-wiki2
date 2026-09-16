@@ -55,6 +55,12 @@ const props = defineProps<{
   busy: boolean;
   writeMessage: string | null;
   announcement: string;
+  /** Threads posted and not yet confirmed (`usePageComments.pendingThreadIds`). */
+  pendingThreadIds?: readonly string[];
+  /** The composer is open — rendered through the `composer` slot above the list. */
+  composing?: boolean;
+  /** Whether the caller may start a thread here: the focused view then offers "Comment on this block". */
+  canStart?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -63,6 +69,8 @@ const emit = defineEmits<{
   reply: [threadId: string, body: string];
   resolve: [threadId: string, resolved: boolean];
   locate: [blockId: string];
+  /** Start a thread on the focused block — a second one beside its mark, or the first from the panel's empty view. */
+  start: [blockId: string];
 }>();
 
 const visible = computed(() =>
@@ -117,10 +125,30 @@ const description = computed(() => {
         {{ writeMessage }}
       </InlineNotice>
 
+      <!-- The composer, above the list: the newest thing on the panel is
+           the one being written. The screen owns its state; this is where
+           it stands (`CommentComposer`). -->
+      <slot v-if="composing" name="composer" />
+
       <!-- Offered only while there is something more to show: on a page
-           whose one thread is the one already open, the offer is noise. -->
-      <div v-if="focusBlockId && visible.length < threads.length" class="flex justify-end">
-        <UButton data-testid="comments-show-all" size="sm" variant="ghost" color="neutral" icon="i-lucide-list" @click="emit('showAll')">
+           whose one thread is the one already open, the offer is noise.
+           "Comment on this block" beside it: a second thread on a block
+           that already has a mark, which the gutter's "+" no longer
+           offers there — and the first, when the panel opened on a block
+           with nothing yet. -->
+      <div v-if="focusBlockId && (visible.length < threads.length || (canStart && !composing))" class="flex flex-wrap justify-end gap-2">
+        <UButton
+          v-if="canStart && !composing"
+          data-testid="comments-start-here"
+          size="sm"
+          variant="ghost"
+          color="neutral"
+          icon="i-lucide-message-square-plus"
+          @click="emit('start', focusBlockId)"
+        >
+          Comment on this block
+        </UButton>
+        <UButton v-if="visible.length < threads.length" data-testid="comments-show-all" size="sm" variant="ghost" color="neutral" icon="i-lucide-list" @click="emit('showAll')">
           Show all {{ plural(threads.length, 'comment') }} on this page
         </UButton>
       </div>
@@ -131,6 +159,7 @@ const description = computed(() => {
             :thread="thread"
             :placement="placementOf(thread)"
             :busy="busy"
+            :pending="pendingThreadIds?.includes(thread.id) ?? false"
             @reply="(threadId, body) => emit('reply', threadId, body)"
             @resolve="(threadId, resolved) => emit('resolve', threadId, resolved)"
             @locate="(blockId) => emit('locate', blockId)"

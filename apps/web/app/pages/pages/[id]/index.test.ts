@@ -123,8 +123,9 @@ function commentThread(overrides: Partial<CommentThread> & { id: string; blockId
  * the mock cannot disagree with the real composable about what a mark
  * means (`usePageComments.test.ts` holds that derivation).
  */
-function mockComments(threads: readonly CommentThread[] = [], status: string = 'success') {
+function mockComments(threads: readonly CommentThread[] = [], status: string = 'success', canComment = threads.length > 0) {
   const load = vi.fn(async () => {});
+  const create = vi.fn(async () => ({ ok: true as const, blockId: 'b1' }));
   const byBlock = new Map<string, number>();
   for (const thread of threads) {
     if (thread.anchor.orphaned) continue;
@@ -137,14 +138,21 @@ function mockComments(threads: readonly CommentThread[] = [], status: string = '
     orphaned: computed(() => threads.filter((thread) => thread.anchor.orphaned)),
     message: ref(status === 'network-error' ? "Couldn't load this page's comments. Check your connection and try again." : ''),
     writeMessage: ref(null),
+    canComment: ref(canComment),
+    pendingThreadIds: computed(() => []),
     load,
     reply: vi.fn(async () => true),
     setResolved: vi.fn(async () => true),
+    create,
   });
-  return load;
+  return Object.assign(load, { create });
 }
 
 const ANCHORED_HTML = '<p data-block-id="b1">First block.</p><p data-block-id="b2">Second block.</p>';
+// A *mark* is "<n> comment(s) on this block"; the "+" is "Comment on this
+// block" — the suffix selectors above match the marks alone (the attribute
+// selector is case-sensitive, and only a mark's name ends in the lowercase
+// word).
 
 async function settle(): Promise<void> {
   await nextTick();
@@ -405,7 +413,7 @@ describe('read-mode page', () => {
 
       expect(load).toHaveBeenCalledTimes(1);
       expect(component.get('article').html()).toContain('data-block-id="b1"');
-      const marks = component.findAll('button[aria-label$="on this block"]');
+      const marks = component.findAll('button[aria-label$="comment on this block"], button[aria-label$="comments on this block"]');
       expect(marks.map((mark) => mark.attributes('aria-label'))).toEqual(['2 comments on this block']);
     });
 
@@ -418,9 +426,112 @@ describe('read-mode page', () => {
       const component = await mount();
       await settle();
 
-      expect(component.find('button[aria-label$="on this block"]').exists()).toBe(false);
+      expect(component.find('button[aria-label$="comment on this block"], button[aria-label$="comments on this block"]').exists()).toBe(false);
       expect(component.find('[data-notice-tier="chip"]').exists()).toBe(false);
       expect(document.body.querySelector('[role="dialog"]')).toBeNull();
+    });
+
+    /*
+     * Starting a thread (the gap gate 10.8 found). The affordance follows
+     * `canComment`, the caller's own grant on the threads response — a
+     * reader gets none even on a page whose blocks are all anchored, and
+     * a commenter gets one beside every block the render named, whether
+     * by a persisted or a derived id, on a page with no thread yet.
+     */
+    describe('starting a thread', () => {
+      const MIXED_HTML = '<p data-block-id="b1">First block.</p><p data-derived-block-id="d:0123456789ab#0">Second block, unanchored.</p><ul><li>a list</li></ul>';
+
+      test('a commenter is offered a "+" beside every commentable block without a thread; a reader is offered nothing', async () => {
+        mockRead({ status: 'success', title: 'A Page', html: MIXED_HTML });
+        mockComments([], 'success', true);
+        const commenter = await mount();
+        await settle();
+        expect(commenter.findAll('button[aria-label="Comment on this block"]')).toHaveLength(2);
+
+        mockRead({ status: 'success', title: 'A Page', html: MIXED_HTML });
+        mockComments([], 'success', false);
+        const reader = await mount();
+        await settle();
+        expect(reader.findAll('button[aria-label="Comment on this block"]')).toHaveLength(0);
+        expect(reader.find('[data-testid="comment-selection-action"]').exists()).toBe(false);
+      });
+
+      test('the "+" opens the panel on that block with the composer quoting the block, and Post sends the thread and announces it', async () => {
+        mockRead({ status: 'success', title: 'A Page', html: MIXED_HTML, workspaceId: 'ws-1' });
+        const load = mockComments([commentThread({ id: 't1', blockId: 'b1' })], 'success', true);
+        const component = await mount();
+        await settle();
+
+        await component.get('button[aria-label="Comment on this block"]').trigger('click');
+        await settle();
+
+        const dialog = document.body.querySelector<HTMLElement>('[role="dialog"]')!;
+        const composer = dialog.querySelector<HTMLElement>('[data-testid="comment-composer"]')!;
+        expect(composer.textContent).toContain('On this block:');
+        expect(composer.querySelector('[data-testid="comment-composer-excerpt"]')!.textContent).toContain('Second block, unanchored.');
+        expect(component.find('[data-testid="comment-highlight"]').exists()).toBe(true);
+
+        const field = composer.querySelector<HTMLTextAreaElement>('textarea')!;
+        field.value = 'Is this still true?';
+        field.dispatchEvent(new Event('input', { bubbles: true }));
+        await settle();
+        composer.querySelector<HTMLElement>('[data-testid="comment-post"]')!.click();
+        await settle();
+
+        expect(load.create).toHaveBeenCalledWith({
+          blockId: 'd:0123456789ab#0',
+          quote: null,
+          excerpt: 'Second block, unanchored.',
+          body: 'Is this still true?',
+          mentionedUserIds: [],
+        });
+        expect(document.body.querySelector('[data-testid="comments-status"]')?.textContent).toContain('Comment posted.');
+        expect(document.body.querySelector('[data-testid="comment-composer"]')).toBeNull();
+      });
+
+      test('Cancel on a block with no thread closes the panel; the comments toggle hides the "+" with the marks', async () => {
+        mockRead({ status: 'success', title: 'A Page', html: MIXED_HTML, workspaceId: 'ws-1' });
+        mockComments([commentThread({ id: 't1', blockId: 'b1' })], 'success', true);
+        const component = await mount();
+        await settle();
+
+        await component.get('button[aria-label="Comment on this block"]').trigger('click');
+        await settle();
+        document.body.querySelector<HTMLElement>('[data-testid="comment-cancel"]')!.click();
+        await settle();
+        expect(document.body.querySelector('[role="dialog"]')).toBeNull();
+
+        await component.get('button[aria-label="Hide comments"]').trigger('click');
+        await settle();
+        expect(component.findAll('button[aria-label="Comment on this block"]')).toHaveLength(0);
+      });
+
+      test('selecting text inside one block floats a "Comment" that opens the composer on those words', async () => {
+        mockRead({ status: 'success', title: 'A Page', html: MIXED_HTML, workspaceId: 'ws-1' });
+        mockComments([], 'success', true);
+        const component = await mount();
+        await settle();
+
+        const paragraph = component.get('article').element.querySelector('p')!;
+        const range = document.createRange();
+        range.setStart(paragraph.firstChild!, 0);
+        range.setEnd(paragraph.firstChild!, 5);
+        const selection = window.getSelection()!;
+        selection.removeAllRanges();
+        selection.addRange(range);
+        document.dispatchEvent(new Event('selectionchange'));
+        await settle();
+
+        const action = component.get('[data-testid="comment-selection-action"]');
+        expect(action.text()).toContain('Comment');
+        await action.get('button').trigger('click');
+        await settle();
+
+        const composer = document.body.querySelector<HTMLElement>('[data-testid="comment-composer"]')!;
+        expect(composer.textContent).toContain('On the selected text:');
+        expect(composer.querySelector('[data-testid="comment-composer-excerpt"]')!.textContent).toContain('First');
+        expect(component.find('[data-testid="comment-selection-action"]').exists()).toBe(false);
+      });
     });
 
     test('a mark opens the panel on that block and highlights the block; closing the panel drops the highlight', async () => {
@@ -460,12 +571,12 @@ describe('read-mode page', () => {
 
         const toggle = component.get('header button[aria-label="Hide comments"]');
         expect(toggle.text()).toBe('');
-        expect(component.findAll('button[aria-label$="on this block"]')).toHaveLength(1);
+        expect(component.findAll('button[aria-label$="comment on this block"], button[aria-label$="comments on this block"]')).toHaveLength(1);
 
         await toggle.trigger('click');
         await settle();
 
-        expect(component.findAll('button[aria-label$="on this block"]')).toHaveLength(0);
+        expect(component.findAll('button[aria-label$="comment on this block"], button[aria-label$="comments on this block"]')).toHaveLength(0);
         expect(component.find('header button[aria-label^="Show comments"]').exists()).toBe(true);
         expect(component.get('[data-testid="comments-visibility-status"]').text()).toBe('Comments hidden.');
         expect(load).toHaveBeenCalledTimes(1);
@@ -480,10 +591,10 @@ describe('read-mode page', () => {
         await settle();
 
         expect(load).toHaveBeenCalledTimes(1);
-        expect(wrapper.findAll('button[aria-label$="on this block"]')).toHaveLength(0);
+        expect(wrapper.findAll('button[aria-label$="comment on this block"], button[aria-label$="comments on this block"]')).toHaveLength(0);
         await wrapper.get('header button[aria-label^="Show comments"]').trigger('click');
         await settle();
-        expect(wrapper.findAll('button[aria-label$="on this block"]')).toHaveLength(1);
+        expect(wrapper.findAll('button[aria-label$="comment on this block"], button[aria-label$="comments on this block"]')).toHaveLength(1);
         expect(wrapper.get('[data-testid="comments-visibility-status"]').text()).toBe('Comments shown.');
       });
 
@@ -532,7 +643,7 @@ describe('read-mode page', () => {
           expect(load, `hidden=${hidden}`).toHaveBeenCalledTimes(1);
           expect(loadMentions, `hidden=${hidden}`).not.toHaveBeenCalled();
           expect(wrapper.find('header button[aria-label*="comments"]').exists(), `hidden=${hidden}`).toBe(false);
-          expect(wrapper.find('button[aria-label$="on this block"]').exists(), `hidden=${hidden}`).toBe(false);
+          expect(wrapper.find('button[aria-label$="comment on this block"], button[aria-label$="comments on this block"]').exists(), `hidden=${hidden}`).toBe(false);
           wrapper.unmount();
         }
       });
@@ -551,7 +662,7 @@ describe('read-mode page', () => {
       const chip = component.get('[data-testid="comments-orphaned"]');
       expect(chip.text()).toMatch(/1 comment points at text that is no longer on this page/);
       // Not a mark: an orphan has no block to stand beside.
-      expect(component.findAll('button[aria-label$="on this block"]')).toHaveLength(1);
+      expect(component.findAll('button[aria-label$="comment on this block"], button[aria-label$="comments on this block"]')).toHaveLength(1);
 
       await chip.get('button').trigger('click');
       await settle();
@@ -577,7 +688,7 @@ describe('read-mode page', () => {
       const component = await mount();
       await settle();
 
-      expect(component.find('button[aria-label$="on this block"]').exists()).toBe(false);
+      expect(component.find('button[aria-label$="comment on this block"], button[aria-label$="comments on this block"]').exists()).toBe(false);
       const chip = component.get('[data-testid="comments-unplaced"]');
       expect(chip.text()).toMatch(/2 comments can't be shown beside their text until this page is re-rendered/);
 

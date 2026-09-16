@@ -2,9 +2,10 @@
 /**
  * The marks beside anchored blocks — the comment overlay's visible half
  * (comment-overlay spec: "The Client Composes Indicators Onto Unchanged
- * Cached HTML"; docs/UI-CHECKLIST.md §4.7). Presentational: `useBlockPlacement`
- * decides where a mark goes and `usePageComments` what it counts; this
- * draws them.
+ * Cached HTML"; docs/UI-CHECKLIST.md §4.7) — and, beside every other
+ * block, the way to start a thread. Presentational: `useBlockPlacement`
+ * decides where a mark or a slot goes and `usePageComments` what a mark
+ * counts; this draws them.
  *
  * ## Where it stands
  *
@@ -34,55 +35,141 @@
  * tonal fill, which is the one thing a container fill is for (§5.2:
  * selected/active), and says so with `aria-pressed`.
  *
- * ## What it is not
+ * ## What a "+" is
  *
- * Not a place to start a thread: creating one from the read screen is
- * not in this batch (tasks.md 10.7 names display, reply and resolve), so
- * a block with no comments draws no mark and the gutter is absent
- * entirely — for a read-only caller that is also what the API returns.
+ * The same 32px control beside a block that has no mark — every
+ * paragraph and heading the render named (`utils/block-element.ts`) —
+ * named "Comment on this block", tooltipped, opening the composer on
+ * click. It is drawn quiet (`opacity-0`) and revealed while its block is
+ * hovered (the screen tracks the pointer over the article and says which
+ * block it is on) or the control itself is hovered or focused; a
+ * hundred "+" at full weight beside a long page would be chrome louder
+ * than the content (§4.4). Quiet is not gone: the control keeps its
+ * place, its size and its name, so a keyboard reaches it exactly as it
+ * reaches a mark. It is offered only when the API said the caller may
+ * comment — `canComment` on the threads response — so a reader sees no
+ * affordance at all, not an empty one (§3, "permission-denied … never a
+ * silently empty list", and the comment-overlay spec's reader).
+ *
+ * ## Keyboard
+ *
+ * A long page has a control per block, so the gutter is one tab stop
+ * with a roving tabindex, not a hundred: `ArrowDown`/`ArrowUp` move
+ * between marks and "+" in document order, `Home`/`End` to the ends,
+ * and the list says so in a description a screen reader is given (§4.1's
+ * rule that a hand-rolled group owes the keyboard contract a library
+ * primitive would bring; §5's "name the keys in the UI").
  */
-import type { PlacedMark } from '~/composables/useBlockPlacement';
+import type { PlacedBlock, PlacedMark } from '~/composables/useBlockPlacement';
 
-defineProps<{
+const props = defineProps<{
   marks: readonly PlacedMark[];
+  /** Every commentable block on the page, in document order — where a thread could be started. */
+  blocks: readonly PlacedBlock[];
   /** The block whose threads the panel is showing — its mark reads as pressed. */
   activeBlockId: string | null;
+  /** The block the pointer is over — its "+" is revealed. */
+  hoveredBlockId: string | null;
+  /** Whether the caller may start a thread here (the API's `canComment`). */
+  canStart: boolean;
 }>();
 
-const emit = defineEmits<{ open: [blockId: string] }>();
+const emit = defineEmits<{ open: [blockId: string]; start: [blockId: string] }>();
 
-function label(mark: PlacedMark): string {
-  return mark.count === 1 ? '1 comment on this block' : `${mark.count} comments on this block`;
+type Slot = { readonly kind: 'mark'; readonly blockId: string; readonly top: number; readonly count: number } | { readonly kind: 'start'; readonly blockId: string; readonly top: number };
+
+/** Marks and "+" as one list in document order — the order the arrow keys walk. */
+const slots = computed<readonly Slot[]>(() => {
+  const marked = new Set(props.marks.map((mark) => mark.blockId));
+  const all: Slot[] = props.marks.map((mark) => ({ kind: 'mark', blockId: mark.blockId, top: mark.top, count: mark.count }));
+  if (props.canStart) {
+    for (const block of props.blocks) {
+      if (!marked.has(block.blockId)) all.push({ kind: 'start', blockId: block.blockId, top: block.top });
+    }
+  }
+  return all.sort((a, b) => a.top - b.top);
+});
+
+function label(count: number): string {
+  return count === 1 ? '1 comment on this block' : `${count} comments on this block`;
 }
+
+const keysId = useId();
+const focusIndex = ref(0);
+const list = useTemplateRef<HTMLElement>('list');
+
+function focusSlot(index: number): void {
+  const bounded = Math.max(0, Math.min(index, slots.value.length - 1));
+  focusIndex.value = bounded;
+  list.value?.querySelectorAll<HTMLElement>('button')[bounded]?.focus();
+}
+
+function onKeydown(event: KeyboardEvent): void {
+  const handlers: Record<string, () => void> = {
+    ArrowDown: () => focusSlot(focusIndex.value + 1),
+    ArrowUp: () => focusSlot(focusIndex.value - 1),
+    Home: () => focusSlot(0),
+    End: () => focusSlot(slots.value.length - 1),
+  };
+  const handler = handlers[event.key];
+  if (!handler) return;
+  event.preventDefault();
+  handler();
+}
+
+watch(slots, (next) => {
+  if (focusIndex.value >= next.length) focusIndex.value = Math.max(0, next.length - 1);
+});
 </script>
 
 <template>
   <ul
-    v-if="marks.length > 0"
+    v-if="slots.length > 0"
+    ref="list"
     aria-label="Comments beside the text"
+    :aria-describedby="keysId"
     class="absolute inset-y-0 right-0 w-8 md:left-full md:right-auto md:ms-2"
+    @keydown="onKeydown"
   >
+    <li :id="keysId" class="sr-only">Use the arrow keys to move between blocks, Home and End for the first and last.</li>
     <li
-      v-for="mark in marks"
-      :key="mark.blockId"
-      data-testid="comment-mark"
-      class="absolute left-0"
-      :style="{ top: `${mark.top}px` }"
+      v-for="(slot, index) in slots"
+      :key="slot.blockId"
+      :data-testid="slot.kind === 'mark' ? 'comment-mark' : 'comment-start'"
+      :data-revealed="slot.kind === 'start' ? String(hoveredBlockId === slot.blockId) : undefined"
+      class="group absolute left-0"
+      :style="{ top: `${slot.top}px` }"
+      @focusin="focusIndex = index"
     >
-      <UChip :text="mark.count" :show="mark.count > 1" color="primary" size="xl" inset>
-        <UTooltip :text="label(mark)">
+      <UChip v-if="slot.kind === 'mark'" :text="slot.count" :show="slot.count > 1" color="primary" size="xl" inset>
+        <UTooltip :text="label(slot.count)">
           <UButton
             square
             size="sm"
-            :variant="activeBlockId === mark.blockId ? 'soft' : 'ghost'"
-            :color="activeBlockId === mark.blockId ? 'primary' : 'neutral'"
+            :variant="activeBlockId === slot.blockId ? 'soft' : 'ghost'"
+            :color="activeBlockId === slot.blockId ? 'primary' : 'neutral'"
             icon="i-lucide-message-square"
-            :aria-label="label(mark)"
-            :aria-pressed="activeBlockId === mark.blockId ? 'true' : 'false'"
-            @click="emit('open', mark.blockId)"
+            :aria-label="label(slot.count)"
+            :aria-pressed="activeBlockId === slot.blockId ? 'true' : 'false'"
+            :tabindex="index === focusIndex ? 0 : -1"
+            @click="emit('open', slot.blockId)"
           />
         </UTooltip>
       </UChip>
+      <UTooltip v-else text="Comment on this block">
+        <UButton
+          square
+          size="sm"
+          variant="ghost"
+          color="neutral"
+          icon="i-lucide-message-square-plus"
+          aria-label="Comment on this block"
+          class="transition-opacity duration-150 ease-standard motion-reduce:transition-none"
+          :class="hoveredBlockId === slot.blockId ? 'opacity-100' : 'opacity-0 hover:opacity-100 focus-visible:opacity-100'"
+          :tabindex="index === focusIndex ? 0 : -1"
+          @click="emit('start', slot.blockId)"
+        />
+      </UTooltip>
     </li>
   </ul>
 </template>

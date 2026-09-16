@@ -51,7 +51,7 @@ describe('readPageHtml (read mode)', () => {
 
     const result = await readPageHtml(sql, ref);
 
-    expect(result?.renderedHtml).toContain('<h1>');
+    expect(result?.renderedHtml).toMatch(/<h1[ >]/);
     expect(result?.renderedHtml).toContain('Hello');
   });
 

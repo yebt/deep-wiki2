@@ -54,8 +54,10 @@ const props = withDefaults(
     placement: ThreadPlacement;
     /** A write on this page is in flight — controls stay in the tab order and explain themselves. */
     busy?: boolean;
+    /** Posted a moment ago and not yet confirmed by the server: shown and counted, not yet repliable. */
+    pending?: boolean;
   }>(),
-  { busy: false },
+  { busy: false, pending: false },
 );
 
 const emit = defineEmits<{
@@ -104,7 +106,7 @@ const headingId = useId();
       </div>
       <blockquote class="border-s-2 border-default ps-3 text-body-small text-muted">“{{ thread.anchor.quote }}”</blockquote>
       <UButton
-        v-if="placement === 'anchored'"
+        v-if="placement === 'anchored' && !pending"
         data-testid="comment-locate"
         size="sm"
         variant="ghost"
@@ -122,6 +124,12 @@ const headingId = useId();
       <!-- Colour is never the only signal (§5): the word and the icon. -->
       <UBadge v-if="thread.resolved" data-testid="comment-resolved" variant="outline" color="success" icon="i-lucide-check" size="sm">
         Resolved
+      </UBadge>
+      <!-- The optimistic thread (§3, "Success — confirmed visibly"): on
+           the page the moment Post is pressed, and marked as not yet the
+           server's word — in text, not only by the missing controls. -->
+      <UBadge v-else-if="pending" data-testid="comment-pending" role="status" variant="outline" color="neutral" icon="i-lucide-loader-circle" size="sm">
+        Posting…
       </UBadge>
     </div>
     <p class="text-body-small text-muted">
@@ -141,11 +149,12 @@ const headingId = useId();
 
     <!-- 16px above the form: the 4dp grid, one step below the 24px that
          separates two field groups (§7.4) — this is one field inside an
-         object, not a form of its own. -->
-    <UFormField label="Reply" class="mt-4">
+         object, not a form of its own. A pending thread has no id to reply
+         to or resolve yet; the controls follow the server's confirmation. -->
+    <UFormField v-if="!pending" label="Reply" class="mt-4">
       <UTextarea v-model="draft" :rows="2" autoresize class="w-full" :aria-disabled="busy || undefined" @keydown.ctrl.enter.prevent="submitReply" />
     </UFormField>
-    <div class="mt-2 flex flex-wrap items-center gap-2">
+    <div v-if="!pending" class="mt-2 flex flex-wrap items-center gap-2">
       <UButton
         data-testid="comment-reply-submit"
         size="sm"

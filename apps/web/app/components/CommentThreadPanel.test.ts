@@ -43,6 +43,7 @@ afterEach(() => {
 });
 
 async function mountPanel(props: Partial<PanelProps> = {}) {
+  wrapper?.unmount();
   wrapper = await mountSuspended(
     defineComponent({
       name: 'PanelInApp',
@@ -158,5 +159,60 @@ describe('CommentThreadPanel', () => {
     await nextTick();
 
     expect(panel.emitted('update:open')).toEqual([[false]]);
+  });
+
+  // Starting a thread from the panel (tasks.md 10.7's gap): the composer
+  // stands above the list when open, and the focused view offers
+  // "Comment on this block" to a caller who may — the second thread on a
+  // marked block, or the first from an empty view.
+  describe('starting a thread', () => {
+    test('renders the composer slot above the list while composing', async () => {
+      wrapper = await mountSuspended(
+        defineComponent({
+          name: 'PanelWithComposer',
+          setup: () => () =>
+            h(UApp, null, {
+              default: () =>
+                h(
+                  CommentThreadPanel,
+                  { open: true, threads: THREADS, focusBlockId: 'b1', unplacedBlockIds: [], busy: false, writeMessage: null, announcement: '', composing: true, canStart: true },
+                  { composer: () => h('p', { 'data-testid': 'the-composer' }, 'composer here') },
+                ),
+            }),
+        }),
+      );
+      await nextTick();
+      await nextTick();
+
+      const dialog = body().querySelector('[role="dialog"]')!;
+      const composer = dialog.querySelector('[data-testid="the-composer"]')!;
+      const list = dialog.querySelector('ol')!;
+      expect(composer.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      // While composing, the offer to start is not repeated.
+      expect(body().querySelector('[data-testid="comments-start-here"]')).toBeNull();
+    });
+
+    test('the focused view offers "Comment on this block" to a caller who may, and asks the screen to start one there', async () => {
+      const mounted = await mountPanel({ focusBlockId: 'b1', threads: [thread({ id: 't1', blockId: 'b1' })], canStart: true });
+      const start = body().querySelector<HTMLElement>('[data-testid="comments-start-here"]')!;
+      expect(start.textContent).toContain('Comment on this block');
+      start.click();
+      await nextTick();
+      expect(mounted.findComponent(CommentThreadPanel).emitted('start')).toEqual([['b1']]);
+
+      await mountPanel({ focusBlockId: 'b1', threads: [thread({ id: 't1', blockId: 'b1' })], canStart: false });
+      expect(body().querySelector('[data-testid="comments-start-here"]')).toBeNull();
+    });
+
+    test('a pending thread is shown in its place, marked as posting, without reply or resolve', async () => {
+      await mountPanel({ focusBlockId: 'b1', threads: [thread({ id: 't1', blockId: 'b1' }), thread({ id: 'pending:1', blockId: 'b1' })], pendingThreadIds: ['pending:1'] });
+
+      expect(quotes()).toHaveLength(2);
+      const pending = body().querySelector<HTMLElement>('[data-testid="comment-pending"]')!;
+      expect(pending.textContent).toContain('Posting');
+      expect(pending.getAttribute('role')).toBe('status');
+      expect(body().querySelectorAll('[data-testid="comment-reply-submit"]')).toHaveLength(1);
+      expect(body().querySelectorAll('[data-testid="comment-resolve"]')).toHaveLength(1);
+    });
   });
 });

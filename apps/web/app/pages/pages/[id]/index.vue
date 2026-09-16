@@ -17,12 +17,16 @@
  * - Data needed: the cached HTML this page's last save produced. Nothing
  *   else exists to render before that response arrives.
  * - Non-goals: no editing, no parsing, no AI panel. Comments are read,
- *   replied to and resolved here (tasks.md 10.7); starting a new thread
- *   is not in this batch.
+ *   replied to, resolved and — since 2026-09-16 — started here (tasks.md
+ *   10.7 named display, reply and resolve; the owner could not comment on
+ *   a document at all, which blocked gate 10.8).
  * - Empty / overflow: a page with a 12,000-word document is exactly what
  *   the constrained measure and skeleton exist for; there is no
- *   "too much" state beyond normal scrolling.
+ *   "too much" state beyond normal scrolling. Its two hundred "+" slots
+ *   are one tab stop (`CommentGutter`), drawn quiet until hovered.
  */
+import { adoptMintedAnchor, blockIdOf, blockSelector, commentableBlockOf } from '~/utils/block-element';
+import type { NewThreadTarget } from '~/composables/useNewThread';
 // Inside the workspace layout: the frame is mounted once and this screen
 // renders only its pane, so the sidebar's tree keeps its scroll and its
 // folds when the person arrives here from a row (`layouts/workspace.vue`).
@@ -122,9 +126,23 @@ const offersPageSurfaces = computed(() => status.value !== 'forbidden' && status
  * error). Both chips open the panel on the full list, where the thread
  * renders with its excerpt and a sentence saying which of the two it is.
  */
-const comments = usePageComments(nodeId);
 const articleEl = ref<HTMLElement | null>(null);
-const { placed, unplaced } = useBlockPlacement(articleEl, comments.indicators);
+/** The block whose threads the panel shows — set by a mark, a "+", a selection, or a chip; cleared when the panel closes. */
+const focusBlockId = ref<string | null>(null);
+const comments = usePageComments(nodeId, {
+  // A thread started on a block with no persisted anchor names it by the
+  // derived id the render carried; the server mints a real anchor in the
+  // same request and re-renders the page. This DOM is the old render, so
+  // the block adopts the minted id here — before the reload, whose thread
+  // will carry it — and the mark lands beside its text without a page
+  // reload (`utils/block-element.ts`).
+  onAnchorMinted: (derivedId, persistedId) => {
+    if (articleEl.value) adoptMintedAnchor(articleEl.value, derivedId, persistedId);
+    // The panel is open on that block: keep it on the block under its new name.
+    if (focusBlockId.value === derivedId) focusBlockId.value = persistedId;
+  },
+});
+const { placed, unplaced, blocks } = useBlockPlacement(articleEl, comments.indicators);
 
 /**
  * The comments toggle — the owner: "the comments on the document should
@@ -172,9 +190,123 @@ function toggleComments(): void {
 }
 
 const panelOpen = ref(false);
-const focusBlockId = ref<string | null>(null);
 const busy = ref(false);
 const announcement = ref('');
+
+/**
+ * Starting a thread (docs/UI-CHECKLIST.md §4.7; the gap gate 10.8 found).
+ * Two ways in, one composer:
+ *
+ * - **A block.** Beside every paragraph and heading the render named
+ *   (`data-block-id`, or `data-derived-block-id` for one with no anchor
+ *   yet), the gutter offers a "+" — revealed while the pointer is over
+ *   the block, always reachable by keyboard. The thread is about the
+ *   whole block; the excerpt shown meanwhile is the block's own text, and
+ *   the server stores the block's source (comment-threads spec).
+ * - **A selection.** Selecting text inside one block floats a "Comment"
+ *   beside the selection; the selected words become the excerpt, and the
+ *   server locates them in the block's source so the anchor survives
+ *   later saves (`locateQuoteInBlock`). A selection that crosses blocks
+ *   offers nothing: an anchor is one block.
+ *
+ * Both open the panel on that block with `CommentComposer` at the top
+ * (`useNewThread` holds the draft). Posting is optimistic — the mark and
+ * the thread appear at once, marked "Posting…", and the server's list
+ * replaces them; on failure the composer stays open with the text and
+ * the panel's notice says so (§3). Offered only when the API said this
+ * caller may comment (`canComment`) — a reader sees no affordance, not an
+ * empty one — and put away with the comments toggle, like the marks.
+ */
+const newThread = useNewThread({ create: comments.create });
+const composing = computed(() => newThread.status.value !== 'closed');
+const canStart = computed(() => comments.canComment.value && !commentsHidden.value);
+const hoveredBlockId = ref<string | null>(null);
+const selectionTarget = ref<(NewThreadTarget & { top: number; left: number }) | null>(null);
+const overlayEl = ref<HTMLElement | null>(null);
+
+/** Which block the pointer is over — the gutter reveals that block's "+". */
+function onArticleMouseover(event: MouseEvent): void {
+  if (!canStart.value || !articleEl.value) return;
+  const block = commentableBlockOf(event.target as Node, articleEl.value);
+  hoveredBlockId.value = block ? blockIdOf(block) : null;
+}
+
+function beginThread(target: NewThreadTarget): void {
+  newThread.begin(target);
+  selectionTarget.value = null;
+  focusBlockId.value = target.blockId;
+  panelOpen.value = true;
+}
+
+/** The gutter's "+" and the panel's "Comment on this block": a thread about the block as a whole. */
+function startThreadOnBlock(blockId: string): void {
+  const element = articleEl.value?.querySelector<HTMLElement>(blockSelector(blockId));
+  beginThread({ blockId, quote: null, excerpt: element?.textContent?.trim() ?? '' });
+}
+
+/** The floating "Comment" beside a selection: a thread about those words. */
+function startThreadOnSelection(): void {
+  const target = selectionTarget.value;
+  if (!target) return;
+  beginThread({ blockId: target.blockId, quote: target.quote, excerpt: target.excerpt });
+  window.getSelection()?.removeAllRanges();
+}
+
+/**
+ * Where the floating "Comment" stands: read off the live selection
+ * whenever it changes, and only while it is one block's worth of text.
+ * Measured against the same wrapper the marks are placed in, above the
+ * selection's first line — or below it when there is no room above.
+ */
+function onSelectionChange(): void {
+  const root = articleEl.value;
+  const wrapper = overlayEl.value;
+  if (!canStart.value || !root || !wrapper || composing.value) {
+    selectionTarget.value = null;
+    return;
+  }
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
+    selectionTarget.value = null;
+    return;
+  }
+  const quote = selection.toString().trim();
+  const block = commentableBlockOf(selection.anchorNode, root);
+  if (!quote || !block || block !== commentableBlockOf(selection.focusNode, root)) {
+    selectionTarget.value = null;
+    return;
+  }
+  const rect = selection.getRangeAt(0).getBoundingClientRect();
+  const frame = wrapper.getBoundingClientRect();
+  const above = rect.top - frame.top - 40;
+  selectionTarget.value = {
+    blockId: blockIdOf(block)!,
+    quote,
+    excerpt: quote,
+    top: above >= 0 ? above : rect.bottom - frame.top + 4,
+    left: Math.max(0, Math.min(rect.left - frame.left, frame.width - 128)),
+  };
+}
+
+onMounted(() => document.addEventListener('selectionchange', onSelectionChange));
+onBeforeUnmount(() => document.removeEventListener('selectionchange', onSelectionChange));
+
+async function onPost(): Promise<void> {
+  announcement.value = '';
+  const ok = await newThread.post();
+  if (ok) announcement.value = 'Comment posted.';
+}
+
+function onCancel(): void {
+  const blockId = newThread.target.value?.blockId;
+  newThread.cancel();
+  // Nothing else to show on this block: close, and let the panel return
+  // focus to the control that opened it.
+  if (blockId && !comments.threads.value.some((thread) => thread.anchor.blockId === blockId)) {
+    panelOpen.value = false;
+    focusBlockId.value = null;
+  }
+}
 
 /** Anchored threads with no block on screen: the "no anchors known" count the chip states. */
 const unplacedThreadCount = computed(
@@ -193,13 +325,18 @@ function openAll(): void {
 
 function onPanelOpen(open: boolean): void {
   panelOpen.value = open;
-  if (!open) focusBlockId.value = null;
+  if (!open) {
+    focusBlockId.value = null;
+    // Closing the panel with nothing typed is a cancel; with a draft, the
+    // draft survives and the next "+" reopens the composer with it.
+    if (composing.value && newThread.body.value.trim() === '') newThread.cancel();
+  }
 }
 
 /** "Show in page" from the panel: scroll the block into view and highlight it (§4.7). */
 function locate(blockId: string): void {
   focusBlockId.value = blockId;
-  articleEl.value?.querySelector(`[data-block-id="${CSS.escape(blockId)}"]`)?.scrollIntoView({ block: 'center' });
+  articleEl.value?.querySelector(blockSelector(blockId))?.scrollIntoView({ block: 'center' });
 }
 
 /** The highlighted block's box, measured against the same wrapper the marks are placed in. */
@@ -209,7 +346,7 @@ const highlight = computed<{ top: number; height: number } | null>(() => {
   const blockId = focusBlockId.value;
   const root = articleEl.value;
   if (!blockId || !root) return null;
-  const element = root.querySelector<HTMLElement>(`[data-block-id="${CSS.escape(blockId)}"]`);
+  const element = root.querySelector<HTMLElement>(blockSelector(blockId));
   return element ? { top: element.offsetTop, height: element.offsetHeight } : null;
 });
 
@@ -458,7 +595,7 @@ useSeoMeta({ title: () => (title.value ? `${title.value} — deep-wiki` : 'deep-
            article gives up 40px of end padding for the marks only below
            `md` and only while a mark exists — from `md` up they stand in
            the margin outside the column (see `CommentGutter`). -->
-      <div class="relative isolate">
+      <div ref="overlayEl" class="relative isolate" @mouseover="onArticleMouseover" @mouseleave="hoveredBlockId = null">
         <div
           v-if="highlight"
           data-testid="comment-highlight"
@@ -466,9 +603,28 @@ useSeoMeta({ title: () => (title.value ? `${title.value} — deep-wiki` : 'deep-
           class="absolute -inset-x-2 -z-10 rounded-md bg-secondary-container"
           :style="{ top: `${highlight.top}px`, height: `${highlight.height}px` }"
         />
-        <!-- eslint-disable-next-line vue/no-v-html -- `html` is server-produced by remark-rehype + rehype-sanitize with an explicit allowlist (design.md D12); it is never client-supplied or user-editable at this route. -->
-        <article ref="articleEl" class="doc-body text-doc-body text-default" :class="placed.length > 0 && !commentsHidden ? 'pe-10 md:pe-0' : undefined" v-html="html" />
-        <CommentGutter v-if="!commentsHidden" :marks="placed" :active-block-id="panelOpen ? focusBlockId : null" @open="openBlock" />
+        <!-- `html` is server-produced by remark-rehype + rehype-sanitize with an explicit allowlist (design.md D12); it is never client-supplied or user-editable at this route. -->
+        <!-- eslint-disable-next-line vue/no-v-html -->
+        <article ref="articleEl" class="doc-body text-doc-body text-default" :class="(placed.length > 0 || canStart) && !commentsHidden ? 'pe-10 md:pe-0' : undefined" v-html="html" />
+        <CommentGutter
+          v-if="!commentsHidden"
+          :marks="placed"
+          :blocks="blocks"
+          :active-block-id="panelOpen ? focusBlockId : null"
+          :hovered-block-id="hoveredBlockId"
+          :can-start="canStart"
+          @open="openBlock"
+          @start="startThreadOnBlock"
+        />
+        <!-- The floating "Comment" beside a selection (see the script's
+             note): a small tonal action — icon and word both (§4.3) —
+             at the selection's own place. `mousedown.prevent` keeps the
+             selection alive across the click that uses it. -->
+        <div v-if="selectionTarget" data-testid="comment-selection-action" class="absolute z-10" :style="{ top: `${selectionTarget.top}px`, left: `${selectionTarget.left}px` }">
+          <UButton size="sm" variant="soft" color="primary" icon="i-lucide-message-square-plus" @mousedown.prevent @click="startThreadOnSelection">
+            Comment
+          </UButton>
+        </div>
       </div>
 
       <CommentThreadPanel
@@ -479,12 +635,30 @@ useSeoMeta({ title: () => (title.value ? `${title.value} — deep-wiki` : 'deep-
         :busy="busy"
         :write-message="comments.writeMessage.value"
         :announcement="announcement"
+        :pending-thread-ids="comments.pendingThreadIds.value"
+        :composing="composing"
+        :can-start="canStart"
         @update:open="onPanelOpen"
         @show-all="focusBlockId = null"
         @reply="onReply"
         @resolve="onResolve"
         @locate="locate"
-      />
+        @start="startThreadOnBlock"
+      >
+        <template #composer>
+          <CommentComposer
+            v-if="newThread.target.value && workspaceId"
+            v-model:body="newThread.body.value"
+            v-model:mentions="newThread.mentions.value"
+            :target="newThread.target.value"
+            :status="newThread.status.value"
+            :workspace-id="workspaceId"
+            :page-id="nodeId"
+            @post="onPost"
+            @cancel="onCancel"
+          />
+        </template>
+      </CommentThreadPanel>
     </template>
   </AppShell>
 </template>
