@@ -28,7 +28,8 @@ interface Fixtures {
 
 const fixtures: Fixtures = JSON.parse(readFileSync(new URL('.auth-fixtures.json', import.meta.url), 'utf8'));
 
-test.describe.configure({ mode: 'serial' });
+/** Serial, with the frame's own budget (e2e/frame.spec.ts): every test here signs in through the real form and the dev server compiles each route on its first visit. */
+test.describe.configure({ mode: 'serial', timeout: 120_000 });
 
 /** See e2e/auth.spec.ts: wait for hydration, not merely for the network. */
 async function goto(page: Page, path: string): Promise<void> {
@@ -105,16 +106,75 @@ test('a fresh user creates a workspace by clicking, is handed the members screen
   expect(workspaceUrl).toMatch(/\/workspaces\/[0-9a-f-]{36}\/members$/);
 
   // The screen the creation handed off to: invite a colleague from it and
-  // see the invitation pending — the same session, no address typed.
+  // see the invitation pending — the same session, no address typed. The
+  // form is a dialog behind the screen's one primary action (owner
+  // review, 2026-09-16); the fields inside are the reviewed ones.
   await expect(page.getByText(/no pending invitations/i)).toBeVisible();
-  await page.getByLabel('Email').fill(fixtures.colleagueEmail);
-  await page.getByRole('radio', { name: /write/i }).click();
-  await page.getByRole('button', { name: /send invitation/i }).click();
+  await expect(page.getByLabel('Email')).toHaveCount(0);
+  await shotM(page, 'members-1280-light');
+  const inviteButton = page.getByRole('button', { name: /invite someone/i });
+  await inviteButton.click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole('heading', { name: /invite someone/i })).toBeVisible();
+  // Focus is trapped in the dialog: Tab from its last control wraps to its first.
+  expect(await page.evaluate(() => document.activeElement?.closest('[role="dialog"]') !== null), 'focus moved into the dialog').toBe(true);
+  await dialog.getByLabel('Email').fill(fixtures.colleagueEmail);
+  await dialog.getByRole('radio', { name: /write/i }).click();
+  await shotM(page, 'invite-1280-light');
+  await dialog.getByRole('button', { name: /send invitation/i }).click();
 
+  // Sent: the dialog closes, focus comes back to the button that opened
+  // it, and the confirmation is announced from the screen.
+  await expect(dialog).toBeHidden();
+  await expect(inviteButton).toBeFocused();
   await expect(page.getByRole('status').filter({ hasText: /invitation sent/i })).toContainText(fixtures.colleagueEmail);
   const pending = page.getByRole('heading', { level: 2, name: /pending invitations/i }).locator('..');
   await expect(pending).toContainText(fixtures.colleagueEmail);
   await expect(pending).toContainText(/write/i);
+});
+
+/**
+ * Closing the invite dialog with an address typed asks first — inside the
+ * dialog, in its footer, not a second dialog and not `window.confirm`.
+ * Escape with the field empty closes at once. Both are the real key in a
+ * real browser: Reka's `DialogContent` handles Escape, and a unit test
+ * can only ask the component to close.
+ */
+test('Escape closes an untouched invite dialog; with an address typed it asks, and Discard clears it', async ({ page }) => {
+  await signIn(page, fixtures.founderEmail);
+  await goto(page, new URL(workspaceUrl).pathname);
+
+  const inviteButton = page.getByRole('button', { name: /invite someone/i });
+  await inviteButton.click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+  await expect(inviteButton).toBeFocused();
+
+  await inviteButton.click();
+  await expect(dialog).toBeVisible();
+  await dialog.getByLabel('Email').fill('draft@example.com');
+  await page.keyboard.press('Escape');
+  await expect(dialog, 'an address typed: Escape does not close it').toBeVisible();
+  await expect(dialog.getByText(/discard this invitation\?/i)).toBeVisible();
+  await expect(dialog.getByRole('button', { name: /keep editing/i })).toBeFocused();
+  await expect(dialog.getByRole('button', { name: /send invitation/i })).toHaveCount(0);
+
+  await dialog.getByRole('button', { name: /keep editing/i }).click();
+  await expect(dialog.getByLabel('Email')).toHaveValue('draft@example.com');
+  await expect(dialog.getByRole('button', { name: /send invitation/i })).toBeVisible();
+
+  await page.keyboard.press('Escape');
+  await dialog.getByRole('button', { name: /^discard$/i }).click();
+  await expect(dialog).toBeHidden();
+  await expect(inviteButton).toBeFocused();
+
+  await inviteButton.click();
+  await expect(dialog.getByLabel('Email')).toHaveValue('');
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
 });
 
 /**
@@ -139,6 +199,12 @@ const SHOTS = process.env.DEEPWIKI_FRAME_SHOTS ?? '';
 async function shot3(page: Page, name: string): Promise<void> {
   if (!SHOTS) return;
   await page.screenshot({ path: `${SHOTS}/frame3-members-${name}.png`, fullPage: false });
+}
+
+/** The invite dialog's review material (owner review, 2026-09-16). */
+async function shotM(page: Page, name: string): Promise<void> {
+  if (!SHOTS) return;
+  await page.screenshot({ path: `${SHOTS}/fb-manage-${name}.png`, fullPage: false });
 }
 
 function overflow(page: Page) {
@@ -172,6 +238,38 @@ test('the members screen fits at 320px with a pending invitation on it', async (
   ).toBeLessThanOrEqual(box.paneClientWidth ?? 0);
 
   await shot3(page, '320-light');
+  await shotM(page, 'members-320-light');
+
+  // The dialog at 320: the same fields, inside the viewport, nothing
+  // scrolling sideways — the pane check plus the dialog's own box.
+  await page.getByRole('button', { name: /invite someone/i }).click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toBeVisible();
+  await dialog.evaluate((el) => Promise.allSettled(el.getAnimations({ subtree: true }).map((animation) => animation.finished)));
+  const dialogBox = (await dialog.boundingBox())!;
+  expect(dialogBox.x, 'the dialog starts inside the viewport').toBeGreaterThanOrEqual(0);
+  expect(dialogBox.x + dialogBox.width, 'the dialog ends inside the viewport').toBeLessThanOrEqual(320);
+  const dialogScroll = await dialog.evaluate((el) => ({ scrollWidth: el.scrollWidth, clientWidth: el.clientWidth }));
+  expect(dialogScroll.scrollWidth, `the dialog scrolls sideways: ${JSON.stringify(dialogScroll)}`).toBeLessThanOrEqual(dialogScroll.clientWidth);
+  await shotM(page, 'invite-320-light');
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+});
+
+test('the invite dialog in the dark theme, for review', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.addInitScript(() => localStorage.setItem('nuxt-color-mode', 'dark'));
+  await signIn(page, fixtures.founderEmail);
+  await goto(page, new URL(workspaceUrl).pathname);
+  await expect(page.locator('html')).toHaveClass(/dark/);
+  await shotM(page, 'members-1280-dark');
+  await page.getByRole('button', { name: /invite someone/i }).click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toBeVisible();
+  await dialog.evaluate((el) => Promise.allSettled(el.getAnimations({ subtree: true }).map((animation) => animation.finished)));
+  await shotM(page, 'invite-1280-dark');
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
 });
 
 test('the colleague accepts the mailed link, signs in, and lands on the tree', async ({ page }) => {
