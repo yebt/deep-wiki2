@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
+import { expectNoHorizontalOverflow } from './overflow';
 import { API_URL } from './ports';
 
 /**
@@ -42,6 +43,24 @@ interface TreeFixtures {
 const seed: SeedFixtures = JSON.parse(readFileSync(new URL('.auth-fixtures.json', import.meta.url), 'utf8'));
 const REPO_ROOT = join(import.meta.dirname, '..');
 
+/** Review material, written only when asked for (the frame batch's `DEEPWIKI_FRAME_SHOTS` convention). */
+const SHOTS = process.env.DEEPWIKI_FRAME2_SHOTS ?? '';
+
+async function shot(page: Page, name: string): Promise<void> {
+  if (!SHOTS) return;
+  await page.screenshot({ path: `${SHOTS}/fb-frame2-${name}.png`, fullPage: false });
+}
+
+async function useTheme(page: Page, theme: 'light' | 'dark'): Promise<void> {
+  await page.addInitScript((value) => localStorage.setItem('nuxt-color-mode', value), theme);
+}
+
+/** Below `lg` the sidebar is a drawer; this opens it so the tree is on screen. */
+async function openDrawerIfNarrow(page: Page): Promise<void> {
+  const toggle = page.getByRole('button', { name: 'Open sidebar' });
+  if (await toggle.isVisible().catch(() => false)) await toggle.click();
+}
+
 /** Fresh rows per test: a reorder is a write, and a test must not inherit the order another left behind. */
 function mintFixtures(): TreeFixtures {
   const output = execFileSync('bun', ['run', 'e2e/tree-fixtures.bun.ts', seed.workspaceId], { cwd: REPO_ROOT, encoding: 'utf8' });
@@ -68,7 +87,8 @@ test.beforeAll(async ({ browser }) => {
 /** The titles of the book's pages, in the order the tree draws them. */
 async function pageOrder(page: Page, fixtures: TreeFixtures): Promise<string[]> {
   const book = page.getByRole('treeitem', { name: new RegExp(fixtures.bookTitle) });
-  return book.locator('[role="group"] [role="treeitem"] .dw-tree-row > span.truncate').allTextContents();
+  // The title element: a link on a page row, a span on a container's.
+  return book.locator('[role="group"] [role="treeitem"] .dw-tree-row > .truncate').allTextContents();
 }
 
 /** Opens the dashboard with the writer's book unfolded and both pages on screen. */
@@ -171,3 +191,45 @@ test('a created page is drawn from the response, and no GET /tree follows it', a
   // Where the server put it: last among the book's pages.
   expect(await pageOrder(page, fixtures)).toEqual([fixtures.firstPageTitle, fixtures.secondPageTitle, title]);
 });
+
+/**
+ * The owner's review material for this batch, at the three sizes the
+ * frame batches shoot: a page row under the pointer (its title a link,
+ * the row lit by the state layer), and the tree after a refused drag —
+ * the row back where it was, the reason in the chip beside it. Measured
+ * for sideways overflow at each, on the pane and the document.
+ */
+for (const [width, theme] of [
+  [1280, 'light'],
+  [1280, 'dark'],
+  [320, 'light'],
+] as const) {
+  test.describe(`review material ${width} ${theme}`, () => {
+    test.use({ viewport: { width, height: 900 } });
+
+    test('a hovered page row, and a refused drag with its notice, screenshotted with no sideways scroll', async ({ page }) => {
+      const fixtures = mintFixtures();
+      await useTheme(page, theme);
+      await page.route(`${API_URL}/nodes/${fixtures.secondPageId}/position`, (route) =>
+        route.fulfill({ status: 403, contentType: 'application/json', body: JSON.stringify({ error: 'forbidden' }) }),
+      );
+      await signInAs(page, fixtures.writerSessionToken);
+      await page.goto(`/workspaces/${seed.workspaceId}`);
+      await expect(page.getByRole('heading', { level: 1, name: 'E2E Workspace' })).toBeVisible({ timeout: 120_000 });
+      await openDrawerIfNarrow(page);
+      const first = page.getByRole('treeitem', { name: new RegExp(fixtures.firstPageTitle) });
+      await expect(first).toBeVisible({ timeout: 120_000 });
+
+      await first.locator('[draggable="true"]').first().hover();
+      await expect(first.getByRole('link')).toHaveAttribute('href', `/pages/${fixtures.firstPageId}`);
+      await shot(page, `tree-row-hover-${width}-${theme}`);
+      await expectNoHorizontalOverflow(page, `tree row hover ${width} ${theme}`);
+
+      await dragBefore(page, fixtures.secondPageTitle, fixtures.firstPageTitle);
+      await expect(page.getByRole('alert').filter({ hasText: "That move isn't allowed" })).toBeVisible();
+      expect(await pageOrder(page, fixtures)).toEqual([fixtures.firstPageTitle, fixtures.secondPageTitle]);
+      await shot(page, `tree-drag-refused-${width}-${theme}`);
+      await expectNoHorizontalOverflow(page, `tree drag refused ${width} ${theme}`);
+    });
+  });
+}
