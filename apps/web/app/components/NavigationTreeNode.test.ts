@@ -1,6 +1,6 @@
 import { UIcon } from '#components';
-import { mountSuspended } from '@nuxt/test-utils/runtime';
-import { describe, expect, test } from 'vitest';
+import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime';
+import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { defineComponent, h, nextTick } from 'vue';
 import type { TreeNode } from '~/composables/useTree';
 import NavigationTreeNode from './NavigationTreeNode.vue';
@@ -43,6 +43,10 @@ function node(overrides: Partial<TreeNode> & { id: string }): TreeNode {
     ...overrides,
   };
 }
+
+const { preloadRouteComponentsMock } = vi.hoisted(() => ({ preloadRouteComponentsMock: vi.fn(async () => {}) }));
+mockNuxtImport('preloadRouteComponents', () => preloadRouteComponentsMock);
+beforeEach(() => preloadRouteComponentsMock.mockClear());
 
 const SHELF: TreeNode = node({
   id: 'shelf-1',
@@ -291,6 +295,68 @@ describe('NavigationTreeNode', () => {
       await nextTick();
 
       expect(component.row.emitted('open')).toEqual([['page-1']]);
+    });
+
+    /**
+     * A page row's title is a real link (2026-09-16): an `<a href>` the
+     * browser can open in a new tab, copy or drag, and that the router
+     * takes over on a plain click. Out of the tab order — the tree is one
+     * tab stop, on the `treeitem` — and a click on it records the
+     * selection only, since the link itself is what navigates; the rest
+     * of the row still opens the page through the tree, as Enter does.
+     */
+    test('a page’s title is a real link to the page, outside the tab order', async () => {
+      const component = await mountNode();
+
+      const link = itemOf(component.dom, 'page-1').querySelector<HTMLAnchorElement>('a[href]')!;
+      expect(link).not.toBeNull();
+      expect(link.getAttribute('href')).toBe('/pages/page-1');
+      expect(link.getAttribute('tabindex')).toBe('-1');
+      expect(link.textContent).toContain('First page');
+      // A container is a place to fold, not a place to go: no link.
+      expect(itemOf(component.dom, 'shelf-1').querySelector(':scope > .dw-tree-row a[href]')).toBeNull();
+    });
+
+    test('a click on the link records the selection and leaves the navigation to the link', async () => {
+      const component = await mountNode();
+
+      const link = itemOf(component.dom, 'page-1').querySelector<HTMLAnchorElement>('a[href]')!;
+      link.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+      await nextTick();
+
+      expect(component.row.emitted('activate')).toEqual([['page-1']]);
+      expect(component.row.emitted('open')).toBeUndefined();
+    });
+
+    /**
+     * Nothing prefetched the read route when a person reached for a row:
+     * the rows navigated with `navigateTo`, which Nuxt's link prefetch
+     * never sees — and `NuxtLink`'s own prefetch skips
+     * `preloadRouteComponents` in dev, the environment the owner runs
+     * (docs/TODO.md Findings, 2026-09-16, cause 3). The row itself warms
+     * the route on pointer and keyboard intent, once.
+     */
+    test('pointer or keyboard intent on a page row preloads the page route, once', async () => {
+      const component = await mountNode();
+      const row = rowOf(component.dom, 'page-1');
+
+      fire(row, 'pointerenter', {}, false);
+      fire(itemOf(component.dom, 'page-1'), 'focus', {}, false);
+      fire(row, 'pointerenter', {}, false);
+      await nextTick();
+
+      expect(preloadRouteComponentsMock).toHaveBeenCalledTimes(1);
+      expect(preloadRouteComponentsMock).toHaveBeenCalledWith('/pages/page-1');
+    });
+
+    test('a container row has no route to warm', async () => {
+      const component = await mountNode();
+
+      fire(rowOf(component.dom, 'shelf-1'), 'pointerenter', {}, false);
+      fire(itemOf(component.dom, 'shelf-1'), 'focus', {}, false);
+      await nextTick();
+
+      expect(preloadRouteComponentsMock).not.toHaveBeenCalled();
     });
 
     // A container row used to hover, show a grab cursor and do nothing on

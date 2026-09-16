@@ -1403,4 +1403,50 @@ decoration per block.
 
 ---
 
+### 2026-09-16 — Frame follow-ups: the tree's rows as links, optimistic writes, and the presence stream — awaiting the owner's eye
+
+**Reviewer:** none yet — this entry is what was shipped for review, not a review.
+**Verdict:** Pending
+
+Four follow-ups from the 2026-09-16 latency report and the frame batches, one commit each on
+`fix/frame-followups` (`docs/TODO.md` Findings, 2026-09-16, "Frame follow-ups", has the
+measurements). Two are invisible by design — the presence stream no longer drops every ten
+seconds (`Bun.serve`'s idle timeout; a keep-alive comment inside it), and it is one
+connection per workspace shared across hops instead of one per screen — and two touch the
+tree a person uses all day:
+
+- **A page row's title is a link** (`NavigationTreeNode.vue`). An `<a href>` the browser can
+  open in a new tab, copy or drag, out of the tab order (`tabindex="-1"`) so the tree stays
+  one tab stop on the `treeitem` (§4.1's hand-rolled-primitive contract, §5); it takes the
+  row's colour and no underline, so it reads as a row and not as prose in the accent. A click
+  on the link records the selection and leaves the navigation to the link; a click elsewhere
+  on the row, and Enter, open the page through the tree as before. Pointer enter or focus on
+  the row preloads the route, once, so the hop finds it warm — `NuxtLink`'s own prefetch
+  skips it in dev. Measured in `e2e/perf.spec.ts`: the read route's chunk requested on hover,
+  none of it after the click; `e2e/tree.spec.ts` and `e2e/navigation.spec.ts` unchanged and
+  green (keyboard model, context menu, filter, clicking through).
+- **Writes draw before the server answers** (`useTree.ts`, `NavigationTree.vue`,
+  `NavigationTreeActions.vue`). A dropped row is where it was dropped at once and stays there
+  on success — no reload, no snap-back — and only a refusal puts it back, with the reason in
+  the existing chip-tier notice beside the tree (§3, recoverable with a real reason). A
+  created or renamed row is drawn from the response that made it; the toolbar's specific
+  announcement is unchanged. Measured in `e2e/tree-writes.spec.ts` against the real API with
+  the `PATCH` held: the new order while the response is held, zero `GET /tree` after a
+  successful `PATCH` or `POST`, the server's tree agreeing, and a 403 snapping back with the
+  notice. Found and fixed on the way: a pointer drop below the dragged row among its own
+  siblings landed one row further than the pointer said (the drawn slot versus the server's
+  after-removal slot); the keyboard and the menu were never affected.
+
+Screenshots `fb-frame2-tree-{row-hover,drag-refused}-{1280-light,1280-dark,320-light}.png` in
+the session scratchpad, each measured with `expectNoHorizontalOverflow` on the pane and the
+document (§6). No new colour, token or rung: the link inherits the row's `text-default`, the
+notice is the chip tier that was already there.
+
+**Known before review, not fixed:** the SSR hydration mismatch on `/workspaces/:id` was
+dropped from this batch by the owner — `perf/data-layer-icons-bundle` fixes it; the report's
+fixes B, F and G are on that branch too; the two-icon-pack requirement (§4.3) remains
+untested.
+
+---
+
 *The next entry goes below this one.*

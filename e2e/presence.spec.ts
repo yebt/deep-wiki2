@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
 import { API_URL } from './ports';
 
@@ -24,6 +25,18 @@ import { API_URL } from './ports';
 
 test.describe.configure({ mode: 'serial' });
 
+interface SeedFixtures {
+  readonly readPageId: string;
+  readonly historyPageId: string;
+  readonly bookHistoryPageAId: string;
+  readonly bookHistoryPageBId: string;
+  readonly workspaceId: string;
+  readonly readerSessionToken: string;
+}
+
+/** The real backend's seed, for the two tests below that count requests against `apps/api` itself rather than a mocked stream. */
+const seed: SeedFixtures = JSON.parse(readFileSync(new URL('.auth-fixtures.json', import.meta.url), 'utf8'));
+
 const PAGE_ID = '44444444-4444-4444-4444-444444444444';
 const WORKSPACE_ID = 'ws-presence-e2e';
 
@@ -43,6 +56,21 @@ function presenceFrame(payload: {
   since: string;
 }): string {
   return `event: presence\ndata: ${JSON.stringify({ mode: 'editing', pageTitle: 'Presence E2E Page', ...payload })}\n\n`;
+}
+
+/**
+ * The frame around the mocked page: the sidebar's tree. With a session
+ * token the real API does not know, `GET /workspaces/:id/tree` answers
+ * 401, and since 2026-09-16 the tree's own signed-out rule
+ * (`useSignInRedirect`) then leaves the whole screen for sign-in — the
+ * page under test unmounts, its stream with it, a second or two after it
+ * opened. An empty tree keeps the frame quiet; nothing here is about the
+ * tree.
+ */
+function mockFrame(page: Page): Promise<void> {
+  return page.route(`${apiOrigin()}/workspaces/${WORKSPACE_ID}/tree`, (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ rootId: 'root-presence-e2e', nodes: [] }) }),
+  );
 }
 
 /**
@@ -81,6 +109,7 @@ test('a displaced editor is shown, by name and since when, who now holds the pag
   await signIn(pageA, 'e2e-presence-a-token');
 
   const bHolder: { current: { userId: string; userDisplayName: string; since: string } | null } = { current: null };
+  await mockFrame(pageA);
   await mockPresenceStream(pageA, bHolder);
   await pageA.route(`${apiOrigin()}/pages/${PAGE_ID}/edit-session`, (route) =>
     route.fulfill({
@@ -111,6 +140,7 @@ test('a displaced editor is shown, by name and since when, who now holds the pag
   const contextB = await browser.newContext();
   const pageB = await contextB.newPage();
   await signIn(pageB, 'e2e-presence-b-token');
+  await mockFrame(pageB);
   await pageB.route(`${apiOrigin()}/pages/${PAGE_ID}/edit-session`, (route) =>
     route.fulfill({
       status: 409,
@@ -187,6 +217,7 @@ test('stale presence expires visibly once its heartbeat window lapses, tied to t
   const holder: { current: { userId: string; userDisplayName: string; since: string } | null } = {
     current: { userId: 'user-b', userDisplayName: 'User B', since: new Date().toISOString() },
   };
+  await mockFrame(page);
   await mockPresenceStream(page, holder);
   await page.route(`${apiOrigin()}/pages/${PAGE_ID}/edit-session`, (route) =>
     route.fulfill({
@@ -224,6 +255,7 @@ test('a reader sees who is editing the page, and since when, without acquiring a
   await signIn(page, 'e2e-presence-reader-token');
 
   const since = new Date().toISOString();
+  await mockFrame(page);
   await mockPresenceStream(page, { current: { userId: 'user-b', userDisplayName: 'User B', since } });
   const lockRequests: string[] = [];
   page.on('request', (request) => {
@@ -249,3 +281,68 @@ test('a reader sees who is editing the page, and since when, without acquiring a
   expect(lockRequests).toEqual([]);
 });
 
+
+/**
+ * The transport itself, against the real `apps/api` on `Bun.serve`. Until
+ * 2026-09-16 the server closed every presence stream after ten idle
+ * seconds (`Bun.serve`'s default `idleTimeout`; the browser reported
+ * `ERR_INCOMPLETE_CHUNKED_ENCODING`) and `EventSource` reconnected — a new
+ * request every ~10 s for as long as a screen stayed open. The route now
+ * writes a keep-alive comment inside that window
+ * (`apps/api/src/routes/presence.ts`, `SSE_KEEP_ALIVE_SECONDS`), so a stream
+ * held open for 25 s is one request. A request count, on purpose: the
+ * observable of a dropped stream is the reconnect, and nothing a person
+ * sees changes between one connection and a chain of them — this is a
+ * transport contract, not a screen contract (docs/UI-CHECKLIST.md §7).
+ */
+test('a presence stream held open for 25 seconds is one request — the server keeps it alive inside its idle timeout', async ({ page }) => {
+  test.setTimeout(240_000);
+  await signIn(page, seed.readerSessionToken);
+  const streamRequests: number[] = [];
+  page.on('request', (request) => {
+    if (request.url().endsWith(`/workspaces/${seed.workspaceId}/presence/stream`)) streamRequests.push(Date.now());
+  });
+
+  await page.goto(`/pages/${seed.readPageId}`);
+  // The stream opens once the read response has named the workspace;
+  // under load, hydration alone can take tens of seconds.
+  await expect.poll(() => streamRequests.length, { timeout: 120_000, message: 'the presence stream never opened' }).toBe(1);
+
+  // Two and a half idle timeouts: a stream the server still dropped
+  // would have reconnected at least twice in this window.
+  await page.waitForTimeout(25_000);
+
+  expect(streamRequests, `stream requests at ${streamRequests.map((at) => at - streamRequests[0]!).join(', ')} ms`).toHaveLength(1);
+});
+
+/**
+ * The stream is the workspace's, not the screen's (`usePresenceStream.ts`,
+ * 2026-09-16): a hop from one page to the next hands the one connection
+ * from the leaving screen to the arriving one instead of closing it and
+ * opening another. Two pages in the same book, reached by the tree — the
+ * way a person hops — and one stream request for both.
+ */
+test('two consecutive page hops open one presence stream', async ({ page }) => {
+  test.setTimeout(240_000);
+  await signIn(page, seed.readerSessionToken);
+  const streamRequests: string[] = [];
+  page.on('request', (request) => {
+    if (request.url().endsWith(`/workspaces/${seed.workspaceId}/presence/stream`)) streamRequests.push(request.url());
+  });
+
+  await page.goto(`/pages/${seed.bookHistoryPageAId}`);
+  await expect(page.getByRole('main').getByRole('heading', { level: 1, name: 'E2E Book Page Alpha' })).toBeVisible({ timeout: 120_000 });
+  await expect.poll(() => streamRequests.length, { timeout: 60_000, message: 'the presence stream never opened' }).toBe(1);
+
+  // The hop: a tree row, so the frame stays and only the pane changes.
+  const sidebar = page.getByRole('navigation', { name: 'Workspace' });
+  const beta = sidebar.getByRole('treeitem', { name: /E2E Book Page Beta/ });
+  await expect(beta).toBeVisible({ timeout: 60_000 });
+  await beta.locator('[draggable="true"]').first().click();
+  await expect(page).toHaveURL(new RegExp(`/pages/${seed.bookHistoryPageBId}$`));
+  await expect(page.getByRole('main').getByRole('heading', { level: 1, name: 'E2E Book Page Beta' })).toBeVisible({ timeout: 60_000 });
+
+  // Long enough for a second screen that reopened the stream to have done so.
+  await page.waitForTimeout(3_000);
+  expect(streamRequests).toHaveLength(1);
+});

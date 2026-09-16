@@ -44,6 +44,19 @@
  * an interactive element. A fill on the tab stop would have marked the
  * first row as chosen on every load.
  *
+ * **A page row is a link** (2026-09-16). Its title is a `NuxtLink` — an
+ * `<a href>` the browser can open in a new tab, copy or drag, and that the
+ * router takes over on a plain click — kept out of the tab order
+ * (`tabindex="-1"`) so the tree stays one tab stop on the `treeitem`. A
+ * click on the link records the selection and leaves the navigation to
+ * the link; a click elsewhere on the row, and Enter, open the page through
+ * the tree as before. And the row warms the route on intent — pointer
+ * enter or focus, once — with `preloadRouteComponents`, because
+ * `NuxtLink`'s own prefetch skips it in dev, the environment the owner
+ * runs, and nothing had prefetched the read route's chunk before a click
+ * (docs/TODO.md Findings, 2026-09-16, cause 3). A shelf, book or chapter
+ * has no screen of its own, so its title stays a span.
+ *
  * A drop in the top/bottom quarter of a row reorders among THAT ROW's OWN
  * siblings (before/after it) — hence `parentId`/`index` are required props,
  * not derived, since this component has no way to see its own position in
@@ -108,6 +121,19 @@ const dropIndicator = ref<'before' | 'after' | 'on' | null>(null);
 
 /** Only a page has a destination in this batch; a shelf, book or chapter is a container to fold and to reorder, not a place to go. */
 const isNavigable = computed(() => props.node.type === 'page');
+const href = computed(() => `/pages/${props.node.id}`);
+/** The title's element: the link, for a page; a plain span for a container. */
+const NuxtLink = resolveComponent('NuxtLink');
+const titleTag = computed(() => (isNavigable.value ? NuxtLink : 'span'));
+const titleAttrs = computed(() => (isNavigable.value ? { to: href.value, tabindex: -1, prefetch: false } : {}));
+
+/** The route's components, requested on the first sign of intent so the click finds them warm. Once per row. */
+let warmed = false;
+function warmRoute(): void {
+  if (!isNavigable.value || warmed) return;
+  warmed = true;
+  void preloadRouteComponents(href.value).catch(() => {});
+}
 const isContainer = computed(() => props.node.children.length > 0);
 const isExpanded = computed(() => isContainer.value && !props.collapsedIds.has(props.node.id));
 const isSelected = computed(() => props.selectedId === props.node.id);
@@ -116,9 +142,16 @@ const isCurrent = computed(() => props.node.type === 'page' && props.currentId =
 const titleSegments = computed(() => highlightSegments(props.node.title, props.highlight ?? ''));
 
 /** A click is the row's one activation: a page opens, a container folds. */
-function onClick(): void {
-  if (isNavigable.value) emit('open', props.node.id);
-  else if (isContainer.value) emit('toggle', props.node.id);
+function onClick(event: MouseEvent): void {
+  if (isNavigable.value) {
+    // On the link itself the link navigates — the router on a plain
+    // click, the browser on a modified one — so the row only records the
+    // selection; anywhere else on the row the tree opens the page.
+    if ((event.target as HTMLElement | null)?.closest('a[href]')) emit('activate', props.node.id);
+    else emit('open', props.node.id);
+  } else if (isContainer.value) {
+    emit('toggle', props.node.id);
+  }
 }
 
 function onDragStart(event: DragEvent): void {
@@ -199,7 +232,10 @@ function onKeydown(event: KeyboardEvent): void {
     :tabindex="activeId === node.id ? 0 : -1"
     class="dw-tree-item"
     @keydown="onKeydown"
-    @focus="emit('activate', node.id)"
+    @focus="
+      emit('activate', node.id);
+      warmRoute();
+    "
   >
     <!-- `group` on the row, not the `<li>`: the item element holds the
          whole subtree, so a `group-hover` there lit every ancestor's `⋯`
@@ -231,6 +267,7 @@ function onKeydown(event: KeyboardEvent): void {
       @dragleave="onDragLeave"
       @drop="onDrop"
       @click="onClick"
+      @pointerenter="warmRoute"
     >
       <!-- The fold state is drawn as well as announced: a chevron that
            turns, beside the type icon, on every container row. -->
@@ -252,7 +289,10 @@ function onKeydown(event: KeyboardEvent): void {
            whose fill *is* `secondary-container` (docs/DESIGN-SYSTEM.md
            §1.2); both opaque, so the mark reads the same in either theme.
            `mark` alone would be the browser's yellow. -->
-      <span class="truncate" :title="node.title">
+      <!-- A page's title is the link (see the script); the row's colour
+           is the link's, so it reads as a row and not as prose underlined
+           in the accent. -->
+      <component :is="titleTag" v-bind="titleAttrs" class="truncate text-inherit no-underline" :title="node.title">
         <template v-for="(segment, segmentIndex) in titleSegments" :key="segmentIndex">
           <mark
             v-if="segment.match"
@@ -260,7 +300,7 @@ function onKeydown(event: KeyboardEvent): void {
           >{{ segment.text }}</mark>
           <template v-else>{{ segment.text }}</template>
         </template>
-      </span>
+      </component>
       <!-- `@click.stop`: the row's click is its activation (open or fold),
            and a click on the action is neither. -->
       <span v-if="$slots['row-actions']" data-row-actions class="ms-auto flex shrink-0 items-center" @click.stop>

@@ -54,12 +54,22 @@ async function signInAs(page: Page, token: string): Promise<void> {
  * Opens the read screen and waits until it is *hydrated*: "Edit" is
  * server-rendered and visible long before Vue has attached a listener to
  * it (tens of seconds, under load), and a hover in that window reaches
- * nothing. The article's title is fetched from `onMounted`, so its
- * presence means hydration is done.
+ * nothing. The article's title used to be fetched from `onMounted`, so
+ * its presence meant hydration was done; since the read layer landed
+ * (2026-09-16) the title is server-rendered too, so Nuxt's own
+ * `isHydrating` is what says the listeners are attached.
  */
 async function openReadScreenHydrated(page: Page): Promise<void> {
   await page.goto(`/pages/${fixtures.editablePageId}`);
   await expect(page.getByRole('main').getByRole('heading', { level: 1, name: fixtures.editablePageTitle })).toBeVisible({ timeout: 120_000 });
+  await page.waitForFunction(
+    () => {
+      const nuxt = (globalThis as { useNuxtApp?: () => { isHydrating?: boolean } }).useNuxtApp;
+      return typeof nuxt === 'function' && nuxt().isHydrating === false;
+    },
+    undefined,
+    { timeout: 120_000 },
+  );
 }
 
 /** The editor is live: ProseMirror has attached and the seeded text is in the document. */
@@ -71,6 +81,13 @@ async function expectEditorLive(page: Page): Promise<void> {
 const MOUNT_CHUNK = /packages\/editor\/src\/mount\/index\.ts/;
 /** The edit route's component chunk, as the dev server names it. */
 const EDIT_ROUTE_CHUNK = /pages\/pages\/\[id\]\/edit\.vue/;
+/**
+ * The read route's component chunk, as the dev server names it. Not the
+ * `?macro=true` request, which is Nuxt's route table reading every page's
+ * `definePageMeta` at boot — that one is on every screen and carries no
+ * component.
+ */
+const READ_ROUTE_CHUNK = /pages\/pages\/\[id\]\/index\.vue(?!\?macro)/;
 
 /**
  * Fix A — prebundle reka-ui (apps/web/modules/perf-prebundle.ts).
@@ -286,4 +303,62 @@ test('opening the editor sends no lock heartbeat: the session that acquired the 
   await page.waitForTimeout(1_500);
 
   expect(heartbeats, 'no PATCH …/lock in the first seconds of the session').toEqual([]);
+});
+
+/**
+ * Fix D, second half — the tree's page rows are links that warm their
+ * route on intent. The rows navigated with `navigateTo`, which Nuxt's
+ * link prefetch never sees, so a hop from the dashboard to a page paid
+ * the read route's whole module graph on the click. Now the row preloads
+ * the route on `pointerenter` and on focus (`NavigationTreeNode.vue`), and
+ * the click finds it warm: zero requests for the route chunk after it.
+ */
+test('hovering a page row in the tree requests the read route before the click, and none of it after', async ({ page }) => {
+  test.setTimeout(300_000);
+  await signInAs(page, fixtures.writerSessionToken);
+  const seen: { url: string; at: number }[] = [];
+  page.on('request', (request) => seen.push({ url: request.url(), at: Date.now() }));
+
+  await page.goto(`/workspaces/${seed.workspaceId}`);
+  const row = page.getByRole('treeitem', { name: new RegExp(fixtures.editablePageTitle) });
+  await expect(row).toBeVisible({ timeout: 120_000 });
+  // The row is server-rendered; the hover must reach a hydrated listener.
+  await page.waitForFunction(() => {
+    const nuxt = (globalThis as { useNuxtApp?: () => { isHydrating?: boolean } }).useNuxtApp;
+    return typeof nuxt === 'function' && nuxt().isHydrating === false;
+  });
+  expect(seen.filter((r) => READ_ROUTE_CHUNK.test(r.url)).map((r) => r.url), 'the read route is not loaded by the dashboard').toEqual([]);
+
+  await row.locator('[draggable="true"]').first().hover();
+  await expect
+    .poll(() => seen.some((r) => READ_ROUTE_CHUNK.test(r.url)), { timeout: 30_000, message: 'the read route chunk was not requested on hover' })
+    .toBe(true);
+  // Let the hover's preload finish before the click, so what the click
+  // needs is already here and not merely on its way.
+  await page.waitForLoadState('networkidle');
+
+  const clickedAt = Date.now();
+  await row.locator('[draggable="true"]').first().click();
+  await expect(page).toHaveURL(new RegExp(`/pages/${fixtures.editablePageId}$`));
+  await expect(page.getByRole('main').getByRole('heading', { level: 1, name: fixtures.editablePageTitle })).toBeVisible({ timeout: 120_000 });
+
+  const afterClick = seen.filter((r) => r.at >= clickedAt && READ_ROUTE_CHUNK.test(r.url));
+  expect(afterClick, 'route chunk requests after the click').toEqual([]);
+});
+
+/**
+ * The same page row, as a link the browser understands: `href` is the
+ * page's address, so "open in a new tab" and "copy link" work as they do
+ * on any link, while the tree itself is still one tab stop.
+ */
+test('a page row carries a real href and stays out of the tab order', async ({ page }) => {
+  test.setTimeout(300_000);
+  await signInAs(page, fixtures.writerSessionToken);
+  await page.goto(`/workspaces/${seed.workspaceId}`);
+  const row = page.getByRole('treeitem', { name: new RegExp(fixtures.editablePageTitle) });
+  await expect(row).toBeVisible({ timeout: 120_000 });
+
+  const link = row.getByRole('link', { name: new RegExp(fixtures.editablePageTitle) });
+  await expect(link).toHaveAttribute('href', `/pages/${fixtures.editablePageId}`);
+  await expect(link).toHaveAttribute('tabindex', '-1');
 });

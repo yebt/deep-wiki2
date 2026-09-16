@@ -48,7 +48,7 @@
  * what was typed still in it (§3 — an error is never a dead end).
  */
 import { legalChildTypes, type NodeType } from '@deep-wiki/contracts';
-import type { TreeNode } from '~/composables/useTree';
+import type { CreatedNode, RenamedNode, TreeNode } from '~/composables/useTree';
 
 interface CreateNodeBody {
   readonly parentId: string;
@@ -56,20 +56,11 @@ interface CreateNodeBody {
   readonly title: string;
 }
 
-interface CreatedNodePayload {
-  readonly id: string;
-  readonly parentId: string;
+interface CreatedNodePayload extends CreatedNode {
   readonly type: NodeType;
-  readonly slug: string;
-  readonly title: string;
-  readonly position: number;
 }
 
-interface RenamedNodePayload {
-  readonly id: string;
-  readonly slug: string;
-  readonly title: string;
-}
+type RenamedNodePayload = RenamedNode;
 
 export type CreateNodeFetcher = (body: CreateNodeBody) => Promise<CreatedNodePayload>;
 export type RenameNodeFetcher = (nodeId: string, body: { title: string }) => Promise<RenamedNodePayload>;
@@ -84,7 +75,13 @@ const props = defineProps<{
   renameFetcher?: RenameNodeFetcher;
 }>();
 
-const emit = defineEmits<{ changed: [] }>();
+/**
+ * The server's answer, handed to the tree to draw: the row appears from
+ * the one request that made it, not from a second `GET /tree` (2026-09-16;
+ * until then the tree reloaded on `changed`, and the new row landed on the
+ * second round trip).
+ */
+const emit = defineEmits<{ created: [node: CreatedNodePayload]; renamed: [node: RenamedNodePayload] }>();
 
 const config = useRuntimeConfig();
 
@@ -235,7 +232,7 @@ async function submitCreate(): Promise<void> {
     announcement.value = `Created ${TYPE_LABELS[created.type].toLowerCase()} “${created.title}” in ${where}.`;
     createOpen.value = false;
     createTitle.value = '';
-    emit('changed');
+    emit('created', created);
   } catch (error) {
     applyWriteError(error, createNameError, createFormError, 'create');
   } finally {
@@ -273,7 +270,7 @@ async function submitRename(): Promise<void> {
     const renamed = await renameNode(target.id, { title: renameTitle.value.trim() });
     announcement.value = `Renamed to “${renamed.title}”.`;
     renameOpen.value = false;
-    emit('changed');
+    emit('renamed', renamed);
   } catch (error) {
     applyWriteError(error, renameNameError, renameFormError, 'rename');
   } finally {

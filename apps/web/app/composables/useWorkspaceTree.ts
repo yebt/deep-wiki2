@@ -1,4 +1,4 @@
-import { useTree, type TreeNode, type TreeStatus, type UseTreeDeps } from './useTree';
+import { useTree, type CreatedNode, type RenamedNode, type TreeNode, type TreeStatus, type UseTreeDeps } from './useTree';
 
 interface TreeRecord {
   status: TreeStatus;
@@ -20,6 +20,8 @@ export interface UseWorkspaceTreeResult {
   readonly selectedId: Ref<string | null>;
   readonly load: () => Promise<void>;
   readonly reorder: (nodeId: string, newParentId: string, newIndex: number) => Promise<boolean>;
+  readonly applyCreated: (created: CreatedNode) => void;
+  readonly applyRenamed: (renamed: RenamedNode) => void;
   readonly toggleCollapsed: (nodeId: string) => void;
   /** Unfold every ancestor of a node so its row is on screen. */
   readonly reveal: (nodeId: string) => void;
@@ -38,10 +40,13 @@ export interface UseWorkspaceTreeResult {
  * workspace, and a second mount reads them back before it refreshes.
  *
  * `useTree` stays the transport — the endpoint, the error mapping, the
- * reorder that reloads on success — and this composable only decides
- * where the answer lives. A `null` workspace has nothing to load and is
- * `idle`, never an error: the shell renders while a screen is still
- * finding out which workspace it is in.
+ * optimistic reorder and the local create/rename — and this composable
+ * only decides where the answer lives: the transport's refs are mirrored
+ * into the shared record the moment they change, so a row moved before
+ * the server has answered is on screen at once (2026-09-16; before, the
+ * record was written only once a request had settled). A `null` workspace
+ * has nothing to load and is `idle`, never an error: the shell renders
+ * while a screen is still finding out which workspace it is in.
  */
 export function useWorkspaceTree(workspaceId: MaybeRefOrGetter<string | null>, deps: UseTreeDeps = {}): UseWorkspaceTreeResult {
   const records = useState<Record<string, TreeRecord>>('dw-workspace-trees', () => ({}));
@@ -51,52 +56,57 @@ export function useWorkspaceTree(workspaceId: MaybeRefOrGetter<string | null>, d
   const id = computed(() => toValue(workspaceId));
   const record = computed<TreeRecord>(() => (id.value ? (records.value[id.value] ?? EMPTY) : EMPTY));
 
-  function write(patch: Partial<TreeRecord>): void {
-    if (!id.value) return;
-    records.value = { ...records.value, [id.value]: { ...record.value, ...patch } };
-  }
-
-  /** One transport per workspace id, created on demand and synced into the shared record. */
+  /**
+   * One transport per workspace id, created on demand. It starts from
+   * whatever the record already holds — a second mount must edit the tree
+   * on screen, not an empty one — and from then on the record follows it:
+   * every change to the transport's refs is written through at once.
+   */
   const transports = new Map<string, ReturnType<typeof useTree>>();
   function transport(): ReturnType<typeof useTree> | null {
-    if (!id.value) return null;
-    let t = transports.get(id.value);
+    const workspaceId = id.value;
+    if (!workspaceId) return null;
+    let t = transports.get(workspaceId);
     if (!t) {
-      t = useTree(id.value, deps);
-      transports.set(id.value, t);
+      t = useTree(workspaceId, deps);
+      const current = records.value[workspaceId] ?? EMPTY;
+      t.status.value = current.status;
+      t.nodes.value = current.nodes;
+      t.rootId.value = current.rootId;
+      t.message.value = current.message;
+      watch(
+        [t.status, t.nodes, t.rootId, t.message],
+        ([status, nodes, rootId, message]) => {
+          // Only the first load shows a skeleton; a refresh of a tree
+          // already on screen keeps the loaded rows in place while the
+          // answer arrives, so `loading` is not written over `success`.
+          const shown = records.value[workspaceId] ?? EMPTY;
+          if (status === 'loading' && shown.status === 'success') return;
+          records.value = { ...records.value, [workspaceId]: { status, nodes, rootId, message } };
+        },
+        { flush: 'sync' },
+      );
+      transports.set(workspaceId, t);
     }
     return t;
   }
 
-  async function sync(t: ReturnType<typeof useTree>, run: () => Promise<void>): Promise<void> {
-    // Only the first load shows a skeleton; a refresh of a tree already on
-    // screen keeps the loaded rows in place while the answer arrives.
-    if (record.value.status !== 'success') write({ status: 'loading' });
-    await run();
-    write({ status: t.status.value, nodes: t.nodes.value, rootId: t.rootId.value, message: t.message.value });
-  }
-
   async function load(): Promise<void> {
-    const t = transport();
-    if (!t) return;
-    await sync(t, () => t.load());
+    await transport()?.load();
   }
 
   async function reorder(nodeId: string, newParentId: string, newIndex: number): Promise<boolean> {
     const t = transport();
     if (!t) return false;
-    let ok = false;
-    await sync(t, async () => {
-      ok = await t.reorder(nodeId, newParentId, newIndex);
-      // A refused reorder leaves the transport's own state untouched — and
-      // with it, the record's — which is what makes a denied drag snap back.
-      if (!ok) {
-        t.nodes.value = record.value.nodes;
-        t.rootId.value = record.value.rootId;
-        t.status.value = record.value.status;
-      }
-    });
-    return ok;
+    return t.reorder(nodeId, newParentId, newIndex);
+  }
+
+  function applyCreated(created: CreatedNode): void {
+    transport()?.applyCreated(created);
+  }
+
+  function applyRenamed(renamed: RenamedNode): void {
+    transport()?.applyRenamed(renamed);
   }
 
   const collapsedIds = computed<ReadonlySet<string>>(() => new Set(id.value ? (folds.value[id.value] ?? []) : []));
@@ -150,6 +160,8 @@ export function useWorkspaceTree(workspaceId: MaybeRefOrGetter<string | null>, d
     selectedId,
     load,
     reorder,
+    applyCreated,
+    applyRenamed,
     toggleCollapsed,
     reveal,
     pathTo,

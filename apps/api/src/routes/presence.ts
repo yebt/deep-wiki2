@@ -12,9 +12,18 @@
  * while still naming the id.
  *
  * Correctness never depends on the in-memory broadcaster alone: this
- * route also polls the `presence` view on every keep-alive tick, so an
- * editor visible only to a different API process still reaches this
- * connection within one tick, never never.
+ * route also polls the `presence` view on a fixed cadence, so an editor
+ * visible only to a different API process still reaches this connection
+ * within one tick, never never.
+ *
+ * Two cadences, deliberately apart. The **keep-alive** (`SSE_KEEP_ALIVE_SECONDS`)
+ * is a comment frame whose only job is to be bytes on the wire: `Bun.serve`
+ * closes a connection that has been idle for ten seconds (its default
+ * `idleTimeout`), which is what dropped every stream every ~10 s with
+ * `ERR_INCOMPLETE_CHUNKED_ENCODING` in the browser until 2026-09-16, and a
+ * reverse proxy's read timeout counts the same silence. The **poll**
+ * (`pollSeconds`, `PAGE_LOCK_HEARTBEAT_SECONDS` in production) is a
+ * database read and keeps the slower interval the two used to share.
  */
 import { can, isWorkspaceMember, listActivePresence } from '@deep-wiki/db';
 import type { PresenceBroadcaster, PresenceEvent } from '@deep-wiki/core';
@@ -25,13 +34,31 @@ import type postgres from 'postgres';
 import { sessionMiddleware, type SessionVariables } from '../middleware/session';
 import type { PresenceStreamRegistry } from '../presence/registry';
 
+/**
+ * How often a `: keep-alive` comment is written to an open stream. Bounded
+ * above by `Bun.serve`'s default `idleTimeout` of 10 seconds — a connection
+ * with no bytes in either direction for that long is closed by the server
+ * (measured on Bun 1.4.2: a stream written every 12 s died at ~20 s with
+ * "timed out a request after 10 seconds"; one written every 5 s stayed open
+ * for the whole 25 s it was watched). Half the timeout leaves room for a
+ * tick that lands late under load. A comment frame is invisible to
+ * `EventSource` consumers, so nothing client-side has to know about it.
+ * Not configurable: it is a property of the server the API runs on, not of
+ * the deployment.
+ */
+export const SSE_KEEP_ALIVE_SECONDS = 5;
+
 export interface PresenceRouteDeps {
   readonly sql: postgres.Sql;
   readonly sessionIdleTimeoutMinutes: number;
   readonly broadcaster: PresenceBroadcaster;
   readonly pageLockTtlSeconds: number;
-  /** Keep-alive / poll-fallback interval, in seconds — `PAGE_LOCK_HEARTBEAT_SECONDS` in production. */
-  readonly keepAliveSeconds: number;
+  /** Poll-fallback interval over the `presence` view, in seconds — `PAGE_LOCK_HEARTBEAT_SECONDS` in production. */
+  readonly pollSeconds: number;
+  /** Keep-alive comment interval, in seconds. Defaults to `SSE_KEEP_ALIVE_SECONDS`; tests shorten it. */
+  readonly keepAliveSeconds?: number;
+  /** The wait between ticks. Injected by tests that drive the clock by hand; real time otherwise. */
+  readonly sleep?: (ms: number) => Promise<void>;
   /** Registered with so a server shutdown can close every open stream. Optional — tests that do not care about shutdown may omit it. */
   readonly registry?: PresenceStreamRegistry;
 }
@@ -51,6 +78,9 @@ function presenceKey(event: PresenceEvent): string {
 export function createPresenceRoutes(deps: PresenceRouteDeps): Hono<{ Variables: SessionVariables }> {
   const app = new Hono<{ Variables: SessionVariables }>();
   const auth = sessionMiddleware(deps.sql, { idleTimeoutMinutes: deps.sessionIdleTimeoutMinutes });
+  const keepAliveMs = (deps.keepAliveSeconds ?? SSE_KEEP_ALIVE_SECONDS) * 1000;
+  const pollMs = deps.pollSeconds * 1000;
+  const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
 
   app.get('/workspaces/:workspaceId/presence/stream', auth, async (c) => {
     const workspaceId = c.req.param('workspaceId');
@@ -144,11 +174,19 @@ export function createPresenceRoutes(deps: PresenceRouteDeps): Hono<{ Variables:
         await stream.write(': connected\n\n');
         await pollTick();
 
+        // The keep-alive drives the loop; the poll rides on every Nth tick.
+        // Counted in ticks rather than read from a clock so a tick that
+        // lands late never skips a poll, and so a test can drive it.
+        let sinceLastPollMs = 0;
         while (!closed) {
-          await stream.sleep(deps.keepAliveSeconds * 1000);
+          await sleep(keepAliveMs);
           if (closed) break;
           await stream.write(': keep-alive\n\n');
-          await pollTick();
+          sinceLastPollMs += keepAliveMs;
+          if (sinceLastPollMs >= pollMs) {
+            sinceLastPollMs = 0;
+            await pollTick();
+          }
         }
       } finally {
         unsubscribe();

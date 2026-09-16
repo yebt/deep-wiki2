@@ -22,6 +22,11 @@
  *   that reloaded on every navigation would never be "at hand".
  * - The row of the page that is open is `aria-current`, and its ancestors
  *   are unfolded when the page opens so the row is on screen.
+ * - Writes are drawn before the server answers (2026-09-16): a dropped
+ *   row is where it was dropped at once and snaps back only on a refusal,
+ *   with the reason beside the tree; a created or renamed row is drawn
+ *   from the response that made it, never by asking for the tree again
+ *   (`useTree`'s `reorder`, `applyCreated`, `applyRenamed`).
  * - Every row has a context menu (2026-09-16): right-click, the `⋯` at
  *   the row's end, `Shift+F10` and the `ContextMenu` key all open the
  *   one `UContextMenu` wrapped around the tree, whose items are
@@ -55,7 +60,7 @@ const props = defineProps<{
 }>();
 
 const tree = useWorkspaceTree(() => props.workspaceId);
-const { status, nodes, rootId, message, collapsedIds, selectedId, load, reorder, reveal } = tree;
+const { status, nodes, rootId, message, collapsedIds, selectedId, load, reorder, applyCreated, applyRenamed, reveal } = tree;
 
 /**
  * The filter owns which rows are shown and which folds apply: the
@@ -109,12 +114,33 @@ watch(
 
 const reorderError = ref<string | null>(null);
 
+/**
+ * `newIndex` counts among the new parent's children *without* the moved
+ * row, as `PATCH /nodes/:id/position` counts it. The move is drawn at
+ * once and the request follows (`useTree`); a refusal snaps the row back
+ * and says why here, beside the tree, in the chip tier (docs/UI-CHECKLIST.md
+ * §3 — recoverable, with the reason).
+ */
 async function onReorder(payload: { draggedId: string; newParentId: string; newIndex: number }): Promise<void> {
   reorderError.value = null;
   const ok = await reorder(payload.draggedId, payload.newParentId, payload.newIndex);
   if (!ok) {
     reorderError.value = "That move isn't allowed — you may only have read access to this item, or the target is in a different workspace.";
   }
+}
+
+/**
+ * A pointer drop names a slot in the list as drawn, the dragged row still
+ * in it; the server counts slots once that row has left. Dropping a row
+ * below its own place among its siblings therefore has to step the slot
+ * back by one, or it lands one row further than the pointer said — as it
+ * did until 2026-09-16. The keyboard and the menu (`onReorder` directly)
+ * already count from the row's own place.
+ */
+function onDrop(payload: { draggedId: string; newParentId: string; newIndex: number }): void {
+  const dragged = entryOf(payload.draggedId);
+  const newIndex = dragged && dragged.parentId === payload.newParentId && dragged.index < payload.newIndex ? payload.newIndex - 1 : payload.newIndex;
+  void onReorder({ ...payload, newIndex });
 }
 
 /* ─── Keyboard: the ARIA tree pattern ─────────────────────────────────
@@ -438,7 +464,8 @@ const menuItems = computed<ContextMenuItem[][]>(() => {
       :nodes="nodes"
       :root-id="rootId"
       :selected-id="selectedId"
-      @changed="load"
+      @created="applyCreated"
+      @renamed="applyRenamed"
     />
 
     <div class="flex items-center justify-between gap-2 px-2">
@@ -583,7 +610,7 @@ const menuItems = computed<ContextMenuItem[][]>(() => {
               :collapsed-ids="shownCollapsedIds"
               :current-id="currentNodeId ?? null"
               :highlight="filter.active.value ? filter.query.value : undefined"
-              @reorder="onReorder"
+              @reorder="onDrop"
               @activate="onActivate"
               @open="onOpen"
               @toggle="onToggle"
