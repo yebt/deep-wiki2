@@ -27,6 +27,8 @@
  */
 import { adoptMintedAnchor, blockIdOf, blockSelector, commentableBlockOf } from '~/utils/block-element';
 import type { NewThreadTarget } from '~/composables/useNewThread';
+import { loadEditorMount } from '~/utils/editor-mount';
+
 // Inside the workspace layout: the frame is mounted once and this screen
 // renders only its pane, so the sidebar's tree keeps its scroll and its
 // folds when the person arrives here from a row (`layouts/workspace.vue`).
@@ -34,6 +36,26 @@ definePageMeta({ layout: 'workspace' });
 
 const route = useRoute();
 const nodeId = route.params.id as string;
+
+/**
+ * Warms edit mode on intent (docs/TODO.md Findings 2026-09-16, "edit-mode
+ * latency"). In dev `NuxtLink` never preloads a route (`nuxt-link.js`
+ * skips `preloadRouteComponents` under `import.meta.dev`), so the hop to
+ * `/edit` paid all 52 of the route's module requests on the click; and
+ * the editor chunk was only ever requested after the session response.
+ * Hover or focus on "Edit" is the moment both should start: the route's
+ * components through Nuxt's own preloader, the editor chunk through the
+ * shared importer `EditorSurface` will await (`~/utils/editor-mount`).
+ * This is not the editor booting on a read view (checklist §4.5 — nothing
+ * here parses or mounts anything); it is a fetch on the one control
+ * whose only purpose is to leave for edit mode, and a chunk that fails
+ * to fetch is swallowed here because the click that follows will
+ * surface it where it belongs.
+ */
+function warmEditMode(): void {
+  void preloadRouteComponents(`/pages/${nodeId}/edit`).catch(() => {});
+  void loadEditorMount().catch(() => {});
+}
 
 const { status, html, title, workspaceId, message, load } = usePageRead(nodeId);
 // A signed-out visit leaves for sign-in and comes back (`useSignInRedirect`).
@@ -475,6 +497,8 @@ useSeoMeta({ title: () => (title.value ? `${title.value} — deep-wiki` : 'deep-
         color="primary"
         size="sm"
         :to="`/pages/${nodeId}/edit`"
+        @pointerenter="warmEditMode"
+        @focus="warmEditMode"
       >
         Edit
       </UButton>

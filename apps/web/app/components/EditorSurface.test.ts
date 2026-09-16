@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { defineComponent, h } from 'vue';
 import { MENU_WIDTH_ESTIMATE } from '~/utils/menu-position';
 import EditorSurface from './EditorSurface.vue';
+import editorSurfaceSource from './EditorSurface.vue?raw';
 
 /**
  * EditorSurface renders three things nothing else in this app renders: the
@@ -43,6 +44,8 @@ type SlashAction =
 
 interface FakeViewOptions {
   readonly dom: HTMLElement;
+  /** The document the host parsed — with the converter it took from the mount module. */
+  readonly doc: { textContent: string };
   readonly mention?: { readonly onStateChange?: (state: MentionState, view: unknown) => void; readonly onConfirmed?: (candidate: MentionCandidate) => void };
   readonly slash?: { readonly onStateChange?: (state: SlashState) => void };
 }
@@ -53,6 +56,10 @@ const { harness } = vi.hoisted(() => ({
     caret: { top: 100, bottom: 120, left: 40 },
     /** Flipped once the component has finished its dynamic import and built its (fake) view. */
     mounted: false,
+    /** The document the fake view was created with — what `fromMarkdown` produced from the `markdown` prop. */
+    doc: null as null | { textContent: string },
+    /** Resolved before `loadEditorMount()` hands the module to the component; a test holds it to see the surface before the view exists. */
+    gate: Promise.resolve(),
     dispatchMention: (_action: MentionAction): void => {
       throw new Error('no editor mounted');
     },
@@ -129,8 +136,25 @@ vi.mock('@deep-wiki/editor/mount', async (importOriginal) => {
 
       harness.dispatchMention = applyMention;
       harness.dispatchSlash = applySlash;
+      harness.doc = options.doc;
       harness.mounted = true;
       return view;
+    },
+  };
+});
+
+// The component takes the chunk from the shared importer, never from an
+// `import()` of its own (fix C, docs/TODO.md Findings 2026-09-16): the
+// route and the read screen start that same import early. The importer
+// stays real — it resolves through the `@deep-wiki/editor/mount` mock
+// above — and only gains a gate a test can hold.
+vi.mock('~/utils/editor-mount', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('~/utils/editor-mount')>();
+  return {
+    ...actual,
+    loadEditorMount: async () => {
+      await harness.gate;
+      return actual.loadEditorMount();
     },
   };
 });
@@ -185,6 +209,65 @@ describe('EditorSurface', () => {
     harness.caret = { top: 100, bottom: 120, left: 40 };
     harness.confirmed = null;
     harness.focusCalls = 0;
+    harness.doc = null;
+    harness.gate = Promise.resolve();
+  });
+
+  /**
+   * Fix C (docs/TODO.md Findings 2026-09-16, "edit-mode latency"): the
+   * static `import { fromMarkdown, toMarkdown } from '@deep-wiki/editor'`
+   * this component carried put the whole remark/micromark stack in the
+   * edit route's pre-hydration chunk, although nothing needs a parser
+   * before the session has arrived and the mount chunk has loaded. The
+   * converters now come from the mount module, through the shared
+   * importer the route and the read screen already started.
+   */
+  describe('the editor chunk and the converters', () => {
+    test('parses the markdown prop with the converter from the mount module', async () => {
+      await mountSurface();
+
+      expect(harness.doc?.textContent).toBe('Hi');
+    });
+
+    test('carries no static value import of @deep-wiki/editor — only the type import survives', () => {
+      const valueImports = [...editorSurfaceSource.matchAll(/^import\s+(?!type\b)[^;]*from\s+'@deep-wiki\/editor'/gm)];
+
+      expect(valueImports.map((match) => match[0])).toEqual([]);
+    });
+  });
+
+  /**
+   * Fix H: measured on 2026-09-16, the surface's own box was in the DOM
+   * 120–730 ms before ProseMirror attached to it — an empty 256px well
+   * where the page's skeleton had just been. The skeleton's text lines
+   * stay until the view exists; the surface is hidden, not absent, so the
+   * element ProseMirror mounts into is there to mount into.
+   */
+  describe('until ProseMirror attaches', () => {
+    test('shows the doc-body skeleton and hides the surface, then swaps them once the view exists', async () => {
+      let open!: () => void;
+      harness.gate = new Promise<void>((resolve) => {
+        open = resolve;
+      });
+      harness.mounted = false;
+      const component = await mountSuspended(SurfaceInApp);
+
+      expect(harness.mounted).toBe(false);
+      expect(component.find('[data-testid="editor-skeleton"]').exists()).toBe(true);
+      expect(component.get('[data-testid="editor-skeleton"]').attributes('aria-hidden')).toBe('true');
+      // `v-show`: the element is there for ProseMirror to mount into, and
+      // hidden. (VTU's `isVisible()` reads the layout tree happy-dom does
+      // not have; the inline style is what `v-show` actually writes.)
+      const surface = component.get('[data-testid="editor-surface"]');
+      expect((surface.element as HTMLElement).style.display).toBe('none');
+
+      open();
+      await vi.waitFor(() => expect(harness.mounted).toBe(true), { timeout: 30_000 });
+      await component.vm.$nextTick();
+
+      expect(component.find('[data-testid="editor-skeleton"]').exists()).toBe(false);
+      expect((surface.element as HTMLElement).style.display).not.toBe('none');
+    });
   });
 
   /**

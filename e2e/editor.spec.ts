@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
+import { DEFAULT_HEARTBEAT_INTERVAL_MS } from '../apps/web/app/composables/useLockHeartbeat';
 import { API_URL } from './ports';
 import { expectNoHorizontalOverflow } from './overflow';
 
@@ -650,15 +651,19 @@ test.describe('inside the workspace frame, 320x900 light', () => {
         }),
       }),
     );
-    // The first heartbeat answers "lost": the notice is on screen from the
-    // moment the editor is.
+    // The first heartbeat answers "lost". It is sent one interval after
+    // the editor opens — the session response that acquired the lock is
+    // the first beat (`useLockHeartbeat`), so the clock is advanced past
+    // that interval rather than waiting 20 s of wall time for it.
     await page.route(`${apiOrigin()}/pages/${PAGE_ID}/lock`, (route) =>
       route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ status: 'lost' }) }),
     );
+    await page.clock.install();
 
     await page.goto(`/pages/${PAGE_ID}/edit`);
     const editor = page.getByTestId('editor-surface');
     await expect(editor).toContainText('about to be lost', { timeout: 30000 });
+    await page.clock.fastForward(DEFAULT_HEARTBEAT_INTERVAL_MS);
 
     const notice = page.getByRole('main').getByRole('alert').filter({ hasText: /lock lost/i });
     await expect(notice).toBeVisible();

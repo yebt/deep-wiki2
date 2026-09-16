@@ -1,22 +1,35 @@
 <script setup lang="ts">
 /**
- * The WYSIWYG editing surface (document-editor spec). Dynamically imports
- * `@deep-wiki/editor/mount` — never a static import — so this component
- * itself can be statically imported by the edit route while the actual
- * ProseMirror-view bundle only loads once this component mounts (which
- * only happens once edit mode is actually entered).
+ * The WYSIWYG editing surface (document-editor spec). Takes
+ * `@deep-wiki/editor/mount` through `loadEditorMount()` — a dynamic
+ * `import()`, never a static one — so this component itself can be
+ * statically imported by the edit route while the actual ProseMirror-view
+ * bundle only loads once edit mode is actually entered.
  * `scripts/checks/bundle-isolation.ts` enforces the "no static import of
  * `/mount`" half of this; the read route never imports this component at
- * all, which is the other half. Arrow-key selection movement, Escape and
- * Enter are all handled inside the plugins themselves
- * (`packages/editor/src/mount/{mention,slash}-plugin.ts`) — this
- * component only renders whatever state they report and supplies the two
- * things a ProseMirror plugin cannot reach itself: fetching mention
- * candidates over the network, and the access-mismatch check.
+ * all, which is the other half.
+ *
+ * The converters come from that same module. This file used to import
+ * `fromMarkdown`/`toMarkdown` statically from `@deep-wiki/editor`, which
+ * put the whole remark/micromark/mdast stack in the edit route's
+ * pre-hydration chunk (measured 2026-09-16: 14 requests and 2.3 MB in
+ * dev, most of a 199 KB chunk in prod) although nothing can parse
+ * anything until the session has arrived and the mount chunk has loaded
+ * anyway. And the import is no longer awaited *after* the session: the
+ * route starts it before its session request, the read screen on pointer
+ * intent towards "Edit", and this component awaits whichever already ran
+ * (`~/utils/editor-mount`; docs/TODO.md Findings, "edit-mode latency").
+ *
+ * Arrow-key selection movement, Escape and Enter are all handled inside
+ * the plugins themselves (`packages/editor/src/mount/{mention,slash}-
+ * plugin.ts`) — this component only renders whatever state they report
+ * and supplies the two things a ProseMirror plugin cannot reach itself:
+ * fetching mention candidates over the network, and the access-mismatch
+ * check.
  */
-import { fromMarkdown, toMarkdown } from '@deep-wiki/editor';
 import type { MentionCandidate, MentionState, SlashState } from '@deep-wiki/editor';
 import type { EditorView } from 'prosemirror-view';
+import { loadEditorMount } from '~/utils/editor-mount';
 import { positionMenu } from '~/utils/menu-position';
 
 const props = defineProps<{
@@ -30,6 +43,15 @@ const emit = defineEmits<{
 }>();
 
 const rootEl = ref<HTMLElement | null>(null);
+/**
+ * True once `createEditorView` has attached ProseMirror to `rootEl`.
+ * Measured on 2026-09-16: this component's box was in the DOM 120–730 ms
+ * before the view existed — an empty well where the page's skeleton had
+ * just been. Until then the template keeps the skeleton's text lines up
+ * and hides (never removes) the surface: the element has to exist for
+ * ProseMirror to mount into it.
+ */
+const attached = ref(false);
 const mentionState = ref<MentionState | null>(null);
 const slashState = ref<SlashState | null>(null);
 const mentionCaretRect = ref<{ top: number; left: number } | null>(null);
@@ -59,8 +81,8 @@ const MENTION_MENU_ID = 'dw-mention-menu';
 const SLASH_MENU_ID = 'dw-slash-menu';
 
 let editorView: EditorView | undefined;
-/** The `"./mount"` module, kept from the dynamic import so the click paths below can build the same transactions the plugins build on Enter. */
-let editorModule: typeof import('@deep-wiki/editor/mount') | undefined;
+/** The `"./mount"` module, kept from `loadEditorMount()` so the click paths below can build the same transactions the plugins build on Enter. */
+let editorModule: Awaited<ReturnType<typeof loadEditorMount>> | undefined;
 
 const { search: searchMentions, checkAccess } = useMentionCandidates(props.workspaceId, props.pageId);
 
@@ -111,7 +133,7 @@ function confirmSlashAt(index: number): void {
 }
 
 async function mount(): Promise<void> {
-  const mod = await import('@deep-wiki/editor/mount');
+  const mod = await loadEditorMount();
   editorModule = mod;
   if (!rootEl.value) return;
 
@@ -120,7 +142,7 @@ async function mount(): Promise<void> {
 
   editorView = mod.createEditorView({
     dom: rootEl.value,
-    doc: fromMarkdown(props.markdown),
+    doc: mod.fromMarkdown(props.markdown),
     mention: {
       onStateChange: (state) => {
         mentionState.value = state;
@@ -165,9 +187,10 @@ async function mount(): Promise<void> {
     },
     onUpdate: (view) => {
       if (debounceTimer) clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(() => emit('update', toMarkdown(view.state.doc)), 300);
+      debounceTimer = setTimeout(() => emit('update', mod.toMarkdown(view.state.doc)), 300);
     },
   });
+  attached.value = true;
 }
 
 onMounted(() => {
@@ -213,8 +236,22 @@ defineExpose({
          combobox-style chain from the textbox to the listbox it drives,
          so the options an arrow key lands on are announced as belonging
          to *this* editor (checklist §5; the audit of 2026-09-14 found an
-         unnamed contenteditable with no relationship to its menus). -->
+         unnamed contenteditable with no relationship to its menus).
+         `v-show`, not `v-if`: ProseMirror mounts into this element, so it
+         must exist before the view does; it is only hidden until then,
+         behind the skeleton below (`attached`). -->
+    <!-- The page's skeleton, continued: the same `doc-body` text lines
+         `pages/[id]/edit.vue` shows while the session is requested, kept
+         up for the last stretch — chunk evaluation, the first parse, the
+         view — so the box never stands empty between the two
+         (docs/UI-CHECKLIST.md §3, "no layout shift on load"). -->
+    <div v-if="!attached" data-testid="editor-skeleton" aria-hidden="true" class="doc-body text-doc-body">
+      <p><USkeleton as="span" class="inline-block h-4 w-full align-middle" /></p>
+      <p><USkeleton as="span" class="inline-block h-4 w-full align-middle" /></p>
+      <p><USkeleton as="span" class="inline-block h-4 w-5/6 align-middle" /></p>
+    </div>
     <div
+      v-show="attached"
       ref="rootEl"
       class="doc-body text-doc-body text-default prosemirror-editor -m-4 min-h-64 rounded-lg p-4"
       data-testid="editor-surface"

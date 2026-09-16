@@ -1,4 +1,4 @@
-import { NuxtLayout, UApp } from '#components';
+import { NuxtLayout, NuxtLoadingIndicator, UApp } from '#components';
 import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime';
 import { describe, expect, test, vi } from 'vitest';
 import { ref } from 'vue';
@@ -81,6 +81,24 @@ describe('app root', () => {
     // route resolved to.
     expect(component.findComponent(WorkspacesPage).exists()).toBe(true);
     expect(component.findAll('main')).toHaveLength(1);
+  });
+
+  // Fix D (docs/TODO.md Findings 2026-09-16, "edit-mode latency"): no
+  // screen said a hop was in flight. The indicator is the shell's — one
+  // for every route — in the primary role at 3px, with its progress
+  // curve supplied by `~/utils/loading-progress` so reduced motion gets a
+  // bar that does not creep.
+  test('mounts one route-change indicator, in the primary role at 3px, inside UApp', async () => {
+    const component = await mountApp();
+
+    const indicators = component.findAllComponents(NuxtLoadingIndicator);
+    expect(indicators).toHaveLength(1);
+    const indicator = indicators[0]!;
+    expect(indicator.props('color')).toBe('var(--ui-primary)');
+    expect(indicator.props('errorColor')).toBe('var(--ui-error)');
+    expect(indicator.props('height')).toBe(3);
+    expect(typeof indicator.props('estimatedProgress')).toBe('function');
+    expect(component.findComponent(UApp).findComponent(NuxtLoadingIndicator).exists()).toBe(true);
   });
 
   test('the document declares its language, on a route that declares none itself', async () => {

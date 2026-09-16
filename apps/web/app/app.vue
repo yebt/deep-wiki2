@@ -7,7 +7,9 @@
 // the one head value a screen inherits rather than states, and the
 // product's one confirm dialog (`ConfirmDialog`), mounted once here so
 // any screen can ask a question through `useConfirm()` and await the
-// answer.
+// answer, and the route-change indicator every hop shares.
+import { loadingProgress } from '~/utils/loading-progress';
+
 useHead({
   htmlAttrs: { lang: 'en' },
 });
@@ -20,6 +22,22 @@ useSeoMeta({
 
 <template>
   <UApp>
+    <!-- Route-change feedback (docs/TODO.md Findings 2026-09-16, "edit-mode
+         latency": no screen said a hop was in flight, and in dev a
+         read → edit hop is 52 module requests). Nuxt's indicator, with
+         Nuxt's default gradient replaced by the design system's roles:
+         `primary` for the bar (docs/DESIGN-SYSTEM.md §1.2 — the one thing
+         that matters while a hop is in flight is that it is in flight)
+         and `error` for a hop that failed, both as the `--ui-*` variables
+         so every theme's own tone is what renders (§4.2 of the checklist:
+         no literal colour). 3px is Nuxt's default and M3's focus-ring
+         width; it stays. `throttle` keeps the bar off any hop under
+         200 ms, so a warm route never flashes it. The progress curve is
+         ours only so reduced motion can be honoured: `main.css` shortens
+         the bar's CSS transitions globally, but the growth is JavaScript
+         per frame, and `loadingProgress` draws the bar full at once under
+         `prefers-reduced-motion` (checklist §5, pass/fail). -->
+    <NuxtLoadingIndicator color="var(--ui-primary)" error-color="var(--ui-error)" :height="3" :estimated-progress="loadingProgress" />
     <NuxtLayout>
       <NuxtPage />
     </NuxtLayout>
