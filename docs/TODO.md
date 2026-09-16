@@ -532,6 +532,108 @@ makes conventions portable across projects.
 
 Discoveries and constraints. Newest first.
 
+### 2026-09-16 — Frame follow-ups: the presence stream that died every 10 s, one stream per workspace, optimistic tree writes, tree rows as links
+
+**What happened.** Four of the follow-ups the 2026-09-16 latency report and the frame batches
+recorded, one commit each on `fix/frame-followups` (worktree `fb-frame2`). Every stage was
+run as its own process; the touched e2e specs ran against this branch's `nuxt dev` on the
+worktree's ports (load average 22–33 on four cores throughout — timings below are that
+host's, counts are exact).
+
+1. **The presence stream dropped every ~10 s** (`ERR_INCOMPLETE_CHUNKED_ENCODING` in every
+   browser, `EventSource` reconnecting for as long as a screen stayed open). Cause:
+   `Bun.serve`'s default `idleTimeout` is ten seconds — a connection with no bytes in either
+   direction for that long is closed — and `routes/presence.ts` wrote its keep-alive comment
+   every `PAGE_LOCK_HEARTBEAT_SECONDS` (20 s). Measured with a 20-line `Bun.serve` script on
+   Bun 1.4.2: a stream written every 12 s died at ~20 s with "Bun.serve() timed out a request
+   after 10 seconds. Pass `idleTimeout` to configure"; one written every 5 s stayed open for
+   the 25 s it was watched. *Fix* (`08cd151`): two cadences — a `: keep-alive` comment every
+   `SSE_KEEP_ALIVE_SECONDS` (5, a constant with the measurement beside it: a property of the
+   server the API runs on, not of a deployment, and a reverse proxy's read timeout counts it
+   as traffic too) and the poll over the `presence` view on `pollSeconds`
+   (`PAGE_LOCK_HEARTBEAT_SECONDS`, as before), riding every Nth keep-alive so a late tick never
+   skips a poll. The route takes an injectable `sleep`, so the route tests drive the clock by
+   hand: frames arrive at the constant's interval, and the poll runs on the fourth keep-alive
+   and not the first. `e2e/presence.spec.ts` holds the read screen open for 25 s against the
+   real API and counts **one** stream request (before: a reconnect every ~10 s). Found on the
+   way: the test `FrameReader` raced `reader.read()` against a timeout and lost the chunk the
+   abandoned read resolved with; it now carries the in-flight read across the deadline.
+2. **One presence stream per workspace, shared across hops** (`bcb1432`). Every screen owned
+   its own `EventSource`; a hop closed it in `onBeforeUnmount` and opened a new one once the
+   next response had named the workspace — a fresh connection, membership check and poll per
+   click. `usePresenceStream` keeps its signature (`start`/`stop` per screen, a page filter per
+   consumer) but the connection lives in a module-level registry keyed by workspace: `start()`
+   subscribes, `stop()` unsubscribes, and a connection nobody has wanted for 10 s (the linger
+   that carries it across a hop) closes. The roster is the connection's, so a hop shows who is
+   editing at once rather than after their next heartbeat; the poll fallback, the backoff, the
+   expiry and the hidden-tab pause moved onto the connection unchanged; the server still
+   authorises every event per subscriber. Measured in `e2e/presence.spec.ts`: two page hops by
+   the tree, **one** stream request.
+3. **Optimistic tree writes** (`3868c89`). A reorder awaited the `PATCH` and then reloaded the
+   whole tree, so the dragged row snapped back until two round trips had landed; a create or
+   rename emitted `changed` and the row appeared on the second request. `useTree.reorder` now
+   moves the node locally first — the same arithmetic `reorderNode` does (the node leaves,
+   `newIndex` counts among the new parent's children without it, clamped, positions
+   renumbered) — then writes, and only a refusal restores the previous list; `applyCreated`
+   draws the `POST /nodes` response at the end of its parent's list and `applyRenamed` patches
+   the `PATCH /nodes/:id` response in place. `useWorkspaceTree` seeds each transport from the
+   shared record and mirrors the transport's refs into it synchronously, keeping `success`
+   over a refresh so the rows stay up (the existing per-workspace record is still the cache;
+   the read layer arriving on `perf/data-layer-icons-bundle` is not duplicated here).
+   `NavigationTreeActions` emits `created`/`renamed` with the payload; the refusal keeps the
+   chip notice beside the tree. Measured in `e2e/tree-writes.spec.ts` against the real API with
+   the `PATCH` held: the rows are in the new order **while the response is held**, **0**
+   `GET /tree` after a successful `PATCH` or `POST` (before: one after each), the server's
+   tree agrees, and a 403 snaps the row back with the notice.
+   **Found on the way, fixed:** a pointer drop *below* the dragged row among its own siblings
+   landed one row further than the pointer said — the node reports the slot in the list as
+   drawn while the server counts slots once the moved row has left. Dropping the first of
+   three pages before the third reached the server as index 2 of a two-page list and landed
+   last. `NavigationTree`'s drop handler steps the slot back by one in that case; the keyboard
+   and the menu already counted from the row's own place and are unchanged.
+4. **Tree page rows are links that warm their route on intent** (`1951fea`). The rows
+   navigated with `navigateTo`, so nothing prefetched the read route. A page row's title is
+   now a `NuxtLink` — an `<a href>` the browser can open in a new tab, copy or drag, and that
+   the router takes over on a plain click — with `tabindex="-1"` so the tree stays one tab
+   stop on the `treeitem`; a click on the link records the selection and leaves the navigation
+   to the link, while a click elsewhere on the row, and Enter, open the page through the tree
+   as before. `NuxtLink`'s own prefetch skips `preloadRouteComponents` under `import.meta.dev`
+   (`nuxt-link.js`), so the row preloads the route itself on `pointerenter` and on focus,
+   once; the link's viewport prefetch is off so a 400-row tree does not carry 400 observers
+   for one shared chunk. Measured in `e2e/perf.spec.ts` on the dashboard in dev: the read
+   route's chunk is requested on hover and **0** requests for it follow the click (before: all
+   of them). Nuxt's route table also requests every page as `…index.vue?macro=true` at boot —
+   `definePageMeta` extraction, no component — which the assertion excludes. `e2e/tree.spec.ts`
+   and `e2e/navigation.spec.ts` (keyboard model, context menu, filter, clicking through the
+   tree) pass unchanged.
+
+**Not done, deliberately.** The SSR hydration mismatch on `/workspaces/:id` (the sidebar's
+"Choose a workspace" state rendered before `enter()`, `NUXT_E7006`) was dropped from this
+batch on the owner's instruction: `perf/data-layer-icons-bundle` fixes it (`useSidebarWorkspace`).
+
+**Found, fixed in passing.** The three mocked tests in `e2e/presence.spec.ts` sign in with a
+token the API does not know and mock only edit-session, lock and the stream; since the
+signed-out redirect landed, the sidebar's tree answered that token with a 401 and
+`NavigationTree`'s `useSignInRedirect` left the whole screen for sign-in a second or two after
+it opened — the page under test unmounted, its stream with it, and the indicator never
+rendered (traced with a stack on the composable's `stop()`: `onBeforeUnmount` of `edit.vue`,
+and the failure snapshot on the sign-in screen). `mockFrame()` answers the tree with an empty
+one for the mocked pages (`d653fa5`).
+
+**Found, not fixed.**
+
+- **A first visit to the edit route on a cold Vite optimizer cache reloads the page** ("new
+  dependencies optimized … reloading" for the ProseMirror set) and the reload can cross a
+  held request or a 30 s wait — `e2e/presence.spec.ts`'s displaced-editor test and
+  `e2e/tree-writes.spec.ts` both failed once on that before passing; the latter now warms its
+  route in `beforeAll`, as `e2e/perf.spec.ts` does. Pre-existing (the perf batch recorded it),
+  and only a symptom of a cold dev server.
+- **`useWorkspaceTree` keeps one `useTree` transport per composable instance**, and
+  `AppShell` and `NavigationTree` each create one for the same workspace. Only the tree's
+  loads; the second exists for `pathTo`. Harmless, but the record could own the transport.
+- Two `EventSource`s per hop to a *different* workspace overlap for the linger window (10 s)
+  before the first closes — by design, and rare (switching workspaces is deliberate).
+
 ### 2026-09-16 — No data layer: measured and fixed
 
 **What happened.** The 2026-09-16 performance report (read-only, `main` at `4987cd9`) found
