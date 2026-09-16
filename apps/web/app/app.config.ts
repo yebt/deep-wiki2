@@ -438,6 +438,46 @@ export default defineAppConfig({
       },
     },
 
+    // The navigation drawer's list — `UNavigationMenu` vertical, the
+    // management sidebar's doors (§9.2). Two of the library's defaults are
+    // steps to another surface rung, which on the `bg-elevated` pane the
+    // list stands in paints the pane's own tone over itself (§5.2, "a
+    // state is a layer, never a step to another surface rung"; measured on
+    // the tree rows 2026-09-07): the active fill `before:bg-elevated` and
+    // the hover `before:bg-elevated/50`. The active indicator becomes
+    // `secondary-container` — M3's selected-state role, the fill the tree
+    // gives its selected row, opaque and the same in both themes — with
+    // the `on-` pair on the label and icon; hover, focus and pressed
+    // become the `currentColor` state layer at M3's 0.08 / 0.12 / 0.12.
+    // The focus ring joins the one every other control has (`main.css`
+    // `:focus-visible`: 3px `secondary`, 2px out), stated on the colour
+    // variant because the variant resolves after the slot (§7.4's
+    // ordering trap).
+    navigationMenu: {
+      variants: {
+        color: {
+          neutral: { link: 'before:outline-secondary before:outline-offset-2' },
+        },
+      },
+      compoundVariants: [
+        {
+          disabled: false,
+          active: false,
+          variant: 'pill' as const,
+          class: { link: 'hover:before:bg-current/8 focus-visible:before:bg-current/12 active:before:bg-current/12' },
+        },
+        {
+          variant: 'pill' as const,
+          active: true,
+          highlight: false,
+          class: {
+            link: 'before:bg-secondary-container text-on-secondary-container',
+            linkLeadingIcon: 'text-on-secondary-container group-data-[state=open]:text-on-secondary-container',
+          },
+        },
+      ],
+    },
+
     // Overlays sit one rung above the panes they cover (§9.6).
     dropdownMenu: { slots: { content: 'bg-accented' } },
     modal: { slots: { content: 'bg-accented' } },

@@ -765,6 +765,114 @@ template) is untouched because a parallel branch restyles it.
 
 ---
 
+### 2026-09-16 — The management sidebar, and the invite form as a dialog
+
+**What happened.** Two owner-review items from the 2026-09-15 frame review, one commit each
+on `feat/management-sidebar` (worktree `fb-manage`):
+
+1. **A management sidebar** (`40cffbc`-lineage; see the branch). "In a settings area the
+   sidebar should switch to everything that is management, not stay on the tree." One
+   mechanism, typed: `definePageMeta({ sidebar: 'management' })` — `useSidebarMode.ts`
+   augments `PageMeta`, `WorkspaceFrame` reads the route and hands `WorkspaceSidebar` a
+   `mode`, and the sidebar swaps *only its middle region* (`ManagementSidebar.vue`) and lets
+   its two footer doors (Members, Registration settings) step out because the sections now
+   hold them. The header (the switcher) and the theme toggle are unchanged in both modes: the
+   person is still in the workspace, and a second copy of its name under the switcher would be
+   the eyebrow defect of `docs/UI-CHECKLIST.md` §4.4, so the region starts with "Back to
+   workspace" instead. `ManagementSidebar` is `UNavigationMenu` vertical — sections
+   Workspace (Members · Settings · AI & models), Instance (Registration settings), You
+   (Profile) — with `exact` links so `aria-current="page"` lands on the open screen's door
+   and never on the way back (a prefix of every management address).
+   - **Placeholders are routes, not disabled items.** `/workspaces/:id/settings`,
+     `/workspaces/:id/ai` and `/account` each render `PageHeading` + a `PageNotice`
+     "Not built yet" with what is true today and a real next action (Members; back to the
+     workspace; the password-reset link). The disabled alternative was rejected on a measured
+     ground: `UNavigationMenu`'s `disabled` renders the link through `ULinkBase` with
+     `tabindex="-1"` — out of the tab order, its reason behind a hover a keyboard user cannot
+     perform — which is exactly the §5 failure the checklist names. Three thin screens, each
+     with a test.
+   - **Two library defaults corrected centrally** (`app.config.ts`, `navigationMenu`): the
+     active pill is `before:bg-elevated` and the hover `before:bg-elevated/50` — on the
+     `bg-elevated` pane the list stands in, the pane's own tone painted over itself, the
+     2026-09-07 tree-row defect in a second component. Active is now `secondary-container`
+     with its `on-` pair (the tree's selected fill; opaque, identical in both themes) and
+     hover/focus/pressed the `currentColor` layer at 0.08/0.12/0.12. The focus ring joins the
+     global 3px `secondary` (stated on the colour variant — §7.4's ordering trap).
+   - **`/admin/registration` and `/account` follow what is remembered.**
+     `middleware/management-frame.ts` sets the `workspace` layout when the last-workspace
+     cookie names one and leaves the document frame otherwise (the operator who holds no
+     workspace — `e2e/navigation.spec.ts`'s Super Root — keeps the chrome's icon door and the
+     document frame). The page reads the same cookie for its `AppShell`, so the layout and
+     the pane cannot disagree. Registration keeps its "Instance" eyebrow in both frames:
+     neither the bare `<h1>` nor a breadcrumb that starts with the workspace's name says it.
+   - **The `is_super_root` gap is unchanged.** "Registration settings" renders for every
+     caller in the Instance section, as the footer door did, because no response carries the
+     flag and there is no `GET /me` (Open Questions, 2026-09-14). Checked again on
+     2026-09-16: `apps/web/app/composables` has no `useSession`, `packages/contracts` has no
+     `capabilities` field on any response, and `apps/api/src/routes/admin.ts` is the only
+     reader of `users.is_super_root`. The destination's 403 state gates it. A hidden-on-a-
+     guess link would be the dishonest one.
+
+2. **The invite form is a dialog** on the members screen. It was a permanent column beside
+   the roster ("saturates"); it is now a `UModal` behind the screen's one primary action,
+   "Invite someone", Filled at the bar's size in `AppShell`'s `header-end` slot — where edit
+   mode's Save stands. Every field, description and the access radio group are unchanged;
+   the submit moved to the dialog's footer beside Cancel (`form="invite-form"` — the dialog is
+   never server-rendered, so `AuthSubmit`'s hydration guard has nothing to guard). The dialog
+   is *controlled*: Escape, the close control, the backdrop and Cancel all go through one
+   handler; with the email empty it closes, with an address typed the footer swaps to
+   "Discard this invitation?" with Keep editing (focused) / Discard — inside the dialog, not
+   `window.confirm`, not a second dialog, because `ConfirmDialog.vue` + `useConfirm()` is
+   arriving on another branch and this screen must not grow a copy (§4.1). When that lands,
+   this footer pair is what it replaces. A sent invitation closes the dialog, focus returns
+   to the button (Reka's focus return), and the confirmation is announced from a live region
+   on the screen — always in the DOM, never inside the dialog that just closed. The two
+   lists are now the screen's single column on the `measure` (Members, then Pending): a
+   roster row is one line read left to right, the tree's own §2.4 reasoning, and a 1216px
+   row is the scanning problem the measure exists to solve. Measured and decided against
+   two columns at `@2xl`: two lists of one-line rows side by side would each be ~490px in a
+   1000px pane, and a pending row (icon · email · badge · expiry) wraps at that width.
+
+**A tailwind-merge trap, recorded, not fixed.** While placing the section headline
+(`title-small text-muted`, §9.2) it was verified with the installed `tailwind-merge@3.6.0`
+that a project `--text-*` role inside a `:ui` slot override is read as a *colour* and
+dropped against a neighbouring colour class — the same mechanism `app.config.ts` already
+documents on `authForm.description`. Two existing sites are affected today:
+`WorkspaceSwitcher.vue`'s `:ui="{ label: 'truncate text-title-medium text-highlighted' }"`
+resolves to `truncate text-highlighted` (the room's name renders at the `sm` button's own
+size, not the `title-medium` the comment above it intends — not re-measured here), and `AppShell.vue`'s
+breadcrumb `link: 'text-label-large'` keeps the role and drops the library's link *colour*.
+The central fix is `ui.tv.twMergeConfig` in `app.config.ts` (Nuxt UI's `tv` passes
+`appConfig.ui.tv` to `createTV`), registering the `--text-*` roles as font-size classes —
+one line, but it changes the rendered size of a control on every screen the owner reviewed,
+so it is a ruling to make deliberately, not inside this batch. `ManagementSidebar` sidesteps
+it by rendering the headline through the item's slot on an element of its own.
+
+**Seen on the way, pre-existing.** On a first load of a workspace screen with no
+`dw-workspace` cookie, the server renders the sidebar's "Choose a workspace" state (the
+layout renders before the page's `AppShell` calls `useCurrentWorkspace().enter()`), the
+client renders the named workspace, and Vue reports "Hydration completed but contains
+mismatches" (text `Choose a workspace` vs `Workspace`, plus the node mismatches for the
+switcher and the Members door). Nuxt also warns `[NUXT_E7006] Cookie dw-workspace was
+previously set to null and is being overridden`. Harmless in effect — Vue patches — but it
+is a hydration mismatch on the frame every screen stands in, and the mechanism predates
+this branch: in the SSR pass the layout's sidebar renders before the page's `AppShell`
+setup runs, and nothing re-renders on the server. Observed on this branch, not re-measured
+on `main`. Not
+fixed here; the fix is for the layout to learn the workspace from the route on the server
+(`useCurrentWorkspace` seeded from `route.params.workspaceId` in `layouts/workspace.vue`)
+rather than from the page's later `enter()`.
+
+**Not done, deliberately.** The management sidebar names no `aria-label` of its own on the
+pane (`role="navigation" aria-label="Workspace"` stays); the region inside is a nested
+`nav` labelled "Management", which is how `e2e/management.spec.ts` finds it. The three
+placeholder screens have no e2e of their own beyond the click-through in that spec.
+
+**Verified.** See the branch's report; each stage run as its own process per the OOM note
+under Known gaps.
+
+---
+
 ### 2026-09-15 — `ai-provider-foundation` integrated into `main`, 204 commits after its base
 
 **What happened.** The branch (24 commits, base `ef94aab`, dated 2026-09-06) was merged onto
@@ -3624,6 +3732,11 @@ in Findings.
   chosen on the invitation; or no default, with the Super Root plan-authoring route (Phase 1,
   still unticked) as the only assignment path. Until decided, only a seeded account can
   reach `/workspaces/new` successfully. (Findings 2026-09-14.)
+- **Whether to teach tailwind-merge the project's type roles.** `ui.tv.twMergeConfig` in
+  `app.config.ts` would stop a `--text-*` role inside a `:ui` slot override being dropped as
+  a colour (Findings 2026-09-16). Cheap, central, and it changes what `WorkspaceSwitcher`'s
+  name and the breadcrumb links render at on every screen — so it is the owner's call, with
+  a re-measure of both.
 - **Which signal tells the client `manage` and `is_super_root`.** No response carries a
   `capabilities` field and there is no `GET /me`, so the Members and Registration-settings
   links render for everyone and the destinations refuse. Either a `capabilities` object on

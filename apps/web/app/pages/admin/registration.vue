@@ -44,31 +44,36 @@
  * **A 403 is a plain denied state.** The existence of instance settings
  * is no secret, so "only the operator can change this" discloses nothing.
  *
- * **The frame decision.** This stays in the document frame, deliberately,
- * not the workspace one. Registration is an instance setting — orthogonal
- * to "one workspace at a time" (apps/web/PRODUCT.md: a person lives inside
- * one workspace the way they live inside one Obsidian vault), not a fact
- * *about* whichever workspace happens to be last-visited. The operator who
- * needs this screen most is exactly the one who may hold **no** workspace
- * at all — `e2e/navigation.spec.ts`'s seeded Super Root carries no grant
- * anywhere and reaches "No workspaces you can open" before reaching here —
- * so standing the workspace frame around it would mean either an empty
- * sidebar with nothing to orient around, or silently adopting a workspace
- * this setting has nothing to do with. Both entry points already exist and
- * both stay: the chrome's icon button (`AppShell`'s document frame, for a
- * caller with no workspace open) and the sidebar footer's (for a caller
- * who is in one and wants to jump out to an instance-wide setting without
- * losing their place) — one screen, reached from two rooms, the way
- * `docs/UI-CHECKLIST.md` §4.1 asks a shared thing to be one component
- * rather than one copy per screen. Because it stays in the document frame,
- * it keeps its `PageHeading` — the eyebrow ("Instance") names what makes
- * this different from a workspace's own settings, which a bare `<h1>`
- * cannot say on its own.
+ * **The frame decision.** Registration is an instance setting — orthogonal
+ * to "one workspace at a time" (apps/web/PRODUCT.md), not a fact *about*
+ * whichever workspace happens to be last-visited — and the operator who
+ * needs this screen most may hold **no** workspace at all
+ * (`e2e/navigation.spec.ts`'s seeded Super Root carries no grant anywhere
+ * and reaches "No workspaces you can open" before reaching here). So the
+ * frame follows what is remembered (`middleware/management-frame.ts`):
+ * inside a workspace, this stands in the workspace frame with the
+ * **management sidebar** beside it — its own door marked current under
+ * "Instance", the workspace's doors above it, the way back to the
+ * workspace first — because the owner asked that a settings area not keep
+ * the tree beside it (2026-09-16); with no workspace remembered it keeps
+ * the document frame, reached from the chrome's icon button, where an
+ * empty sidebar would orient nobody. One screen, two rooms
+ * (docs/UI-CHECKLIST.md §4.1: a shared thing is one component). The
+ * eyebrow ("Instance") stays in both: it names what makes this different
+ * from a workspace's own settings, which neither the bare `<h1>` nor a
+ * breadcrumb that starts with the workspace's name can say.
  */
 import type { FormSubmitEvent } from '@nuxt/ui';
 import { RegistrationModeSchema, type RegistrationModeValue } from '@deep-wiki/contracts';
 import { z } from 'zod';
 import { formatRevisionDate } from '~/utils/format-revision-date';
+
+// A management screen (`useSidebarMode`), in whichever frame the
+// middleware chose; the pane reads the same cookie so the two agree.
+definePageMeta({ middleware: ['management-frame'], sidebar: 'management' });
+
+/** The workspace the frame stands on, or `undefined` for the document frame. */
+const remembered = rememberedWorkspaceId() ?? undefined;
 
 const {
   status,
@@ -141,7 +146,7 @@ useSeoMeta({ title: 'Registration — deep-wiki' });
 </script>
 
 <template>
-  <AppShell>
+  <AppShell :workspace-id="remembered" title="Registration">
     <!-- The eyebrow adds what the h1 lacks: this is the instance's
          setting, not a workspace's (§4.4). -->
     <PageHeading

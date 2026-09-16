@@ -2,6 +2,7 @@ import { UApp, UDashboardGroup } from '#components';
 import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime';
 import { describe, expect, test, vi } from 'vitest';
 import { computed, defineComponent, h, nextTick, ref } from 'vue';
+import ManagementSidebar from './ManagementSidebar.vue';
 import NavigationTree from './NavigationTree.vue';
 import WorkspaceSidebar from './WorkspaceSidebar.vue';
 import WorkspaceSwitcher from './WorkspaceSwitcher.vue';
@@ -43,7 +44,7 @@ function mockCollaborators() {
 }
 
 /** `UDashboardSidebar` reads its context from `UDashboardGroup`, so the pane is mounted inside one, as it ships — with the frame's own storage key, so the cookie asserted below is the one the product writes. */
-function mount(props: { workspaceId: string | null; currentNodeId?: string | null }) {
+function mount(props: { workspaceId: string | null; currentNodeId?: string | null; mode?: 'tree' | 'management' }) {
   mockCollaborators();
   useFocusMode().collapsed.value = false;
   return mountSuspended(
@@ -77,6 +78,29 @@ describe('WorkspaceSidebar', () => {
     const all = component.element.innerHTML;
     expect(all.indexOf('Contents')).toBeGreaterThan(all.indexOf('Acme'));
     expect(all.indexOf('Members')).toBeGreaterThan(all.indexOf('Contents'));
+  });
+
+  /*
+   * Management mode: the tree steps out and everything that is management
+   * steps in (`ManagementSidebar`), and the two footer doors it now holds
+   * as sections — Members, Registration settings — step out of the footer
+   * so each stands once. The switcher and the theme toggle stay: the person
+   * is still in the workspace, and the pane keeps its shape.
+   */
+  test('in management mode: the switcher above, the management doors in the middle, and the footer keeps only the theme toggle', async () => {
+    const component = await mount({ workspaceId: 'ws-1', mode: 'management' });
+
+    expect(component.findComponent(WorkspaceSwitcher).exists()).toBe(true);
+    expect(component.findComponent(NavigationTree).exists()).toBe(false);
+    const management = component.findComponent(ManagementSidebar);
+    expect(management.exists()).toBe(true);
+    expect(management.props('workspaceId')).toBe('ws-1');
+
+    // Each door once: the sections hold them, the footer no longer does.
+    expect(component.findAll('a[href="/workspaces/ws-1/members"]')).toHaveLength(1);
+    expect(component.findAll('a[href="/admin/registration"]')).toHaveLength(1);
+    expect(component.find('a[aria-label="Registration settings"]').exists()).toBe(false);
+    expect(component.get('button[aria-label="Toggle color theme"]').attributes('type')).toBe('button');
   });
 
   test('with no workspace yet: no tree and no Members door, but a way to the workspace list', async () => {
