@@ -682,19 +682,23 @@ describe('edit-mode page', () => {
   });
 
   describe('inside the workspace frame', () => {
-    // Where the person is: workspace › shelf › book › page, through the
-    // tree the sidebar holds, then the state this screen adds — a crumb
-    // saying "Editing" (docs/UI-CHECKLIST.md §4.5). The word alone: with
-    // an icon the crumb truncated to "Edit…" at 320 beside the bar's two
-    // actions (`e2e/editor.spec.ts` measures that bar).
-    test('the breadcrumb walks from the workspace to the page and ends in the Editing state', async () => {
+    // Where the person is, in the condensed bar (2026-09-16): the page,
+    // then the state this screen adds — a crumb saying "Editing"
+    // (docs/UI-CHECKLIST.md §4.5) — with the path above them (workspace ›
+    // shelf › book) folded behind one overflow control; the tree beside
+    // the editor shows it. The word alone: with an icon the crumb
+    // truncated to "Edit…" at 320 beside the bar's two actions
+    // (`e2e/editor.spec.ts` measures that bar). `AppShell.test.ts` holds
+    // what the overflow menu contains.
+    test('the breadcrumb is condensed to the page and the Editing state, the path above them behind an overflow control', async () => {
       mockDefaults();
       mockSession({ status: 'ready', session: READY_SESSION });
       const component = await mountSuspended(PageInApp, EDITOR_STUBS);
 
       const nav = component.get('nav[aria-label="Where you are"]');
       const crumbs = nav.findAll('li').map((li) => li.text()).filter(Boolean);
-      expect(crumbs).toEqual(['Acme', 'Engineering', 'Handbook', 'A Page', 'Editing']);
+      expect(crumbs).toEqual(['A Page', 'Editing']);
+      expect(nav.find('button[aria-label="Show the full path"]').exists()).toBe(true);
       // The page crumb is the link back to reading it; the state crumb is
       // a place name, not a link.
       expect(nav.find('a[href="/pages/page-1"]').exists()).toBe(true);
@@ -780,11 +784,11 @@ describe('edit-mode page', () => {
 
       confirm.mockResolvedValue(true);
       await reload.trigger('click');
+      await flushPromises();
       expect(reloadSpy).toHaveBeenCalledTimes(1);
 
       vi.unstubAllGlobals();
     });
-      await flushPromises();
 
     // The skeleton is the loaded screen's boxes: the title line the
     // heading takes and the editor's text on `doc-body` lines — the read

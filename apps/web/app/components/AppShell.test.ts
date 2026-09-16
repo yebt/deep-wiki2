@@ -139,6 +139,68 @@ describe('AppShell', () => {
       expect(titleLabels).toEqual(['Acme', 'Members']);
     });
 
+    /*
+     * The condensed bar (2026-09-16), for a screen where the document must
+     * outrank the chrome — edit mode. The owner: "the top part is too much;
+     * the document loses importance." The breadcrumb keeps its last two
+     * crumbs and folds the rest into one overflow control that reveals them
+     * (PRODUCT.md principle 1: the tree beside it is the furniture; the
+     * path is one activation away, not a line of chrome).
+     */
+    describe('condensed', () => {
+      test('the breadcrumb shows the last two crumbs behind an overflow control that names itself', async () => {
+        const component = await mountShell({ workspaceId: 'ws-1', nodeId: 'page-1', trail: [{ label: 'Editing' }], condensed: true });
+
+        const nav = component.get('nav[aria-label="Where you are"]');
+        const labels = nav.findAll('li').map((li) => li.text()).filter(Boolean);
+        expect(labels).toEqual(['Onboarding', 'Editing']);
+        const overflow = nav.get('button[aria-label="Show the full path"]');
+        expect(overflow.text()).toBe('');
+        // The overflow stands where the folded crumbs stood: first.
+        const html = nav.element.innerHTML;
+        expect(html.indexOf('Show the full path')).toBeLessThan(html.indexOf('Onboarding'));
+        // Nothing folded is drawn as a crumb; the workspace link is in the menu, not the row.
+        expect(nav.find('a[href="/workspaces/ws-1"]').exists()).toBe(false);
+        expect(nav.get('a[href="/pages/page-1"]').text()).toBe('Onboarding');
+      });
+
+      test('the overflow control is a menu holding the folded crumbs in order, the workspace as a link and the places as names', async () => {
+        const component = await mountShell({ workspaceId: 'ws-1', nodeId: 'page-1', trail: [{ label: 'Editing' }], condensed: true });
+
+        // The sidebar's switcher is a dropdown too; the overflow is the one inside the breadcrumb.
+        const nav = component.get('nav[aria-label="Where you are"]').element;
+        const menu = component.findAllComponents({ name: 'UDropdownMenu' }).find((candidate) => nav.contains(candidate.element));
+        expect(menu).toBeDefined();
+        const items = (menu!.props('items') as { label: string; to?: string; type?: string }[][]).flat();
+        expect(items.map((item) => item.label)).toEqual(['Acme', 'Engineering', 'Handbook']);
+        expect(items[0]).toMatchObject({ to: '/workspaces/ws-1' });
+        expect(items[1]?.to).toBeUndefined();
+        expect(items[2]?.to).toBeUndefined();
+      });
+
+      test('below sm the overflow control is gone outright, never a focusable control that cannot be seen', async () => {
+        const component = await mountShell({ workspaceId: 'ws-1', nodeId: 'page-1', trail: [{ label: 'Editing' }], condensed: true });
+
+        const overflowItem = component.get('nav[aria-label="Where you are"] button[aria-label="Show the full path"]').element.closest('[data-slot="item"]')!;
+        expect(overflowItem.className).toMatch(/\bmax-sm:hidden\b/);
+      });
+
+      test('a path of two crumbs or fewer has nothing to fold and shows no overflow control', async () => {
+        const component = await mountShell({ workspaceId: 'ws-1', nodeId: 'unplaced', title: 'Members', condensed: true });
+
+        const nav = component.get('nav[aria-label="Where you are"]');
+        expect(nav.findAll('li').map((li) => li.text()).filter(Boolean)).toEqual(['Acme', 'Members']);
+        expect(nav.find('button[aria-label="Show the full path"]').exists()).toBe(false);
+      });
+
+      test('the bar keeps the header height the full bar has, so the column below starts where it does on every other screen', async () => {
+        const full = await mountShell({ workspaceId: 'ws-1', nodeId: 'page-1' });
+        const condensed = await mountShell({ workspaceId: 'ws-1', nodeId: 'page-1', trail: [{ label: 'Editing' }], condensed: true });
+
+        expect(condensed.get('#content-bar').classes()).toEqual(full.get('#content-bar').classes());
+      });
+    });
+
     // Focus mode's control stands at the sidebar's edge of the bar — before
     // the breadcrumb, where the drawer's own toggle stands below `lg` — on
     // every screen inside a workspace, in either frame mode.

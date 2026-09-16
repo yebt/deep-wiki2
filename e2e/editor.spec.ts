@@ -438,6 +438,42 @@ for (const theme of ['light', 'dark'] as const) {
       await expect(bar.getByRole('link', { name: 'Read page' })).toBeVisible();
       await expect(bar.getByRole('button', { name: /^Save/ })).toBeVisible();
 
+      // The condensed bar (2026-09-16): the page and its state are the
+      // only crumbs drawn; the path above them — here the workspace — is
+      // one activation away behind an overflow control, and the bar keeps
+      // the height every other screen's bar has.
+      await expect(crumbs).not.toContainText('E2E Workspace');
+      const overflowControl = crumbs.getByRole('button', { name: 'Show the full path' });
+      await expect(overflowControl).toBeVisible();
+      await overflowControl.click();
+      await expect(page.getByRole('menu')).toBeVisible();
+      await expect(page.getByRole('menu')).toContainText('E2E Workspace');
+      await page.keyboard.press('Escape');
+      await expect(page.getByRole('menu')).toBeHidden();
+      const barBox = (await bar.boundingBox())!;
+      expect(Math.round(barBox.height), `bar height ${barBox.height}`).toBe(56);
+      // Save is the one filled action; "Read page" is a Text button.
+      const saveClass = await bar.getByRole('button', { name: /^Save/ }).getAttribute('class');
+      const readClass = await bar.getByRole('link', { name: 'Read page' }).getAttribute('class');
+      expect(saveClass).toMatch(/(^|\s)bg-primary(\s|$)/);
+      // No fill at rest — a `hover:bg-*` state layer is not a fill.
+      expect(readClass).not.toMatch(/(^|\s)bg-/);
+      // Focus mode's keys are stated on its control.
+      await bar.getByRole('button', { name: 'Hide sidebar' }).hover();
+      await expect(page.getByRole('tooltip')).toContainText(/Hide sidebar/);
+      await expect(page.getByRole('tooltip')).toContainText('\\');
+      await page.mouse.move(0, 0);
+
+      // The sidebar's toolbar row fills the pane: New… grows, Rename…
+      // keeps its natural width, and nothing is left empty to the right.
+      const createBox = (await sidebar.getByTestId('tree-create-open').boundingBox())!;
+      const renameBox = (await sidebar.getByTestId('tree-rename-open').boundingBox())!;
+      const rowBox = (await sidebar.getByTestId('tree-create-open').locator('..').boundingBox())!;
+      expect(createBox.width, 'New… grows past its natural width').toBeGreaterThan(renameBox.width);
+      expect(Math.abs(renameBox.x + renameBox.width - (rowBox.x + rowBox.width)), 'Rename… ends at the row\'s edge').toBeLessThanOrEqual(1);
+      expect(Math.round(createBox.height)).toBe(32);
+      expect(Math.round(renameBox.height)).toBe(32);
+
       // The same title in the same box, and the prose on the same column:
       // the text does not move under the cursor when the mode changes.
       const editTitle = page.getByRole('main').getByRole('heading', { level: 1, name: editorFixtures.editablePageTitle });
@@ -445,6 +481,7 @@ for (const theme of ['light', 'dark'] as const) {
       const editTitleBox = (await editTitle.boundingBox())!;
       const editParagraph = (await editor.locator(':scope > p').first().boundingBox())!;
       expect(Math.abs(editTitleBox.x - readTitleBox.x), `title x: read ${readTitleBox.x}, edit ${editTitleBox.x}`).toBeLessThanOrEqual(1);
+      expect(Math.abs(editTitleBox.y - readTitleBox.y), `title y: read ${readTitleBox.y}, edit ${editTitleBox.y}`).toBeLessThanOrEqual(1);
       expect(Math.abs(editTitleBox.width - readTitleBox.width), `title width: read ${readTitleBox.width}, edit ${editTitleBox.width}`).toBeLessThanOrEqual(1);
       expect(Math.abs(editParagraph.x - readParagraph.x), `paragraph x: read ${readParagraph.x}, edit ${editParagraph.x}`).toBeLessThanOrEqual(1);
       expect(Math.abs(editParagraph.width - readParagraph.width), `paragraph width: read ${readParagraph.width}, edit ${editParagraph.width}`).toBeLessThanOrEqual(
@@ -457,6 +494,7 @@ for (const theme of ['light', 'dark'] as const) {
       expect(box.scrollHeight).toBe(box.innerHeight);
 
       await shot3(page, `1280-${theme}`);
+      await shotShell(page, `edit-1280-${theme}`);
     });
   });
 }
@@ -616,6 +654,21 @@ test.describe('inside the workspace frame, 320x900 light', () => {
     expect(box.scrollHeight).toBe(box.innerHeight);
 
     await shot3(page, '320-light');
+    await shotShell(page, 'edit-320-light');
+
+    // The drawer's toolbar row fills its width too, and neither control
+    // drops below 32px or clips (docs/UI-CHECKLIST.md §5, §6).
+    await page.getByRole('button', { name: 'Open sidebar' }).click();
+    const drawer = page.getByRole('dialog');
+    await expect(drawer.getByTestId('tree-create-open')).toBeVisible({ timeout: 30000 });
+    const createBox = (await drawer.getByTestId('tree-create-open').boundingBox())!;
+    const renameBox = (await drawer.getByTestId('tree-rename-open').boundingBox())!;
+    const rowBox = (await drawer.getByTestId('tree-create-open').locator('..').boundingBox())!;
+    expect(createBox.width).toBeGreaterThan(renameBox.width);
+    expect(Math.abs(renameBox.x + renameBox.width - (rowBox.x + rowBox.width))).toBeLessThanOrEqual(1);
+    expect(Math.round(createBox.height)).toBe(32);
+    expect(Math.round(renameBox.height)).toBe(32);
+    await shotShell(page, 'sidebar-320-light');
   });
 });
 

@@ -65,8 +65,26 @@
  *
  * `center` adds `my-auto`, which only absorbs *positive* free space, so a
  * block taller than the region stays top-aligned and fully reachable.
+ *
+ * ── The condensed bar ────────────────────────────────────────────────
+ *
+ * `condensed` is for a screen where the document must outrank the chrome
+ * — edit mode. The owner's words on 2026-09-16: "the top part is too
+ * much; the document loses importance." The full breadcrumb —
+ * workspace › shelf › book › chapter › page › Editing — restates the
+ * path the sidebar's tree already shows beside the document
+ * (apps/web/PRODUCT.md, principle 1: the tree is the furniture, always at
+ * hand), so in the condensed bar the breadcrumb keeps its last two crumbs
+ * — the page and the state — and folds the rest into one overflow
+ * control, `…`, a menu that reveals them: the workspace as the link it
+ * was, the shelf, book and chapter as the place names they were.
+ * `UBreadcrumb` in the installed Nuxt UI (4.11) has no overflow of its
+ * own, so the fold is composed from its item slot and `UDropdownMenu`,
+ * not a second breadcrumb. The bar's height does not change: the column
+ * starts where it starts on every other screen, which
+ * `e2e/editor.spec.ts` measures against read mode.
  */
-import type { BreadcrumbItem } from '@nuxt/ui';
+import type { BreadcrumbItem, DropdownMenuItem } from '@nuxt/ui';
 import WorkspaceFrame from './WorkspaceFrame.vue';
 
 /**
@@ -92,8 +110,10 @@ const props = withDefaults(
     trail?: readonly BreadcrumbItem[];
     /** What the last crumb says when the tree cannot place `nodeId` yet — the screen's own name for itself. */
     title?: string;
+    /** The lighter bar: the breadcrumb keeps its last two crumbs and folds the rest into an overflow menu. Edit mode. */
+    condensed?: boolean;
   }>(),
-  { column: 'measure', center: false, workspaceId: undefined, nodeId: null, trail: () => [], title: undefined },
+  { column: 'measure', center: false, workspaceId: undefined, nodeId: null, trail: () => [], title: undefined, condensed: false },
 );
 
 const COLUMNS = {
@@ -153,6 +173,34 @@ const crumbs = computed<BreadcrumbItem[]>(() => {
   items.push(...props.trail);
   return items;
 });
+
+/** How many crumbs the condensed bar keeps in the row: the page and its state. */
+const CONDENSED_TAIL = 2;
+
+/** The crumbs the condensed bar folds away — everything before the tail, when there is anything. */
+const foldedCrumbs = computed<BreadcrumbItem[]>(() =>
+  props.condensed && crumbs.value.length > CONDENSED_TAIL ? crumbs.value.slice(0, -CONDENSED_TAIL) : [],
+);
+
+/**
+ * What the breadcrumb draws: the overflow item in place of the folded
+ * crumbs, then the tail. Below `sm` the overflow is gone outright
+ * (`hidden`, not the `sr-only` the other crumbs take): a focusable control
+ * a person cannot see is §6's inaccessible control, and at that width the
+ * drawer already holds the whole path.
+ */
+const rowCrumbs = computed<BreadcrumbItem[]>(() =>
+  foldedCrumbs.value.length > 0
+    ? [{ slot: 'overflow' as const, ui: { item: 'max-sm:hidden' } }, ...crumbs.value.slice(-CONDENSED_TAIL)]
+    : crumbs.value,
+);
+
+/** The overflow menu: a folded crumb that was a link stays one; a place name is a label, not a dead item. */
+const overflowMenu = computed<DropdownMenuItem[][]>(() => [
+  foldedCrumbs.value.map((crumb) =>
+    crumb.to ? { label: crumb.label, icon: crumb.icon, to: crumb.to } : { label: crumb.label, type: 'label' as const },
+  ),
+]);
 </script>
 
 <template>
@@ -177,7 +225,7 @@ const crumbs = computed<BreadcrumbItem[]>(() => {
                  stay for assistive technology. The workspace is one tap
                  away in the drawer. -->
             <UBreadcrumb
-              :items="crumbs"
+              :items="rowCrumbs"
               :ui="{
                 link: 'text-label-large',
                 root: 'min-w-0 flex-1',
@@ -185,7 +233,18 @@ const crumbs = computed<BreadcrumbItem[]>(() => {
                 separator: 'max-sm:hidden',
               }"
               aria-label="Where you are"
-            />
+            >
+              <!-- The condensed bar's overflow: one icon-only control, so
+                   both halves of §4.3 — a name and a tooltip — at the bar's
+                   32px chrome height (§7.2), holding the folded crumbs. -->
+              <template #overflow>
+                <UDropdownMenu :items="overflowMenu" :content="{ align: 'start' }">
+                  <UTooltip text="Show the full path">
+                    <UButton size="sm" variant="ghost" color="neutral" square icon="i-lucide-ellipsis" aria-label="Show the full path" />
+                  </UTooltip>
+                </UDropdownMenu>
+              </template>
+            </UBreadcrumb>
           </template>
           <template #right>
             <slot name="header-end" />

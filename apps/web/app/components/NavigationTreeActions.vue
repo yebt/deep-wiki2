@@ -316,9 +316,12 @@ function applyWriteError(
          sidebar on every screen, and a filled button there would be a
          second primary beside whatever the screen's own is (checklist §2,
          one primary per view). The two read as one group — tonal and
-         outlined — apart from the screen's actions in the top bar. -->
+         outlined — apart from the screen's actions in the top bar.
+         The row fills the pane: New… grows (`flex-1`), Rename… takes its
+         natural width — measured on 2026-09-16, the two at their natural
+         widths left the right third of the 280px pane empty. -->
     <div class="mb-2 flex flex-wrap items-center gap-2">
-      <UButton size="sm" variant="soft" icon="i-lucide-plus" data-testid="tree-create-open" @click="openCreate">New…</UButton>
+      <UButton size="sm" variant="soft" icon="i-lucide-plus" class="flex-1" data-testid="tree-create-open" @click="openCreate">New…</UButton>
 
       <!-- `aria-disabled`, never `disabled`: the attribute would take the
            control out of the tab order and put its own explanation behind

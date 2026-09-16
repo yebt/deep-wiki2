@@ -239,8 +239,15 @@ useSeoMeta({ title: () => (session.value?.title ? `Editing ${session.value.title
 </script>
 
 <template>
-  <AppShell :workspace-id="session?.workspaceId ?? null" :node-id="nodeId" :title="session?.title || undefined" :trail="[{ label: 'Editing' }]">
-    <!-- The breadcrumb ends in the page — placed through the tree once
+  <AppShell :workspace-id="session?.workspaceId ?? null" :node-id="nodeId" :title="session?.title || undefined" :trail="[{ label: 'Editing' }]" condensed>
+    <!-- `condensed`: the lighter bar, because here the document must
+         outrank the chrome — the breadcrumb keeps the page and "Editing"
+         and folds the path above them into an overflow menu; the tree
+         beside the editor already shows it (docs/UI-CHECKLIST.md Review
+         Log, 2026-09-16). Save is the one filled action; "Read page" is
+         the Text button beside it.
+
+         The breadcrumb ends in the page — placed through the tree once
          the session names the workspace, the title alone until then — and
          then the state this screen adds: "Editing". The word alone, no
          pencil: at 320 the bar holds the drawer toggle, this one crumb,
