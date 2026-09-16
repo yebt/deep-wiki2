@@ -55,6 +55,9 @@ async function expectEditorLive(page: Page): Promise<void> {
   await expect(page.getByTestId('editor-surface')).toContainText(fixtures.editablePageMarkdown.trim(), { timeout: 120_000 });
 }
 
+/** The `"./mount"` entry of packages/editor, as the dev server names it. */
+const MOUNT_CHUNK = /packages\/editor\/src\/mount\/index\.ts/;
+
 /**
  * Fix A — prebundle reka-ui (apps/web/modules/perf-prebundle.ts).
  *
@@ -82,4 +85,46 @@ test('the edit route loads in fewer than 500 requests: reka-ui is prebundled, no
   const rekaUi = resources.filter((name) => name.includes('reka-ui')).length;
 
   expect(resources.length, `${resources.length} resources, ${rekaUi} of them reka-ui`).toBeLessThan(500);
+});
+
+/**
+ * Fix C — the edit chain is parallel, not serial.
+ *
+ * On main the mount chunk (`@deep-wiki/editor/mount`) was imported by
+ * `EditorSurface` *after* the edit-session response arrived, so the two
+ * longest waits of the open ran one after the other. The session is held
+ * here until the chunk request has been seen — or for long enough to be
+ * sure it never comes — so the order is what is asserted, not a timing.
+ */
+test('the editor chunk is requested while the edit-session request is still in flight', async ({ page }) => {
+  test.setTimeout(300_000);
+  await signInAs(page, fixtures.writerSessionToken);
+
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route(`${API_URL}/pages/${fixtures.editablePageId}/edit-session`, async (route) => {
+    await held;
+    await route.continue();
+  });
+  const mountRequestedAt: number[] = [];
+  page.on('request', (request) => {
+    if (MOUNT_CHUNK.test(request.url())) mountRequestedAt.push(Date.now());
+  });
+
+  await page.goto(`/pages/${fixtures.editablePageId}/edit`);
+  await expect(page.getByTestId('edit-skeleton')).toBeVisible({ timeout: 120_000 });
+  // The session is still held. The chunk must be on the wire already.
+  await expect
+    .poll(() => mountRequestedAt.length, {
+      timeout: 60_000,
+      message: 'the editor chunk was never requested while the edit-session response was held back',
+    })
+    .toBeGreaterThan(0);
+  const releasedAt = Date.now();
+  release();
+
+  await expectEditorLive(page);
+  expect(mountRequestedAt[0]!, 'the chunk request preceded the session response').toBeLessThan(releasedAt);
 });

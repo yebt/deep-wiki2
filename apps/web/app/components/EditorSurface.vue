@@ -1,22 +1,35 @@
 <script setup lang="ts">
 /**
- * The WYSIWYG editing surface (document-editor spec). Dynamically imports
- * `@deep-wiki/editor/mount` — never a static import — so this component
- * itself can be statically imported by the edit route while the actual
- * ProseMirror-view bundle only loads once this component mounts (which
- * only happens once edit mode is actually entered).
+ * The WYSIWYG editing surface (document-editor spec). Takes
+ * `@deep-wiki/editor/mount` through `loadEditorMount()` — a dynamic
+ * `import()`, never a static one — so this component itself can be
+ * statically imported by the edit route while the actual ProseMirror-view
+ * bundle only loads once edit mode is actually entered.
  * `scripts/checks/bundle-isolation.ts` enforces the "no static import of
  * `/mount`" half of this; the read route never imports this component at
- * all, which is the other half. Arrow-key selection movement, Escape and
- * Enter are all handled inside the plugins themselves
- * (`packages/editor/src/mount/{mention,slash}-plugin.ts`) — this
- * component only renders whatever state they report and supplies the two
- * things a ProseMirror plugin cannot reach itself: fetching mention
- * candidates over the network, and the access-mismatch check.
+ * all, which is the other half.
+ *
+ * The converters come from that same module. This file used to import
+ * `fromMarkdown`/`toMarkdown` statically from `@deep-wiki/editor`, which
+ * put the whole remark/micromark/mdast stack in the edit route's
+ * pre-hydration chunk (measured 2026-09-16: 14 requests and 2.3 MB in
+ * dev, most of a 199 KB chunk in prod) although nothing can parse
+ * anything until the session has arrived and the mount chunk has loaded
+ * anyway. And the import is no longer awaited *after* the session: the
+ * route starts it before its session request, the read screen on pointer
+ * intent towards "Edit", and this component awaits whichever already ran
+ * (`~/utils/editor-mount`; docs/TODO.md Findings, "edit-mode latency").
+ *
+ * Arrow-key selection movement, Escape and Enter are all handled inside
+ * the plugins themselves (`packages/editor/src/mount/{mention,slash}-
+ * plugin.ts`) — this component only renders whatever state they report
+ * and supplies the two things a ProseMirror plugin cannot reach itself:
+ * fetching mention candidates over the network, and the access-mismatch
+ * check.
  */
-import { fromMarkdown, toMarkdown } from '@deep-wiki/editor';
 import type { MentionCandidate, MentionState, SlashState } from '@deep-wiki/editor';
 import type { EditorView } from 'prosemirror-view';
+import { loadEditorMount } from '~/utils/editor-mount';
 import { positionMenu } from '~/utils/menu-position';
 
 const props = defineProps<{
@@ -59,8 +72,8 @@ const MENTION_MENU_ID = 'dw-mention-menu';
 const SLASH_MENU_ID = 'dw-slash-menu';
 
 let editorView: EditorView | undefined;
-/** The `"./mount"` module, kept from the dynamic import so the click paths below can build the same transactions the plugins build on Enter. */
-let editorModule: typeof import('@deep-wiki/editor/mount') | undefined;
+/** The `"./mount"` module, kept from `loadEditorMount()` so the click paths below can build the same transactions the plugins build on Enter. */
+let editorModule: Awaited<ReturnType<typeof loadEditorMount>> | undefined;
 
 const { search: searchMentions, checkAccess } = useMentionCandidates(props.workspaceId, props.pageId);
 
@@ -111,7 +124,7 @@ function confirmSlashAt(index: number): void {
 }
 
 async function mount(): Promise<void> {
-  const mod = await import('@deep-wiki/editor/mount');
+  const mod = await loadEditorMount();
   editorModule = mod;
   if (!rootEl.value) return;
 
@@ -120,7 +133,7 @@ async function mount(): Promise<void> {
 
   editorView = mod.createEditorView({
     dom: rootEl.value,
-    doc: fromMarkdown(props.markdown),
+    doc: mod.fromMarkdown(props.markdown),
     mention: {
       onStateChange: (state) => {
         mentionState.value = state;
@@ -165,7 +178,7 @@ async function mount(): Promise<void> {
     },
     onUpdate: (view) => {
       if (debounceTimer) clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(() => emit('update', toMarkdown(view.state.doc)), 300);
+      debounceTimer = setTimeout(() => emit('update', mod.toMarkdown(view.state.doc)), 300);
     },
   });
 }

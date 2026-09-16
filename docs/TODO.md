@@ -532,6 +532,87 @@ makes conventions portable across projects.
 
 Discoveries and constraints. Newest first.
 
+### 2026-09-16 — Edit-mode latency: measured causes and fixes
+
+**What happened.** The owner's eighth finding above ("entering edit mode is slow to load")
+was measured before it was touched: a read-only session drove `/pages/:id/edit` in a real
+browser (Playwright, CDP network log, `performance` marks from a `MutationObserver` installed
+before navigation) against the dev server the owner runs and against a production build, 3
+cold + 3 warm runs each. The whole report — numbers, the dev-mode request breakdown, the
+serial open chain, the "feels fast" audit of every screen, and a plan for a block-editor UX
+on the current ProseMirror — is in the session scratchpad (`perf-report.md`); what follows is
+what it found about edit mode and what this batch did about it. Four fixes, one commit each,
+each proved by the measurement the report named, on branch `perf/edit-chain-and-prebundle`.
+
+**Caveat on every wall-clock number below.** The machine carried a load average of 30–38 on
+four cores throughout (other agents' Vitest and dev servers), against 10–25 during the
+report's runs. Request counts, bytes and *order* are deterministic and exact; times are
+inflated 5–10× and are quoted only as the same instrument's before/after on the same load.
+
+**Cause 1 — dev hydration was a 1,030-request waterfall, 565 of them `reka-ui`.**
+`@nuxt/ui` pushes `reka-ui` onto `build.transpile` (`node_modules/@nuxt/ui/dist/module.mjs:109`);
+`@nuxt/vite-builder` turns every transpile pattern into `optimizeDeps.exclude` for the client
+and then, in its `nuxt:dev-server` plugin, drops any `optimizeDeps.include` entry that is also
+excluded (`dist/index.mjs:1115-1124`). So the obvious `vite.optimizeDeps.include: ['reka-ui']`
+in `nuxt.config.ts` is silently discarded, and Vite serves the package as ~565 raw ESM files
+over HTTP/1.1, spanning 0.78 s → 3.04 s of the load on their own. Hydration was 80–88% of the
+time to an editable surface in dev.
+*Fix A* (`02c8844`): `apps/web/modules/perf-prebundle.ts` hooks `vite:extendConfig` on the
+client config and moves `reka-ui` from `exclude` to `include`; dev only; listed in
+`nuxt.config.ts` beside the reason. Measured (2 cold + 2 warm): resources **1051–1053 →
+455–457**, requests before the session request left **1026–1032 → 431–432**, `reka-ui`
+**565 → 2** (one 6 MB prebundle, cached after the first load). Proof: `e2e/perf.spec.ts`
+asserts fewer than 500 resource entries on the edit route, with the resource-timing buffer
+raised past the browser's 250-entry default (which would have hidden the waterfall and passed
+the assertion on main).
+
+**Cause 2 — the open chain was serial where nothing depended on anything.** Hydration → `GET
+…/edit-session` (fired from `onMounted`) → `EditorSurface` mounts → *only then*
+`import('@deep-wiki/editor/mount')` (dev: 14 requests, 1.04 MB) → first `fromMarkdown` (98 ms,
+lazy processor init) → view. And `EditorSurface.vue` statically imported `fromMarkdown`/
+`toMarkdown` from `@deep-wiki/editor`, so the whole remark/micromark/mdast stack rode in the
+edit route's pre-hydration chunk (dev: 21 module requests before hydration by this batch's
+count; prod: most of the 199 KB `DBjEgo5p.js`) although nothing can parse until the session
+and the mount chunk have both arrived.
+*Fix C*: `packages/editor/src/mount/index.ts` re-exports the two converters (same bindings —
+`mount/index.test.ts` holds them identical to the `"."` export's, so there is still one
+parser); `apps/web/app/utils/editor-mount.ts` is the one importer of the mount chunk, cached,
+warming `fromMarkdown('')` inside the same promise; `pages/[id]/edit.vue` calls it in
+`onMounted` *before* `load()`; `EditorSurface` awaits it and takes the converters from the
+module, dropping its static import. Measured: the mount chunk's first request now leaves in
+the same millisecond as the session request (`24519` vs `24520`, `20583` vs `20620` — before,
+it left 2.2–2.9 s *after* the session response); module requests before the session request
+**431–432 → 402–403**, and the markdown-stack requests before hydration **21 → 0**. Proof:
+`e2e/perf.spec.ts` holds the session response and asserts the chunk request is on the wire
+before it is released — impossible on main, where the import waited for the response.
+`bundle-isolation` and `single-parser` stay green: the import is still dynamic, and the
+re-export is a binding, not a second pipeline.
+
+**Cause 3 — no route-change feedback, and nothing prefetched in dev.** `NuxtLoadingIndicator`
+was not mounted anywhere; `NuxtLink` skips `preloadRouteComponents` under `import.meta.dev`,
+so a read → edit hop paid all 52 of the route's module requests on the click.
+*Fix D (partial)*: see the entry's continuation below once that commit lands. Out of this
+batch, deliberately: turning the tree rows into `NuxtLink`s (the `feat/tree-context-menu-filter`
+branch owns `NavigationTree.vue`), and the presence `EventSource` reopened on every hop.
+
+**Cause 4 — small serial costs at open.** `useLockHeartbeat.start()` sent a `PATCH …/lock`
+the instant the editor opened, renewing a lock the session response had acquired 100 ms
+earlier; and `EditorSurface`'s box was in the DOM 120–730 ms before ProseMirror attached to
+it, an empty well where the page's skeleton had just been.
+*Fix H*: see the entry's continuation below once that commit lands.
+
+**What this batch did not do**, recorded so it is not mistaken for done: the report's fix B
+(a cached, SSR-capable read layer — every screen still `$fetch`es in `onMounted` and shows its
+skeleton again on every hop), E (optimistic tree writes), F (icons bundled offline —
+`@nuxt/icon` still falls back to `api.iconify.design`), G (bundle hygiene — the server
+`envSchema` and zod still ship to every page, 75 KB gzipped, and Nitro serves no
+`content-encoding`), and the second half of D.
+
+**Impact.** In dev, the owner's stack, the first two causes were ~80–90% of the time to an
+editable surface; both are removed at the request level. The remaining wait on this machine
+is CPU under load, which no request-shaped fix can reach. Production gains are smaller and
+structural: −150 KB from the pre-hydration route chunk and one fewer serial hop per open.
+
 ### 2026-09-16 — Owner review of the workspace frame: eight defects, all in flight
 
 **What happened.** The owner reviewed the workspace frame shipped across the 2026-09-15

@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { defineComponent, h } from 'vue';
 import { MENU_WIDTH_ESTIMATE } from '~/utils/menu-position';
 import EditorSurface from './EditorSurface.vue';
+import editorSurfaceSource from './EditorSurface.vue?raw';
 
 /**
  * EditorSurface renders three things nothing else in this app renders: the
@@ -43,6 +44,8 @@ type SlashAction =
 
 interface FakeViewOptions {
   readonly dom: HTMLElement;
+  /** The document the host parsed — with the converter it took from the mount module. */
+  readonly doc: { textContent: string };
   readonly mention?: { readonly onStateChange?: (state: MentionState, view: unknown) => void; readonly onConfirmed?: (candidate: MentionCandidate) => void };
   readonly slash?: { readonly onStateChange?: (state: SlashState) => void };
 }
@@ -53,6 +56,10 @@ const { harness } = vi.hoisted(() => ({
     caret: { top: 100, bottom: 120, left: 40 },
     /** Flipped once the component has finished its dynamic import and built its (fake) view. */
     mounted: false,
+    /** The document the fake view was created with — what `fromMarkdown` produced from the `markdown` prop. */
+    doc: null as null | { textContent: string },
+    /** Resolved before `loadEditorMount()` hands the module to the component; a test holds it to see the surface before the view exists. */
+    gate: Promise.resolve(),
     dispatchMention: (_action: MentionAction): void => {
       throw new Error('no editor mounted');
     },
@@ -129,8 +136,25 @@ vi.mock('@deep-wiki/editor/mount', async (importOriginal) => {
 
       harness.dispatchMention = applyMention;
       harness.dispatchSlash = applySlash;
+      harness.doc = options.doc;
       harness.mounted = true;
       return view;
+    },
+  };
+});
+
+// The component takes the chunk from the shared importer, never from an
+// `import()` of its own (fix C, docs/TODO.md Findings 2026-09-16): the
+// route and the read screen start that same import early. The importer
+// stays real — it resolves through the `@deep-wiki/editor/mount` mock
+// above — and only gains a gate a test can hold.
+vi.mock('~/utils/editor-mount', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('~/utils/editor-mount')>();
+  return {
+    ...actual,
+    loadEditorMount: async () => {
+      await harness.gate;
+      return actual.loadEditorMount();
     },
   };
 });
@@ -185,18 +209,33 @@ describe('EditorSurface', () => {
     harness.caret = { top: 100, bottom: 120, left: 40 };
     harness.confirmed = null;
     harness.focusCalls = 0;
+    harness.doc = null;
+    harness.gate = Promise.resolve();
   });
 
   /**
-   * Measured by the 2026-09-14 audit: clicking the second candidate left
-   * the text unchanged, the menu open and the editor unfocused. The
-   * plugins handle Enter themselves and document the click as the host's
-   * to wire (`mention-plugin.ts`: "confirmed (Enter or click)"); nothing
-   * was wired. docs/UI-CHECKLIST.md §6, "no inert interactions".
-   *
-   * The click is dispatched on the option row itself — the element that
-   * looks clickable — never on the listbox around it.
+   * Fix C (docs/TODO.md Findings 2026-09-16, "edit-mode latency"): the
+   * static `import { fromMarkdown, toMarkdown } from '@deep-wiki/editor'`
+   * this component carried put the whole remark/micromark stack in the
+   * edit route's pre-hydration chunk, although nothing needs a parser
+   * before the session has arrived and the mount chunk has loaded. The
+   * converters now come from the mount module, through the shared
+   * importer the route and the read screen already started.
    */
+  describe('the editor chunk and the converters', () => {
+    test('parses the markdown prop with the converter from the mount module', async () => {
+      await mountSurface();
+
+      expect(harness.doc?.textContent).toBe('Hi');
+    });
+
+    test('carries no static value import of @deep-wiki/editor — only the type import survives', () => {
+      const valueImports = [...editorSurfaceSource.matchAll(/^import\s+(?!type\b)[^;]*from\s+'@deep-wiki\/editor'/gm)];
+
+      expect(valueImports.map((match) => match[0])).toEqual([]);
+    });
+  });
+
   describe('a click confirms an option', () => {
     test('clicking the second mention candidate inserts that candidate, closes the menu and keeps the editor focused', async () => {
       const component = await mountSurface();

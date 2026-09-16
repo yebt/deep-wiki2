@@ -16,6 +16,12 @@ const { useEditSessionMock, useLockHeartbeatMock, useSavePageMock, usePresenceSt
   }));
 
 mockNuxtImport('useEditSession', () => useEditSessionMock);
+
+// The order of the two things `onMounted` starts is the whole point of
+// fix C (docs/TODO.md Findings 2026-09-16): the editor chunk before the
+// session request, so they overlap instead of queueing.
+const { loadEditorMountMock, mountedOrder } = vi.hoisted(() => ({ loadEditorMountMock: vi.fn(), mountedOrder: [] as string[] }));
+vi.mock('~/utils/editor-mount', () => ({ loadEditorMount: loadEditorMountMock }));
 mockNuxtImport('useLockHeartbeat', () => useLockHeartbeatMock);
 mockNuxtImport('useSavePage', () => useSavePageMock);
 mockNuxtImport('usePresenceStream', () => usePresenceStreamMock);
@@ -128,6 +134,35 @@ function mockPresence(editors: readonly { userId: string; userDisplayName: strin
 }
 
 describe('edit-mode page', () => {
+  test('starts loading the editor chunk before it requests the edit session, so the two overlap', async () => {
+    mountedOrder.length = 0;
+    loadEditorMountMock.mockImplementation(async () => {
+      mountedOrder.push('chunk');
+      return {};
+    });
+    mockDefaults();
+    const { load } = mockSession({ status: 'loading' });
+    load.mockImplementation(async () => {
+      mountedOrder.push('session');
+    });
+    await mountSuspended(PageInApp, FRAME_STUBS);
+
+    expect(loadEditorMountMock).toHaveBeenCalledTimes(1);
+    expect(load).toHaveBeenCalledTimes(1);
+    expect(mountedOrder).toEqual(['chunk', 'session']);
+  });
+
+  test('a chunk that fails to load early does not take the screen down: the session is still requested', async () => {
+    loadEditorMountMock.mockRejectedValue(new Error('Failed to fetch dynamically imported module'));
+    mockDefaults();
+    const { load } = mockSession({ status: 'loading' });
+    const component = await mountSuspended(PageInApp, FRAME_STUBS);
+    await component.vm.$nextTick();
+
+    expect(load).toHaveBeenCalledTimes(1);
+    expect(component.find('[data-testid="edit-skeleton"]').exists()).toBe(true);
+  });
+
   test('renders the loading skeleton while the edit session is being requested', async () => {
     mockDefaults();
     mockSession({ status: 'loading' });

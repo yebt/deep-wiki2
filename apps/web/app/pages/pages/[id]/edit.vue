@@ -19,6 +19,7 @@
  *   `fromMarkdown` turns into a single empty paragraph — there is no
  *   separate empty state to design for beyond that.
  */
+import { loadEditorMount } from '~/utils/editor-mount';
 import { formatRevisionDate } from '~/utils/format-revision-date';
 
 // Inside the workspace layout: the frame is mounted once and this screen
@@ -91,6 +92,15 @@ function useCanonicalDocument(): void {
 }
 
 onMounted(() => {
+  // The editor chunk first, then the session request, so the two overlap
+  // instead of queueing: measured on 2026-09-16, `EditorSurface` only
+  // began `import('@deep-wiki/editor/mount')` once the session had
+  // arrived — 14 requests and 230–530 ms in dev on the critical path, on
+  // top of the request they could have shared (docs/TODO.md Findings,
+  // "edit-mode latency"). Neither depends on the other. A failure here is
+  // swallowed on purpose: `EditorSurface` awaits the same loader and is
+  // where a chunk that cannot load surfaces; this call only warms it.
+  void loadEditorMount().catch(() => {});
   void load();
 });
 
