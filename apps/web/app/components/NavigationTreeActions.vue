@@ -195,9 +195,21 @@ watch(createTypeOptions, (options) => {
   }
 });
 
+/** The toolbar's New…: the first legal type at the picked row. */
 function openCreate(): void {
+  openCreateAs();
+}
+
+/**
+ * `type` is the row's context menu asking for a specific child ("New
+ * page…" on a chapter); the toolbar asks for none and gets the first
+ * legal one. Either way the location is the picked row, so the menu
+ * selects its row before calling this and lands in the same dialog.
+ */
+function openCreateAs(type?: NodeType): void {
   createParentId.value = nearestContainerId.value;
-  createType.value = (legalChildTypes(typeOf(createParentId.value))[0] ?? 'shelf') as NodeType;
+  const legal = legalChildTypes(typeOf(createParentId.value));
+  createType.value = (type && legal.includes(type) ? type : (legal[0] ?? 'shelf')) as NodeType;
   createTitle.value = '';
   createNameError.value = null;
   createFormError.value = null;
@@ -268,6 +280,14 @@ async function submitRename(): Promise<void> {
     renameSubmitting.value = false;
   }
 }
+
+/**
+ * The row's context menu (`NavigationTree`) opens these same two dialogs:
+ * one create, one rename, one classification of failure, whichever
+ * surface asked. A second copy of either dialog is how the toolbar and
+ * the menu would drift apart.
+ */
+defineExpose({ openCreate: openCreateAs, openRename });
 
 /* ─── One classification of failure, for both writes ────────────────── */
 

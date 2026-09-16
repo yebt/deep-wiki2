@@ -1,6 +1,6 @@
 import { UApp } from '#components';
 import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime';
-import { describe, expect, test, vi } from 'vitest';
+import { afterEach, describe, expect, test, vi } from 'vitest';
 import { computed, defineComponent, h, nextTick, ref } from 'vue';
 import NavigationTreeActions from '~/components/NavigationTreeActions.vue';
 import NavigationTree from './NavigationTree.vue';
@@ -49,13 +49,26 @@ function mockTree(overrides: { status?: string; nodes?: unknown[]; message?: str
   return { load, reorder, reveal, selectedId };
 }
 
-function mount(props: { workspaceId: string | null; currentNodeId?: string | null } = { workspaceId: 'ws-1' }) {
-  return mountSuspended(
+// Attached to the document: focus and the menu's focus return are real
+// only for a node the document holds, and this file asserts both. Each
+// mount is taken down after its test so a menu or dialog it portaled
+// into the body is gone before the next one looks there.
+let mounted: { unmount: () => void } | null = null;
+afterEach(() => {
+  mounted?.unmount();
+  mounted = null;
+});
+
+async function mount(props: { workspaceId: string | null; currentNodeId?: string | null } = { workspaceId: 'ws-1' }) {
+  const wrapper = await mountSuspended(
     defineComponent({
       name: 'TreeInApp',
       setup: () => () => h(UApp, null, { default: () => h(NavigationTree, props) }),
     }),
+    { attachTo: document.body },
   );
+  mounted = wrapper;
+  return wrapper;
 }
 
 const NODES = [
@@ -271,31 +284,150 @@ describe('NavigationTree', () => {
   });
 
   /*
-   * A book's history used to be a strip of "Book history: A B C" links in
-   * the app bar. It is a context action on the book's own row now — a menu
-   * at the row's end, named for the book, present on book rows alone.
+   * Every row carries a context menu: right-click, the `⋯` button at the
+   * row's end, `Shift+F10` and the `ContextMenu` key all open the same
+   * one. Its items come from `treeRowActions` — the one table in
+   * `packages/core`, read backwards — and an item the row cannot take
+   * right now stays in the menu, `aria-disabled`, with its reason shown.
    */
-  describe('a book row’s context action', () => {
-    test('every book row, and only a book row, carries a named menu trigger', async () => {
+  describe('a row’s context menu', () => {
+    function menu(): HTMLElement | null {
+      return document.body.querySelector<HTMLElement>('[role="menu"]');
+    }
+
+    function menuItems(): HTMLElement[] {
+      return Array.from(document.body.querySelectorAll<HTMLElement>('[role="menuitem"]'));
+    }
+
+    async function settle(): Promise<void> {
+      await nextTick();
+      await nextTick();
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+
+    test('every row, whatever its type, carries a named `⋯` trigger', async () => {
       mockTree({ status: 'success', nodes: NODES });
       const component = await mount();
 
       const triggers = component.findAll('[role="tree"] button[aria-haspopup="menu"]');
-      expect(triggers).toHaveLength(1);
-      expect(triggers[0]!.attributes('aria-label')).toBe('Actions for Handbook');
-      expect(component.get('[data-node-id="book-1"]').element.contains(triggers[0]!.element)).toBe(true);
+      expect(triggers).toHaveLength(4);
+      expect(triggers.map((trigger) => trigger.attributes('aria-label'))).toEqual([
+        'Actions for Engineering',
+        'Actions for Handbook',
+        'Actions for First page',
+        'Actions for Second page',
+      ]);
     });
 
     test('the trigger is in the tab order only on the row that holds the tree’s tab stop', async () => {
       mockTree({ status: 'success', nodes: NODES });
       const component = await mount();
 
-      const trigger = component.get('[role="tree"] button[aria-haspopup="menu"]');
+      const trigger = component.get('[data-node-id="book-1"] button[aria-haspopup="menu"]');
       expect(trigger.attributes('tabindex')).toBe('-1');
 
       await component.get('[data-node-id="book-1"]').trigger('focus');
       await nextTick();
       expect(trigger.attributes('tabindex')).toBe('0');
+    });
+
+    test('right-click on a page row opens its menu: rename, move, open, history and copy — and no "New", since a page holds nothing', async () => {
+      mockTree({ status: 'success', nodes: NODES });
+      const component = await mount();
+
+      await component.get('[data-node-id="page-1"] [draggable="true"]').trigger('contextmenu', { clientX: 40, clientY: 40 });
+      await settle();
+
+      expect(menu()).not.toBeNull();
+      const labels = menuItems().map((item) => item.textContent?.trim().replace(/\s+/g, ' '));
+      expect(labels.some((label) => label?.startsWith('New '))).toBe(false);
+      expect(labels.some((label) => label?.startsWith('Rename…'))).toBe(true);
+      expect(labels.some((label) => label?.startsWith('Open'))).toBe(true);
+      expect(labels.some((label) => label?.startsWith('History'))).toBe(true);
+      expect(labels.some((label) => label?.startsWith('Copy link'))).toBe(true);
+      expect(labels.some((label) => /delete/i.test(label ?? ''))).toBe(false);
+
+      // The first of two siblings: "Move up" stays in the menu, disabled
+      // with its reason on show; "Move down" is live.
+      const up = menuItems().find((item) => item.textContent?.includes('Move up'))!;
+      expect(up.getAttribute('aria-disabled')).toBe('true');
+      // The reason is in the item itself, visible the moment the menu is
+      // open — not behind a hover (§3, §5).
+      expect(up.textContent).toMatch(/already first/i);
+      const down = menuItems().find((item) => item.textContent?.includes('Move down'))!;
+      expect(down.getAttribute('aria-disabled')).toBeNull();
+    });
+
+    test('right-click on a shelf row offers "New book…" and nothing to open', async () => {
+      mockTree({ status: 'success', nodes: NODES });
+      const component = await mount();
+
+      await component.get('[data-node-id="shelf-1"] [draggable="true"]').trigger('contextmenu', { clientX: 40, clientY: 40 });
+      await settle();
+
+      const labels = menuItems().map((item) => item.textContent?.trim() ?? '');
+      expect(labels.some((label) => label.startsWith('New book…'))).toBe(true);
+      expect(labels.some((label) => label.startsWith('Open'))).toBe(false);
+      // Right-clicking a row also picks it, the way every explorer does.
+      expect(component.get('[data-node-id="shelf-1"]').attributes('aria-selected')).toBe('true');
+    });
+
+    test('"Rename…" from the menu opens the toolbar’s own rename dialog for that row — one path, not a second one', async () => {
+      const { selectedId } = mockTree({ status: 'success', nodes: NODES });
+      const component = await mount();
+
+      await component.get('[data-node-id="page-2"] [draggable="true"]').trigger('contextmenu', { clientX: 40, clientY: 40 });
+      await settle();
+      const rename = menuItems().find((item) => item.textContent?.includes('Rename…'))!;
+      rename.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      await settle();
+
+      expect(selectedId.value).toBe('page-2');
+      const dialog = document.body.querySelector('[role="dialog"]');
+      expect(dialog).not.toBeNull();
+      expect(dialog!.textContent).toContain('Second page');
+      expect(document.body.querySelector('[data-testid="tree-rename-title"]')).not.toBeNull();
+    });
+
+    test('"Move down" from the menu is the same reorder the keyboard makes', async () => {
+      const { reorder } = mockTree({ status: 'success', nodes: NODES });
+      const component = await mount();
+
+      await component.get('[data-node-id="page-1"] [draggable="true"]').trigger('contextmenu', { clientX: 40, clientY: 40 });
+      await settle();
+      const down = menuItems().find((item) => item.textContent?.includes('Move down'))!;
+      down.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      await settle();
+
+      expect(reorder).toHaveBeenCalledWith('page-1', 'book-1', 1);
+    });
+
+    test('Shift+F10 on a row opens the menu, and Escape closes it and puts focus back on the row', async () => {
+      mockTree({ status: 'success', nodes: NODES });
+      const component = await mount();
+
+      const row = component.get('[data-node-id="book-1"]');
+      (row.element as HTMLElement).focus();
+      await row.trigger('keydown', { key: 'F10', shiftKey: true });
+      await settle();
+      expect(menu()).not.toBeNull();
+
+      menu()!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      await settle();
+      expect(menu()).toBeNull();
+      expect(document.activeElement).toBe(row.element);
+    });
+
+    test('the `⋯` button opens the same menu', async () => {
+      mockTree({ status: 'success', nodes: NODES });
+      const component = await mount();
+
+      await component.get('[data-node-id="book-1"] button[aria-haspopup="menu"]').trigger('click');
+      await settle();
+
+      expect(menu()).not.toBeNull();
+      expect(menuItems().some((item) => item.textContent?.includes('New chapter…'))).toBe(true);
+      expect(component.get('[data-node-id="book-1"] button[aria-haspopup="menu"]').attributes('aria-expanded')).toBe('true');
     });
   });
 });

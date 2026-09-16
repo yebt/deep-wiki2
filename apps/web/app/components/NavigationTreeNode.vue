@@ -192,13 +192,16 @@ function onKeydown(event: KeyboardEvent): void {
     :aria-selected="isSelected"
     :aria-current="isCurrent ? 'page' : undefined"
     :tabindex="activeId === node.id ? 0 : -1"
-    class="dw-tree-item group"
+    class="dw-tree-item"
     @keydown="onKeydown"
     @focus="emit('activate', node.id)"
   >
+    <!-- `group` on the row, not the `<li>`: the item element holds the
+         whole subtree, so a `group-hover` there lit every ancestor's `⋯`
+         when a page three levels down was hovered (seen 2026-09-16). -->
     <div
       draggable="true"
-      class="dw-tree-row dw-state-layer flex h-10 min-h-10 items-center gap-2 rounded-md pe-1 text-body-medium text-default"
+      class="dw-tree-row dw-state-layer group flex h-10 min-h-10 items-center gap-2 rounded-md pe-1 text-body-medium text-default"
       :class="[
         // Every row does something on click now — open or fold — so every
         // row is a pointer target; the grab cursor promised a drag and
