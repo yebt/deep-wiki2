@@ -1,3 +1,5 @@
+import { pageDiffKey } from '~/utils/api-keys';
+
 export type PageDiffStatus = 'idle' | 'loading' | 'success' | 'not-found' | 'unauthenticated' | 'network-error';
 
 export type BlockChangeWithText =
@@ -33,8 +35,9 @@ export type PageDiffFetcher = (nodeId: string, from: string, to: string) => Prom
 
 export interface UsePageDiffResult {
   readonly status: Ref<PageDiffStatus>;
-  readonly diff: Ref<PageDiff | null>;
-  readonly message: Ref<string>;
+  readonly diff: ComputedRef<PageDiff | null>;
+  readonly message: ComputedRef<string>;
+  /** Fetch, or — with the diff already on screen — refresh behind it. */
   readonly load: () => Promise<void>;
 }
 
@@ -49,49 +52,43 @@ export interface UsePageDiffResult {
  * every change classified `unchanged` (block-diff spec's `BlockChange`
  * union always reports one entry per block, on both sides). The caller
  * decides whether that renders as an empty-state notice.
+ *
+ * The answer lives in the read layer (`useApiRead`, keyed by
+ * `pageDiffKey` — the page and both revision ids): server-rendered when
+ * the request can be authenticated and both ids are present, and kept
+ * for good, since a diff between two named revisions never changes.
  */
 export function usePageDiff(nodeId: string, from: string, to: string, fetcher?: PageDiffFetcher): UsePageDiffResult {
   const get =
     fetcher ??
     ((id: string, fromId: string, toId: string) => {
-      const config = useRuntimeConfig();
-      return $fetch<PageDiffResponse>(`${config.public.apiBaseUrl}/pages/${id}/diff`, {
-        credentials: 'include',
-        query: { from: fromId, to: toId },
-      });
+      const api = useApiClient();
+      return api<PageDiffResponse>(`/pages/${id}/diff`, { query: { from: fromId, to: toId } });
     });
 
-  const status = ref<PageDiffStatus>('idle');
-  const diff = ref<PageDiff | null>(null);
-  const message = ref('');
+  const read = useApiRead<PageDiffResponse>(pageDiffKey(nodeId, from, to), () => get(nodeId, from, to), {
+    // A URL missing a revision id is settled by the screen as `not-found`
+    // without a request; the server must not ask on its behalf.
+    server: from.length > 0 && to.length > 0,
+  });
+  const status = useReadStatus(read, (code) => {
+    // Signed out: the screen's next move is sign-in, not a retry
+    // (`useSignInRedirect`). Only the browser ever sees it — a 401 during
+    // the server's render is "nothing known" (useApiRead).
+    if (code === 401) return 'unauthenticated';
+    return code === 403 || code === 404 ? 'not-found' : 'network-error';
+  });
 
-  async function load(): Promise<void> {
-    status.value = 'loading';
-    message.value = 'Loading diff…';
+  const diff = computed(() => (read.outcome.value?.ok ? read.outcome.value.value.diff : null));
+  const MESSAGES: Record<PageDiffStatus, string> = {
+    'idle': '',
+    'loading': 'Loading diff…',
+    'success': '',
+    'unauthenticated': 'Your session has ended.',
+    'not-found': 'This page does not exist.',
+    'network-error': 'Cannot reach the server. Check your connection and try again.',
+  };
+  const message = computed(() => MESSAGES[status.value]);
 
-    try {
-      const response = await get(nodeId, from, to);
-      diff.value = response.diff;
-      status.value = 'success';
-      message.value = '';
-    } catch (error) {
-      const code = httpStatusOf(error);
-      // Signed out: the screen's next move is sign-in, not a retry
-      // (`useSignInRedirect`), so this is never the network branch.
-      if (code === 401) {
-        status.value = 'unauthenticated';
-        message.value = 'Your session has ended.';
-        return;
-      }
-      if (code === 403 || code === 404) {
-        status.value = 'not-found';
-        message.value = 'This page does not exist.';
-      } else {
-        status.value = 'network-error';
-        message.value = 'Cannot reach the server. Check your connection and try again.';
-      }
-    }
-  }
-
-  return { status, diff, message, load };
+  return { status, diff, message, load: read.load };
 }

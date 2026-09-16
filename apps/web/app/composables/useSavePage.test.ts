@@ -1,4 +1,6 @@
 import { describe, expect, test, vi } from 'vitest';
+import { useNuxtApp } from '#imports';
+import { bookHistoryKey, pageDiffKey, pageHistoryKey, pageReadKey, workspaceActivityKey } from '~/utils/api-keys';
 import { useSavePage } from './useSavePage';
 
 function responseError(status: number, body: unknown = {}) {
@@ -119,5 +121,42 @@ describe('useSavePage when the API never responded', () => {
     expect(status.value).toBe('network-error');
     expect(message.value).toMatch(/try saving again/i);
     expect(settled).toBe('resolved');
+  });
+
+  // The data layer keeps read answers across screens (`useApiRead`); a
+  // save is the one write this app has that stales them, and the reader
+  // the person goes back to must not render the page as it was.
+  describe('invalidation', () => {
+    test('a successful save clears the saved page, its history, and every book history and workspace activity from the read cache', async () => {
+      const payload = useNuxtApp().payload.data;
+      payload[pageReadKey('page-saved')] = { ok: true, value: { html: '<p>old</p>' } };
+      payload[pageHistoryKey('page-saved')] = { ok: true, value: { revisions: [] } };
+      payload[bookHistoryKey('book-any')] = { ok: true, value: {} };
+      payload[workspaceActivityKey('ws-any')] = { ok: true, value: {} };
+      payload[pageReadKey('page-other')] = { ok: true, value: { html: '<p>other</p>' } };
+      payload[pageDiffKey('page-saved', 'r1', 'r2')] = { ok: true, value: {} };
+
+      const { save } = useSavePage('page-saved', vi.fn(async () => ({ contentHash: 'hash-2' })));
+      await save('# Hi\n', 'hash-1');
+
+      expect(payload[pageReadKey('page-saved')]).toBeUndefined();
+      expect(payload[pageHistoryKey('page-saved')]).toBeUndefined();
+      expect(payload[bookHistoryKey('book-any')]).toBeUndefined();
+      expect(payload[workspaceActivityKey('ws-any')]).toBeUndefined();
+      expect(payload[pageReadKey('page-other')]).toEqual({ ok: true, value: { html: '<p>other</p>' } });
+      expect(payload[pageDiffKey('page-saved', 'r1', 'r2')]).toEqual({ ok: true, value: {} });
+    });
+
+    test('a refused save clears nothing: what is cached is still what is stored', async () => {
+      const payload = useNuxtApp().payload.data;
+      payload[pageReadKey('page-refused')] = { ok: true, value: { html: '<p>kept</p>' } };
+
+      const { save } = useSavePage('page-refused', vi.fn(async () => {
+        throw responseError(409, { error: 'stale' });
+      }));
+      await save('# Hi\n', 'hash-1');
+
+      expect(payload[pageReadKey('page-refused')]).toEqual({ ok: true, value: { html: '<p>kept</p>' } });
+    });
   });
 });

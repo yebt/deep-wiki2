@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
+import { waitForHydration } from './hydration';
 import { expectNoHorizontalOverflow } from './overflow';
 
 /**
@@ -275,6 +276,8 @@ test.describe('inside the workspace frame, the skeleton', () => {
    * caption, same left, width and height for a row.
    */
   test('occupies the caption line and the row box', async ({ page, context }) => {
+    // Waits for hydration before the hop (below): dev mode under load.
+    test.setTimeout(240_000);
     await signInAs(context, fixtures.readerSessionToken);
     let release!: () => void;
     const held = new Promise<void>((resolve) => {
@@ -285,7 +288,15 @@ test.describe('inside the workspace frame, the skeleton', () => {
       await route.continue();
     });
 
-    await page.goto(DIFF_URL);
+    // By a client-side navigation from the history screen ("Compare with
+    // previous" on the newest revision, which is this exact diff): a full
+    // load is answered on the server since the data layer (`useApiRead`),
+    // with no skeleton to measure — the skeleton is for a diff the browser
+    // has not seen yet (see e2e/data-layer.spec.ts).
+    await page.goto(`/pages/${fixtures.historyPageId}/history`);
+    await waitForHydration(page);
+    await page.getByRole('link', { name: 'Compare with previous' }).first().click({ timeout: 30000 });
+    await expect(page).toHaveURL(DIFF_URL);
     const skeleton = page.getByTestId('diff-skeleton');
     await expect(skeleton).toBeVisible({ timeout: 30000 });
     const skeletonCaption = (await skeleton.getByTestId('diff-skeleton-caption').boundingBox())!;

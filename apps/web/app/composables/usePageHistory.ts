@@ -1,3 +1,5 @@
+import { pageHistoryKey } from '~/utils/api-keys';
+
 export type PageHistoryStatus = 'idle' | 'loading' | 'success' | 'not-found' | 'unauthenticated' | 'network-error';
 
 export interface RevisionSummary {
@@ -16,8 +18,9 @@ export type PageHistoryFetcher = (nodeId: string) => Promise<PageHistoryResponse
 
 export interface UsePageHistoryResult {
   readonly status: Ref<PageHistoryStatus>;
-  readonly revisions: Ref<readonly RevisionSummary[]>;
-  readonly message: Ref<string>;
+  readonly revisions: ComputedRef<readonly RevisionSummary[]>;
+  readonly message: ComputedRef<string>;
+  /** Fetch, or — with the list already on screen — refresh behind it. */
   readonly load: () => Promise<void>;
 }
 
@@ -33,46 +36,39 @@ export interface UsePageHistoryResult {
  * application's own not-found screen ("selects by status code alone").
  * Reintroducing a 403 branch here would defeat that on the one client
  * that happens to see a 403 rather than a 404.
+ *
+ * The answer lives in the read layer (`useApiRead`, keyed by
+ * `pageHistoryKey`): server-rendered when the request can be
+ * authenticated, kept across screens, and cleared by `useSavePage` when
+ * this page is saved — the list is newest first, and a save is the newest.
  */
 export function usePageHistory(nodeId: string, fetcher?: PageHistoryFetcher): UsePageHistoryResult {
   const get =
     fetcher ??
     ((id: string) => {
-      const config = useRuntimeConfig();
-      return $fetch<PageHistoryResponse>(`${config.public.apiBaseUrl}/pages/${id}/history`, { credentials: 'include' });
+      const api = useApiClient();
+      return api<PageHistoryResponse>(`/pages/${id}/history`);
     });
 
-  const status = ref<PageHistoryStatus>('idle');
-  const revisions = ref<readonly RevisionSummary[]>([]);
-  const message = ref('');
+  const read = useApiRead<PageHistoryResponse>(pageHistoryKey(nodeId), () => get(nodeId));
+  const status = useReadStatus(read, (code) => {
+    // Signed out: the screen's next move is sign-in, not a retry
+    // (`useSignInRedirect`). Only the browser ever sees it — a 401 during
+    // the server's render is "nothing known" (useApiRead).
+    if (code === 401) return 'unauthenticated';
+    return code === 403 || code === 404 ? 'not-found' : 'network-error';
+  });
 
-  async function load(): Promise<void> {
-    status.value = 'loading';
-    message.value = 'Loading revision history…';
+  const revisions = computed(() => (read.outcome.value?.ok ? read.outcome.value.value.revisions : []));
+  const MESSAGES: Record<PageHistoryStatus, string> = {
+    'idle': '',
+    'loading': 'Loading revision history…',
+    'success': '',
+    'unauthenticated': 'Your session has ended.',
+    'not-found': 'This page does not exist.',
+    'network-error': 'Cannot reach the server. Check your connection and try again.',
+  };
+  const message = computed(() => MESSAGES[status.value]);
 
-    try {
-      const response = await get(nodeId);
-      revisions.value = response.revisions;
-      status.value = 'success';
-      message.value = '';
-    } catch (error) {
-      const code = httpStatusOf(error);
-      // Signed out: the screen's next move is sign-in, not a retry
-      // (`useSignInRedirect`), so this is never the network branch.
-      if (code === 401) {
-        status.value = 'unauthenticated';
-        message.value = 'Your session has ended.';
-        return;
-      }
-      if (code === 403 || code === 404) {
-        status.value = 'not-found';
-        message.value = 'This page does not exist.';
-      } else {
-        status.value = 'network-error';
-        message.value = 'Cannot reach the server. Check your connection and try again.';
-      }
-    }
-  }
-
-  return { status, revisions, message, load };
+  return { status, revisions, message, load: read.load };
 }

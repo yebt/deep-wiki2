@@ -15,7 +15,7 @@
  * variable fails here rather than in a browser run.
  */
 import { describe, expect, test } from 'bun:test';
-import { parseEnv } from '@deep-wiki/contracts';
+import { parseEnv } from '@deep-wiki/contracts/env';
 import { apiProcessEnv } from '../../../e2e/global-setup';
 
 const INPUT = { databaseUrl: 'postgres://user:pass@localhost:5432/dw_test_1', blobRoot: '/tmp/blobs' };

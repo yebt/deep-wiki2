@@ -50,6 +50,48 @@ export default defineNuxtConfig({
     serverBundle: {
       collections: ['lucide'],
     },
+    // The server bundle alone was not that guarantee (measured 2026-09-16,
+    // docs/TODO.md). Only Nuxt UI's own default icons were in the client
+    // bundle; every icon this app's templates name was fetched from
+    // `/api/_nuxt_icon/lucide.json?icons=…` the first time a screen showed
+    // it — one request per screen, a late pop-in with it — and when that
+    // request was slow, `@nuxt/icon` fell through to the public
+    // `https://api.iconify.design` (`fallbackToApi` defaults to `true`).
+    // `scan` reads every `.vue` file for `i-lucide-*` names and ships them
+    // in the client bundle beside Nuxt UI's defaults; the fallback is off,
+    // so an icon that somehow is not bundled fails loudly on this server
+    // rather than quietly on someone else's. e2e/icons.spec.ts holds this.
+    clientBundle: {
+      scan: true,
+      icons: [],
+    },
+    fallbackToApi: false,
+  },
+
+  vue: {
+    compilerOptions: {
+      // Template comments are stripped from the client bundle in
+      // production and kept in development. The server renderer does not
+      // keep a comment that sits between `v-if`/`v-else` branches, and
+      // this codebase documents its branches exactly there — so in
+      // development every server-rendered branch hydrated against one
+      // comment node more than the server sent, and Vue reported a
+      // mismatch on the read, history and dashboard screens the moment
+      // the read layer began answering them on the server (2026-09-16).
+      // Stripping comments on both sides in every mode makes development
+      // hydrate what production hydrates.
+      comments: false,
+    },
+  },
+
+  nitro: {
+    // Pre-compresses every built public asset (`.gz` and `.br` beside each
+    // file under `.output/public`) so the production server answers with
+    // `content-encoding` instead of the raw bytes: measured 2026-09-16
+    // (docs/TODO.md), Nitro's default served the whole 1.4 MB of client
+    // JavaScript uncompressed, encoded size equal to decoded on every
+    // entry — a 60–70% wire-byte cut left on the table on every page.
+    compressPublicAssets: true,
   },
 
   typescript: {

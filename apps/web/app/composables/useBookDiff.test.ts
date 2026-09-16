@@ -1,4 +1,5 @@
-import { describe, expect, test, vi } from 'vitest';
+import { beforeAll, describe, expect, test, vi } from 'vitest';
+import { useNuxtApp } from '#imports';
 import type { ChangedPageDiffPayload } from '@deep-wiki/contracts';
 import { useBookDiff } from './useBookDiff';
 
@@ -9,6 +10,23 @@ import { useBookDiff } from './useBookDiff';
  * page its title, both revision ids and text-bearing changes — so this is
  * the book-diff screen's only request.
  */
+/**
+ * Every test reads its own id: the read layer (`useApiRead`) keeps one
+ * answer per key across screens — that is the cache — so two tests sharing
+ * an id would share an answer. And the test app never leaves hydration on
+ * its own (there is no server render to resolve), so each file says it is
+ * on the client, where `load()` fetches.
+ */
+let ids = 0;
+function nextId(prefix: string): string {
+  ids += 1;
+  return `${prefix}-${ids}`;
+}
+
+beforeAll(() => {
+  useNuxtApp().isHydrating = false;
+});
+
 describe('useBookDiff', () => {
   test('starts idle and moves through loading to success with the book, and the changed pages, as the server sent them', async () => {
     const pages: ChangedPageDiffPayload[] = [
@@ -16,7 +34,7 @@ describe('useBookDiff', () => {
       { pageId: 'page-2', pageTitle: 'Beta', baselineRevisionId: null, latestRevisionId: 'r3', diff: { changes: [] } },
     ];
     const fetcher = vi.fn(async () => ({ title: 'Handbook', workspaceId: 'ws-1', pages }));
-    const { status, title, workspaceId, pages: result, load } = useBookDiff('book-1', '2026-01-01T00:00:00.000Z', fetcher);
+    const { status, title, workspaceId, pages: result, load } = useBookDiff(nextId('book'), '2026-01-01T00:00:00.000Z', fetcher);
 
     expect(status.value).toBe('idle');
     expect(workspaceId.value).toBeNull();
@@ -29,12 +47,12 @@ describe('useBookDiff', () => {
     expect(workspaceId.value).toBe('ws-1');
     expect(result.value).toEqual(pages);
     expect(result.value[0]!.diff.changes[0]).toMatchObject({ text: 'New.' });
-    expect(fetcher).toHaveBeenCalledWith('book-1', '2026-01-01T00:00:00.000Z');
+    expect(fetcher).toHaveBeenCalledWith(expect.stringMatching(/^book-\d+$/), '2026-01-01T00:00:00.000Z');
   });
 
   test('no pages changed since the given date resolves to success with an empty list, not an error', async () => {
     const fetcher = vi.fn(async () => ({ title: 'Handbook', workspaceId: 'ws-1', pages: [] }));
-    const { status, pages: result, load } = useBookDiff('book-1', '2026-01-01T00:00:00.000Z', fetcher);
+    const { status, pages: result, load } = useBookDiff(nextId('book'), '2026-01-01T00:00:00.000Z', fetcher);
 
     await load();
 
@@ -46,7 +64,7 @@ describe('useBookDiff', () => {
     const fetcher = vi.fn(async () => {
       throw { response: { status: 404 } };
     });
-    const { status, load } = useBookDiff('book-1', '2026-01-01T00:00:00.000Z', fetcher);
+    const { status, load } = useBookDiff(nextId('book'), '2026-01-01T00:00:00.000Z', fetcher);
 
     await load();
 
@@ -58,7 +76,7 @@ describe('useBookDiff', () => {
   // a retry that would 401 again. Before 2026-09-16 it fell through to
   // network-error and the screen said "Cannot reach the server".
   test('a 401 resolves to unauthenticated, not to a network error', async () => {
-    const { status, load } = useBookDiff('book-1', '2026-01-01T00:00:00.000Z', vi.fn(async () => { throw { response: { status: 401 } }; }));
+    const { status, load } = useBookDiff(nextId('book'), '2026-01-01T00:00:00.000Z', vi.fn(async () => { throw { response: { status: 401 } }; }));
     await load();
     expect(status.value).toBe('unauthenticated');
   });
@@ -67,7 +85,7 @@ describe('useBookDiff', () => {
     const fetcher = vi.fn(async () => {
       throw { response: { status: 403 } };
     });
-    const { status, load } = useBookDiff('book-1', '2026-01-01T00:00:00.000Z', fetcher);
+    const { status, load } = useBookDiff(nextId('book'), '2026-01-01T00:00:00.000Z', fetcher);
 
     await load();
 
@@ -78,7 +96,7 @@ describe('useBookDiff', () => {
     const fetcher = vi.fn(async () => {
       throw new Error('fetch failed');
     });
-    const { status, message, load } = useBookDiff('book-1', '2026-01-01T00:00:00.000Z', fetcher);
+    const { status, message, load } = useBookDiff(nextId('book'), '2026-01-01T00:00:00.000Z', fetcher);
 
     await load();
 
@@ -93,7 +111,7 @@ describe('useBookDiff', () => {
       if (attempt === 1) throw new Error('fetch failed');
       return { title: 'Handbook', workspaceId: 'ws-1', pages: [] };
     });
-    const { status, load } = useBookDiff('book-1', '2026-01-01T00:00:00.000Z', fetcher);
+    const { status, load } = useBookDiff(nextId('book'), '2026-01-01T00:00:00.000Z', fetcher);
 
     await load();
     expect(status.value).toBe('network-error');

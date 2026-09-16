@@ -35,4 +35,22 @@ describe('checkBuildOutputIsolation', () => {
     expect(result.ok).toBe(true);
     expect(result.skipped).toBeDefined();
   });
+
+  // Bundle hygiene (docs/TODO.md, 2026-09-16): the server env schema —
+  // every server-side variable's name, `AI_KEK_*` included — shipped in
+  // every page's client bundle through the contracts barrel. Its names in
+  // a client chunk are the fingerprint of that leak.
+  test('fails when any client chunk carries the server env schema (an AI_KEK variable name)', async () => {
+    const result = await checkBuildOutputIsolation(join(FIXTURES_DIR, 'violating-server-env'));
+
+    expect(result.ok).toBe(false);
+    expect(result.errors.some((e) => e.includes('contracts.def456.js') && e.includes('AI_KEK'))).toBe(true);
+  });
+
+  test('a clean build with client chunks that name only public config passes the server-env scan', async () => {
+    const result = await checkBuildOutputIsolation(join(FIXTURES_DIR, 'clean'));
+
+    expect(result.ok).toBe(true);
+    expect(result.scannedClientChunks).toBe(1);
+  });
 });

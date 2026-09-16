@@ -266,8 +266,9 @@ useSeoMeta({ title: 'Page diff — deep-wiki' });
     <template v-else-if="diff">
       <!-- The pair being compared: from, then to, each a `<time>` read in
            the viewer's own zone with the zone named and the instant kept in
-           the attribute (docs/UI-CHECKLIST.md §4.11 — fetched in
-           `onMounted`, so never server-rendered). `body-small text-muted`:
+           the attribute (docs/UI-CHECKLIST.md §4.11 — server-rendered in
+           UTC, the viewer's zone once hydrated; `useViewerTimeZone`).
+           `body-small text-muted`:
            §9.8's trailing meta, a caption over the list, not a heading. -->
       <p data-testid="diff-pair" class="mb-4 text-body-small text-muted">
         From <time :datetime="diff!.from.createdAt">{{ formatRevisionDate(diff!.from.createdAt) }}</time>

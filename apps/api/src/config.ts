@@ -1,4 +1,4 @@
-import { parseEnv, parseKeyring, type Env } from '@deep-wiki/contracts';
+import { parseEnv, parseKeyring, type Env } from '@deep-wiki/contracts/env';
 import type postgres from 'postgres';
 
 /**

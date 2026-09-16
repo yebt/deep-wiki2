@@ -78,10 +78,18 @@ const activeId = ref<string | null>(null);
 
 // Load on mount and whenever the workspace changes — a tree already
 // loaded for this workspace is shown at once and refreshed behind it.
+// Client only: since the read layer answers screens on the server, the
+// frame knows its workspace during the server's render pass on every
+// visit after the first, and this immediate watch ran there too — a
+// `$fetch` with no session cookie, answered 401, written into the shared
+// tree state and serialised with the page, so the client hydrated a
+// signed-out tree and `redirectWhenSignedOut` above bounced a signed-in
+// reader to sign-in on every reload (2026-09-16). The tree is fetched by
+// the browser, as it always was.
 watch(
   () => props.workspaceId,
   (id) => {
-    if (id) void load();
+    if (id && import.meta.client) void load();
   },
   { immediate: true },
 );

@@ -1,4 +1,5 @@
-import { describe, expect, test, vi } from 'vitest';
+import { beforeAll, describe, expect, test, vi } from 'vitest';
+import { useNuxtApp } from '#imports';
 import { usePageDiff } from './usePageDiff';
 
 /**
@@ -7,6 +8,23 @@ import { usePageDiff } from './usePageDiff';
  * `usePageHistory` — the route itself returns a byte-identical 404 for
  * both (`apps/api/src/routes/diff.ts`).
  */
+/**
+ * Every test reads its own id: the read layer (`useApiRead`) keeps one
+ * answer per key across screens — that is the cache — so two tests sharing
+ * an id would share an answer. And the test app never leaves hydration on
+ * its own (there is no server render to resolve), so each file says it is
+ * on the client, where `load()` fetches.
+ */
+let ids = 0;
+function nextId(prefix: string): string {
+  ids += 1;
+  return `${prefix}-${ids}`;
+}
+
+beforeAll(() => {
+  useNuxtApp().isHydrating = false;
+});
+
 describe('usePageDiff', () => {
   test('starts idle and moves through loading to success with the diff as the server sent it', async () => {
     const diff = {
@@ -15,7 +33,7 @@ describe('usePageDiff', () => {
       changes: [{ kind: 'added' as const, id: 'b1', slot: 0, text: 'New paragraph.' }],
     };
     const fetcher = vi.fn(async () => ({ diff }));
-    const { status, diff: result, load } = usePageDiff('page-1', 'rev-1', 'rev-2', fetcher);
+    const { status, diff: result, load } = usePageDiff(nextId('page'), 'rev-1', 'rev-2', fetcher);
 
     expect(status.value).toBe('idle');
     const promise = load();
@@ -24,7 +42,7 @@ describe('usePageDiff', () => {
 
     expect(status.value).toBe('success');
     expect(result.value).toEqual(diff);
-    expect(fetcher).toHaveBeenCalledWith('page-1', 'rev-1', 'rev-2');
+    expect(fetcher).toHaveBeenCalledWith(expect.stringMatching(/^page-\d+$/), 'rev-1', 'rev-2');
   });
 
   test('two revisions with no differences resolve to success with every change unchanged, not an error', async () => {
@@ -34,7 +52,7 @@ describe('usePageDiff', () => {
       changes: [{ kind: 'unchanged' as const, id: 'b1', slot: 0, text: 'Same paragraph.' }],
     };
     const fetcher = vi.fn(async () => ({ diff }));
-    const { status, diff: result, load } = usePageDiff('page-1', 'rev-1', 'rev-2', fetcher);
+    const { status, diff: result, load } = usePageDiff(nextId('page'), 'rev-1', 'rev-2', fetcher);
 
     await load();
 
@@ -46,7 +64,7 @@ describe('usePageDiff', () => {
     const fetcher = vi.fn(async () => {
       throw { response: { status: 404 } };
     });
-    const { status, load } = usePageDiff('page-1', 'rev-1', 'rev-2', fetcher);
+    const { status, load } = usePageDiff(nextId('page'), 'rev-1', 'rev-2', fetcher);
 
     await load();
 
@@ -58,7 +76,7 @@ describe('usePageDiff', () => {
   // a retry that would 401 again. Before 2026-09-16 it fell through to
   // network-error and the screen said "Cannot reach the server".
   test('a 401 resolves to unauthenticated, not to a network error', async () => {
-    const { status, load } = usePageDiff('page-1', 'rev-1', 'rev-2', vi.fn(async () => { throw { response: { status: 401 } }; }));
+    const { status, load } = usePageDiff(nextId('page'), 'rev-1', 'rev-2', vi.fn(async () => { throw { response: { status: 401 } }; }));
     await load();
     expect(status.value).toBe('unauthenticated');
   });
@@ -67,7 +85,7 @@ describe('usePageDiff', () => {
     const fetcher = vi.fn(async () => {
       throw { response: { status: 403 } };
     });
-    const { status, load } = usePageDiff('page-1', 'rev-1', 'rev-2', fetcher);
+    const { status, load } = usePageDiff(nextId('page'), 'rev-1', 'rev-2', fetcher);
 
     await load();
 
@@ -78,7 +96,7 @@ describe('usePageDiff', () => {
     const fetcher = vi.fn(async () => {
       throw new Error('fetch failed');
     });
-    const { status, message, load } = usePageDiff('page-1', 'rev-1', 'rev-2', fetcher);
+    const { status, message, load } = usePageDiff(nextId('page'), 'rev-1', 'rev-2', fetcher);
 
     await load();
 
@@ -94,7 +112,7 @@ describe('usePageDiff', () => {
       if (attempt === 1) throw new Error('fetch failed');
       return { diff };
     });
-    const { status, load } = usePageDiff('page-1', 'rev-1', 'rev-2', fetcher);
+    const { status, load } = usePageDiff(nextId('page'), 'rev-1', 'rev-2', fetcher);
 
     await load();
     expect(status.value).toBe('network-error');

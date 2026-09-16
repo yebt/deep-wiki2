@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 import { boundaryContrast } from './contrast';
+import { waitForHydration } from './hydration';
 import { expectNoHorizontalOverflow } from './overflow';
 
 /**
@@ -106,8 +107,17 @@ for (const theme of ['light', 'dark'] as const) {
  * first paragraph 32px under the `h1` (`PageHeading`'s `mb-8`), on 26px
  * `doc-body` lines rather than 16px ones. happy-dom has no layout engine,
  * so this file is the owner: hold the response, measure, release, measure.
+ *
+ * The page is reached by a client-side navigation (from its history
+ * screen, through "Read page"): a full load is answered on the server
+ * since the data layer (`useApiRead`) — the article is in the document
+ * and no skeleton ever shows, which `e2e/data-layer.spec.ts` holds. The
+ * skeleton is for a page the browser has not seen yet, and that is the
+ * hop this test makes.
  */
 test('the read skeleton occupies the box the loaded document takes: title and first paragraph line up', async ({ page, context }) => {
+  // Waits for hydration before the hop (below): dev mode under load.
+  test.setTimeout(240_000);
   await signInAs(context, fixtures.readerSessionToken);
   let release!: () => void;
   const held = new Promise<void>((resolve) => {
@@ -119,7 +129,9 @@ test('the read skeleton occupies the box the loaded document takes: title and fi
     await route.continue();
   });
 
-  await page.goto(`/pages/${fixtures.readPageId}`);
+  await page.goto(`/pages/${fixtures.readPageId}/history`);
+  await waitForHydration(page);
+  await page.getByRole('link', { name: 'Read page' }).click({ timeout: 30000 });
   const skeleton = page.getByTestId('read-skeleton');
   await expect(skeleton).toBeVisible({ timeout: 30000 });
   const skeletonTitle = (await skeleton.getByTestId('read-skeleton-title').boundingBox())!;
@@ -195,6 +207,8 @@ test.describe('the comments toggle', () => {
         page,
         context,
       }) => {
+        // Two full loads, each waiting for hydration: dev mode under load.
+        test.setTimeout(240_000);
         await signInAs(context, comments.commenterSessionToken);
         await useTheme(page, theme);
 
@@ -233,12 +247,18 @@ test.describe('the comments toggle', () => {
         // Remembered.
         await page.reload();
         await expect(page.getByRole('heading', { level: 1, name: comments.commentsPageTitle })).toBeVisible({ timeout: 30000 });
+        // The article is server-rendered now; the count on the toggle needs
+        // the hydrated app to have fetched the threads.
+        await waitForHydration(page);
         await expect(page.getByRole('button', { name: /on this block$/ })).toHaveCount(0);
         await expect(page.getByRole('button', { name: 'Show comments — 1 open thread mentions you' })).toBeVisible({ timeout: 30000 });
 
-        // And back.
+        // And back: the one mark returns. Counted by the marks' own name
+        // (`N comment(s) on this block`) — since 2026-09-16 every block a
+        // commenter can start a thread on also carries a "Comment on this
+        // block" slot, which `/on this block$/` would count with them.
         await page.getByRole('button', { name: /^Show comments/ }).click();
-        await expect(page.getByRole('button', { name: /on this block$/ })).toHaveCount(1);
+        await expect(page.getByRole('button', { name: /\d+ comments? on this block$/ })).toHaveCount(1);
         await expect(page.getByRole('button', { name: 'Hide comments' })).toBeVisible();
         await expect(page.getByTestId('comments-mention-badge')).toHaveCount(0);
       });

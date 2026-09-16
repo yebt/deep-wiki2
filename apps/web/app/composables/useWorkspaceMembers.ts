@@ -27,6 +27,7 @@ import {
   type WorkspaceMembersResponse,
 } from '@deep-wiki/contracts';
 import { z } from 'zod';
+import { workspaceMembersKey } from '~/utils/api-keys';
 
 export type WorkspaceMembersStatus = 'idle' | 'loading' | 'success' | 'not-found' | 'unauthenticated' | 'network-error';
 export type InviteStatus = 'idle' | 'sending' | 'sent' | 'invalid' | 'not-found' | 'unauthenticated' | 'network-error';
@@ -46,8 +47,8 @@ export interface UseWorkspaceMembersDeps {
 
 export interface UseWorkspaceMembersResult {
   readonly status: Ref<WorkspaceMembersStatus>;
-  readonly message: Ref<string>;
-  readonly listing: Ref<WorkspaceMembersResponse | null>;
+  readonly message: ComputedRef<string>;
+  readonly listing: ComputedRef<WorkspaceMembersResponse | null>;
   readonly inviteStatus: Ref<InviteStatus>;
   readonly inviteMessage: Ref<string>;
   readonly load: () => Promise<void>;
@@ -57,49 +58,38 @@ export interface UseWorkspaceMembersResult {
 /** The wire contract's `email` is a bare string; the form wants a real address before it sends. */
 const InviteEmailSchema = z.string().trim().toLowerCase().email();
 
+/**
+ * The listing lives in the read layer (`useApiRead`, keyed by
+ * `workspaceMembersKey`): server-rendered when the request can be
+ * authenticated, kept across screens, and re-read — bypassing what is
+ * kept — after every invitation, which is the proof the invitation was
+ * recorded (see above).
+ */
 export function useWorkspaceMembers(workspaceId: string, deps: UseWorkspaceMembersDeps = {}): UseWorkspaceMembersResult {
-  const config = useRuntimeConfig();
-  const fetchMembers: FetchWorkspaceMembers =
-    deps.fetchMembers ??
-    ((id) => $fetch<WorkspaceMembersResponse>(`${config.public.apiBaseUrl}/workspaces/${id}/members`, { credentials: 'include' }));
+  const api = useApiClient();
+  const fetchMembers: FetchWorkspaceMembers = deps.fetchMembers ?? ((id) => api<WorkspaceMembersResponse>(`/workspaces/${id}/members`));
   const postInvitation: PostInvitation =
-    deps.postInvitation ??
-    ((input) =>
-      $fetch<CreateInvitationResponse>(`${config.public.apiBaseUrl}/invitations`, {
-        method: 'POST',
-        body: input,
-        credentials: 'include',
-      }));
+    deps.postInvitation ?? ((input) => api<CreateInvitationResponse>('/invitations', { method: 'POST', body: input }));
 
-  const status = ref<WorkspaceMembersStatus>('idle');
-  const message = ref('');
-  const listing = ref<WorkspaceMembersResponse | null>(null);
+  const read = useApiRead<WorkspaceMembersResponse>(workspaceMembersKey(workspaceId), () => fetchMembers(workspaceId));
+  const status = useReadStatus(read, (code) => {
+    if (code === 401) return 'unauthenticated';
+    if (code === 404) return 'not-found';
+    return 'network-error';
+  });
+  const listing = computed(() => (read.outcome.value?.ok ? read.outcome.value.value : null));
+  const MESSAGES: Record<WorkspaceMembersStatus, string> = {
+    'idle': '',
+    'loading': '',
+    'success': '',
+    'unauthenticated': 'Your session has ended.',
+    'not-found': 'This workspace does not exist, or you do not manage it.',
+    'network-error': 'Cannot reach the server. Check your connection and try again.',
+  };
+  const message = computed(() => MESSAGES[status.value]);
+  const load = read.load;
   const inviteStatus = ref<InviteStatus>('idle');
   const inviteMessage = ref('');
-
-  async function load(): Promise<void> {
-    status.value = 'loading';
-    try {
-      listing.value = await fetchMembers(workspaceId);
-      status.value = 'success';
-      message.value = '';
-    } catch (error) {
-      listing.value = null;
-      const code = httpStatusOf(error);
-      if (code === 401) {
-        status.value = 'unauthenticated';
-        message.value = 'Your session has ended.';
-        return;
-      }
-      if (code === 404) {
-        status.value = 'not-found';
-        message.value = 'This workspace does not exist, or you do not manage it.';
-        return;
-      }
-      status.value = 'network-error';
-      message.value = 'Cannot reach the server. Check your connection and try again.';
-    }
-  }
 
   async function invite(input: InviteInput): Promise<void> {
     const email = InviteEmailSchema.safeParse(input.email);

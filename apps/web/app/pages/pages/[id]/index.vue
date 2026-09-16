@@ -88,11 +88,14 @@ useSignInRedirect().redirectWhenSignedOut(status);
 const presence = usePresenceStream(nodeId);
 // `immediate: true` for the same reason edit.vue gives: a response that is
 // already resolved the first time this runs must start the stream exactly
-// the way one that resolves a tick later does.
+// the way one that resolves a tick later does. Since the read layer answers
+// during server rendering, "already resolved" now includes the server's
+// own render pass — where there is no browser to hold a stream, and a
+// stream started there would be a timer leaked per request. Client only.
 watch(
   workspaceId,
   (value) => {
-    if (value) presence.start(value);
+    if (value && import.meta.client) presence.start(value);
   },
   { immediate: true },
 );
