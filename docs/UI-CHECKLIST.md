@@ -1016,7 +1016,6 @@ substitute for the owner's review against this checklist and `docs/DESIGN-SYSTEM
 ---
 
 ### 2026-09-16 — Starting a thread from read mode — awaiting the owner's eye
-### 2026-09-16 — The navigation tree's context menu and filter — awaiting the owner's eye
 
 **Reviewer:** none yet — this entry is what was shipped for review, not a review.
 **Verdict:** Pending
@@ -1062,6 +1061,18 @@ typed Post explains itself, and a 12,000-word page's two hundred slots are one t
   anchor cannot live on them today, so a "+" there would fail at the mint.
 - A provisional thread is authored "You" until the server answers; the client has no `me`.
 - Gate **10.8** is still `[ ]`; this batch is what makes it exercisable.
+
+---
+
+*The next entry goes below this one.*
+
+---
+
+### 2026-09-16 — The navigation tree's context menu and filter — awaiting the owner's eye
+
+**Reviewer:** none yet — this entry is what was shipped for review, not a review.
+**Verdict:** Pending
+
 Two of the owner's review items on the tree, one commit each, on
 `feat/tree-context-menu-filter` (`docs/TODO.md` Findings, 2026-09-16, has the detail).
 The sidebar's toolbar row is untouched; a parallel branch owns it.
