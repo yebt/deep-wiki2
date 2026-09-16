@@ -1,5 +1,11 @@
-export { envSchema, parseEnv, parseKeyring, refineEnv } from './env';
-export type { Env, EnvIssue, ParsedKeyring } from './env';
+// The server env schema (`./env`) is deliberately NOT re-exported here.
+// This barrel is what `apps/web` imports, and everything it names rides in
+// every page's client bundle: with `envSchema` in it, the zod schema of
+// every server-side variable — `AI_KEK_*`, `DATABASE_URL` — shipped to the
+// browser at 75 KB gzipped per page (measured 2026-09-16, docs/TODO.md).
+// Server-side code imports it from `@deep-wiki/contracts/env`, and
+// `scripts/checks/bundle-isolation-build.ts` fails the build the day it
+// finds an `AI_KEK` in a client chunk again.
 
 export { ErrorResponseSchema } from './errors';
 export type { ErrorResponse } from './errors';

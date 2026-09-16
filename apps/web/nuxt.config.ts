@@ -84,6 +84,16 @@ export default defineNuxtConfig({
     },
   },
 
+  nitro: {
+    // Pre-compresses every built public asset (`.gz` and `.br` beside each
+    // file under `.output/public`) so the production server answers with
+    // `content-encoding` instead of the raw bytes: measured 2026-09-16
+    // (docs/TODO.md), Nitro's default served the whole 1.4 MB of client
+    // JavaScript uncompressed, encoded size equal to decoded on every
+    // entry — a 60–70% wire-byte cut left on the table on every page.
+    compressPublicAssets: true,
+  },
+
   typescript: {
     // Matches the strictness of the repository's shared tsconfig.base.json
     // (see apps/web/tsconfig.json for why this project does not extend it

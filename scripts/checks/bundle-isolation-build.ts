@@ -21,8 +21,17 @@
  * installed Nuxt/Nitro version (2026-09-06); if a future Nuxt release
  * changes this file's shape, this check fails loudly — a missing file or
  * a missing route entry — rather than silently passing.
+ *
+ * A second assertion over the same build (2026-09-16, docs/TODO.md "no
+ * data layer: measured and fixed"): no client chunk under
+ * `.output/public/_nuxt` may carry the server env schema. Until
+ * `packages/contracts` grew its `./env` subpath export, the barrel
+ * re-exported `envSchema`, and every page's shared chunk shipped the zod
+ * schema of every server-side variable — 263 KB raw / 75 KB gzipped, with
+ * `AI_KEK_*` and `DATABASE_URL` spelled out in it. Those names have no
+ * business in a browser; `AI_KEK` is the fingerprint this scans for.
  */
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -30,9 +39,37 @@ export interface BuildOutputIsolationResult {
   readonly ok: boolean;
   readonly errors: readonly string[];
   readonly skipped?: string;
+  /** How many client chunks the server-env scan read — so a green result can be told from a scan that found nothing to read. */
+  readonly scannedClientChunks?: number;
 }
 
 const FORBIDDEN_PATTERN = /prosemirror|milkdown|tiptap/i;
+
+/** A server-side variable name that exists only in `packages/contracts/src/env.ts` — the leak's fingerprint. */
+const SERVER_ENV_FINGERPRINT = 'AI_KEK';
+
+/**
+ * Every JavaScript chunk a browser can download from the build, scanned
+ * for the server env schema's fingerprint. Returns one error per chunk
+ * that carries it, and the number of chunks read.
+ */
+function scanClientChunksForServerEnv(webRoot: string): { readonly errors: string[]; readonly scanned: number } {
+  const chunksDir = join(webRoot, '.output', 'public', '_nuxt');
+  if (!existsSync(chunksDir)) return { errors: [], scanned: 0 };
+  const errors: string[] = [];
+  let scanned = 0;
+  for (const name of readdirSync(chunksDir)) {
+    if (!name.endsWith('.js')) continue;
+    scanned += 1;
+    if (readFileSync(join(chunksDir, name), 'utf8').includes(SERVER_ENV_FINGERPRINT)) {
+      errors.push(
+        `client chunk "${name}" carries "${SERVER_ENV_FINGERPRINT}" — the server env schema (packages/contracts/src/env.ts) is in a ` +
+          'bundle the browser downloads; import it from "@deep-wiki/contracts/env" on the server only, never through the contracts barrel',
+      );
+    }
+  }
+  return { errors, scanned };
+}
 
 /** The read route this batch (WU-15) ships. A future route added alongside it needs its own entry here — the check is deliberately route-specific, not "every route", so it stays fast and its failures name exactly one thing. */
 const READ_ROUTE_SRC = 'pages/pages/[id]/index.vue';
@@ -102,7 +139,10 @@ export async function checkBuildOutputIsolation(webRoot: string): Promise<BuildO
     }
   }
 
-  return { ok: errors.length === 0, errors };
+  const serverEnv = scanClientChunksForServerEnv(webRoot);
+  errors.push(...serverEnv.errors);
+
+  return { ok: errors.length === 0, errors, scannedClientChunks: serverEnv.scanned };
 }
 
 if (import.meta.main) {
@@ -118,5 +158,5 @@ if (import.meta.main) {
     }
     process.exit(1);
   }
-  console.log('bundle-isolation-build: ok');
+  console.log(`bundle-isolation-build: ok (${result.scannedClientChunks ?? 0} client chunks scanned for the server env schema)`);
 }

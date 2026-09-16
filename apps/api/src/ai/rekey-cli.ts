@@ -1,5 +1,5 @@
 import postgres from 'postgres';
-import { parseKeyring } from '@deep-wiki/contracts';
+import { parseKeyring } from '@deep-wiki/contracts/env';
 import { EnvKeyProvider } from '../adapters/ai/key-provider/env-key-provider';
 import { rekeyAll } from './rekey';
 

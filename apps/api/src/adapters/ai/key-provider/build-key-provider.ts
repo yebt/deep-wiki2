@@ -7,7 +7,7 @@
  * throws before this function is ever reached otherwise, so it trusts
  * that guarantee rather than re-validating it.
  */
-import { parseKeyring } from '@deep-wiki/contracts';
+import { parseKeyring } from '@deep-wiki/contracts/env';
 import type { KeyProvider } from '@deep-wiki/core';
 import { EnvKeyProvider } from './env-key-provider';
 
