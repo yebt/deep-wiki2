@@ -117,6 +117,9 @@ function makeDeps(overrides: Partial<ResolveAdminUrlDeps> = {}): ResolveAdminUrl
     identity: MAIN_ID,
     portOwners: () => '',
     serverOwners: async () => [],
+    projectContainers: () => [],
+    startContainers: () => false,
+    log: () => {},
     ...overrides,
   };
 }
@@ -265,6 +268,124 @@ describe('resolveAdminUrl — a worktree collision names itself', () => {
 
     await expect(resolveAdminUrl(deps)).rejects.toThrow(/someone-elses-postgres/);
     await expect(resolveAdminUrl(deps)).rejects.toThrow(/unrelated-project/);
+  });
+});
+
+/**
+ * Seen 2026-09-16: `podman compose up -d --wait` exits 125 under load
+ * having created the container but never started it, and every later
+ * attempt against the same project name fails the same way — until a
+ * human runs the printed command, which starts the container in seconds.
+ * So provisioning does that itself, once, before giving up.
+ */
+describe('resolveAdminUrl — a container compose left behind is started once', () => {
+  const stalled = { name: `${WORKTREE_ID.dbProjectName}_postgres_1`, project: WORKTREE_ID.dbProjectName, state: 'created' };
+
+  test('a healthy first try never asks the runtime what it left behind', async () => {
+    let asked = false;
+    let probes = 0;
+    const deps = makeDeps({
+      identity: WORKTREE_ID,
+      detectRuntime: () => 'podman',
+      runCompose: async () => ({ code: 0, timedOut: false }),
+      probe: async () => {
+        probes += 1;
+        return probes > 1;
+      },
+      projectContainers: () => {
+        asked = true;
+        return [];
+      },
+    });
+
+    expect(await resolveAdminUrl(deps)).toBe(localTestUrl(WORKTREE_ID));
+    expect(asked).toBe(false);
+  });
+
+  test('exit 125 with the container in `Created`: it is started, waited for, and provisioning succeeds — logged', async () => {
+    const started: string[][] = [];
+    const logged: string[] = [];
+    const deps = makeDeps({
+      identity: WORKTREE_ID,
+      detectRuntime: () => 'podman',
+      runCompose: async () => ({ code: 125, timedOut: false }),
+      probe: async () => started.length > 0,
+      projectContainers: () => [stalled],
+      startContainers: (_binary, names) => {
+        started.push([...names]);
+        return true;
+      },
+      log: (message) => {
+        logged.push(message);
+      },
+    });
+
+    expect(await resolveAdminUrl(deps, 200)).toBe(localTestUrl(WORKTREE_ID));
+    expect(started).toEqual([[stalled.name]]);
+    expect(logged).toHaveLength(1);
+    expect(logged[0]).toContain(stalled.name);
+  });
+
+  test('a compose wait that timed out with the container already running is waited for, not restarted', async () => {
+    let probes = 0;
+    let started = false;
+    const deps = makeDeps({
+      identity: WORKTREE_ID,
+      detectRuntime: () => 'podman',
+      runCompose: async () => ({ code: null, timedOut: true }),
+      probe: async () => {
+        probes += 1;
+        return probes >= 3;
+      },
+      projectContainers: () => [{ ...stalled, state: 'running' }],
+      startContainers: () => {
+        started = true;
+        return true;
+      },
+    });
+
+    expect(await resolveAdminUrl(deps, 200)).toBe(localTestUrl(WORKTREE_ID));
+    expect(started).toBe(false);
+  });
+
+  test('a genuine failure still throws, naming the exact manual command: nothing to start', async () => {
+    const deps = makeDeps({
+      identity: WORKTREE_ID,
+      detectRuntime: () => 'podman',
+      runCompose: async () => ({ code: 125, timedOut: false }),
+      projectContainers: () => [],
+    });
+
+    await expect(resolveAdminUrl(deps, 200)).rejects.toThrow(ProvisioningError);
+    await expect(resolveAdminUrl(deps, 200)).rejects.toThrow(/code 125/);
+    await expect(resolveAdminUrl(deps, 200)).rejects.toThrow(/podman compose up -d --wait postgres/);
+  });
+
+  test('a genuine failure still throws when the started container never answers', async () => {
+    const deps = makeDeps({
+      identity: WORKTREE_ID,
+      detectRuntime: () => 'podman',
+      runCompose: async () => ({ code: 125, timedOut: false }),
+      projectContainers: () => [stalled],
+      startContainers: () => true,
+    });
+
+    await expect(resolveAdminUrl(deps, 50)).rejects.toThrow(/code 125/);
+    await expect(resolveAdminUrl(deps, 50)).rejects.toThrow(/podman compose up -d --wait postgres/);
+  });
+
+  test('the healed server is still checked for ownership before it is trusted', async () => {
+    const deps = makeDeps({
+      identity: WORKTREE_ID,
+      detectRuntime: () => 'podman',
+      runCompose: async () => ({ code: 125, timedOut: false }),
+      probe: async () => true,
+      projectContainers: () => [stalled],
+      startContainers: () => true,
+      serverOwners: async () => ['dw_owner_someone_else'],
+    });
+
+    await expect(resolveAdminUrl(deps, 200)).rejects.toThrow(/belongs to a different worktree/);
   });
 });
 

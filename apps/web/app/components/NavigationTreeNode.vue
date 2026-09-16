@@ -50,10 +50,11 @@
  * (`tabindex="-1"`) so the tree stays one tab stop on the `treeitem`. A
  * click on the link records the selection and leaves the navigation to
  * the link; a click elsewhere on the row, and Enter, open the page through
- * the tree as before; focus a click puts on the link is handed straight
- * to the `treeitem`, so the tree's tab stop is always where focus is
- * (`onLinkFocus`). And the row warms the route on intent — pointer
- * enter or focus, once — with `preloadRouteComponents`, because
+ * the tree as before; the focus a mouse puts on the link is handed to
+ * the `treeitem` by the click, or by the end of a drag, so the tree's
+ * tab stop is where focus is (`focusItem`). And the row warms the route
+ * on intent — pointer enter or focus, once — with
+ * `preloadRouteComponents`, because
  * `NuxtLink`'s own prefetch skips it in dev, the environment the owner
  * runs, and nothing had prefetched the read route's chunk before a click
  * (docs/TODO.md Findings, 2026-09-16, cause 3). A shelf, book or chapter
@@ -127,26 +128,47 @@ const href = computed(() => `/pages/${props.node.id}`);
 /** The title's element: the link, for a page; a plain span for a container. */
 const NuxtLink = resolveComponent('NuxtLink');
 const titleTag = computed(() => (isNavigable.value ? NuxtLink : 'span'));
-const titleAttrs = computed(() => (isNavigable.value ? { to: href.value, tabindex: -1, prefetch: false, onFocus: onLinkFocus } : {}));
+const titleAttrs = computed(() => (isNavigable.value ? { to: href.value, tabindex: -1, prefetch: false } : {}));
 
 /** The item element — where the tree's focus lives; the row and the link inside it never hold it. */
 const itemEl = ref<HTMLElement | null>(null);
 
 /**
  * A mouse click focuses the element under the pointer, and the link
- * carries a `tabindex`, so a click on a page's title would leave focus on
- * the `<a>` — inside the `treeitem`, but not on it. The tree's one tab
- * stop is the item (the ARIA tree pattern), and whatever asks "where was
+ * carries a `tabindex`, so a click on a page's title leaves focus on the
+ * `<a>` — inside the `treeitem`, but not on it. The tree's one tab stop
+ * is the item (the ARIA tree pattern), and whatever asks "where was
  * focus?" afterwards — the confirm dialog that guards a dirty editor,
  * which returns focus to the control that asked — must find the row, not
  * a link the keyboard cannot reach (seen 2026-09-16, docs/TODO.md
- * Findings). So focus arriving on the link is handed to the item at
- * once; the click that follows still runs on the link, which is what
- * navigates. The `⋯` actions button is not a link and keeps its own
- * focus: its menu returns focus to it.
+ * Findings). So the click hands focus to the item — in the **capture**
+ * phase, before the link's own handler runs (`onClickCapture`).
+ *
+ * Not on the link's `focus` event, where the first repair put it: a
+ * focus move during the mousedown's own focus step makes Chromium cancel
+ * the native drag of that link — `dragstart` never fires and the drop
+ * never lands — and every mouse drag of a page row was gone (measured
+ * 2026-09-16, docs/TODO.md Findings). A drag produces no click, so its
+ * end hands focus over instead (`onDragEnd`).
+ *
+ * And not in the row's bubbling `click` either, where the second repair
+ * first put it: a native click runs the microtask queue between its
+ * listeners, so by the time the row's handler ran, the link's
+ * `router.push` had already run the dirty-editor guard, the guard had
+ * asked, the dialog had opened with the link recorded as the control
+ * that asked, and its focus trap pulled the row's late `focus()` straight
+ * back (measured 2026-09-16, same entry). A synthetic `click()` runs no
+ * microtasks between listeners, which is why a unit test on the bubbling
+ * handler passed while the browser failed. The `⋯` actions button is not
+ * a link and keeps its own focus: its menu returns focus to it.
  */
-function onLinkFocus(): void {
+function focusItem(): void {
   itemEl.value?.focus();
+}
+
+/** Before the link acts: a click on a page's title puts the tree's focus on the row first. */
+function onClickCapture(event: MouseEvent): void {
+  if (isNavigable.value && (event.target as HTMLElement | null)?.closest('a[href]')) focusItem();
 }
 
 /** The route's components, requested on the first sign of intent so the click finds them warm. Once per row. */
@@ -167,10 +189,11 @@ const titleSegments = computed(() => highlightSegments(props.node.title, props.h
 function onClick(event: MouseEvent): void {
   if (isNavigable.value) {
     // On the link itself the link navigates — the router on a plain
-    // click, the browser on a modified one — so the row only records the
-    // selection; anywhere else on the row the tree opens the page.
-    if ((event.target as HTMLElement | null)?.closest('a[href]')) emit('activate', props.node.id);
-    else emit('open', props.node.id);
+    // click, the browser on a modified one — and the row already took
+    // the focus in the capture phase (which records the selection: the
+    // item's own `focus` emits `activate`), so there is nothing left to
+    // do; anywhere else on the row the tree opens the page.
+    if (!(event.target as HTMLElement | null)?.closest('a[href]')) emit('open', props.node.id);
   } else if (isContainer.value) {
     emit('toggle', props.node.id);
   }
@@ -179,6 +202,11 @@ function onClick(event: MouseEvent): void {
 function onDragStart(event: DragEvent): void {
   event.dataTransfer?.setData('text/plain', props.node.id);
   event.dataTransfer!.effectAllowed = 'move';
+}
+
+/** The drag is over, dropped or not: the pointer's focus on the link is the row's now. */
+function onDragEnd(): void {
+  focusItem();
 }
 
 function onDragOver(event: DragEvent): void {
@@ -286,9 +314,11 @@ function onKeydown(event: KeyboardEvent): void {
       ]"
       :style="{ paddingLeft: `${depth * 12 + 8}px` }"
       @dragstart="onDragStart"
+      @dragend="onDragEnd"
       @dragover="onDragOver"
       @dragleave="onDragLeave"
       @drop="onDrop"
+      @click.capture="onClickCapture"
       @click="onClick"
       @pointerenter="warmRoute"
     >

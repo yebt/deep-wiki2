@@ -32,6 +32,7 @@ import { join } from 'node:path';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
+import { listProjectContainers, restartStalledStack, startContainers, type ProjectContainer } from './containers';
 import {
   composeEnvPrefix,
   dbComposeEnv,
@@ -168,6 +169,12 @@ export interface ResolveAdminUrlDeps {
   serverOwners?(url: string): Promise<string[]>;
   /** `podman|docker ps` output, used only to name a port's real owner. */
   portOwners?(): string;
+  /** This project's containers in any state, asked only once compose has already failed. */
+  projectContainers?(binary: ContainerRuntime): ProjectContainer[];
+  /** `podman|docker start <names>`: true when the runtime accepted it. */
+  startContainers?(binary: ContainerRuntime, names: readonly string[]): boolean;
+  /** Where the one retry announces itself. */
+  log?(message: string): void;
 }
 
 /**
@@ -207,6 +214,9 @@ export const defaultProvisionDeps: ResolveAdminUrlDeps = {
   runCompose: defaultRunCompose,
   serverOwners: defaultServerOwners,
   portOwners: defaultPortOwners,
+  projectContainers: (binary) => listProjectContainers(binary, harnessIdentity().dbProjectName),
+  startContainers,
+  log: (message) => console.warn(`packages/db/testing: ${message}`),
 };
 
 /**
@@ -325,18 +335,28 @@ export async function resolveAdminUrl(deps: ResolveAdminUrlDeps, timeoutMs: numb
   }
 
   const result = await deps.runCompose(binary, timeoutMs);
-  if (result.timedOut) {
-    assertPortIsOurs();
-    throw new ProvisioningError(timeoutMessage(binary, timeoutMs, id));
-  }
-  if (result.code !== 0) {
-    assertPortIsOurs();
-    throw new ProvisioningError(composeFailedMessage(binary, result.code, id));
-  }
+  let failure: string | undefined;
+  if (result.timedOut) failure = timeoutMessage(binary, timeoutMs, id);
+  else if (result.code !== 0) failure = composeFailedMessage(binary, result.code, id);
+  else if (!(await deps.probe(url))) failure = composeFailedMessage(binary, result.code, id);
 
-  if (!(await deps.probe(url))) {
-    assertPortIsOurs();
-    throw new ProvisioningError(composeFailedMessage(binary, result.code, id));
+  // Seen 2026-09-16 under load: compose exits 125 (or is killed at the
+  // bound) with the container created and never started, and every later
+  // `up` against the same project name fails the same way. What the
+  // human then did by hand — start the container that is already there —
+  // is done here once before the failure, with its manual command, is
+  // raised.
+  if (failure !== undefined) {
+    const healed = await restartStalledStack(binary, id.dbProjectName, timeoutMs, {
+      projectContainers: (bin) => deps.projectContainers?.(bin) ?? [],
+      startContainers: (bin, names) => deps.startContainers?.(bin, names) ?? false,
+      reachable: () => deps.probe(url),
+      log: (message) => deps.log?.(message),
+    });
+    if (!healed) {
+      assertPortIsOurs();
+      throw new ProvisioningError(failure);
+    }
   }
 
   await assertServerIsOurs();
