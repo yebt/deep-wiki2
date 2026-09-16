@@ -12,13 +12,19 @@ import NavigationTree from './NavigationTree.vue';
  * placement, the four request states — plus what the housing added, the
  * book row's context action and the current page's marking.
  */
-const { useWorkspaceTreeMock, navigateToMock } = vi.hoisted(() => ({
+const { useWorkspaceTreeMock, navigateToMock, preloadRouteComponentsMock } = vi.hoisted(() => ({
   useWorkspaceTreeMock: vi.fn(),
   navigateToMock: vi.fn(async () => {}),
+  preloadRouteComponentsMock: vi.fn(async () => {}),
 }));
 
 mockNuxtImport('useWorkspaceTree', () => useWorkspaceTreeMock);
 mockNuxtImport('navigateTo', () => navigateToMock);
+// A page row warms its route on focus (`NavigationTreeNode`); the real
+// preload imports the read screen's module here, which is not what these
+// tests are about and slowed the menu's focus return past its wait under
+// load. `NavigationTreeNode.test.ts` holds the warming itself.
+mockNuxtImport('preloadRouteComponents', () => preloadRouteComponentsMock);
 
 function mockTree(overrides: { status?: string; nodes?: unknown[]; message?: string } = {}) {
   navigateToMock.mockClear();
