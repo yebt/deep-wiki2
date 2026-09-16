@@ -1,3 +1,5 @@
+import { keysStaledBySave } from '~/utils/api-keys';
+
 export type SavePageStatus = 'idle' | 'saving' | 'success' | 'stale' | 'not-canonical' | 'dead-anchor' | 'forbidden' | 'network-error';
 
 export type SavePageFetcher = (nodeId: string, markdown: string, expectedContentHash: string | null) => Promise<{ contentHash: string }>;
@@ -36,15 +38,12 @@ export interface UseSavePageResult {
  * composable.
  */
 export function useSavePage(nodeId: string, fetcher?: SavePageFetcher): UseSavePageResult {
-  const config = useRuntimeConfig();
   const put =
     fetcher ??
-    ((id: string, markdown: string, expectedContentHash: string | null) =>
-      $fetch<{ contentHash: string }>(`${config.public.apiBaseUrl}/pages/${id}`, {
-        method: 'PUT',
-        credentials: 'include',
-        body: { markdown, expectedContentHash },
-      }));
+    ((id: string, markdown: string, expectedContentHash: string | null) => {
+      const api = useApiClient();
+      return api<{ contentHash: string }>(`/pages/${id}`, { method: 'PUT', body: { markdown, expectedContentHash } });
+    });
 
   const status = ref<SavePageStatus>('idle');
   const contentHash = ref<string | null>(null);
@@ -59,6 +58,9 @@ export function useSavePage(nodeId: string, fetcher?: SavePageFetcher): UseSaveP
 
     try {
       const result = await put(nodeId, markdown, expectedContentHash);
+      // The read layer (`useApiRead`) keeps this page, its history and the
+      // lists a new revision appears in; the next screen must fetch them.
+      clearNuxtData(keysStaledBySave(nodeId));
       contentHash.value = result.contentHash;
       canonical.value = null;
       corrected.value = null;
