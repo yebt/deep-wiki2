@@ -420,6 +420,33 @@ describe('EditorSurface', () => {
     });
   });
 
+  describe('the transaction count on the editor root', () => {
+    /**
+     * Chrome delivers `selectionchange` at the next rendering opportunity,
+     * so ProseMirror learns where a click put the caret one frame later —
+     * and a synthetic keypress inside that frame is handled at the caret
+     * ProseMirror still holds. Measured 2026-09-16 (docs/TODO.md Findings):
+     * `editor.click()`, `End`, `Enter` split the paragraph at its START in
+     * 15 of 20 unthrottled runs. `data-transactions` is the count the view
+     * reports after every transaction, including the selection-only one a
+     * pointer produces, so a harness can wait for ProseMirror to have read
+     * the caret instead of for a frame it cannot see.
+     */
+    test('reflects every transaction the view reports, selection-only ones included', async () => {
+      const component = await mountSurface();
+      const surface = component.get('[data-testid="editor-surface"]');
+      expect(surface.attributes('data-transactions')).toBe('0');
+
+      harness.update({ undoDepth: 0, redoDepth: 0 });
+      await component.vm.$nextTick();
+      expect(surface.attributes('data-transactions')).toBe('1');
+
+      harness.update({ undoDepth: 0, redoDepth: 0 });
+      await component.vm.$nextTick();
+      expect(surface.attributes('data-transactions')).toBe('2');
+    });
+  });
+
   describe('flush', () => {
     /**
      * Save reads the buffer the surface last reported, and the surface

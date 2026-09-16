@@ -534,6 +534,66 @@ makes conventions portable across projects.
 
 Discoveries and constraints. Newest first.
 
+### 2026-09-16 — `e2e/editor.spec.ts`'s "flake" was one race, and it is the harness's: a key sent within the frame after a click is handled at the caret ProseMirror still holds
+
+**What happened.** The v0.5.0 verification saw `:754` (`/table`) time out waiting for "Saved"
+and, rerun alone with `--workers 1`, `:347` produce `"SecondStart."` in the new heading. Both
+sit on the slash-menu path `feat/editor-block-ui` and `feat/editor-block-commands` touched, so
+the suspects were a click running a command against a stale `view.state`, a debounce/`flush`
+race, or the host's capture-phase Enter handler swallowing a key. Measured first, on
+`fix/editor-flake-and-heal` (worktree `fb-fix3`), then read.
+
+**Measured.** `bun run e2e -- e2e/editor.spec.ts --repeat-each 5 --workers 1` on the idle
+machine: `:347` failed 4 of 5 repeats with `"SecondStart."`, and in the one repeat it passed,
+`:754` failed instead — the spec is `serial`, so each failure skipped the rest of that repeat
+(33 passed, 5 failed, 106 skipped). `:754`'s error-context snapshot shows the editor holding an
+*empty paragraph, then the table, then `Before the table.`* and Save refused as "not canonical"
+— the table was inserted above the text, not below it. Both failures are one shape: `Enter`
+after `editor.click()` + `End` split the paragraph at its START, so `/` was typed at the start
+and the block command ran on the paragraph holding the original text — `"Second"` typed at the
+start of `Start.` in one case, a table above `Before the table.` in the other. A throwaway spec
+doing only click, `End`, `Enter` on `Start.` split at the start in **15 of 20** unthrottled runs
+and **0 of 20** under six-times CPU throttling. A page-side event log on the failing runs shows
+why, byte for byte:
+
+    mousedown, setTimeout(20) [ProseMirror's focus timer], focusin, mouseup,
+    keydown End, keyup End, keydown Enter, keyup Enter,
+    selectionchange anchor=#text:0            ← the first one, after Enter, at offset 0
+
+and on the passing runs `selectionchange anchor=#text:6` lands ~14 ms after `mouseup`, before
+`End`. Chrome delivers `selectionchange` at the next rendering opportunity; ProseMirror reads
+the browser's caret only from that event (`prosemirror-view`'s `DOMObserver.onSelectionChange`
+→ `flush()`; its `keydown` handler's `forceFlush()` flushes only a flush that was already
+scheduled). Playwright's `mouseup`, `End` and `Enter` arrive ~1 ms apart — inside one frame —
+so ProseMirror handles `Enter` with the selection it had at mount, the start of the document,
+then writes that selection to the DOM, which is the `#text:0` above. Throttling stretches the
+frame past the next key, hence 0 of 20. No hand is that fast. None of the suspects was it:
+`confirmSlashAt` reads `slashState`, which the plugin view's `update` sets synchronously with
+`view.state`; `flush()` is called before Save; the capture handler returns before touching an
+event with no menu open. Not a stale-state dispatch in this code — a synthetic key inside the
+frame ProseMirror needs.
+
+**What changed.** `EditorSurface.vue` exposes `data-transactions` on the editor root: the count
+the view reports after every transaction (`EditorUpdate.transactionCount`), the pointer's
+selection-only one included. `e2e/editor.spec.ts` replaces every `editor.click()` + `End` with
+`caretToEnd(editor)`: click just inside the last block's right edge — where `End` was taking the
+caret — then wait for `data-transactions` to move past its value before the click. That is
+ProseMirror saying it has read the caret; no timeout, and no longer wait papering over anything.
+The same throwaway spec with that sequence: 0 of 20 at both throttles. `EditorSurface.test.ts`
+proves the attribute follows every reported transaction.
+
+**After.** `bun run e2e -- e2e/editor.spec.ts --repeat-each 5 --workers 1`, same idle machine:
+130 passed, 0 failed, 0 skipped in 10.6 minutes — every test, all five repeats — against
+33 passed, 5 failed, 106 skipped before. `--repeat-each 3`: see the verification line in the
+commit.
+
+**Not fixed here.** `e2e/comments.spec.ts:332` presses `End` on a focused gutter control, not in
+the editor — a different `End`, no race. The 20 ms focus timer ProseMirror schedules
+(`handlers.focus`: push its selection to the DOM if the two disagree) never fired first in any
+logged run, but it is the other half of the same frame arithmetic and would produce the same
+outcome by a different route; `caretToEnd` covers both because it waits for the transaction
+rather than for either event.
+
 ### 2026-09-16 — The self-healing provisioning did not heal because the cause was this process's `PATH`: `bun run` puts `@vercel/nft`'s `nft` in front of nftables' and netavark ran the wrong one
 
 **What happened.** The very next full verification after `2d10af6` ("start a container compose

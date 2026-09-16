@@ -71,6 +71,17 @@ const rootEl = ref<HTMLElement | null>(null);
  * ProseMirror to mount into it.
  */
 const attached = ref(false);
+/**
+ * How many transactions the view has applied, selection-only ones
+ * included, exposed on the editor root as `data-transactions`. Chrome
+ * delivers `selectionchange` at the next rendering opportunity, so
+ * ProseMirror learns where a click put the caret one frame later — a key
+ * sent inside that frame is handled at the caret ProseMirror still holds.
+ * No hand is that fast; Playwright is (docs/TODO.md Findings, 2026-09-16:
+ * click, End, Enter split the paragraph at its START in 15 of 20 runs).
+ * The count is the signal a harness waits on instead of a frame.
+ */
+const transactionCount = ref(0);
 const mentionState = ref<MentionState | null>(null);
 const slashState = ref<SlashState | null>(null);
 const mentionCaretRect = ref<{ top: number; left: number } | null>(null);
@@ -493,6 +504,7 @@ async function mount(): Promise<void> {
       },
     },
     onUpdate: (view, update) => {
+      transactionCount.value = update.transactionCount;
       emit('history', { undoDepth: update.undoDepth, redoDepth: update.redoDepth });
       // Only a transaction that changed the document is reported. A
       // selection-only transaction — a click, an arrow key, the toolbar's
@@ -602,6 +614,7 @@ defineExpose({
       ref="rootEl"
       class="doc-body text-doc-body text-default prosemirror-editor -m-4 min-h-64 rounded-lg p-4"
       data-testid="editor-surface"
+      :data-transactions="transactionCount"
       role="textbox"
       aria-multiline="true"
       aria-label="Page content"
