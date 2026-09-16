@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
+import { waitForHydration } from './hydration';
 import { expectNoHorizontalOverflow } from './overflow';
 
 /**
@@ -225,6 +226,8 @@ for (const theme of ['light', 'dark'] as const) {
 
       await page.goto(`/pages/${fixtures.readPageId}`);
       await expect(page.getByRole('heading', { level: 1, name: 'E2E Read Page' })).toBeVisible({ timeout: 30000 });
+      // The article is server-rendered; the button below needs the hydrated app.
+      await waitForHydration(page);
       const sidebar = page.getByRole('navigation', { name: 'Workspace' });
       await expect(sidebar).toBeVisible();
       const before = (await page.locator('article').boundingBox())!;
@@ -255,6 +258,8 @@ for (const theme of ['light', 'dark'] as const) {
       await expect(page.getByRole('heading', { level: 1, name: 'E2E Read Page' })).toBeVisible({ timeout: 30000 });
       await expect(sidebar).toBeHidden();
       await expect(page.getByRole('button', { name: 'Show sidebar' })).toBeVisible();
+      // The keys below need the hydrated app; the document above did not.
+      await waitForHydration(page);
 
       // The keys bring it back, from anywhere on the page.
       await page.locator('article').click();
@@ -336,6 +341,8 @@ test.describe('320x900 light', () => {
 
     await page.goto(`/workspaces/${fixtures.workspaceId}`);
     await expect(page.getByRole('heading', { level: 1, name: 'E2E Workspace' })).toBeVisible({ timeout: 30000 });
+    // The dashboard is server-rendered; the drawer below needs the hydrated app.
+    await waitForHydration(page);
 
     // No persistent sidebar; the content takes the width.
     const persistent = page.getByRole('navigation', { name: 'Workspace' });
