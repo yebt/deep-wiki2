@@ -207,6 +207,8 @@ test.describe('the comments toggle', () => {
         page,
         context,
       }) => {
+        // Two full loads, each waiting for hydration: dev mode under load.
+        test.setTimeout(240_000);
         await signInAs(context, comments.commenterSessionToken);
         await useTheme(page, theme);
 
@@ -245,12 +247,18 @@ test.describe('the comments toggle', () => {
         // Remembered.
         await page.reload();
         await expect(page.getByRole('heading', { level: 1, name: comments.commentsPageTitle })).toBeVisible({ timeout: 30000 });
+        // The article is server-rendered now; the count on the toggle needs
+        // the hydrated app to have fetched the threads.
+        await waitForHydration(page);
         await expect(page.getByRole('button', { name: /on this block$/ })).toHaveCount(0);
         await expect(page.getByRole('button', { name: 'Show comments — 1 open thread mentions you' })).toBeVisible({ timeout: 30000 });
 
-        // And back.
+        // And back: the one mark returns. Counted by the marks' own name
+        // (`N comment(s) on this block`) — since 2026-09-16 every block a
+        // commenter can start a thread on also carries a "Comment on this
+        // block" slot, which `/on this block$/` would count with them.
         await page.getByRole('button', { name: /^Show comments/ }).click();
-        await expect(page.getByRole('button', { name: /on this block$/ })).toHaveCount(1);
+        await expect(page.getByRole('button', { name: /\d+ comments? on this block$/ })).toHaveCount(1);
         await expect(page.getByRole('button', { name: 'Hide comments' })).toBeVisible();
         await expect(page.getByTestId('comments-mention-badge')).toHaveCount(0);
       });

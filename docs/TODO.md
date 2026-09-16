@@ -618,6 +618,17 @@ uncompressed on the wire).
   timestamp on screen; the switch lives in the formatter, so it covers the members screen
   this branch does not edit.
 
+- **The tree fetched itself on the server, without a cookie, and serialised the 401.** After the
+  rebase onto the tree-menu and signed-out-redirect merges: `NavigationTree`'s immediate watch
+  ran `load()` during the server's render pass whenever the frame already knew its workspace
+  (every visit after the first, through the `dw-workspace` cookie), `useTree`'s bare `$fetch`
+  carries no session cookie there, the 401 landed in the shared `useState` tree record, was
+  serialised with the page, and `redirectWhenSignedOut(tree.status)` bounced a signed-in
+  reader to sign-in on every reload (reproduced: reload → `/login?next=…` with no browser
+  request for the page at all). Latent on `main` — whether the 401 was serialised depended on
+  the fetch beating the render — and deterministic once the read layer made the render wait
+  for the page. The tree loads on the client only, as it always had.
+
 **Found, not fixed.**
 
 - **Template comments between `v-if` branches were a dev-only hydration mismatch** the
