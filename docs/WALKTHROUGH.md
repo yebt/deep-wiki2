@@ -170,13 +170,27 @@ a move is a move, not a delete plus an insert. The badges are legible on their r
 ## 9. Comments — read mode, second user
 
 **Do:** grant the second user `comment` on the page (stop 3's members screen, or `manage` on
-the root). As the second user, open the page: marks appear in the gutter beside anchored
-blocks. Open one, reply, resolve. As the operator, reply back.
+the root). As the second user, open the page and **start a thread**: hover a paragraph and a
+"+" appears beside it in the gutter (or Tab to the gutter and use the arrow keys); press it,
+type, Post. Then select a few words inside a paragraph: a "Comment" floats beside the
+selection; press it and the selected words are the thread's excerpt. Open a thread, reply,
+resolve. As the operator, reply back.
 
-**See:** one request for the page's threads; a read-only user sees no gutter at all (the API
-returns nothing to them, and the client draws nothing — not an empty gutter).
+**See:** the mark and the thread appear the moment you post ("Posting…" until the server
+answers, then "Comment posted."), and are still there after a reload — on a paragraph nobody
+had commented on before, the server wrote a ` ^id` anchor into the Markdown for it. One request
+for the page's threads; a read-only user sees no gutter, no "+", no floating "Comment" at all
+(the API answers `canComment: false` and nothing else, and the client draws nothing — not an
+empty gutter). Type `@` in the composer for the same mention menu the editor has.
 
 **Provoke:**
+- Press Post with nothing typed → it explains itself and stays reachable; press Cancel on a
+  block with no thread → the panel closes and focus returns to the "+".
+- Stop the API, Post → the composer stays open, the notice says your text is still here; start
+  it, Post again.
+- As the operator, save an edit to the paragraph while the second user has the composer open on
+  it, then Post → "this block has changed since you opened the page — reload".
+- Try a list or a code block: no "+". A persisted anchor cannot live on those yet.
 - As the operator, delete the commented paragraph and save. As the second user, reload: a chip
   says a comment points at text that is gone; the panel shows **Text removed** and the original
   excerpt. The thread did not vanish and did not attach itself to someone else's paragraph.
@@ -237,8 +251,8 @@ answers identically to one that does not exist, everywhere.
 
 - **Delete** anything. Three questions are open in `docs/TODO.md` and the schema currently
   answers "cascade" by accident.
-- **Start a thread** from read mode — only reply and resolve. Threads are created through the
-  API today.
+- **Comment on a list, a code block, a table or a raw-HTML block.** Threads start from read
+  mode on paragraphs and headings (stop 9); the other block kinds cannot carry an anchor yet.
 - **Self-register and create a workspace.** Registration works when the mode allows it, but a
   new user has no plan and nothing assigns one; they stop at "ask the operator".
 - **Click a wiki-link.** `[[Page]]` renders inert by decision until the overlay carries it.

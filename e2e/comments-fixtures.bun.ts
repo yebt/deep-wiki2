@@ -80,6 +80,11 @@ export interface CommentFixtures {
   readonly legacyPageId: string;
   readonly legacyPageTitle: string;
   readonly legacyQuote: string;
+  /** A page saved with no persisted anchor at all — the mint path a thread started from read mode exercises. */
+  readonly freshPageId: string;
+  readonly freshPageTitle: string;
+  readonly freshFirstParagraph: string;
+  readonly freshSecondParagraph: string;
 }
 
 /** Mints the commenter, the editor, the three pages and their threads into `sql`'s database, under `workspaceId`'s root. */
@@ -177,6 +182,14 @@ export async function mintCommentFixtures(sql: postgres.Sql, workspaceId: string
      WHERE node_id = ${legacyPage.id} AND workspace_id = ${workspaceId}
   `;
 
+  // The new-thread path (2026-09-16): a page with no persisted anchor at
+  // all, so that starting a thread from read mode drives the real mint —
+  // `data-derived-block-id` on the cached render, the server's
+  // `mintAnchorAtBlock` and re-render, and the reload that proves it.
+  const freshFirstParagraph = 'A fresh paragraph that has never been commented on.';
+  const freshSecondParagraph = 'A second fresh paragraph, with a few words worth selecting.';
+  const freshPage = await makePage('E2E Fresh Page', 23, `${freshFirstParagraph}\n\n${freshSecondParagraph}\n`);
+
   return {
     commenterSessionToken,
     editorSessionToken,
@@ -191,6 +204,10 @@ export async function mintCommentFixtures(sql: postgres.Sql, workspaceId: string
     legacyPageId: legacyPage.id,
     legacyPageTitle: legacyPage.title,
     legacyQuote,
+    freshPageId: freshPage.id,
+    freshPageTitle: freshPage.title,
+    freshFirstParagraph,
+    freshSecondParagraph,
   };
 }
 

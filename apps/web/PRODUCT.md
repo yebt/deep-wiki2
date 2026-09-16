@@ -57,13 +57,15 @@ creation with plan limits, members and grants, instance registration settings (S
 the navigation tree with create/rename/reorder/fold, read and edit with live-preview
 markdown, slash and mention menus, revision history, page and book diff with four change
 classes, changesets grouped by a thirty-minute window, block-anchored comment threads with
-orphan handling, presence chips, the workspace frame (sidebar mounted once, `/` reopening the
+orphan handling — started from read mode on any paragraph or heading, replied to and resolved
+(2026-09-16) — presence chips, the workspace frame (sidebar mounted once, `/` reopening the
 last workspace), focus mode (`Ctrl`/`⌘`+`\`) and a per-browser comments toggle on the read
 screen.
 
-Not yet: deleting anything (three open questions), starting a thread from read mode,
-self-registration that leads anywhere (no default plan), clickable wiki-links, backlinks or
-tags in the UI, logout, diagram rendering (Phase 4), any AI or MCP surface (Phases 5, 7).
+Not yet: deleting anything (three open questions), commenting on a list, code block, table or
+raw-HTML block, self-registration that leads anywhere (no default plan), clickable wiki-links,
+backlinks or tags in the UI, logout, diagram rendering (Phase 4), any AI or MCP surface
+(Phases 5, 7).
 
 Technical constraints that bind every screen: Nuxt 4 + Nuxt UI v4 on Bun; `packages/core`
 has zero framework imports; one markdown parser; the ProseMirror document is a view, never

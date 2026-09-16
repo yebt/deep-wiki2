@@ -502,6 +502,104 @@ makes conventions portable across projects.
 
 Discoveries and constraints. Newest first.
 
+### 2026-09-16 — Threads can be started from read mode; the anchor is the server's; `data-derived-block-id`
+
+**What happened.** The owner tried to comment on a document and could not: the overlay drew
+marks, the panel replied and resolved, and the only way to *start* a thread was
+`POST /pages/:id/comments` by hand — recorded as out of scope on 2026-09-14, and the reason gate
+10.8 could not be exercised. Branch `feat/new-thread-from-read`, worktree `fb-comments`.
+
+**What the client could not name.** `render()` emits `data-block-id` only on a block with a
+persisted anchor (comment-overlay spec: "an unanchored block MUST carry no such attribute"), so
+a block that had never been commented on had *no identity in the HTML at all*, and the read
+screen never parses. The API already accepted a derived id (`d:<hash>#<n>`) for exactly this
+case — nothing could send one. The render now emits **`data-derived-block-id`** on every
+top-level paragraph and heading with no anchor, carrying `sliceBlocks`'s derived id, under its
+own attribute so the spec's sentence about `data-block-id` stays literally true and the two
+never have to be told apart by their value's shape. Grammar-pinned in `SANITIZE_SCHEMA` like
+`dataBlockId`. Only anchorable blocks get one: a list, code block, table or raw-HTML block
+cannot carry ` ^id`, so an identity for one would be an affordance that fails at the mint —
+**comments on those block kinds are not offered**, and that is a limit to record, not a bug.
+`CURRENT_PIPELINE_VERSION` is 4; `backfill:render` carries the attribute to the existing
+corpus, and until it reaches a page its unanchored blocks simply offer no "+".
+
+**Why a derived id and not a slot index.** A derived id is a hash of the block's text: a
+page saved between the reader's load and their post makes it stop resolving, and the route now
+answers **409** ("that block has changed since this page was loaded") instead of falling
+through to `createRootComment` with an unresolved id and surfacing `comments_block_fk` as a
+500. A slot index would silently land on whichever block now sits there — the one failure
+`docs/UI-CHECKLIST.md` §4.7 forbids outright.
+
+**The anchor is the server's to compute.** The client selects *visible* text off cached HTML
+(`bold word`) and has no offsets into the canonical source (`__bold__ word`). Save-time
+reconciliation compares the stored quote to the block's source by exact substring first and
+trigram containment at 0.8 second, so a quote that is not a source substring would skip the
+exact rows on every later save and could orphan a comment on a block nobody touched. New
+`locateQuoteInBlock` (`packages/markdown/src/anchor-quote.ts`): exact occurrence (nearest the
+client's offset hint when repeated) → smallest source window containing the selection as a
+subsequence (`Hello world` over `Hello __world__` stores `Hello __world`) → the whole block
+minus its trailing ` ^id`. `CreateCommentRequestSchema`'s `offsetStart`/`offsetEnd`/`quote`
+are optional; offsets are a hint, never stored as sent. The consequence to know: a selection
+across inline markup stores the *source* window, so its excerpt can show `__`/`[](…)` — a
+markdown wiki's honest excerpt, but not the reader's exact words.
+
+**`canComment` on the threads response.** The API answered `{ threads: [] }` identically to a
+reader and to a commenter on a page with no thread yet, so no page's first thread could ever be
+started from the client. The response now carries `canComment`, the caller's *own* grant —
+which a POST tells them anyway. Non-disclosure is unchanged and tested: a reader's response is
+byte-identical whether the page has threads or none.
+
+**`mintAnchorAtBlock` now receives `reservedIds`** — the page's full `page_blocks` registry,
+every status — closing the 2026-09-13 "still open" follow-up below; a test drives
+`crypto.getRandomValues` into a tombstoned id and asserts the second draw is taken.
+
+**The 403 stays.** The task asked that a caller without `comment` get the same answer as a
+nonexistent page. Verified against the route and its tests: absence and denial already answer
+identically at the *read* gate (404 for an unreadable page, tested byte-for-byte), and a caller
+who can read the page learns nothing from a 403 for the stronger action — the route's own
+comment and `comments.test.ts` ("a subject who holds read but not comment still gets 403, not
+404") say so deliberately, and the client's message for a revoked commenter depends on it. Not
+changed.
+
+**Read mode.** `CommentGutter` offers a "+" (`i-lucide-message-square-plus`, "Comment on this
+block", tooltip, 32px) beside every commentable block without a mark, quiet (`opacity-0`) until
+its block is hovered or it is focused; the gutter is **one tab stop with a roving tabindex**
+(arrows, Home, End; stated in an `aria-describedby` description) rather than a control per
+paragraph in the tab order. A selection inside one block floats a tonal "Comment" above it
+(`data-testid="comment-selection-action"`). Both open `CommentComposer` at the top of the panel
+(`useNewThread` holds the draft): labelled `UTextarea`, Post (Filled) and Cancel (Outlined),
+Ctrl+Enter. Posting is **optimistic**: `usePageComments.create` inserts a `pending:*` thread —
+counted by the gutter, marked "Posting…" in the panel, not yet repliable — and the server's
+list replaces it; on failure it is withdrawn, the composer keeps the text, and the notice says
+"Your text is still here". When the server mints an anchor for a derived id, the screen
+**adopts it in the DOM** (`adoptMintedAnchor`) and moves the panel's focus to the new id before
+the reload, so the thread just posted is placed without a page reload.
+
+**Mentions in the composer.** The editor's menu was markup inside `EditorSurface.vue`, not a
+component; it is now `MentionMenu.vue`, used by both (§4.1). The composer's trigger is
+`utils/mention-trigger.ts` (pure), not the ProseMirror plugin, so the read path never loads the
+editor chunk — `bundle-isolation` and `bundle-isolation-build` both exit 0. People only:
+a comment's mention notifies a person; a page has no inbox. Access is checked the way the
+editor's is, with the same chip.
+
+**Seen on the way, not fixed.**
+- The Nuxt **dev** server on this machine takes ~60s to hydrate a page in a fresh browser
+  context (1017 module requests, two other worktrees running e2e at the same time), so every
+  30s first-visit timeout in `e2e/comments.spec.ts` fails against `bun run e2e`'s dev
+  `webServer`. The suite was run against a production build served on the harness's web port
+  (`bun run -F @deep-wiki/web build` then `node apps/web/.output/server/index.mjs`, with
+  `bunx playwright test` directly, `reuseExistingServer`): 8/8. `scripts/e2e.ts` refuses when a
+  dev lock is held, so this is a documented workaround, not the command.
+- Two `apps/api` suites (`s3-blob-store`, `smtp-mail-sender`) failed once with "podman compose
+  did not bring up a reachable Mailpit/MinIO within 90000ms"; the same stack came up in 16s when
+  started by hand. Environmental.
+- The floating "Comment" stands 8px above the selection and therefore over the previous line's
+  text while it is shown — the Medium/Docs pattern, transient, gone on the next click. Whether
+  the owner wants it in the gutter column instead is a review question.
+- The "+" is offered to a commenter below `md` inside the column, so every page a commenter
+  reads at 320px gives up 40px of end padding, not only pages with threads.
+- A provisional thread is shown as authored by "You": the client holds no `me`.
+
 ### 2026-09-15 — `ai-provider-foundation` integrated into `main`, 204 commits after its base
 
 **What happened.** The branch (24 commits, base `ef94aab`, dated 2026-09-06) was merged onto
@@ -1053,11 +1151,13 @@ the three is a design question, not a fourth `div`.
 - **`PUT /pages/:id` now answers a reintroduced dead anchor with `409` and `corrected`**
   (commit `40f9844`, `apps/api/src/routes/pages.ts`), and the edit screen no longer reports
   it as a stale save (`87979d5`). Done.
-- **Still open:** `mintAnchorAtBlock` in `apps/api/src/routes/comments.ts` is called with
+- ~~**Still open:** `mintAnchorAtBlock` in `apps/api/src/routes/comments.ts` is called with
   the markdown and the block id only — it does not receive the page's full id set as
   `reservedIds`, so the comment-creation mint path can still collide with a tombstoned or
   superseded id by chance. The refusal in `savePage` would then reject the comment's own
-  save with a `DeadAnchorError` the comment route does not catch. Follow-up, `apps/api`.
+  save with a `DeadAnchorError` the comment route does not catch. Follow-up, `apps/api`.~~
+  **Closed 2026-09-16:** the route passes the page's full `page_blocks` id set; see the
+  Finding of that date.
 
 **Impact.** As the tombstone entry states, plus: when a finding lists follow-ups, the next
 entry says which ones closed and which did not, by commit — otherwise "recorded here rather

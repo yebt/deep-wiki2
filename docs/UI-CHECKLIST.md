@@ -1015,4 +1015,53 @@ substitute for the owner's review against this checklist and `docs/DESIGN-SYSTEM
 
 ---
 
+### 2026-09-16 — Starting a thread from read mode — awaiting the owner's eye
+
+**Reviewer:** none yet — this entry is what was shipped for review, not a review.
+**Verdict:** Pending
+
+The owner could not comment on a document: the overlay displayed, replied and resolved, and
+nothing started a thread. This batch (`feat/new-thread-from-read`) adds the two ways in and one
+composer, on the read screen only. Pre-build contract: a member with `comment`, arriving on a
+paragraph they disagree with; "say something about this"; the single primary action is Post;
+the data is the block's identity the render now names (`data-block-id` or the new
+`data-derived-block-id`) and the person's own text; it does not edit or reply; with nothing
+typed Post explains itself, and a 12,000-word page's two hundred slots are one tab stop.
+
+- **A "+" beside every commentable block** without a mark (`CommentGutter`): 32px icon-only,
+  accessible name "Comment on this block" and a tooltip (§4.3), quiet until its block is hovered
+  or it is focused (§4.4 — chrome quieter than content), never removed from the tab order (§5).
+  The gutter is a roving-tabindex group — arrows, Home, End, said in an `aria-describedby`
+  description (§4.1's hand-rolled-primitive contract; §5's "name the keys").
+- **A floating "Comment" beside a selection** inside one block; a selection across blocks
+  offers nothing, because an anchor is one block (§4.7).
+- **`CommentComposer`** at the top of the thread panel: excerpt as §2.3's blockquote,
+  labelled 16px `UTextarea` (§9.5), `@` mentions through the editor's own `MentionMenu` —
+  extracted from `EditorSurface` so it exists once (§4.1) — keyboard-first (§4.6: arrows,
+  Enter, Escape closes only the menu, Tab moves on), Post Filled and Cancel Outlined (§9.1),
+  `aria-disabled` with a reason on both (§3, §5), focus taken on open, Ctrl+Enter posts.
+- **States (§3):** optimistic success (the mark and a "Posting…" thread at once, replaced by
+  the server's; "Comment posted." announced in the panel's live region); recoverable failure
+  (bar notice, text kept, "Your text is still here"); stale page (409 → "reload"); permission
+  (a reader gets no affordance, from `canComment` on the threads response — nothing empty);
+  hidden (the comments toggle hides the "+" with the marks).
+- **Measured** in `e2e/comments.spec.ts` against a real backend: the "+" ≥ 24px, revealed on
+  hover, level with its block; the composer's field focused; the thread and mark present after
+  a reload on a page that had **no persisted anchor** (the server minted one); the selection's
+  words as the excerpt; the roving keyboard; no horizontal overflow at 320 (pane and document,
+  `expectNoHorizontalOverflow`); a reader with `read` only sees no "+" and no floating action.
+  Screenshots `fb-comments-{read-hover,composer}-{1280-light,1280-dark,320-light}.png` and
+  `fb-comments-selection-1280-light.png` in the session scratchpad.
+
+**Known before review, not fixed**
+
+- The floating "Comment" sits over the previous line while shown (transient; the Medium/Docs
+  placement). If the owner prefers it in the gutter column, that is a one-line change.
+- Comments on lists, code blocks, tables and raw-HTML blocks are not offered: a persisted
+  anchor cannot live on them today, so a "+" there would fail at the mint.
+- A provisional thread is authored "You" until the server answers; the client has no `me`.
+- Gate **10.8** is still `[ ]`; this batch is what makes it exercisable.
+
+---
+
 *The next entry goes below this one.*

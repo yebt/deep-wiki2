@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
+import { expectNoHorizontalOverflow } from './overflow';
 
 /**
  * The comment gutter and thread panel on the read screen (comment-overlay
@@ -33,6 +34,21 @@ interface CommentFixtures {
   readonly legacyPageId: string;
   readonly legacyPageTitle: string;
   readonly legacyQuote: string;
+  readonly freshPageId: string;
+  readonly freshPageTitle: string;
+  readonly freshFirstParagraph: string;
+  readonly freshSecondParagraph: string;
+}
+
+const SHOTS = process.env.DEEPWIKI_FB_COMMENTS_SHOTS ?? '';
+
+async function shot(page: Page, name: string): Promise<void> {
+  if (!SHOTS) return;
+  await page.screenshot({ path: `${SHOTS}/fb-comments-${name}.png`, fullPage: false });
+}
+
+async function useTheme(page: Page, theme: 'light' | 'dark'): Promise<void> {
+  await page.addInitScript((value) => localStorage.setItem('nuxt-color-mode', value), theme);
 }
 
 const seed: SeedFixtures = JSON.parse(readFileSync(new URL('.auth-fixtures.json', import.meta.url), 'utf8'));
@@ -146,6 +162,197 @@ test('a reader with read but not comment sees the page and nothing of the overla
   await expect(page.getByRole('dialog')).toHaveCount(0);
   const html = await page.content();
   expect(html).not.toContain('Is this paragraph still accurate');
+
+  // Nor any way to start one: no "+" on hover, no "Comment" on a
+  // selection. The API answered `canComment: false`; the client draws no
+  // empty affordance.
+  await page.getByText(fixtures.commentedQuote).hover();
+  await expect(page.getByRole('button', { name: 'Comment on this block' })).toHaveCount(0);
+  await page.getByText(fixtures.commentedQuote).selectText();
+  await expect(page.getByTestId('comment-selection-action')).toHaveCount(0);
+});
+
+/**
+ * Starting a thread from read mode (2026-09-16; the gap gate 10.8 found).
+ * The fresh page carries no persisted anchor, so the first thread drives
+ * the whole mint: the "+" beside a block the render named only by its
+ * derived id, the composer, an optimistic mark and thread, the server's
+ * anchor written into the Markdown and its re-render — and a reload that
+ * finds the thread beside the block under the anchor the server minted.
+ */
+test('a commenter starts a thread from a block’s "+": hover, type, Post — the mark and the thread appear, and survive a reload', async ({ page, context }) => {
+  await signInAs(context, fixtures.commenterSessionToken);
+
+  await page.goto(`/pages/${fixtures.freshPageId}`);
+  await expect(page.getByRole('heading', { level: 1, name: fixtures.freshPageTitle })).toBeVisible({ timeout: 30000 });
+  const paragraph = page.locator('article > p', { hasText: fixtures.freshFirstParagraph });
+  await expect(paragraph).toHaveAttribute('data-derived-block-id', /^d:[0-9a-f]{12}#0$/);
+  await expect(paragraph).not.toHaveAttribute('data-block-id', /.*/);
+
+  // No thread yet, so no mark — but a "+" beside every paragraph, quiet
+  // until its block is hovered, and a 24px target (§5).
+  await expect(page.getByRole('button', { name: /^\d+ comments? on this block$/ })).toHaveCount(0);
+  const starts = page.getByRole('button', { name: 'Comment on this block' });
+  await expect(starts).toHaveCount(2);
+  await expect(starts.first()).toHaveCSS('opacity', '0');
+  await paragraph.hover();
+  await expect(starts.first()).toHaveCSS('opacity', '1');
+  const startBox = (await starts.first().boundingBox())!;
+  expect(startBox.width).toBeGreaterThanOrEqual(24);
+  expect(startBox.height).toBeGreaterThanOrEqual(24);
+  await shot(page, 'read-hover-1280-light');
+
+  await starts.first().click();
+  const panel = dialog(page);
+  await expect(panel).toBeVisible();
+  const composer = panel.getByTestId('comment-composer');
+  await expect(composer).toContainText('On this block:');
+  await expect(composer).toContainText(fixtures.freshFirstParagraph);
+  await expect(panel.getByLabel('Comment', { exact: true })).toBeFocused();
+  // Nothing typed: Post explains itself and stays in the tab order.
+  await expect(panel.getByRole('button', { name: 'Post' })).toHaveAttribute('aria-disabled', 'true');
+  await shot(page, 'composer-1280-light');
+
+  await panel.getByLabel('Comment', { exact: true }).fill('Started from read mode.');
+  await panel.getByRole('button', { name: 'Post' }).click();
+
+  // Optimistic, then confirmed: the composer closes, the live region
+  // says so, the thread is in the panel, and the mark is beside the
+  // block — placed under the anchor the server minted, before any reload.
+  await expect(panel.getByRole('status').filter({ hasText: 'Comment posted.' })).toBeVisible({ timeout: 30000 });
+  await expect(composer).toHaveCount(0);
+  await expect(panel).toContainText('Started from read mode.');
+  await expect(panel.getByTestId('comment-pending')).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await expect(panel).toBeHidden();
+  const mark = page.getByRole('button', { name: '1 comment on this block' });
+  await expect(mark).toBeVisible();
+  await expect(paragraph).toHaveAttribute('data-block-id', /^[0-9A-Za-z]{10}$/);
+  const paragraphBox = (await paragraph.boundingBox())!;
+  const markBox = (await mark.boundingBox())!;
+  expect(markBox.y).toBeGreaterThanOrEqual(paragraphBox.y - 1);
+  expect(markBox.y).toBeLessThan(paragraphBox.y + paragraphBox.height);
+
+  // Reload: the server's own render carries the persisted anchor, and
+  // the thread stands beside its block with the block's text as excerpt.
+  await page.reload();
+  await expect(page.getByRole('heading', { level: 1, name: fixtures.freshPageTitle })).toBeVisible({ timeout: 30000 });
+  const reloaded = page.getByRole('button', { name: '1 comment on this block' });
+  await expect(reloaded).toBeVisible({ timeout: 30000 });
+  await expect(page.locator('article > p', { hasText: fixtures.freshFirstParagraph })).toHaveAttribute('data-block-id', /^[0-9A-Za-z]{10}$/);
+  await reloaded.click();
+  await expect(dialog(page)).toContainText('Started from read mode.');
+  await expect(dialog(page)).toContainText(fixtures.freshFirstParagraph);
+  await expect(dialog(page).getByText(/^“.*”$/).first()).not.toContainText('^');
+});
+
+test('a commenter selects words inside a block and starts a thread on them — the thread carries the selection as its excerpt', async ({ page, context }) => {
+  await signInAs(context, fixtures.commenterSessionToken);
+
+  await page.goto(`/pages/${fixtures.freshPageId}`);
+  await expect(page.getByRole('heading', { level: 1, name: fixtures.freshPageTitle })).toBeVisible({ timeout: 30000 });
+  const paragraph = page.locator('article > p', { hasText: fixtures.freshSecondParagraph });
+  await expect(paragraph).toBeVisible();
+
+  // Select "a few words" inside the second paragraph, by character offsets
+  // of the real text node — the way a person drags across it.
+  await paragraph.evaluate((element, phrase) => {
+    const text = element.firstChild as Text;
+    const start = text.data.indexOf(phrase);
+    const range = document.createRange();
+    range.setStart(text, start);
+    range.setEnd(text, start + phrase.length);
+    const selection = window.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }, 'a few words');
+
+  const action = page.getByTestId('comment-selection-action').getByRole('button', { name: 'Comment' });
+  await expect(action).toBeVisible();
+  // Beside the selection: inside the article's box, at the selected line.
+  const actionBox = (await action.boundingBox())!;
+  const paragraphBox = (await paragraph.boundingBox())!;
+  expect(actionBox.y + actionBox.height).toBeLessThanOrEqual(paragraphBox.y + paragraphBox.height + 48);
+  expect(actionBox.y).toBeGreaterThanOrEqual(paragraphBox.y - 48);
+  await shot(page, 'selection-1280-light');
+
+  await action.click();
+  const panel = dialog(page);
+  await expect(panel).toBeVisible();
+  const composer = panel.getByTestId('comment-composer');
+  await expect(composer).toContainText('On the selected text:');
+  await expect(composer.getByTestId('comment-composer-excerpt')).toHaveText('“a few words”');
+  await panel.getByLabel('Comment', { exact: true }).fill('These words specifically.');
+  await panel.getByRole('button', { name: 'Post' }).click();
+  await expect(panel.getByRole('status').filter({ hasText: 'Comment posted.' })).toBeVisible({ timeout: 30000 });
+
+  // The server located the words in the block's source: the excerpt the
+  // thread keeps is the selection, not the whole paragraph.
+  const thread = panel.locator('[data-comment-placement="anchored"]', { hasText: 'These words specifically.' });
+  await expect(thread.locator('blockquote')).toHaveText('“a few words”');
+
+  await page.reload();
+  await expect(page.getByRole('heading', { level: 1, name: fixtures.freshPageTitle })).toBeVisible({ timeout: 30000 });
+  await page.locator('article > p', { hasText: fixtures.freshSecondParagraph }).hover();
+  await page.getByRole('button', { name: '1 comment on this block' }).last().click();
+  await expect(dialog(page).locator('blockquote', { hasText: 'a few words' })).toHaveCount(1);
+});
+
+test('the gutter is one tab stop: the arrow keys move between the marks and the "+" slots, and Enter opens the composer', async ({ page, context }) => {
+  await signInAs(context, fixtures.commenterSessionToken);
+
+  await page.goto(`/pages/${fixtures.commentsPageId}`);
+  await expect(page.getByRole('heading', { level: 1, name: fixtures.commentsPageTitle })).toBeVisible({ timeout: 30000 });
+  const gutter = page.getByRole('list', { name: 'Comments beside the text' });
+  await expect(gutter).toBeVisible();
+  const controls = gutter.getByRole('button');
+  // Heading, three paragraphs: four slots, one of them the existing mark.
+  await expect(controls).toHaveCount(4);
+
+  // Tab lands on the gutter once; the rest of its controls are reached by
+  // the arrow keys, never by another Tab.
+  await controls.first().focus();
+  await expect(controls.first()).toBeFocused();
+  await page.keyboard.press('ArrowDown');
+  await expect(controls.nth(1)).toBeFocused();
+  await page.keyboard.press('End');
+  await expect(controls.nth(3)).toBeFocused();
+  await expect(controls.nth(3)).toHaveAccessibleName('Comment on this block');
+  // A focused "+" is revealed, and Enter opens the composer on its block.
+  await expect(controls.nth(3)).toHaveCSS('opacity', '1');
+  await page.keyboard.press('Enter');
+  await expect(dialog(page).getByTestId('comment-composer')).toContainText('The third paragraph');
+  await page.keyboard.press('Escape');
+  await expect(dialog(page)).toBeHidden();
+});
+
+test('at 320px the affordance fits the column and nothing scrolls sideways; in dark the composer reads', async ({ browser }) => {
+  const narrow = await browser.newContext({ viewport: { width: 320, height: 900 } });
+  const page = await narrow.newPage();
+  await signInAs(narrow, fixtures.commenterSessionToken);
+  await page.goto(`/pages/${fixtures.commentsPageId}`);
+  await expect(page.getByRole('heading', { level: 1, name: fixtures.commentsPageTitle })).toBeVisible({ timeout: 30000 });
+  await expectNoHorizontalOverflow(page);
+  await page.getByText('The first paragraph, which nobody has commented on.').hover();
+  await shot(page, 'read-hover-320-light');
+  await page.getByRole('button', { name: 'Comment on this block' }).first().click();
+  await expect(dialog(page).getByTestId('comment-composer')).toBeVisible();
+  await expectNoHorizontalOverflow(page);
+  await shot(page, 'composer-320-light');
+  await narrow.close();
+
+  const dark = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  const darkPage = await dark.newPage();
+  await useTheme(darkPage, 'dark');
+  await signInAs(dark, fixtures.commenterSessionToken);
+  await darkPage.goto(`/pages/${fixtures.commentsPageId}`);
+  await expect(darkPage.getByRole('heading', { level: 1, name: fixtures.commentsPageTitle })).toBeVisible({ timeout: 30000 });
+  await darkPage.getByText('The first paragraph, which nobody has commented on.').hover();
+  await shot(darkPage, 'read-hover-1280-dark');
+  await darkPage.getByRole('button', { name: 'Comment on this block' }).first().click();
+  await expect(dialog(darkPage).getByTestId('comment-composer')).toBeVisible();
+  await shot(darkPage, 'composer-1280-dark');
+  await dark.close();
 });
 
 /**
@@ -200,8 +407,9 @@ test('a thread whose paragraph another user deleted is shown as orphaned, with i
   const chip = readerPage.getByTestId('comments-orphaned');
   await expect(chip).toBeVisible({ timeout: 30000 });
   await expect(chip).toContainText('1 comment points at text that is no longer on this page.');
-  // No mark: there is no block for it to stand beside.
-  await expect(readerPage.getByRole('button', { name: /on this block$/ })).toHaveCount(0);
+  // No mark: there is no block for it to stand beside. (A "+" beside the
+  // paragraph that stays is the commenter's, and is not a mark.)
+  await expect(readerPage.getByRole('button', { name: /^\d+ comments? on this block$/ })).toHaveCount(0);
 
   await chip.getByRole('button', { name: 'Show' }).click();
   const panel = dialog(readerPage);
@@ -223,7 +431,9 @@ test('a page whose cached render predates block anchors says its comment cannot 
   await page.goto(`/pages/${fixtures.legacyPageId}`);
   await expect(page.getByRole('heading', { level: 1, name: fixtures.legacyPageTitle })).toBeVisible({ timeout: 30000 });
   await expect(page.getByText(fixtures.legacyQuote)).toBeVisible();
-  // The pre-backfill render carries no anchor for the gutter to use.
+  // The pre-backfill render carries no anchor for the gutter to use — and
+  // no derived id either, so nothing to start a thread on until the
+  // backfill reaches this page.
   await expect(page.locator('[data-block-id]')).toHaveCount(0);
   await expect(page.getByRole('button', { name: /on this block$/ })).toHaveCount(0);
 
