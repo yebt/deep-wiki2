@@ -21,6 +21,7 @@ import { Node } from 'prosemirror-model';
 import { EditorState } from 'prosemirror-state';
 import { EditorView } from 'prosemirror-view';
 import { schema } from '../schema';
+import { createEditorCommands, describeUpdate, type EditorCommands, type EditorUpdate } from './editor-commands';
 import { insertMention, type MentionPluginOptions } from './mention-plugin';
 import { buildEditorPlugins } from './plugins';
 import type { SlashPluginOptions } from './slash-plugin';
@@ -30,7 +31,8 @@ export interface CreateEditorViewOptions {
   /** The starting document, already produced by `fromMarkdown()` (root `"."` export) — this module never parses Markdown itself. */
   readonly doc: Node;
   readonly editable?: boolean;
-  readonly onUpdate?: (view: EditorView, transactionCount: number) => void;
+  /** Fired after every transaction with the summary a toolbar renders from (`editor-commands.ts`: undo/redo depths). */
+  readonly onUpdate?: (view: EditorView, update: EditorUpdate) => void;
   readonly mention?: Omit<MentionPluginOptions, 'onConfirm'> & {
     /** Fired once a candidate is confirmed and inserted — apps/web uses this to run the "Mentioning A User Does Not Silently Grant Them Access" check, which needs a network round trip this package never makes itself. */
     readonly onConfirmed?: (candidate: Parameters<MentionPluginOptions['onConfirm']>[0]) => void;
@@ -82,8 +84,30 @@ export function createEditorView(options: CreateEditorViewOptions): EditorView {
       const next = view.state.apply(tr);
       view.updateState(next);
       transactionCount += 1;
-      options.onUpdate?.(view, transactionCount);
+      options.onUpdate?.(view, describeUpdate(next, transactionCount));
     },
   });
   return view;
+}
+
+/**
+ * What the host holds after mounting: the live view plus the command
+ * surface (`editor-commands.ts`) bound to it. `view` stays exposed for
+ * what the commands do not cover — `focus()`, `coordsAtPos()` for menu
+ * placement, `state` for the plugins' own keys — and `destroy()` tears
+ * the view down.
+ */
+export interface EditorHandle extends EditorCommands {
+  readonly view: EditorView;
+  destroy(): void;
+}
+
+/**
+ * `createEditorView` plus the command surface, in one object. This is the
+ * entry point the Vue surface should hold; `createEditorView` remains
+ * exported for the current caller and for hosts that only need the view.
+ */
+export function mountEditor(options: CreateEditorViewOptions): EditorHandle {
+  const view = createEditorView(options);
+  return { view, ...createEditorCommands(view), destroy: () => view.destroy() };
 }

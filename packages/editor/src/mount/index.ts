@@ -9,8 +9,11 @@
  * NEVER re-export anything from this module — see its own doc comment
  * and `index.test.ts`.
  */
-export { createEditorView } from './create-editor-view';
-export type { CreateEditorViewOptions } from './create-editor-view';
+export { createEditorView, mountEditor } from './create-editor-view';
+export type { CreateEditorViewOptions, EditorHandle } from './create-editor-view';
+
+export { createEditorCommands, describeUpdate } from './editor-commands';
+export type { CommandTarget, EditorCommands, EditorUpdate } from './editor-commands';
 
 export { createMentionPlugin, insertMention, mentionPluginKey, moveSelection, reduceMentionState, INACTIVE_MENTION_STATE } from './mention-plugin';
 export type { MentionAction, MentionCandidate, MentionPluginOptions, MentionState } from './mention-plugin';
