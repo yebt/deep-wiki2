@@ -24,10 +24,18 @@ export interface UseLockHeartbeatResult {
 
 /**
  * `PATCH /pages/:id/lock` (document-modes spec: "Heartbeat Keeps The
- * Lock Alive"). `start()` sends one heartbeat immediately (so the UI
- * knows the lock's fate without waiting a full interval) and then repeats
- * every `intervalMs`; `stop()` — called on unmount and on "lost" — clears
- * the timer so a displaced editor's tab does not keep silently polling.
+ * Lock Alive"). `start()` schedules a heartbeat every `intervalMs`, the
+ * first one a full interval away; `stop()` — called on unmount and on
+ * "lost" — clears the timer so a displaced editor's tab does not keep
+ * silently polling.
+ *
+ * No beat at `start()` itself. It used to send one "so the UI knows the
+ * lock's fate without waiting a full interval", but `start()` is called
+ * the instant `GET /pages/:id/edit-session` has *acquired* the lock — a
+ * response that already carries the lock's `heartbeatAt` — so that beat
+ * renewed a lock that was 100 ms old and put one more round trip on the
+ * critical path of every open (measured 2026-09-16, docs/TODO.md
+ * Findings "edit-mode latency"). The session is the first beat.
  */
 export function useLockHeartbeat(nodeId: string, fetcher?: LockHeartbeatFetcher, options: UseLockHeartbeatOptions = {}): UseLockHeartbeatResult {
   const config = useRuntimeConfig();
@@ -49,7 +57,6 @@ export function useLockHeartbeat(nodeId: string, fetcher?: LockHeartbeatFetcher,
   }
 
   async function start(): Promise<void> {
-    await beat();
     timer = setInterval(() => void beat(), options.intervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS);
   }
 

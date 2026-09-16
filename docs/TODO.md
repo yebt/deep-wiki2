@@ -617,7 +617,19 @@ have done this in dev, because `nuxt-link.js` skips `preloadRouteComponents` und
 the instant the editor opened, renewing a lock the session response had acquired 100 ms
 earlier; and `EditorSurface`'s box was in the DOM 120–730 ms before ProseMirror attached to
 it, an empty well where the page's skeleton had just been.
-*Fix H*: see the entry's continuation below once that commit lands.
+*Fix H*: `useLockHeartbeat.start()` schedules the first beat one interval away instead of
+sending one at once — the session response is the first beat; `e2e/editor.spec.ts`'s
+lock-lost test advances Playwright's clock one interval rather than expecting the notice the
+instant the editor opens. And `EditorSurface` keeps the skeleton's `doc-body` lines up and
+hides (never removes) its own box until `createEditorView` has attached, so the empty well
+never shows. Measured: no `PATCH …/lock` in the first seconds of an open (before: one, in
+the same instant as the session response), and the surface is `display: none` from the
+moment it enters the DOM until ProseMirror is in it. Proof: `e2e/perf.spec.ts` counts lock
+PATCHes for 1.5 s after the editor is live and expects none; `EditorSurface.test.ts` holds the
+mount import back and sees the skeleton and the hidden box, then the swap;
+`useLockHeartbeat.test.ts` runs on fake timers. The `min-h-64` well still opens the moment
+the surface appears — a layout step below the text, not under it — and is the same step the
+page skeleton (three lines) already made before this batch; not changed here.
 
 **What this batch did not do**, recorded so it is not mistaken for done: the report's fix B
 (a cached, SSR-capable read layer — every screen still `$fetch`es in `onMounted` and shows its

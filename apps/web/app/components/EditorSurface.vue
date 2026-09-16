@@ -43,6 +43,15 @@ const emit = defineEmits<{
 }>();
 
 const rootEl = ref<HTMLElement | null>(null);
+/**
+ * True once `createEditorView` has attached ProseMirror to `rootEl`.
+ * Measured on 2026-09-16: this component's box was in the DOM 120–730 ms
+ * before the view existed — an empty well where the page's skeleton had
+ * just been. Until then the template keeps the skeleton's text lines up
+ * and hides (never removes) the surface: the element has to exist for
+ * ProseMirror to mount into it.
+ */
+const attached = ref(false);
 const mentionState = ref<MentionState | null>(null);
 const slashState = ref<SlashState | null>(null);
 const mentionCaretRect = ref<{ top: number; left: number } | null>(null);
@@ -181,6 +190,7 @@ async function mount(): Promise<void> {
       debounceTimer = setTimeout(() => emit('update', mod.toMarkdown(view.state.doc)), 300);
     },
   });
+  attached.value = true;
 }
 
 onMounted(() => {
@@ -226,8 +236,22 @@ defineExpose({
          combobox-style chain from the textbox to the listbox it drives,
          so the options an arrow key lands on are announced as belonging
          to *this* editor (checklist §5; the audit of 2026-09-14 found an
-         unnamed contenteditable with no relationship to its menus). -->
+         unnamed contenteditable with no relationship to its menus).
+         `v-show`, not `v-if`: ProseMirror mounts into this element, so it
+         must exist before the view does; it is only hidden until then,
+         behind the skeleton below (`attached`). -->
+    <!-- The page's skeleton, continued: the same `doc-body` text lines
+         `pages/[id]/edit.vue` shows while the session is requested, kept
+         up for the last stretch — chunk evaluation, the first parse, the
+         view — so the box never stands empty between the two
+         (docs/UI-CHECKLIST.md §3, "no layout shift on load"). -->
+    <div v-if="!attached" data-testid="editor-skeleton" aria-hidden="true" class="doc-body text-doc-body">
+      <p><USkeleton as="span" class="inline-block h-4 w-full align-middle" /></p>
+      <p><USkeleton as="span" class="inline-block h-4 w-full align-middle" /></p>
+      <p><USkeleton as="span" class="inline-block h-4 w-5/6 align-middle" /></p>
+    </div>
     <div
+      v-show="attached"
       ref="rootEl"
       class="doc-body text-doc-body text-default prosemirror-editor -m-4 min-h-64 rounded-lg p-4"
       data-testid="editor-surface"

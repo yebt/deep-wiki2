@@ -1015,4 +1015,50 @@ substitute for the owner's review against this checklist and `docs/DESIGN-SYSTEM
 
 ---
 
+### 2026-09-16 — Edit-mode latency batch: route-change indicator, prefetch on intent, the skeleton held until the editor exists — awaiting the owner's eye
+
+**Reviewer:** none yet — this entry is what was shipped for review, not a review.
+**Verdict:** Pending
+
+Built from the owner's eighth finding of 2026-09-16 ("entering edit mode is slow to load …
+an nprogress-style top progress bar … the UI must feel fast") after the cause was measured
+(`docs/TODO.md` Findings, 2026-09-16, "edit-mode latency: measured causes and fixes"). Two of
+the four fixes are invisible by design — `reka-ui` prebundled in dev, the editor chunk loaded
+beside the session request — and two touch what a person sees:
+
+- **Route-change feedback.** `NuxtLoadingIndicator` in `app.vue`, once for every route:
+  `primary` role at 3px, `error` for a failed hop, off for any hop under 200 ms, and under
+  `prefers-reduced-motion` drawn full at once rather than creeping (`docs/DESIGN-SYSTEM.md`
+  §14, 2026-09-16). Measured in `e2e/perf.spec.ts` with the edit route's chunk held back:
+  opacity 1 during the hop, background equal to the computed `--ui-primary`, height 3px,
+  opacity 0 once the screen lands; and with `reducedMotion: 'reduce'` emulated, the bar's
+  transform is the identity matrix from its first visible frame.
+- **Prefetch on intent.** Hover or focus on the read screen's "Edit" preloads the edit route's
+  components and starts the editor chunk, so the click finds them warm. §4.5's "read mode
+  does not boot the editor" still holds — nothing parses or mounts on the read screen; the
+  chunk is fetched on the one control whose only purpose is to leave for edit mode, and
+  `e2e/read.spec.ts`'s no-editor-request assertion (which never hovers) stays green. The
+  tree rows are unchanged: `feat/tree-context-menu-filter` owns `NavigationTree.vue`, and
+  their `NuxtLink` conversion waits for it.
+- **The skeleton stays until the editor exists.** `EditorSurface` keeps the `doc-body` text
+  lines up and hides (never removes — ProseMirror needs the element to mount into) its own
+  box until `createEditorView` has attached; measured before, the empty 256px well stood
+  120–730 ms where the skeleton had been. §3's "no layout shift on load" measurement in
+  `e2e/editor.spec.ts` is unchanged and green: the loaded first paragraph lands where the
+  skeleton's first line stood.
+- **No heartbeat at open.** `useLockHeartbeat.start()` no longer sends a `PATCH …/lock` in
+  the instant the session response has just acquired the lock; the first beat is one
+  interval later. Not visible, but it changes when the lock-lost notice can first appear —
+  `e2e/editor.spec.ts`'s 320px lock-lost test now advances the clock one interval.
+
+Screenshots `fb-perf1-{loading,edit,edit-skeleton}-{1280-light,1280-dark,320-light}.png` in
+the session scratchpad; `expectNoHorizontalOverflow` measured on the edit screen at 320.
+
+Known before review, not fixed: the report's fixes B (a cached, SSR-capable read layer), E
+(optimistic tree writes), F (icons bundled offline) and G (bundle hygiene) are not in this
+batch; the presence `EventSource` is still reopened on every hop; the two-icon-pack
+requirement (§4.3) remains untested.
+
+---
+
 *The next entry goes below this one.*

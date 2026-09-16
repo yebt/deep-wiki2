@@ -236,6 +236,50 @@ describe('EditorSurface', () => {
     });
   });
 
+  /**
+   * Fix H: measured on 2026-09-16, the surface's own box was in the DOM
+   * 120–730 ms before ProseMirror attached to it — an empty 256px well
+   * where the page's skeleton had just been. The skeleton's text lines
+   * stay until the view exists; the surface is hidden, not absent, so the
+   * element ProseMirror mounts into is there to mount into.
+   */
+  describe('until ProseMirror attaches', () => {
+    test('shows the doc-body skeleton and hides the surface, then swaps them once the view exists', async () => {
+      let open!: () => void;
+      harness.gate = new Promise<void>((resolve) => {
+        open = resolve;
+      });
+      harness.mounted = false;
+      const component = await mountSuspended(SurfaceInApp);
+
+      expect(harness.mounted).toBe(false);
+      expect(component.find('[data-testid="editor-skeleton"]').exists()).toBe(true);
+      expect(component.get('[data-testid="editor-skeleton"]').attributes('aria-hidden')).toBe('true');
+      // `v-show`: the element is there for ProseMirror to mount into, and
+      // hidden. (VTU's `isVisible()` reads the layout tree happy-dom does
+      // not have; the inline style is what `v-show` actually writes.)
+      const surface = component.get('[data-testid="editor-surface"]');
+      expect((surface.element as HTMLElement).style.display).toBe('none');
+
+      open();
+      await vi.waitFor(() => expect(harness.mounted).toBe(true), { timeout: 30_000 });
+      await component.vm.$nextTick();
+
+      expect(component.find('[data-testid="editor-skeleton"]').exists()).toBe(false);
+      expect((surface.element as HTMLElement).style.display).not.toBe('none');
+    });
+  });
+
+  /**
+   * Measured by the 2026-09-14 audit: clicking the second candidate left
+   * the text unchanged, the menu open and the editor unfocused. The
+   * plugins handle Enter themselves and document the click as the host's
+   * to wire (`mention-plugin.ts`: "confirmed (Enter or click)"); nothing
+   * was wired. docs/UI-CHECKLIST.md §6, "no inert interactions".
+   *
+   * The click is dispatched on the option row itself — the element that
+   * looks clickable — never on the listbox around it.
+   */
   describe('a click confirms an option', () => {
     test('clicking the second mention candidate inserts that candidate, closes the menu and keeps the editor focused', async () => {
       const component = await mountSurface();

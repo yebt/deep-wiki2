@@ -265,3 +265,25 @@ test('under prefers-reduced-motion the indicator is drawn full at once and still
   await expect(indicator).toHaveCSS('opacity', '0', { timeout: 10_000 });
 });
 
+/**
+ * Fix H — no redundant heartbeat at open. `GET /pages/:id/edit-session`
+ * acquires the lock and returns its `heartbeatAt`; a `PATCH …/lock` in
+ * the same instant renewed a lock that was 100 ms old. The first
+ * heartbeat is one interval later.
+ */
+test('opening the editor sends no lock heartbeat: the session that acquired the lock is the first beat', async ({ page }) => {
+  test.setTimeout(300_000);
+  await signInAs(page, fixtures.writerSessionToken);
+  const heartbeats: string[] = [];
+  page.on('request', (request) => {
+    if (request.method() === 'PATCH' && /\/pages\/[^/]+\/lock$/.test(request.url())) heartbeats.push(request.url());
+  });
+
+  await page.goto(`/pages/${fixtures.editablePageId}/edit`);
+  await expectEditorLive(page);
+  // Long enough for a heartbeat fired "immediately" to have been seen;
+  // far shorter than the 20 s interval.
+  await page.waitForTimeout(1_500);
+
+  expect(heartbeats, 'no PATCH …/lock in the first seconds of the session').toEqual([]);
+});
