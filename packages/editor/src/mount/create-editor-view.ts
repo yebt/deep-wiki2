@@ -24,6 +24,7 @@ import { schema } from '../schema';
 import { createEditorCommands, describeUpdate, type EditorCommands, type EditorUpdate } from './editor-commands';
 import { insertMention, type MentionPluginOptions } from './mention-plugin';
 import { buildEditorPlugins } from './plugins';
+import type { SelectionPluginOptions } from './selection-plugin';
 import type { SlashPluginOptions } from './slash-plugin';
 
 export interface CreateEditorViewOptions {
@@ -38,6 +39,8 @@ export interface CreateEditorViewOptions {
     readonly onConfirmed?: (candidate: Parameters<MentionPluginOptions['onConfirm']>[0]) => void;
   };
   readonly slash?: SlashPluginOptions;
+  /** The bubble toolbar's feed: the selection snapshot plus `coordsAtPos` of both ends, whenever either changes (`selection-plugin.ts`). */
+  readonly selection?: SelectionPluginOptions;
 }
 
 /**
@@ -65,6 +68,7 @@ export function createEditorView(options: CreateEditorViewOptions): EditorView {
         },
       },
       slash: options.slash,
+      selection: options.selection,
     }),
   });
 

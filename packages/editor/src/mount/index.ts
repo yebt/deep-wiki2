@@ -12,8 +12,11 @@
 export { createEditorView, mountEditor } from './create-editor-view';
 export type { CreateEditorViewOptions, EditorHandle } from './create-editor-view';
 
-export { createEditorCommands, describeUpdate } from './editor-commands';
-export type { CommandTarget, EditorCommands, EditorUpdate } from './editor-commands';
+export { createEditorCommands, describeUpdate, toggleMarkCommand } from './editor-commands';
+export type { CommandTarget, EditorCommands, EditorUpdate, ToggleableMarkName } from './editor-commands';
+
+export { createSelectionPlugin, selectionPluginKey, selectionSnapshot, TOOLBAR_MARKS } from './selection-plugin';
+export type { LinkAttrs, Rect, SelectionCoords, SelectionPluginOptions, SelectionReport, SelectionSnapshot, ToolbarMarkName } from './selection-plugin';
 
 export { createMentionPlugin, insertMention, mentionPluginKey, moveSelection, reduceMentionState, INACTIVE_MENTION_STATE } from './mention-plugin';
 export type { MentionAction, MentionCandidate, MentionPluginOptions, MentionState } from './mention-plugin';

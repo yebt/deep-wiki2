@@ -9,12 +9,13 @@
  * directly is a *guess* that `Mod-b` is bound to that command; a test that
  * calls `EDITOR_KEY_BINDINGS['Mod-b']` cannot be wrong about it.
  */
-import { baseKeymap, chainCommands, exitCode, toggleMark } from 'prosemirror-commands';
+import { baseKeymap, chainCommands, exitCode } from 'prosemirror-commands';
 import { history, redo, undo } from 'prosemirror-history';
 import { keymap } from 'prosemirror-keymap';
 import type { Command, Plugin } from 'prosemirror-state';
 import { liftListItem, sinkListItem, splitListItem } from 'prosemirror-schema-list';
 import { schema } from '../schema';
+import { toggleMarkCommand } from './editor-commands';
 
 /**
  * Every binding the editing surface installs, keyed exactly as
@@ -25,8 +26,10 @@ import { schema } from '../schema';
  */
 export const EDITOR_KEY_BINDINGS: Readonly<Record<string, Command>> = {
   ...baseKeymap,
-  'Mod-b': toggleMark(schema.marks.strong!),
-  'Mod-i': toggleMark(schema.marks.emphasis!),
+  // The same factory the toolbar buttons use (editor-commands.ts), so a
+  // keystroke and a click never disagree on a half-marked range.
+  'Mod-b': toggleMarkCommand('strong'),
+  'Mod-i': toggleMarkCommand('emphasis'),
   'Mod-z': undo,
   'Shift-Mod-z': redo,
   'Mod-y': redo,

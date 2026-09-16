@@ -14,9 +14,11 @@
  *   5. drop cursor — its `view()` half registers `dragover`/`drop`/
  *      `dragend`/`dragleave` on the surface and draws the insertion
  *      marker; a plain `Plugin` with no state, so its position is free;
- *   6. mention, 7. slash — the two menus, last so an open menu's
- *      Enter/Arrow handling has already been offered every earlier chance
- *      to be refused.
+ *   6. mention, 7. slash — the two menus, after everything that could
+ *      claim a key, so an open menu's Enter/Arrow handling has already
+ *      been offered every earlier chance to be refused;
+ *   8. selection — reports only, claims no key; last so it observes the
+ *      state every other plugin has finished with.
  *
  * Why the gap cursor is here at all: this schema has three block types
  * that hold no text — `thematicBreak`, `table` (cells do, the block does
@@ -40,6 +42,7 @@ import { schema } from '../schema';
 import { buildInputRules } from './input-rules';
 import { buildHistory, buildKeymap } from './keymap';
 import { createMentionPlugin, insertMention, type MentionPluginOptions } from './mention-plugin';
+import { createSelectionPlugin, type SelectionPluginOptions } from './selection-plugin';
 import { createSlashPlugin, type SlashPluginOptions } from './slash-plugin';
 
 /**
@@ -52,6 +55,7 @@ export const DROP_CURSOR_CLASS = 'editor-drop-cursor';
 export interface BuildEditorPluginsOptions {
   readonly mention?: MentionPluginOptions;
   readonly slash?: SlashPluginOptions;
+  readonly selection?: SelectionPluginOptions;
 }
 
 export function buildEditorPlugins(options: BuildEditorPluginsOptions = {}): Plugin[] {
@@ -64,5 +68,6 @@ export function buildEditorPlugins(options: BuildEditorPluginsOptions = {}): Plu
     // Without a host-supplied `onConfirm`, a confirmed mention is simply inserted.
     createMentionPlugin(options.mention ?? { onConfirm: insertMention }),
     createSlashPlugin(options.slash),
+    createSelectionPlugin(options.selection),
   ];
 }
