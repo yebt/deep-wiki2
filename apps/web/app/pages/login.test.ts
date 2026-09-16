@@ -39,12 +39,12 @@ function atAddress(query: Record<string, unknown>) {
   useRouteMock.mockReturnValue({ query, fullPath: '/login' });
 }
 
-/** Fill both fields and submit; the page navigates 800ms after the composable reports success. */
+/** Fill both fields and submit; the page navigates 800ms after the composable reports success, so wait for the call rather than a fixed time. */
 async function signInThrough(component: Awaited<ReturnType<typeof mountSuspended>>): Promise<void> {
   await component.get('input[type="email"]').setValue('a@example.com');
   await component.get('input[type="password"]').setValue('correct horse');
   await component.get('form').trigger('submit');
-  await new Promise((resolve) => setTimeout(resolve, 1000));
+  await vi.waitFor(() => expect(navigateToMock).toHaveBeenCalled(), { timeout: 10_000, interval: 50 });
 }
 
 describe('login page', () => {

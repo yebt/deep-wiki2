@@ -77,10 +77,26 @@ function apiOrigin(): string {
   return API_URL;
 }
 
+/**
+ * A fake session for the mocked-route tests. The real `apps/api` behind
+ * the mocks answers this token with 401 on every route a test did not
+ * intercept — the frame's own `GET /workspaces` and the tree — and since
+ * 2026-09-16 a 401 anywhere is the signed-out rule: the screen leaves for
+ * sign-in (`useSignInRedirect`). So the frame's requests are answered
+ * here as a signed-in caller who can read nothing: an empty directory and
+ * a refused tree. A test that wants the frame for real signs in with a
+ * seeded token (`signInAs`).
+ */
 async function signIn(page: Page): Promise<void> {
   await page.context().addCookies([
     { name: 'session', value: 'e2e-editor-spec-token', domain: 'localhost', path: '/', httpOnly: true, secure: true, sameSite: 'Lax' },
   ]);
+  await page.route(`${apiOrigin()}/workspaces`, (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ workspaces: [] }) }),
+  );
+  await page.route(`${apiOrigin()}/workspaces/*/tree`, (route) =>
+    route.fulfill({ status: 403, contentType: 'application/json', body: JSON.stringify({ error: 'forbidden' }) }),
+  );
 }
 
 async function signInAs(page: Page, token: string): Promise<void> {
@@ -133,17 +149,24 @@ test('leaving a dirty editor by clicking a tree row asks in the product\'s dialo
   await page.goto(`/pages/${editorFixtures.editablePageId}/edit`);
   const editor = page.getByTestId('editor-surface');
   await expect(editor).toContainText(editorFixtures.editablePageMarkdown.trim(), { timeout: 30000 });
+  // The writer can read one page — this one — so its own row is the tree
+  // row to click: from `/edit` it opens the page for reading, a route
+  // change the guard sees like any other.
   const sidebar = page.getByRole('navigation', { name: 'Workspace' });
-  const otherRow = sidebar.getByRole('treeitem', { name: /E2E Read Page/ });
+  const otherRow = sidebar.getByRole('treeitem', { name: new RegExp(editorFixtures.editablePageTitle) });
   await expect(otherRow).toBeVisible({ timeout: 30000 });
 
   await editor.click();
   await page.keyboard.press('End');
   await page.keyboard.type(' Not saved yet.');
   await expect(editor).toContainText('Not saved yet.');
+  // The editor reports its document 300ms after the last keystroke
+  // (`EditorSurface`); Save enabling is the screen's own word that the
+  // buffer is dirty, and the guard reads the same flag.
+  await expect(page.locator('#content-bar').getByRole('button', { name: /^Save/ })).not.toHaveAttribute('aria-disabled');
 
   // Escape is one exit (§5); Cancel is the other. Both keep the editor.
-  await otherRow.getByText('E2E Read Page').click();
+  await otherRow.getByText(editorFixtures.editablePageTitle).click();
   const dialog = page.getByRole('dialog', { name: 'Leave without saving?' });
   await expect(dialog).toBeVisible();
   await expect(dialog).toContainText(/unsaved changes in this tab will be lost/i);
@@ -152,7 +175,7 @@ test('leaving a dirty editor by clicking a tree row asks in the product\'s dialo
   await expect(page).toHaveURL(new RegExp(`/pages/${editorFixtures.editablePageId}/edit$`));
   await expect(editor).toContainText('Not saved yet.');
 
-  await otherRow.getByText('E2E Read Page').click();
+  await otherRow.getByText(editorFixtures.editablePageTitle).click();
   await expect(dialog).toBeVisible();
   await shotShell(page, 'edit-confirm-1280-light');
   await dialog.getByRole('button', { name: 'Keep editing' }).click();
@@ -162,11 +185,11 @@ test('leaving a dirty editor by clicking a tree row asks in the product\'s dialo
   // Focus came back to the control that asked (§5).
   await expect(otherRow).toBeFocused();
 
-  await otherRow.getByText('E2E Read Page').click();
+  await otherRow.getByText(editorFixtures.editablePageTitle).click();
   await expect(dialog).toBeVisible();
   await dialog.getByRole('button', { name: 'Leave' }).click();
-  await expect(page).toHaveURL(/\/pages\/[0-9a-f-]+$/, { timeout: 30000 });
-  await expect(page.getByRole('heading', { level: 1, name: 'E2E Read Page' })).toBeVisible({ timeout: 30000 });
+  await expect(page).toHaveURL(new RegExp(`/pages/${editorFixtures.editablePageId}$`), { timeout: 30000 });
+  await expect(page.locator('article')).toContainText(editorFixtures.editablePageMarkdown.trim(), { timeout: 30000 });
 });
 
 test('typing markdown syntax renders the formatted result inline, with no separate preview pane', async ({ page }) => {
@@ -445,6 +468,8 @@ for (const theme of ['light', 'dark'] as const) {
       await expect(crumbs).not.toContainText('E2E Workspace');
       const overflowControl = crumbs.getByRole('button', { name: 'Show the full path' });
       await expect(overflowControl).toBeVisible();
+      // The review shot, before the interactions below leave a control focused.
+      await shotShell(page, `edit-1280-${theme}`);
       await overflowControl.click();
       await expect(page.getByRole('menu')).toBeVisible();
       await expect(page.getByRole('menu')).toContainText('E2E Workspace');
@@ -458,11 +483,18 @@ for (const theme of ['light', 'dark'] as const) {
       expect(saveClass).toMatch(/(^|\s)bg-primary(\s|$)/);
       // No fill at rest — a `hover:bg-*` state layer is not a fill.
       expect(readClass).not.toMatch(/(^|\s)bg-/);
-      // Focus mode's keys are stated on its control.
-      await bar.getByRole('button', { name: 'Hide sidebar' }).hover();
-      await expect(page.getByRole('tooltip')).toContainText(/Hide sidebar/);
-      await expect(page.getByRole('tooltip')).toContainText('\\');
-      await page.mouse.move(0, 0);
+      // Focus mode's keys are stated on its control: the tooltip opens on
+      // focus as on hover, and carries the name and the keys. Asserted
+      // through `aria-describedby`, as `e2e/history.spec.ts` does — Reka's
+      // `role="tooltip"` copy sits inside an `aria-hidden` wrapper.
+      const toggle = bar.getByRole('button', { name: 'Hide sidebar' });
+      await toggle.focus();
+      await expect(toggle).toHaveAttribute('data-state', /open/);
+      const describedBy = await toggle.getAttribute('aria-describedby');
+      expect(describedBy, 'focus must open the tooltip').not.toBeNull();
+      await expect(page.locator(`#${describedBy}`)).toContainText('Hide sidebar');
+      await expect(page.locator(`#${describedBy}`)).toContainText('\\');
+      await page.keyboard.press('Escape');
 
       // The sidebar's toolbar row fills the pane: New… grows, Rename…
       // keeps its natural width, and nothing is left empty to the right.
@@ -494,7 +526,6 @@ for (const theme of ['light', 'dark'] as const) {
       expect(box.scrollHeight).toBe(box.innerHeight);
 
       await shot3(page, `1280-${theme}`);
-      await shotShell(page, `edit-1280-${theme}`);
     });
   });
 }
@@ -655,19 +686,30 @@ test.describe('inside the workspace frame, 320x900 light', () => {
 
     await shot3(page, '320-light');
     await shotShell(page, 'edit-320-light');
+  });
 
-    // The drawer's toolbar row fills its width too, and neither control
-    // drops below 32px or clips (docs/UI-CHECKLIST.md §5, §6).
+  // The drawer's toolbar row fills its width too, and neither control
+  // drops below 32px or clips (docs/UI-CHECKLIST.md §5, §6). A real
+  // session: the toolbar renders only over a tree the caller can read.
+  test('the drawer\'s toolbar row fills its width: New… grows, Rename… keeps its width, both 32px', async ({ page }) => {
+    test.setTimeout(90000);
+    await signInAs(page, editorFixtures.writerSessionToken);
+    await useTheme(page, 'light');
+
+    await page.goto(`/pages/${editorFixtures.editablePageId}/edit`);
+    await expect(page.getByTestId('editor-surface')).toContainText(editorFixtures.editablePageMarkdown.trim(), { timeout: 30000 });
+
     await page.getByRole('button', { name: 'Open sidebar' }).click();
     const drawer = page.getByRole('dialog');
     await expect(drawer.getByTestId('tree-create-open')).toBeVisible({ timeout: 30000 });
     const createBox = (await drawer.getByTestId('tree-create-open').boundingBox())!;
     const renameBox = (await drawer.getByTestId('tree-rename-open').boundingBox())!;
     const rowBox = (await drawer.getByTestId('tree-create-open').locator('..').boundingBox())!;
-    expect(createBox.width).toBeGreaterThan(renameBox.width);
-    expect(Math.abs(renameBox.x + renameBox.width - (rowBox.x + rowBox.width))).toBeLessThanOrEqual(1);
+    expect(createBox.width, 'New… grows past its natural width').toBeGreaterThan(renameBox.width);
+    expect(Math.abs(renameBox.x + renameBox.width - (rowBox.x + rowBox.width)), 'Rename… ends at the row\'s edge').toBeLessThanOrEqual(1);
     expect(Math.round(createBox.height)).toBe(32);
     expect(Math.round(renameBox.height)).toBe(32);
+    await expectNoHorizontalOverflow(page, 'drawer 320');
     await shotShell(page, 'sidebar-320-light');
   });
 });
@@ -695,6 +737,7 @@ for (const { theme, width } of [
       await editor.click();
       await page.keyboard.press('End');
       await page.keyboard.type(' Not saved yet.');
+      await expect(page.locator('#content-bar').getByRole('button', { name: /^Save/ })).not.toHaveAttribute('aria-disabled');
 
       await page.locator('#content-bar').getByRole('link', { name: 'Read page' }).click();
       const dialog = page.getByRole('dialog', { name: 'Leave without saving?' });

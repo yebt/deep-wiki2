@@ -42,8 +42,14 @@ async function useTheme(page: Page, theme: 'light' | 'dark'): Promise<void> {
   await page.addInitScript((value) => localStorage.setItem('nuxt-color-mode', value), theme);
 }
 
+const SHOTS = process.env.DEEPWIKI_FRAME_SHOTS ?? '';
+
 const AUTH_PAGES = [
   { name: 'sign-in', path: '/login' },
+  // Reached by the signed-out redirect (2026-09-16): the same screen with
+  // the "session ended" notice above the form — one more line of height
+  // the measurement below has to absorb at 320.
+  { name: 'sign-in after a session ended', path: '/login?next=%2Fworkspaces', shot: 'login' },
   { name: 'password reset request', path: '/forgot-password' },
   { name: 'password reset confirm', path: '/reset-password?token=layout-probe' },
   { name: 'invitation accept', path: '/invite/accept?token=layout-probe' },
@@ -61,11 +67,15 @@ for (const viewport of VIEWPORTS) {
     test.describe(`${viewport.width}x${viewport.height} ${theme}`, () => {
       test.use({ viewport });
 
-      for (const { name, path } of AUTH_PAGES) {
+      for (const { name, path, ...rest } of AUTH_PAGES) {
         test(`${name} fits the viewport exactly, with no app chrome around it`, async ({ page }) => {
           await useTheme(page, theme);
           await goto(page, path);
           await expect(page.locator('html')).toHaveClass(theme === 'dark' ? /dark/ : /light/);
+          if ('shot' in rest) {
+            await expect(page.getByRole('status')).toContainText(/session has ended/i);
+            if (SHOTS) await page.screenshot({ path: `${SHOTS}/fb-shell-${rest.shot}-${viewport.width}-${theme}.png`, fullPage: false });
+          }
 
           const box = await page.evaluate(() => ({
             scrollHeight: document.body.scrollHeight,
