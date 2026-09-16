@@ -50,6 +50,22 @@ export default defineNuxtConfig({
     serverBundle: {
       collections: ['lucide'],
     },
+    // The server bundle alone was not that guarantee (measured 2026-09-16,
+    // docs/TODO.md). Only Nuxt UI's own default icons were in the client
+    // bundle; every icon this app's templates name was fetched from
+    // `/api/_nuxt_icon/lucide.json?icons=…` the first time a screen showed
+    // it — one request per screen, a late pop-in with it — and when that
+    // request was slow, `@nuxt/icon` fell through to the public
+    // `https://api.iconify.design` (`fallbackToApi` defaults to `true`).
+    // `scan` reads every `.vue` file for `i-lucide-*` names and ships them
+    // in the client bundle beside Nuxt UI's defaults; the fallback is off,
+    // so an icon that somehow is not bundled fails loudly on this server
+    // rather than quietly on someone else's. e2e/icons.spec.ts holds this.
+    clientBundle: {
+      scan: true,
+      icons: [],
+    },
+    fallbackToApi: false,
   },
 
   vue: {

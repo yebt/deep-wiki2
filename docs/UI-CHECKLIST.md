@@ -105,6 +105,7 @@ Derived from this project's actual stack and domain.
 - [ ] The screen renders correctly with **at least two different icon packs selected**. Verify sizing and optical alignment, not just presence — packs differ in viewBox padding and stroke weight.
 - [ ] Missing-icon fallback is handled. Not every name exists in every pack; a missing icon must not collapse the layout or render a broken glyph box.
 - [ ] **Build gotcha:** dynamic icon names defeat `@nuxt/icon`'s build-time tree-shaking. Any dynamically-selected icon set must have its collections explicitly declared/bundled (`@iconify-json/*`), or self-hosted and air-gapped instances will render nothing. Verify with the network blocked.
+- [ ] **Bundle gotcha (2026-09-16):** a server bundle alone is not offline. `@nuxt/icon` puts only Nuxt UI's default icons in the client bundle; every icon *this app's templates* name was fetched at runtime from `/api/_nuxt_icon/<collection>.json?icons=…` the first time a screen showed it (one request per screen, a late pop-in with it), and when that request was slow it fell through to the public `api.iconify.design` (`fallbackToApi` defaults to `true`) — measured on the read → edit hop. `nuxt.config.ts` now scans templates into the client bundle (`clientBundle.scan`) and sets `fallbackToApi: false`; `e2e/icons.spec.ts` asserts no icon request across dashboard → page → edit → page. An icon named only in a `.ts` file, or built from a string at runtime, is not scanned — list it in `clientBundle.icons`.
 
 ### 4.4 Reading density — this is a tool people live in all day
 
