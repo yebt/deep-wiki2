@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
+import { waitForHydration } from './hydration';
 import { expectNoHorizontalOverflow } from './overflow';
 
 /**
@@ -110,10 +111,15 @@ test('the history screen is reachable from the read screen by its control, not o
 });
 
 test('the history control is operable with the keyboard alone, and names itself on focus', async ({ page, context }) => {
+  // Waits for hydration (below), which in dev mode under load is a
+  // module waterfall well past Playwright's default 30s.
+  test.setTimeout(240_000);
   await signInAs(context, fixtures.readerSessionToken);
 
   await page.goto(`/pages/${fixtures.historyPageId}`);
   await expect(page.getByRole('heading', { level: 1, name: 'E2E History Page' })).toBeVisible({ timeout: 30000 });
+  // The heading is server-rendered; the keyboard needs the hydrated app.
+  await waitForHydration(page);
 
   const history = page.getByRole('link', { name: 'Revision history' });
   await expect(history).toBeVisible();
@@ -297,6 +303,8 @@ test('an outsider with no read grant sees the same not-found state a nonexistent
  * measured, and the two boxes must agree.
  */
 test('the history skeleton occupies the box the loaded list takes: same first-row top, same row height', async ({ page, context }) => {
+  // Waits for hydration before the hop (below): dev mode under load.
+  test.setTimeout(240_000);
   await signInAs(context, fixtures.readerSessionToken);
   let release!: () => void;
   const held = new Promise<void>((resolve) => {
@@ -307,7 +315,13 @@ test('the history skeleton occupies the box the loaded list takes: same first-ro
     await route.continue();
   });
 
-  await page.goto(`/pages/${fixtures.historyPageId}/history`);
+  // By a client-side navigation from the page itself: a full load of the
+  // history screen is answered on the server since the data layer
+  // (`useApiRead`), with no skeleton to measure — the skeleton is for a
+  // list the browser has not seen yet (see e2e/data-layer.spec.ts).
+  await page.goto(`/pages/${fixtures.historyPageId}`);
+  await waitForHydration(page);
+  await page.getByRole('link', { name: 'Revision history' }).click({ timeout: 30000 });
   const skeletonRows = page.getByTestId('history-skeleton').locator('li');
   await expect(skeletonRows.first()).toBeVisible({ timeout: 30000 });
   const skeletonFirst = (await skeletonRows.first().boundingBox())!;
