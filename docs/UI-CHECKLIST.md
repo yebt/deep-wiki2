@@ -1192,6 +1192,9 @@ too much:* the list is fixed and short; nothing to overflow.
 - Everything the 2026-09-15 entries carried forward and this batch did not touch: the
   contextual (third) pane is still an overlay, the sidebar's resize handle is pointer-only,
   the two-icon-pack requirement (§4.3) remains untested.
+
+---
+
 ### 2026-09-16 — Owner review of the frame: the signed-out bounce, native confirms, and edit mode's bar
 
 **Reviewer:** Eduardo
