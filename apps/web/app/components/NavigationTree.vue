@@ -34,6 +34,11 @@ const props = defineProps<{
 const tree = useWorkspaceTree(() => props.workspaceId);
 const { status, nodes, rootId, message, collapsedIds, selectedId, load, reorder, toggleCollapsed, reveal } = tree;
 
+// The tree is the frame's own request, made on every screen inside a
+// workspace, so a 401 here is the frame's own signed-out state and takes
+// the one rule every screen takes: leave for sign-in and come back.
+useSignInRedirect().redirectWhenSignedOut(status);
+
 /** The row holding the tree's single tab stop; the selection is `useWorkspaceTree`'s and outlives this component. */
 const activeId = ref<string | null>(null);
 

@@ -4,9 +4,13 @@ import { describe, expect, test, vi } from 'vitest';
 import { defineComponent, h, ref } from 'vue';
 import WorkspacesPage from './index.vue';
 
-const { useWorkspacesMock } = vi.hoisted(() => ({ useWorkspacesMock: vi.fn() }));
+const { useWorkspacesMock, navigateToMock } = vi.hoisted(() => ({
+  navigateToMock: vi.fn(async () => {}),
+  useWorkspacesMock: vi.fn(),
+}));
 
 mockNuxtImport('useWorkspaces', () => useWorkspacesMock);
+mockNuxtImport('navigateTo', () => navigateToMock);
 
 const PageInApp = defineComponent({
   name: 'PageInApp',
@@ -107,13 +111,15 @@ describe('workspaces index screen', () => {
     expect(load).toHaveBeenCalled();
   });
 
-  test('a signed-out visitor is offered sign-in, not a retry', async () => {
+  // One rule for a signed-out visit to a signed-in screen: leave for
+  // sign-in with this address as the return path, and show no card here —
+  // the card was a dead end with a button on it (docs/UI-CHECKLIST.md §3).
+  test('a signed-out visitor is sent to sign in, to come back here afterwards, and shown no card', async () => {
     mockWorkspaces({ status: 'unauthenticated' });
     const component = await mountSuspended(PageInApp);
 
-    const signIn = component.findAll('a').find((a) => /sign in/i.test(a.text()));
-    expect(signIn, 'expected a link whose accessible text names signing in').toBeDefined();
-    expect(signIn!.attributes('href')).toBe('/login');
+    expect(navigateToMock).toHaveBeenCalledWith(expect.stringMatching(/^\/login(\?next=|$)/), { replace: true });
+    expect(component.findAll('a').find((a) => /sign in/i.test(a.text()))).toBeUndefined();
   });
 });
 
@@ -152,12 +158,6 @@ describe('the new-workspace affordance', () => {
     expect(fromLoaded?.attributes('href')).toBe('/workspaces/new');
   });
 
-  test('a signed-out visitor is not offered the new-workspace screen', async () => {
-    mockWorkspaces({ status: 'unauthenticated' });
-    const component = await mountSuspended(PageInApp);
-
-    expect(component.findAll('a').find((a) => /new workspace/i.test(a.text()))).toBeUndefined();
-  });
 
   // This screen is reached only when there is no last workspace, or from
   // the sidebar switcher — its job is choosing, not reading, so creating

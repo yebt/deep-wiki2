@@ -5,9 +5,13 @@ import { flushPromises } from '@vue/test-utils';
 import { defineComponent, h, nextTick, ref } from 'vue';
 import NewWorkspacePage from './new.vue';
 
-const { useCreateWorkspaceMock } = vi.hoisted(() => ({ useCreateWorkspaceMock: vi.fn() }));
+const { useCreateWorkspaceMock, navigateToMock } = vi.hoisted(() => ({
+  navigateToMock: vi.fn(async () => {}),
+  useCreateWorkspaceMock: vi.fn(),
+}));
 
 mockNuxtImport('useCreateWorkspace', () => useCreateWorkspaceMock);
+mockNuxtImport('navigateTo', () => navigateToMock);
 
 const PageInApp = defineComponent({
   name: 'PageInApp',
@@ -132,12 +136,14 @@ describe('new workspace screen', () => {
     expect(component.find('form').exists()).toBe(false);
   });
 
-  test('a signed-out visitor is offered sign-in, not a form', async () => {
+  // One rule for a signed-out visit to a signed-in screen: leave for
+  // sign-in with this address as the return path, and show no card here —
+  // the card was a dead end with a button on it (docs/UI-CHECKLIST.md §3).
+  test('a signed-out visitor is sent to sign in, to come back here afterwards, and shown no card', async () => {
     mockCreate({ status: 'unauthenticated' });
     const component = await mountSuspended(PageInApp);
 
-    const signIn = component.findAll('a').find((a) => /sign in/i.test(a.text()));
-    expect(signIn?.attributes('href')).toBe('/login');
-    expect(component.find('form').exists()).toBe(false);
+    expect(navigateToMock).toHaveBeenCalledWith(expect.stringMatching(/^\/login(\?next=|$)/), { replace: true });
+    expect(component.findAll('a').find((a) => /sign in/i.test(a.text()))).toBeUndefined();
   });
 });

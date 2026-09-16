@@ -53,6 +53,16 @@ describe('usePageDiff', () => {
     expect(status.value).toBe('not-found');
   });
 
+  // A 401 is neither denial nor a dead connection: the person is signed
+  // out, and the screen's next move is sign-in (`useSignInRedirect`), not
+  // a retry that would 401 again. Before 2026-09-16 it fell through to
+  // network-error and the screen said "Cannot reach the server".
+  test('a 401 resolves to unauthenticated, not to a network error', async () => {
+    const { status, load } = usePageDiff('page-1', 'rev-1', 'rev-2', vi.fn(async () => { throw { response: { status: 401 } }; }));
+    await load();
+    expect(status.value).toBe('unauthenticated');
+  });
+
   test('a 403 ALSO resolves to not-found, not a distinct forbidden state — the non-disclosure requirement', async () => {
     const fetcher = vi.fn(async () => {
       throw { response: { status: 403 } };

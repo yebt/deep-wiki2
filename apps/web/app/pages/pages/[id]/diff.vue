@@ -42,6 +42,8 @@ const fromId = (route.query.from as string | undefined) ?? '';
 const toId = (route.query.to as string | undefined) ?? '';
 
 const { status, diff, message, load } = usePageDiff(nodeId, fromId, toId);
+// A signed-out visit leaves for sign-in and comes back (`useSignInRedirect`).
+useSignInRedirect().redirectWhenSignedOut(status);
 
 onMounted(() => {
   // A link with no `from`/`to` is a broken link, not a network condition —
@@ -258,7 +260,10 @@ useSeoMeta({ title: 'Page diff — deep-wiki' });
       </template>
     </PageNotice>
 
-    <template v-else>
+    <!-- `v-else-if`, not `v-else`: a signed-out visit is a state this
+         screen leaves rather than renders, and a bare `v-else` read the
+         diff's `from` off a `null` on the way out. -->
+    <template v-else-if="diff">
       <!-- The pair being compared: from, then to, each a `<time>` read in
            the viewer's own zone with the zone named and the instant kept in
            the attribute (docs/UI-CHECKLIST.md §4.11 — fetched in

@@ -5,9 +5,13 @@ import { describe, expect, test, vi } from 'vitest';
 import { defineComponent, h, ref } from 'vue';
 import RegistrationPage from './registration.vue';
 
-const { useInstanceSettingsMock } = vi.hoisted(() => ({ useInstanceSettingsMock: vi.fn() }));
+const { useInstanceSettingsMock, navigateToMock } = vi.hoisted(() => ({
+  navigateToMock: vi.fn(async () => {}),
+  useInstanceSettingsMock: vi.fn(),
+}));
 
 mockNuxtImport('useInstanceSettings', () => useInstanceSettingsMock);
+mockNuxtImport('navigateTo', () => navigateToMock);
 
 const PageInApp = defineComponent({
   name: 'PageInApp',
@@ -184,10 +188,14 @@ describe('instance registration screen', () => {
     expect(load).toHaveBeenCalled();
   });
 
-  test('a signed-out visitor is offered sign-in', async () => {
+  // One rule for a signed-out visit to a signed-in screen: leave for
+  // sign-in with this address as the return path, and show no card here —
+  // the card was a dead end with a button on it (docs/UI-CHECKLIST.md §3).
+  test('a signed-out visitor is sent to sign in, to come back here afterwards, and shown no card', async () => {
     mockSettings({ status: 'unauthenticated' });
     const component = await mountSuspended(PageInApp);
 
-    expect(component.findAll('a').find((a) => /sign in/i.test(a.text()))?.attributes('href')).toBe('/login');
+    expect(navigateToMock).toHaveBeenCalledWith(expect.stringMatching(/^\/login(\?next=|$)/), { replace: true });
+    expect(component.findAll('a').find((a) => /sign in/i.test(a.text()))).toBeUndefined();
   });
 });

@@ -36,6 +36,16 @@ describe('useWorkspaceActivity', () => {
     expect(fetcher).toHaveBeenCalledWith('ws-1');
   });
 
+  // A 401 is neither denial nor a dead connection: the person is signed
+  // out, and the screen's next move is sign-in (`useSignInRedirect`), not
+  // a retry that would 401 again. Before 2026-09-16 it fell through to
+  // network-error and the screen said "Cannot reach the server".
+  test('a 401 resolves to unauthenticated, not to a network error', async () => {
+    const { status, load } = useWorkspaceActivity('ws-1', vi.fn(async () => { throw responseError(401); }));
+    await load();
+    expect(status.value).toBe('unauthenticated');
+  });
+
   // Absence and denial are one state, because the route answers both with
   // one byte-identical 404 — a distinct `forbidden` here would undo that on
   // the one client that could tell.

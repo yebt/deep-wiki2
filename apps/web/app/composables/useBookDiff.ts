@@ -1,6 +1,6 @@
 import type { BookDiffResponse, ChangedPageDiffPayload } from '@deep-wiki/contracts';
 
-export type BookDiffStatus = 'idle' | 'loading' | 'success' | 'not-found' | 'network-error';
+export type BookDiffStatus = 'idle' | 'loading' | 'success' | 'not-found' | 'unauthenticated' | 'network-error';
 
 /** One changed page as `GET /books/:id/diff` returns it — text-bearing changes, both revision ids, and the page's title. */
 export type ChangedPageDiff = ChangedPageDiffPayload;
@@ -64,6 +64,13 @@ export function useBookDiff(bookId: string, since: string, fetcher?: BookDiffFet
       message.value = '';
     } catch (error) {
       const code = httpStatusOf(error);
+      // Signed out: the screen's next move is sign-in, not a retry
+      // (`useSignInRedirect`), so this is never the network branch.
+      if (code === 401) {
+        status.value = 'unauthenticated';
+        message.value = 'Your session has ended.';
+        return;
+      }
       if (code === 403 || code === 404) {
         status.value = 'not-found';
         message.value = 'This book does not exist.';

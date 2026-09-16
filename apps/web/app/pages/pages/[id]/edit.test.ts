@@ -4,8 +4,9 @@ import { describe, expect, test, vi } from 'vitest';
 import { computed, defineComponent, h, ref } from 'vue';
 import EditPage from './edit.vue';
 
-const { useEditSessionMock, useLockHeartbeatMock, useSavePageMock, usePresenceStreamMock, useRouteMock, useWorkspaceTreeMock, useWorkspaceDirectoryMock } =
+const { useEditSessionMock, useLockHeartbeatMock, useSavePageMock, usePresenceStreamMock, useRouteMock, useWorkspaceTreeMock, useWorkspaceDirectoryMock, navigateToMock } =
   vi.hoisted(() => ({
+    navigateToMock: vi.fn(async () => {}),
     useEditSessionMock: vi.fn(),
     useLockHeartbeatMock: vi.fn(),
     useSavePageMock: vi.fn(),
@@ -22,6 +23,7 @@ mockNuxtImport('usePresenceStream', () => usePresenceStreamMock);
 mockNuxtImport('useRoute', () => useRouteMock);
 mockNuxtImport('useWorkspaceTree', () => useWorkspaceTreeMock);
 mockNuxtImport('useWorkspaceDirectory', () => useWorkspaceDirectoryMock);
+mockNuxtImport('navigateTo', () => navigateToMock);
 
 /**
  * The frame's own collaborators — the sidebar's tree and the workspace
@@ -169,6 +171,18 @@ describe('edit-mode page', () => {
     const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
     expect(component.text()).toMatch(/deliberately doesn't say which/);
+  });
+
+  // One rule for a signed-out visit to a signed-in screen: leave for
+  // sign-in with this address as the return path, and show no card here —
+  // a card would be a dead end with a button on it (docs/UI-CHECKLIST.md §3).
+  test('a signed-out visitor is sent to sign in, to come back here afterwards, and shown no card', async () => {
+    mockDefaults();
+    mockSession({ status: 'unauthenticated' });
+    const component = await mountSuspended(PageInApp, FRAME_STUBS);
+
+    expect(navigateToMock).toHaveBeenCalledWith(expect.stringMatching(/^\/login(\?next=|$)/), { replace: true });
+    expect(component.find('main a[href="/login"]').exists()).toBe(false);
   });
 
   // One chrome for one destination: edit mode and the history screen both

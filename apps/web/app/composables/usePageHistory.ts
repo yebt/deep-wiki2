@@ -1,4 +1,4 @@
-export type PageHistoryStatus = 'idle' | 'loading' | 'success' | 'not-found' | 'network-error';
+export type PageHistoryStatus = 'idle' | 'loading' | 'success' | 'not-found' | 'unauthenticated' | 'network-error';
 
 export interface RevisionSummary {
   readonly id: string;
@@ -57,6 +57,13 @@ export function usePageHistory(nodeId: string, fetcher?: PageHistoryFetcher): Us
       message.value = '';
     } catch (error) {
       const code = httpStatusOf(error);
+      // Signed out: the screen's next move is sign-in, not a retry
+      // (`useSignInRedirect`), so this is never the network branch.
+      if (code === 401) {
+        status.value = 'unauthenticated';
+        message.value = 'Your session has ended.';
+        return;
+      }
       if (code === 403 || code === 404) {
         status.value = 'not-found';
         message.value = 'This page does not exist.';

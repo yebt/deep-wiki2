@@ -51,6 +51,8 @@ const route = useRoute();
 const bookId = route.params.id as string;
 
 const { status, title, workspaceId, changesets, message, load } = useBookHistory(bookId);
+// A signed-out visit leaves for sign-in and comes back (`useSignInRedirect`).
+useSignInRedirect().redirectWhenSignedOut(status);
 
 /** One `<h1>`, whose words change with the state and whose role does not (docs/UI-CHECKLIST.md §4.4). */
 const heading = computed(() => (title.value ? `${title.value} — book history` : 'Book history'));

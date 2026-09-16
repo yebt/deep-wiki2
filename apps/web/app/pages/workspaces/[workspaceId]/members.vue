@@ -64,6 +64,8 @@ const route = useRoute();
 const workspaceId = route.params.workspaceId as string;
 
 const { status, message, listing, inviteStatus, inviteMessage, load, invite } = useWorkspaceMembers(workspaceId);
+// A signed-out visit leaves for sign-in and comes back (`useSignInRedirect`).
+useSignInRedirect().redirectWhenSignedOut(status);
 
 onMounted(() => {
   void load();
@@ -133,13 +135,6 @@ useSeoMeta({ title: 'Members — deep-wiki' });
         </div>
       </div>
     </div>
-
-    <PageNotice v-else-if="status === 'unauthenticated'" icon="i-lucide-log-in" heading="Sign in to manage members" :level="2">
-      Your session has ended, or you have not signed in on this device yet.
-      <template #actions>
-        <UButton to="/login" color="primary" variant="solid" size="lg" icon="i-lucide-log-in">Sign in</UButton>
-      </template>
-    </PageNotice>
 
     <!-- One state for "no such workspace" and "not yours to manage",
          because the server refuses to tell them apart, on purpose. The

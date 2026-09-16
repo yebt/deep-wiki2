@@ -32,6 +32,8 @@ const route = useRoute();
 const nodeId = route.params.id as string;
 
 const { status, html, title, workspaceId, message, load } = usePageRead(nodeId);
+// A signed-out visit leaves for sign-in and comes back (`useSignInRedirect`).
+useSignInRedirect().redirectWhenSignedOut(status);
 
 /**
  * editing-presence spec / design.md Decision 5 ("Presence and SSE"): "who

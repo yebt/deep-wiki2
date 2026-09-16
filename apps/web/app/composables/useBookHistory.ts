@@ -1,4 +1,4 @@
-export type BookHistoryStatus = 'idle' | 'loading' | 'success' | 'not-found' | 'network-error';
+export type BookHistoryStatus = 'idle' | 'loading' | 'success' | 'not-found' | 'unauthenticated' | 'network-error';
 
 export interface ChangesetRevisionSummary {
   readonly id: string;
@@ -71,6 +71,13 @@ export function useBookHistory(bookId: string, fetcher?: BookHistoryFetcher): Us
       message.value = '';
     } catch (error) {
       const code = httpStatusOf(error);
+      // Signed out: the screen's next move is sign-in, not a retry
+      // (`useSignInRedirect`), so this is never the network branch.
+      if (code === 401) {
+        status.value = 'unauthenticated';
+        message.value = 'Your session has ended.';
+        return;
+      }
       if (code === 403 || code === 404) {
         status.value = 'not-found';
         message.value = 'This book does not exist.';

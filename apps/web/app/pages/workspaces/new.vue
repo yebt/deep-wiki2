@@ -42,6 +42,8 @@ import { CreateWorkspaceRequestSchema, slugifyTitle, WORKSPACE_NAME_MAX_LENGTH }
 import type { FormSubmitEvent } from '@nuxt/ui';
 
 const { status, message, limit, workspace, create } = useCreateWorkspace();
+// A signed-out visit leaves for sign-in and comes back (`useSignInRedirect`).
+useSignInRedirect().redirectWhenSignedOut(status);
 
 const schema = CreateWorkspaceRequestSchema.extend({
   name: CreateWorkspaceRequestSchema.shape.name.min(1, 'Give the workspace a name').max(WORKSPACE_NAME_MAX_LENGTH, `Use at most ${WORKSPACE_NAME_MAX_LENGTH} characters`),
@@ -81,19 +83,7 @@ useSeoMeta({ title: 'New workspace — deep-wiki' });
     />
 
     <PageNotice
-      v-if="status === 'unauthenticated'"
-      icon="i-lucide-log-in"
-      heading="Sign in to create a workspace"
-      :level="2"
-    >
-      Your session has ended, or you have not signed in on this device yet.
-      <template #actions>
-        <UButton to="/login" color="primary" variant="solid" size="lg" icon="i-lucide-log-in">Sign in</UButton>
-      </template>
-    </PageNotice>
-
-    <PageNotice
-      v-else-if="status === 'plan-limit'"
+      v-if="status === 'plan-limit'"
       icon="i-lucide-lock"
       heading="You have reached your plan's limit"
       :level="2"

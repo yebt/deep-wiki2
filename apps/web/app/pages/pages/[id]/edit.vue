@@ -31,6 +31,8 @@ const route = useRoute();
 const nodeId = route.params.id as string;
 
 const { status, session, refusal, message, load, takeOver } = useEditSession(nodeId);
+// A signed-out visit leaves for sign-in and comes back (`useSignInRedirect`).
+useSignInRedirect().redirectWhenSignedOut(status);
 const heartbeat = useLockHeartbeat(nodeId);
 const { status: saveStatus, contentHash, canonical, corrected, message: saveMessage, save } = useSavePage(nodeId);
 const presence = usePresenceStream(nodeId);

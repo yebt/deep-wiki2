@@ -5,8 +5,9 @@ import { computed, defineComponent, h, nextTick, ref } from 'vue';
 import type { CommentThread } from '@deep-wiki/contracts';
 import ReadPage from './index.vue';
 
-const { usePageReadMock, usePresenceStreamMock, usePageCommentsMock, usePageMentionsMock, useRouteMock, useWorkspaceTreeMock, useWorkspaceDirectoryMock } =
+const { usePageReadMock, usePresenceStreamMock, usePageCommentsMock, usePageMentionsMock, useRouteMock, useWorkspaceTreeMock, useWorkspaceDirectoryMock, navigateToMock } =
   vi.hoisted(() => ({
+  navigateToMock: vi.fn(async () => {}),
     usePageReadMock: vi.fn(),
     usePresenceStreamMock: vi.fn(),
     usePageCommentsMock: vi.fn(),
@@ -23,6 +24,7 @@ mockNuxtImport('usePageMentions', () => usePageMentionsMock);
 mockNuxtImport('useRoute', () => useRouteMock);
 mockNuxtImport('useWorkspaceTree', () => useWorkspaceTreeMock);
 mockNuxtImport('useWorkspaceDirectory', () => useWorkspaceDirectoryMock);
+mockNuxtImport('navigateTo', () => navigateToMock);
 
 /**
  * The frame's own collaborators — the sidebar's tree and the workspace
@@ -259,6 +261,17 @@ describe('read-mode page', () => {
     await retry.trigger('click');
 
     expect(load).toHaveBeenCalled();
+  });
+
+  // One rule for a signed-out visit to a signed-in screen: leave for
+  // sign-in with this address as the return path, and show no card here —
+  // a card would be a dead end with a button on it (docs/UI-CHECKLIST.md §3).
+  test('a signed-out visitor is sent to sign in, to come back here afterwards, and shown no card', async () => {
+    mockRead({ status: 'unauthenticated' });
+    const component = await mount();
+
+    expect(navigateToMock).toHaveBeenCalledWith(expect.stringMatching(/^\/login(\?next=|$)/), { replace: true });
+    expect(component.findAll('a').find((a) => /sign in/i.test(a.text()))).toBeUndefined();
   });
 
   /**
