@@ -30,7 +30,7 @@
 import type { MentionCandidate, MentionState, SlashState } from '@deep-wiki/editor';
 import type { EditorView } from 'prosemirror-view';
 import { loadEditorMount, type EditorMountModule } from '~/utils/editor-mount';
-import { positionMenu } from '~/utils/menu-position';
+import { positionMenu, positionToolbar } from '~/utils/menu-position';
 
 const props = defineProps<{
   markdown: string;
@@ -99,12 +99,80 @@ const SLASH_MENU_ID = 'dw-slash-menu';
 // `@deep-wiki/editor/mount`: `scripts/checks/bundle-isolation.ts` sweeps
 // every static specifier, `import type` included.
 type EditorHandle = ReturnType<EditorMountModule['mountEditor']>;
+type MountOptions = Parameters<EditorMountModule['mountEditor']>[0];
+/** What the selection plugin reports: the snapshot plus both ends' viewport coordinates (`selection-plugin.ts`). */
+type SelectionReport = Parameters<NonNullable<NonNullable<MountOptions['selection']>['onChange']>>[0];
 let handle: EditorHandle | undefined;
 let editorView: EditorView | undefined;
 /** The `"./mount"` module, kept from `loadEditorMount()` so the click paths below can build the same transactions the plugins build on Enter. */
 let editorModule: Awaited<ReturnType<typeof loadEditorMount>> | undefined;
 
 const { search: searchMentions, checkAccess } = useMentionCandidates(props.workspaceId, props.pageId);
+
+/* ─── The selection toolbar ────────────────────────────────────────────
+ * Shown over a non-empty text selection (never in a code block, never
+ * over a node or gap selection — the plugin says which) while focus is
+ * inside this component: the editor itself, or the toolbar the keyboard
+ * reached. The link popover is the one moment focus legitimately leaves
+ * both, so it keeps the toolbar up on its own. Typing collapses the
+ * selection, so the toolbar goes the moment a key lands (docs/TODO.md,
+ * "hidden while typing").
+ */
+const selection = ref<SelectionReport | null>(null);
+const focusWithin = ref(false);
+const linkPopoverOpen = ref(false);
+const hostEl = ref<HTMLElement | null>(null);
+const selectionToolbar = ref<{ focus: () => void } | null>(null);
+
+const toolbarVisible = computed(
+  () =>
+    selection.value !== null &&
+    selection.value.kind === 'text' &&
+    !selection.value.empty &&
+    selection.value.coords !== null &&
+    (focusWithin.value || linkPopoverOpen.value),
+);
+const toolbarPosition = computed(() => (selection.value?.coords ? positionToolbar(selection.value.coords) : { top: 0, left: 0 }));
+
+function onFocusIn(): void {
+  focusWithin.value = true;
+}
+
+function onFocusOut(event: FocusEvent): void {
+  const next = event.relatedTarget;
+  focusWithin.value = next instanceof Node && hostEl.value !== null && hostEl.value.contains(next);
+}
+
+/**
+ * `Ctrl`/`⌘`+`Shift`+`.` moves focus from the editor into the toolbar —
+ * the keyboard's way to a surface a pointer reaches by hovering (checklist
+ * §5). Read by `code`, because `Shift`+`.` reports `>` on a US layout and
+ * something else on others. Only while the toolbar is up: with no range
+ * there is nothing to focus.
+ */
+function onHostKeydown(event: KeyboardEvent): void {
+  if (!(event.ctrlKey || event.metaKey) || !event.shiftKey || event.altKey) return;
+  if (event.code !== 'Period' && event.key !== '.' && event.key !== '>') return;
+  if (!toolbarVisible.value) return;
+  event.preventDefault();
+  selectionToolbar.value?.focus();
+}
+
+function focusEditor(): void {
+  editorView?.focus();
+}
+
+function onToolbarToggle(name: Parameters<EditorHandle['toggleMark']>[0]): void {
+  handle?.toggleMark(name);
+}
+
+function onToolbarSetLink(href: string): void {
+  handle?.setLink(href);
+}
+
+function onToolbarUnsetLink(): void {
+  handle?.unsetLink();
+}
 
 /** document-editor: "Mentioning A User Does Not Silently Grant Them Access" — the check a confirmed user mention runs, whichever way it was confirmed. */
 function onMentionConfirmed(candidate: MentionCandidate): void {
@@ -159,10 +227,13 @@ async function mount(): Promise<void> {
 
   let debounceTimer: ReturnType<typeof setTimeout> | undefined;
   let lastMentionQuery: string | null = null;
+  const initialDoc = mod.fromMarkdown(props.markdown);
+  /** The document last handed to `update` — by identity: ProseMirror keeps the same `Node` through a transaction with no steps. */
+  let lastReportedDoc: unknown = initialDoc;
 
   handle = mod.mountEditor({
     dom: rootEl.value,
-    doc: mod.fromMarkdown(props.markdown),
+    doc: initialDoc,
     mention: {
       onStateChange: (state) => {
         mentionState.value = state;
@@ -205,8 +276,22 @@ async function mount(): Promise<void> {
         }
       },
     },
+    selection: {
+      onChange: (report) => {
+        selection.value = report;
+      },
+    },
     onUpdate: (view, update) => {
       emit('history', { undoDepth: update.undoDepth, redoDepth: update.redoDepth });
+      // Only a transaction that changed the document is reported. A
+      // selection-only transaction — a click, an arrow key, the toolbar's
+      // own report — leaves `state.doc` the same instance, and reporting
+      // it marked the buffer dirty and enabled Save before anything had
+      // changed; `e2e/editor.spec.ts` then saved the pre-edit document
+      // when a click landed inside the 300ms window (docs/TODO.md
+      // Findings, 2026-09-16).
+      if (view.state.doc === lastReportedDoc) return;
+      lastReportedDoc = view.state.doc;
       if (debounceTimer) clearTimeout(debounceTimer);
       debounceTimer = setTimeout(() => emit('update', mod.toMarkdown(view.state.doc)), 300);
     },
@@ -247,7 +332,7 @@ defineExpose({
 </script>
 
 <template>
-  <div class="relative">
+  <div ref="hostEl" class="relative" @focusin="onFocusIn" @focusout="onFocusOut" @keydown="onHostKeydown">
     <!-- No `focus-within:ring-*` here. `main.css` declares the focus
          indicator unlayered — 3px `secondary` at 2px offset — so it lands
          on the editor when it takes focus like it lands on every other
@@ -329,6 +414,22 @@ defineExpose({
       option-id-prefix="dw-mention-option-"
       :position="mentionCaretRect"
       @select="confirmMentionAt"
+    />
+
+    <!-- The selection toolbar: the one formatting chrome, and only while
+         there is a range to format — nothing permanent stands inside the
+         measure column (PRODUCT.md, principle 6). -->
+    <EditorSelectionToolbar
+      v-if="toolbarVisible && selection"
+      ref="selectionToolbar"
+      :marks="selection.marks"
+      :link="selection.link"
+      :position="toolbarPosition"
+      @toggle="onToolbarToggle"
+      @set-link="onToolbarSetLink"
+      @unset-link="onToolbarUnsetLink"
+      @link-open="linkPopoverOpen = $event"
+      @close="focusEditor"
     />
 
     <!-- The chip tier (`InlineNotice`): one line about the editor above it. -->

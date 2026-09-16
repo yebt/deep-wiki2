@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { MENU_HEIGHT_ESTIMATE, MENU_WIDTH_ESTIMATE, positionMenu } from './menu-position';
+import { MENU_HEIGHT_ESTIMATE, MENU_WIDTH_ESTIMATE, positionMenu, positionToolbar, TOOLBAR_HEIGHT_ESTIMATE, TOOLBAR_WIDTH_ESTIMATE } from './menu-position';
 
 /**
  * document-editor spec: "Menus Reposition To Stay In The Viewport" —
@@ -86,5 +86,100 @@ describe('positionMenu', () => {
     const caret = { top: 10, bottom: 30, left: 40 };
 
     expect(positionMenu(caret)).toEqual(positionMenu(caret, { width: window.innerWidth, height: window.innerHeight }));
+  });
+});
+
+/**
+ * The selection toolbar floats over the range it formats — above the
+ * first line where there is room, below the last line where there is
+ * not (docs/UI-CHECKLIST.md §4.6: menus reposition to stay in the
+ * viewport, never clipped), and always inside a 320px viewport (§6).
+ * Same viewport-relative coordinates as the menus: the selection
+ * plugin reports `coordsAtPos` of both ends.
+ */
+describe('positionToolbar', () => {
+  const VIEWPORT = { width: 1280, height: 900 };
+  const line = (top: number, left: number, right: number) => ({ top, bottom: top + 26, left, right });
+  const size = { width: TOOLBAR_WIDTH_ESTIMATE, height: TOOLBAR_HEIGHT_ESTIMATE };
+
+  test('with room above the first line, it stands above it, its bottom edge a gap short of the text', () => {
+    const coords = { from: line(300, 400, 400), to: line(300, 600, 600) };
+
+    const origin = positionToolbar(coords, VIEWPORT);
+
+    expect(origin.placement).toBe('above');
+    expect(origin.top + size.height).toBeLessThan(coords.from.top);
+    expect(origin.top + size.height).toBeGreaterThan(coords.from.top - 16);
+  });
+
+  test('centres on a single-line range', () => {
+    const coords = { from: line(300, 400, 400), to: line(300, 600, 600) };
+
+    const origin = positionToolbar(coords, VIEWPORT);
+
+    expect(origin.left + size.width / 2).toBe(500);
+  });
+
+  test('centres on the start of a range that spans lines, since its two ends share no column', () => {
+    const coords = { from: line(300, 500, 500), to: line(352, 120, 120) };
+
+    const origin = positionToolbar(coords, VIEWPORT);
+
+    expect(origin.left + size.width / 2).toBe(500);
+  });
+
+  test('with no room above, it flips below the last line', () => {
+    const coords = { from: line(10, 400, 400), to: line(36, 200, 200) };
+
+    const origin = positionToolbar(coords, VIEWPORT);
+
+    expect(origin.placement).toBe('below');
+    expect(origin.top).toBeGreaterThan(coords.to.bottom);
+    expect(origin.top).toBeLessThan(coords.to.bottom + 16);
+  });
+
+  test('flipped below at the bottom edge, it is still kept on screen', () => {
+    const short = { width: 1280, height: 60 };
+    const coords = { from: line(10, 400, 400), to: line(36, 200, 200) };
+
+    const origin = positionToolbar(coords, short);
+
+    expect(origin.top).toBeGreaterThanOrEqual(0);
+    expect(origin.top + size.height).toBeLessThanOrEqual(short.height);
+  });
+
+  test('a range against the right edge pulls the toolbar back inside the viewport', () => {
+    const coords = { from: line(300, 1250, 1250), to: line(300, 1270, 1270) };
+
+    const origin = positionToolbar(coords, VIEWPORT);
+
+    expect(origin.left + size.width).toBeLessThanOrEqual(VIEWPORT.width);
+  });
+
+  test('a range against the left edge never pushes the toolbar off-screen to the left', () => {
+    const coords = { from: line(300, 0, 0), to: line(300, 10, 10) };
+
+    const origin = positionToolbar(coords, VIEWPORT);
+
+    expect(origin.left).toBeGreaterThanOrEqual(0);
+  });
+
+  test('never overflows a 320px viewport, wherever the range is', () => {
+    const narrow = { width: 320, height: 900 };
+    for (const [left, right] of [
+      [16, 40],
+      [150, 170],
+      [290, 304],
+    ] as const) {
+      const origin = positionToolbar({ from: line(300, left, left), to: line(300, right, right) }, narrow);
+      expect(origin.left).toBeGreaterThanOrEqual(0);
+      expect(origin.left + size.width).toBeLessThanOrEqual(narrow.width);
+    }
+  });
+
+  test('defaults to the real window when no viewport is supplied', () => {
+    const coords = { from: line(300, 400, 400), to: line(300, 600, 600) };
+
+    expect(positionToolbar(coords)).toEqual(positionToolbar(coords, { width: window.innerWidth, height: window.innerHeight }));
   });
 });

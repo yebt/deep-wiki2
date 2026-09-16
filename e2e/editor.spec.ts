@@ -122,7 +122,12 @@ test('saving an already-saved page persists the edit and reads back for real, wi
   await page.keyboard.press('End');
   await page.keyboard.type(' Edited for real, through the real backend.');
 
-  await page.getByRole('button', { name: /Save/ }).click();
+  // The buffer reports 300ms after the last keystroke; Save enabling is
+  // the screen's word that it has (docs/TODO.md Findings, 2026-09-16: a
+  // click inside that window once saved the pre-edit document).
+  const save = page.getByRole('button', { name: /Save/ });
+  await expect(save).not.toHaveAttribute('aria-disabled');
+  await save.click();
   await expect(page.getByRole('status').filter({ hasText: /Saved/ })).toBeVisible({ timeout: 30000 });
 
   // The saved markdown came back: reload triggers a fresh, real
@@ -315,6 +320,7 @@ test('a save refused as "not canonical" offers the canonical document back, and 
   await page.keyboard.press('End');
   await page.keyboard.type(' edited');
 
+  await expect(page.getByRole('button', { name: /Save/ })).not.toHaveAttribute('aria-disabled');
   await page.getByRole('button', { name: /Save/ }).click();
 
   const banner = page.getByRole('alert').filter({ hasText: /canonical form/i });
@@ -448,6 +454,189 @@ test('Undo and Redo stand beside Save: disabled with a reason until there is his
   await redo.click();
   await expect(editor).toContainText('Start. Then more.');
   await expect(redo).toHaveAttribute('aria-disabled', 'true');
+});
+
+/* ─── The block UI against the real backend ─────────────────────────────
+ * The selection toolbar, the block handle and its tunes, and the `/`
+ * commands the editor package added on 2026-09-16 (docs/TODO.md Findings,
+ * "the `/mount` API"). Every test here drives a real edit session and a
+ * real Save, then reads the row back through a fresh edit-session
+ * request — the same holder, so the lock is simply renewed — because the
+ * claim under test is what the markdown *bytes* become, which a mocked
+ * PUT cannot answer. Each test mints its own writer and page
+ * (`e2e/editor-fixtures.bun.ts`) and writes the document it needs
+ * through the API first, so the tests share nothing and run in any order.
+ */
+const UI_SHOTS = process.env.DEEPWIKI_FRAME_SHOTS ?? '';
+
+/** The review material for this batch: `fb-editor-ui-<screen>-<size>-<theme>.png`. */
+async function shotUi(page: Page, name: string): Promise<void> {
+  if (!UI_SHOTS) return;
+  await page.screenshot({ path: `${UI_SHOTS}/fb-editor-ui-${name}.png`, fullPage: false });
+}
+
+interface BlockPage {
+  readonly pageId: string;
+  readonly title: string;
+}
+
+/** A fresh writer and page holding exactly `markdown`, signed in on `page`. */
+async function seedBlockPage(page: Page, markdown: string): Promise<BlockPage> {
+  const output = execFileSync('bun', ['run', 'e2e/editor-fixtures.bun.ts', seed.workspaceId], { cwd: REPO_ROOT, encoding: 'utf8' });
+  const minted: EditorFixtures = JSON.parse(output.trim().split('\n').pop()!);
+  await signInAs(page, minted.writerSessionToken);
+  const session = await page.request.get(`${apiOrigin()}/pages/${minted.editablePageId}/edit-session`);
+  expect(session.ok()).toBe(true);
+  const { contentHash } = (await session.json()) as { contentHash: string };
+  const saved = await page.request.put(`${apiOrigin()}/pages/${minted.editablePageId}`, { data: { markdown, expectedContentHash: contentHash } });
+  expect(saved.ok()).toBe(true);
+  return { pageId: minted.editablePageId, title: minted.editablePageTitle };
+}
+
+/** What the row holds now, as the editor would open it. */
+async function savedMarkdown(page: Page, pageId: string): Promise<string> {
+  const session = await page.request.get(`${apiOrigin()}/pages/${pageId}/edit-session`);
+  expect(session.ok()).toBe(true);
+  return ((await session.json()) as { markdown: string }).markdown;
+}
+
+async function openBlockPage(page: Page, block: BlockPage, firstWords: string): Promise<ReturnType<Page['getByTestId']>> {
+  await page.goto(`/pages/${block.pageId}/edit`);
+  const editor = page.getByTestId('editor-surface');
+  await expect(editor).toContainText(firstWords, { timeout: 30000 });
+  return editor;
+}
+
+/** Selects `word` inside the editor's `nth` paragraph through the DOM selection, which ProseMirror reads back into its state. */
+async function selectWord(editor: ReturnType<Page['getByTestId']>, nth: number, word: string): Promise<void> {
+  await editor.locator(':scope > p').nth(nth).evaluate((paragraph, needle) => {
+    const walker = document.createTreeWalker(paragraph, NodeFilter.SHOW_TEXT);
+    let node: Text | null;
+    while ((node = walker.nextNode() as Text | null)) {
+      const at = node.data.indexOf(needle);
+      if (at < 0) continue;
+      const range = document.createRange();
+      range.setStart(node, at);
+      range.setEnd(node, at + needle.length);
+      const selection = window.getSelection()!;
+      selection.removeAllRanges();
+      selection.addRange(range);
+      return;
+    }
+    throw new Error(`"${needle}" not found`);
+  }, word);
+}
+
+/** Save, and wait for the screen's own word that the row holds it — never inside the 300ms window the buffer reports in. */
+async function saveAndConfirm(page: Page): Promise<void> {
+  const save = page.locator('#content-bar').getByRole('button', { name: /^Save/ });
+  await expect(save).not.toHaveAttribute('aria-disabled');
+  await save.click();
+  await expect(page.getByRole('status').filter({ hasText: /Saved/ })).toBeVisible({ timeout: 30000 });
+}
+
+test.describe('the block UI against the real backend, 1280x900', () => {
+  test.use({ viewport: { width: 1280, height: 900 } });
+
+  test('selecting a word shows the toolbar above it; Bold marks it and saves as __word__; Bold again restores the original bytes', async ({ page }) => {
+    test.setTimeout(120000);
+    const original = 'A paragraph with one word to embolden.\n';
+    const block = await seedBlockPage(page, original);
+    const editor = await openBlockPage(page, block, 'A paragraph with one word');
+    const toolbar = page.getByRole('toolbar', { name: 'Text formatting' });
+    await expect(toolbar).toHaveCount(0);
+
+    await editor.click();
+    await selectWord(editor, 0, 'word');
+    await expect(toolbar).toBeVisible();
+    // Above the line it formats, whole, inside the viewport.
+    const lineBox = (await editor.locator(':scope > p').first().boundingBox())!;
+    const toolbarBox = (await toolbar.boundingBox())!;
+    expect(toolbarBox.y + toolbarBox.height, 'stands above the selected line').toBeLessThanOrEqual(lineBox.y);
+    expect(toolbarBox.x).toBeGreaterThanOrEqual(0);
+    expect(toolbarBox.x + toolbarBox.width).toBeLessThanOrEqual(1280);
+    const bold = toolbar.getByRole('button', { name: 'Bold' });
+    await expect(bold).toHaveAttribute('aria-pressed', 'false');
+    await shotUi(page, 'toolbar-1280-light');
+
+    await bold.click();
+    await expect(editor.locator('strong')).toHaveText('word');
+    await expect(bold).toHaveAttribute('aria-pressed', 'true');
+    await expect(editor, 'the click left focus in the editor').toBeFocused();
+    await saveAndConfirm(page);
+    // `__` is the pinned strong spelling (`packages/markdown/src/pipeline.ts`).
+    expect(await savedMarkdown(page, block.pageId)).toBe('A paragraph with one __word__ to embolden.\n');
+
+    // Save took focus, so the toolbar went with it (it is up only while
+    // the editor or the toolbar has focus). Back in the range it reads as
+    // pressed, and the same button now unbolds: the round trip is
+    // byte-identical to what the page held before.
+    await expect(toolbar).toHaveCount(0);
+    await editor.click();
+    await selectWord(editor, 0, 'word');
+    await expect(toolbar).toBeVisible();
+    await expect(bold).toHaveAttribute('aria-pressed', 'true');
+    await bold.click();
+    await expect(editor.locator('strong')).toHaveCount(0);
+    await saveAndConfirm(page);
+    expect(await savedMarkdown(page, block.pageId)).toBe(original);
+  });
+
+  test('the toolbar is keyboard-reachable: Ctrl+Shift+. focuses it, arrows move along it, Enter toggles, Escape returns to the editor', async ({ page }) => {
+    test.setTimeout(120000);
+    const block = await seedBlockPage(page, 'Keyboard reaches the toolbar too.\n');
+    const editor = await openBlockPage(page, block, 'Keyboard reaches');
+    const toolbar = page.getByRole('toolbar', { name: 'Text formatting' });
+
+    await editor.click();
+    await selectWord(editor, 0, 'reaches');
+    await expect(toolbar).toBeVisible();
+
+    await page.keyboard.press('Control+Shift+Period');
+    await expect(toolbar.getByRole('button', { name: 'Bold' })).toBeFocused();
+    await page.keyboard.press('ArrowRight');
+    await expect(toolbar.getByRole('button', { name: 'Italic' })).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(editor.locator('em')).toHaveText('reaches');
+    await expect(toolbar.getByRole('button', { name: 'Italic' })).toHaveAttribute('aria-pressed', 'true');
+
+    await page.keyboard.press('Escape');
+    await expect(editor).toBeFocused();
+    // Typing replaces the selection, and the toolbar goes with it.
+    await page.keyboard.type('finds');
+    await expect(editor).toContainText('Keyboard finds the toolbar too.');
+    await expect(toolbar).toHaveCount(0);
+  });
+
+  test('the link control: a URL applied from the popover saves as [text](url), and Remove link takes it off again', async ({ page }) => {
+    test.setTimeout(120000);
+    const block = await seedBlockPage(page, 'Read the spec before deciding.\n');
+    const editor = await openBlockPage(page, block, 'Read the spec');
+    const toolbar = page.getByRole('toolbar', { name: 'Text formatting' });
+
+    await editor.click();
+    await selectWord(editor, 0, 'spec');
+    await toolbar.getByRole('button', { name: 'Link' }).click();
+    const dialog = page.getByRole('dialog');
+    const field = dialog.getByLabel('Link URL');
+    await expect(field).toBeFocused();
+    await field.fill('https://example.com/spec');
+    await page.keyboard.press('Enter');
+    await expect(dialog).toBeHidden();
+    await expect(editor.locator('a')).toHaveAttribute('href', 'https://example.com/spec');
+    await expect(editor).toBeFocused();
+    await saveAndConfirm(page);
+    expect(await savedMarkdown(page, block.pageId)).toBe('Read the [spec](https://example.com/spec) before deciding.\n');
+
+    await selectWord(editor, 0, 'spec');
+    await expect(toolbar.getByRole('button', { name: 'Link' })).toHaveAttribute('aria-pressed', 'true');
+    await toolbar.getByRole('button', { name: 'Link' }).click();
+    await expect(dialog.getByLabel('Link URL')).toHaveValue('https://example.com/spec');
+    await dialog.getByRole('button', { name: 'Remove link' }).click();
+    await expect(editor.locator('a')).toHaveCount(0);
+    await saveAndConfirm(page);
+    expect(await savedMarkdown(page, block.pageId)).toBe('Read the spec before deciding.\n');
+  });
 });
 
 /**

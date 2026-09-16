@@ -3,7 +3,8 @@ import type { MentionCandidate, MentionState, SlashState } from '@deep-wiki/edit
 import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { defineComponent, h } from 'vue';
-import { MENU_WIDTH_ESTIMATE } from '~/utils/menu-position';
+import { MENU_WIDTH_ESTIMATE, positionToolbar } from '~/utils/menu-position';
+import EditorSelectionToolbar from './EditorSelectionToolbar.vue';
 import EditorSurface from './EditorSurface.vue';
 import editorSurfaceSource from './EditorSurface.vue?raw';
 
@@ -50,6 +51,24 @@ interface FakeViewOptions {
   readonly mention?: { readonly onStateChange?: (state: MentionState, view: unknown) => void; readonly onConfirmed?: (candidate: MentionCandidate) => void };
   readonly slash?: { readonly onStateChange?: (state: SlashState) => void };
   readonly onUpdate?: (view: unknown, update: EditorUpdate) => void;
+  readonly selection?: { readonly onChange?: (report: SelectionReport) => void };
+}
+
+/** What the shipped selection plugin reports (`selection-plugin.ts`): the snapshot plus both ends' coordinates. */
+interface SelectionReport {
+  readonly kind: 'text' | 'code' | 'node' | 'gap';
+  readonly from: number;
+  readonly to: number;
+  readonly empty: boolean;
+  readonly marks: { strong: boolean; emphasis: boolean; delete: boolean; inlineCode: boolean; link: boolean };
+  readonly link: { href: string; title: string | null } | null;
+  readonly coords: { from: LineRect; to: LineRect } | null;
+}
+interface LineRect {
+  readonly top: number;
+  readonly bottom: number;
+  readonly left: number;
+  readonly right: number;
 }
 
 /** What the shipped `describeUpdate` reports after a transaction (`editor-commands.ts`). */
@@ -80,6 +99,14 @@ const { harness } = vi.hoisted(() => ({
       throw new Error('no editor mounted');
     },
     dispatchSlash: (_action: SlashAction): void => {
+      throw new Error('no editor mounted');
+    },
+    /** Reports a selection change to the host the way the shipped selection plugin does. */
+    select: (_report: SelectionReport): void => {
+      throw new Error('no editor mounted');
+    },
+    /** Gives the fake view a new document instance, as a transaction with steps would. */
+    replaceDoc: (_markdown: string): void => {
       throw new Error('no editor mounted');
     },
     /** Reports a transaction to the host the way the real `dispatchTransaction` does, with these history depths. */
@@ -122,7 +149,9 @@ vi.mock('@deep-wiki/editor/mount', async (importOriginal) => {
         coordsAtPos: () => harness.caret,
         state: {
           // The real document the host parsed, so the debounced `toMarkdown`
-          // the host runs after an update has something to serialise.
+          // the host runs after an update has something to serialise; a
+          // test swaps it (`harness.replaceDoc`) to stand for a transaction
+          // with steps, which is the only kind that yields a new instance.
           doc: options.doc,
           get tr() {
             return { setMeta: (key: unknown, action: unknown) => ({ key, action }) };
@@ -159,6 +188,10 @@ vi.mock('@deep-wiki/editor/mount', async (importOriginal) => {
         else if (event.key === 'Escape') dispatchAction({ type: 'dismiss' });
       });
 
+      harness.select = (report) => options.selection?.onChange?.(report);
+      harness.replaceDoc = (markdown) => {
+        view.state.doc = actual.fromMarkdown(markdown);
+      };
       let transactionCount = 0;
       harness.update = ({ undoDepth, redoDepth }) => {
         transactionCount += 1;
@@ -236,9 +269,9 @@ const SurfaceInApp = defineComponent({
   setup: () => () => h(UApp, null, { default: () => h(EditorSurface, { markdown: '# Hi\n', workspaceId: 'ws-1', pageId: 'page-1' }) }),
 });
 
-async function mountSurface() {
+async function mountSurface(options: { attachTo?: Element } = {}) {
   harness.mounted = false;
-  const component = await mountSuspended(SurfaceInApp);
+  const component = await mountSuspended(SurfaceInApp, options);
   // The component only builds its view after `await import(…)` resolves, and
   // the first such import in a run pays for transforming the whole editor
   // module graph — seconds, not a microtask.
@@ -320,6 +353,37 @@ describe('EditorSurface', () => {
    * from keystrokes — and the two commands, which run through the handle
    * so the button and `Ctrl+Z` can never disagree.
    */
+  describe('what a transaction reports', () => {
+    /**
+     * A selection-only transaction — a click, an arrow key — keeps
+     * `state.doc` the same instance and must not report the document:
+     * doing so marked the buffer dirty and enabled Save before anything
+     * had changed, and `e2e/editor.spec.ts` saved the pre-edit document
+     * when a click landed inside the 300ms window (docs/TODO.md,
+     * 2026-09-16).
+     */
+    test('a transaction that left the document alone reports no update; one that changed it reports the new markdown once', async () => {
+      vi.useFakeTimers();
+      try {
+        const component = await mountSurface();
+        const surface = component.findComponent(EditorSurface);
+
+        harness.update({ undoDepth: 0, redoDepth: 0 });
+        harness.update({ undoDepth: 0, redoDepth: 0 });
+        await vi.advanceTimersByTimeAsync(400);
+        expect(surface.emitted('update')).toBeUndefined();
+
+        harness.replaceDoc('# Hi\n\nChanged.\n');
+        harness.update({ undoDepth: 1, redoDepth: 0 });
+        harness.update({ undoDepth: 1, redoDepth: 0 });
+        await vi.advanceTimersByTimeAsync(400);
+        expect(surface.emitted('update')).toEqual([['# Hi\n\nChanged.\n']]);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
   describe('undo and redo for the contextual bar', () => {
     test('reports the history depths of every transaction, undebounced, as a `history` event', async () => {
       const component = await mountSurface();
@@ -342,6 +406,120 @@ describe('EditorSurface', () => {
 
       expect(harness.handleCalls.map((call) => call.command)).toEqual(['undo', 'redo']);
       expect(harness.focusCalls).toBe(focusBefore + 2);
+    });
+  });
+
+  /**
+   * The selection toolbar (`EditorSelectionToolbar`) over a non-empty text
+   * selection: shown from the selection plugin's report while the editor
+   * — or the toolbar itself — has focus, placed by `positionToolbar`,
+   * acting through the handle. Its own contract (the roving keyboard, the
+   * link popover) is `EditorSelectionToolbar.test.ts`; this holds the
+   * wiring.
+   */
+  describe('the selection toolbar', () => {
+    const NO_MARKS = { strong: false, emphasis: false, delete: false, inlineCode: false, link: false };
+    const RANGE: SelectionReport = {
+      kind: 'text',
+      from: 1,
+      to: 5,
+      empty: false,
+      marks: NO_MARKS,
+      link: null,
+      coords: { from: { top: 300, bottom: 326, left: 400, right: 400 }, to: { top: 300, bottom: 326, left: 480, right: 480 } },
+    };
+
+    function toolbar(component: { find: (selector: string) => { exists: () => boolean } }) {
+      return component.find('[role="toolbar"][aria-label="Text formatting"]');
+    }
+
+    async function focusEditor(component: Awaited<ReturnType<typeof mountSurface>>): Promise<void> {
+      component.get('[data-testid="editor-surface"]').element.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+      await component.vm.$nextTick();
+    }
+
+    test('appears over a non-empty text selection while the editor has focus, where positionToolbar puts it, and goes when the selection collapses', async () => {
+      const component = await mountSurface();
+      await focusEditor(component);
+      expect(toolbar(component).exists()).toBe(false);
+
+      harness.select(RANGE);
+      await component.vm.$nextTick();
+
+      expect(toolbar(component).exists()).toBe(true);
+      const expected = positionToolbar(RANGE.coords!);
+      const style = (component.get('[role="toolbar"]').element as HTMLElement).style;
+      expect(Number.parseFloat(style.top)).toBe(expected.top);
+      expect(Number.parseFloat(style.left)).toBe(expected.left);
+
+      harness.select({ ...RANGE, to: 1, empty: true });
+      await component.vm.$nextTick();
+      expect(toolbar(component).exists()).toBe(false);
+    });
+
+    test('stays away inside a code block, over a node selection, and while the editor is not focused', async () => {
+      const component = await mountSurface();
+
+      harness.select(RANGE);
+      await component.vm.$nextTick();
+      expect(toolbar(component).exists(), 'no focus yet').toBe(false);
+
+      await focusEditor(component);
+      expect(toolbar(component).exists()).toBe(true);
+      harness.select({ ...RANGE, kind: 'code' });
+      await component.vm.$nextTick();
+      expect(toolbar(component).exists(), 'code block').toBe(false);
+      harness.select({ ...RANGE, kind: 'node' });
+      await component.vm.$nextTick();
+      expect(toolbar(component).exists(), 'node selection').toBe(false);
+
+      harness.select(RANGE);
+      await component.vm.$nextTick();
+      expect(toolbar(component).exists()).toBe(true);
+      const outside = document.createElement('button');
+      document.body.append(outside);
+      component.get('[data-testid="editor-surface"]').element.dispatchEvent(new FocusEvent('focusout', { bubbles: true, relatedTarget: outside }));
+      await component.vm.$nextTick();
+      expect(toolbar(component).exists(), 'focus left the editor').toBe(false);
+      outside.remove();
+    });
+
+    test('reflects the marks the plugin reports, and a button runs the handle\'s toggleMark, setLink or unsetLink', async () => {
+      const component = await mountSurface();
+      await focusEditor(component);
+      harness.select({ ...RANGE, marks: { ...NO_MARKS, emphasis: true } });
+      await component.vm.$nextTick();
+
+      expect(component.get('[role="toolbar"] button[aria-label="Italic"]').attributes('aria-pressed')).toBe('true');
+      await component.get('[role="toolbar"] button[aria-label="Bold"]').trigger('click');
+      const bubble = component.findComponent(EditorSelectionToolbar);
+      bubble.vm.$emit('setLink', 'https://example.com');
+      bubble.vm.$emit('unsetLink');
+      await component.vm.$nextTick();
+
+      expect(harness.handleCalls).toEqual([
+        { command: 'toggleMark', args: ['strong'] },
+        { command: 'setLink', args: ['https://example.com'] },
+        { command: 'unsetLink', args: [] },
+      ]);
+    });
+
+    test('Ctrl+Shift+. from the editor moves focus into the toolbar, and Escape there hands it back', async () => {
+      const component = await mountSurface({ attachTo: document.body });
+      await focusEditor(component);
+      harness.select(RANGE);
+      await component.vm.$nextTick();
+      const focusBefore = harness.focusCalls;
+
+      // `Shift`+`.` reports `>` on a US layout; the code names the key.
+      await component.get('[data-testid="editor-surface"]').trigger('keydown', { key: '>', code: 'Period', ctrlKey: true, shiftKey: true });
+
+      const bold = component.get('[role="toolbar"] button[aria-label="Bold"]');
+      expect(document.activeElement).toBe(bold.element);
+
+      await bold.trigger('keydown', { key: 'Escape' });
+      expect(harness.focusCalls).toBe(focusBefore + 1);
+      component.unmount();
     });
   });
 
