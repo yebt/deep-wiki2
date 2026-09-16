@@ -1,11 +1,24 @@
 import { UApp } from '#components';
 import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime';
+import { flushPromises } from '@vue/test-utils';
 import { describe, expect, test, vi } from 'vitest';
 import { computed, defineComponent, h, ref } from 'vue';
 import EditPage from './edit.vue';
 
-const { useEditSessionMock, useLockHeartbeatMock, useSavePageMock, usePresenceStreamMock, useRouteMock, useWorkspaceTreeMock, useWorkspaceDirectoryMock } =
+const {
+  useEditSessionMock,
+  useLockHeartbeatMock,
+  useSavePageMock,
+  usePresenceStreamMock,
+  useRouteMock,
+  useWorkspaceTreeMock,
+  useWorkspaceDirectoryMock,
+  navigateToMock,
+  useConfirmMock,
+} =
   vi.hoisted(() => ({
+    navigateToMock: vi.fn(async () => {}),
+    useConfirmMock: vi.fn(),
     useEditSessionMock: vi.fn(),
     useLockHeartbeatMock: vi.fn(),
     useSavePageMock: vi.fn(),
@@ -22,6 +35,19 @@ mockNuxtImport('usePresenceStream', () => usePresenceStreamMock);
 mockNuxtImport('useRoute', () => useRouteMock);
 mockNuxtImport('useWorkspaceTree', () => useWorkspaceTreeMock);
 mockNuxtImport('useWorkspaceDirectory', () => useWorkspaceDirectoryMock);
+mockNuxtImport('navigateTo', () => navigateToMock);
+mockNuxtImport('useConfirm', () => useConfirmMock);
+
+/**
+ * The product's one confirm dialog is `app.vue`'s; here the question half
+ * is a mock that answers what the test decides, so a test reads what was
+ * asked (`confirm.mock.calls`) and what happened after the answer.
+ */
+function mockConfirm(answer = false) {
+  const confirm = vi.fn(async () => answer);
+  useConfirmMock.mockReturnValue({ pending: ref(null), confirm, settle: vi.fn() });
+  return confirm;
+}
 
 /**
  * The frame's own collaborators — the sidebar's tree and the workspace
@@ -112,7 +138,8 @@ function mockDefaults(
   });
   mockPresence();
   mockFrame();
-  return { save };
+  const confirm = mockConfirm(false);
+  return { save, confirm };
 }
 
 const READY_SESSION = { markdown: '# Hi\n', title: 'A Page', workspaceId: 'ws-1', lock: { holderUserId: 'me', acquiredAt: 'x', heartbeatAt: 'x' } };
@@ -169,6 +196,18 @@ describe('edit-mode page', () => {
     const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
     expect(component.text()).toMatch(/deliberately doesn't say which/);
+  });
+
+  // One rule for a signed-out visit to a signed-in screen: leave for
+  // sign-in with this address as the return path, and show no card here —
+  // a card would be a dead end with a button on it (docs/UI-CHECKLIST.md §3).
+  test('a signed-out visitor is sent to sign in, to come back here afterwards, and shown no card', async () => {
+    mockDefaults();
+    mockSession({ status: 'unauthenticated' });
+    const component = await mountSuspended(PageInApp, FRAME_STUBS);
+
+    expect(navigateToMock).toHaveBeenCalledWith(expect.stringMatching(/^\/login(\?next=|$)/), { replace: true });
+    expect(component.find('main a[href="/login"]').exists()).toBe(false);
   });
 
   // One chrome for one destination: edit mode and the history screen both
@@ -244,6 +283,31 @@ describe('edit-mode page', () => {
     expect(component.text()).toMatch(/someone else is editing/i);
     expect(component.text()).toMatch(/open read-only/i);
     expect(component.text()).toMatch(/take over editing/i);
+  });
+
+  // "Take over" states its consequence for the other person before it is
+  // confirmed (§4.8) — through the product's one confirm dialog, in the
+  // destructive colour, and nothing happens on a "no".
+  test('Take over asks through the confirm dialog, naming the consequence, and only takes over on a yes', async () => {
+    const { confirm } = mockDefaults();
+    const { takeOver } = mockSession({
+      status: 'locked',
+      refusal: { reason: 'locked', holder: { userId: 'other', acquiredAt: '2026-01-01T00:00:00Z', heartbeatAt: '2026-01-01T00:00:00Z' }, offeredExits: ['read_only', 'take_over'] },
+    });
+    const component = await mountSuspended(PageInApp, FRAME_STUBS);
+    const button = component.findAll('button').find((b) => /take over editing/i.test(b.text()))!;
+
+    await button.trigger('click');
+    await flushPromises();
+    expect(confirm).toHaveBeenCalledWith(
+      expect.objectContaining({ title: 'Take over editing?', confirmLabel: 'Take over', tone: 'destructive', description: expect.stringMatching(/unsaved edits/i) }),
+    );
+    expect(takeOver).not.toHaveBeenCalled();
+
+    confirm.mockResolvedValue(true);
+    await button.trigger('click');
+    await flushPromises();
+    expect(takeOver).toHaveBeenCalledTimes(1);
   });
 
   test('renders the refused state naming the construct and line, with read-only and an unavailable normalise exit that stays reachable', async () => {
@@ -470,7 +534,7 @@ describe('edit-mode page', () => {
   // retry that would just 409 again on the same hash (docs/TODO.md
   // Finding, this task).
   test('a stale save offers Reload, confirms before discarding unsaved edits, and disables Save meanwhile', async () => {
-    mockDefaults({ status: 'stale', message: 'Someone else saved a newer version. Reload before saving again.' });
+    const { confirm } = mockDefaults({ status: 'stale', message: 'Someone else saved a newer version. Reload before saving again.' });
     mockSession({
       status: 'ready',
       session: { markdown: '# Hi\n', title: 'Hi', workspaceId: 'ws-1', lock: { holderUserId: 'me', acquiredAt: 'x', heartbeatAt: 'x' } },
@@ -483,18 +547,20 @@ describe('edit-mode page', () => {
     const saveButton = component.findAll('button').find((button) => /Save/.test(button.text()))!;
     expect(saveButton.attributes('aria-disabled')).toBe('true');
 
-    const confirmMock = vi.fn().mockReturnValue(false);
     const reloadSpy = vi.fn();
-    vi.stubGlobal('confirm', confirmMock);
     vi.stubGlobal('location', { ...window.location, reload: reloadSpy });
 
     const reloadButton = component.findAll('button').find((button) => /Reload/.test(button.text()))!;
     await reloadButton.trigger('click');
-    expect(confirmMock).toHaveBeenCalled();
+    await flushPromises();
+    // The product's dialog, not `window.confirm`: a destructive question
+    // whose verb is the action, naming what is lost.
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ confirmLabel: 'Reload', tone: 'destructive', description: expect.stringMatching(/unsaved changes/i) }));
     expect(reloadSpy).not.toHaveBeenCalled(); // declined the confirm — nothing discarded
 
-    confirmMock.mockReturnValue(true);
+    confirm.mockResolvedValue(true);
     await reloadButton.trigger('click');
+    await flushPromises();
     expect(reloadSpy).toHaveBeenCalledTimes(1);
 
     vi.unstubAllGlobals();
@@ -616,19 +682,23 @@ describe('edit-mode page', () => {
   });
 
   describe('inside the workspace frame', () => {
-    // Where the person is: workspace › shelf › book › page, through the
-    // tree the sidebar holds, then the state this screen adds — a crumb
-    // saying "Editing" (docs/UI-CHECKLIST.md §4.5). The word alone: with
-    // an icon the crumb truncated to "Edit…" at 320 beside the bar's two
-    // actions (`e2e/editor.spec.ts` measures that bar).
-    test('the breadcrumb walks from the workspace to the page and ends in the Editing state', async () => {
+    // Where the person is, in the condensed bar (2026-09-16): the page,
+    // then the state this screen adds — a crumb saying "Editing"
+    // (docs/UI-CHECKLIST.md §4.5) — with the path above them (workspace ›
+    // shelf › book) folded behind one overflow control; the tree beside
+    // the editor shows it. The word alone: with an icon the crumb
+    // truncated to "Edit…" at 320 beside the bar's two actions
+    // (`e2e/editor.spec.ts` measures that bar). `AppShell.test.ts` holds
+    // what the overflow menu contains.
+    test('the breadcrumb is condensed to the page and the Editing state, the path above them behind an overflow control', async () => {
       mockDefaults();
       mockSession({ status: 'ready', session: READY_SESSION });
       const component = await mountSuspended(PageInApp, EDITOR_STUBS);
 
       const nav = component.get('nav[aria-label="Where you are"]');
       const crumbs = nav.findAll('li').map((li) => li.text()).filter(Boolean);
-      expect(crumbs).toEqual(['Acme', 'Engineering', 'Handbook', 'A Page', 'Editing']);
+      expect(crumbs).toEqual(['A Page', 'Editing']);
+      expect(nav.find('button[aria-label="Show the full path"]').exists()).toBe(true);
       // The page crumb is the link back to reading it; the state crumb is
       // a place name, not a link.
       expect(nav.find('a[href="/pages/page-1"]').exists()).toBe(true);
@@ -685,7 +755,7 @@ describe('edit-mode page', () => {
     // with the action, and it confirms before a dirty buffer is discarded
     // the way the stale banner's Reload does.
     test('the lock-lost notice is the shared chip tier above the editor, offers Reload, and confirms before discarding unsaved edits', async () => {
-      mockDefaults({ heartbeatStatus: 'lost' });
+      const { confirm } = mockDefaults({ heartbeatStatus: 'lost' });
       mockSession({ status: 'ready', session: READY_SESSION });
       const component = await mountSuspended(PageInApp, EDITOR_STUBS);
 
@@ -703,18 +773,18 @@ describe('edit-mode page', () => {
       editorStub.vm.$emit('update', '# Hi\n\nedited\n');
       await component.vm.$nextTick();
 
-      const confirmMock = vi.fn().mockReturnValue(false);
       const reloadSpy = vi.fn();
-      vi.stubGlobal('confirm', confirmMock);
       vi.stubGlobal('location', { ...window.location, reload: reloadSpy });
 
       const reload = chip.findAll('button').find((button) => /Reload/.test(button.text()))!;
       await reload.trigger('click');
-      expect(confirmMock).toHaveBeenCalled();
+      await flushPromises();
+      expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ confirmLabel: 'Reload', tone: 'destructive' }));
       expect(reloadSpy).not.toHaveBeenCalled();
 
-      confirmMock.mockReturnValue(true);
+      confirm.mockResolvedValue(true);
       await reload.trigger('click');
+      await flushPromises();
       expect(reloadSpy).toHaveBeenCalledTimes(1);
 
       vi.unstubAllGlobals();

@@ -35,6 +35,18 @@ describe('InlineNotice', () => {
     expect(root.find('[aria-hidden="true"]').exists()).toBe(true);
   });
 
+  // `info` is for a fact the person should know that is neither a result
+  // nor a fault — "your session ended, sign in to go back" on the sign-in
+  // screen. Its container pair already exists in main.css beside the
+  // other three; the tone only had no name here.
+  test('the info tone picks the M3 info container pair', async () => {
+    const component = await mountSuspended(inApp({ tier: 'chip', tone: 'info' }, { default: () => 'Your session has ended.' }));
+
+    const root = component.get('[data-notice-tier="chip"]');
+    expect(root.classes()).toContain('bg-info-container');
+    expect(root.classes()).toContain('text-on-info-container');
+  });
+
   test('a chip is the one-line tier: no title, and its action sits on the same row', async () => {
     const component = await mountSuspended(
       inApp({ tier: 'chip', tone: 'error', role: 'alert' }, { default: () => 'Save refused.', actions: () => h('button', 'Reload') }),

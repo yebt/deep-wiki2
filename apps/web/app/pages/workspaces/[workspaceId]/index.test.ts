@@ -13,7 +13,8 @@ import DashboardPage from './index.vue';
  * and the single column at 320 — is `e2e/dashboard.spec.ts`'s; happy-dom
  * has no layout engine.
  */
-const { useWorkspaceActivityMock, usePresenceStreamMock, useRouteMock, useWorkspaceTreeMock, useWorkspaceDirectoryMock } = vi.hoisted(() => ({
+const { useWorkspaceActivityMock, usePresenceStreamMock, useRouteMock, useWorkspaceTreeMock, useWorkspaceDirectoryMock, navigateToMock } = vi.hoisted(() => ({
+  navigateToMock: vi.fn(async () => {}),
   useWorkspaceActivityMock: vi.fn(),
   usePresenceStreamMock: vi.fn(),
   useRouteMock: vi.fn(() => ({ params: { workspaceId: 'ws-1' } })),
@@ -25,6 +26,7 @@ mockNuxtImport('usePresenceStream', () => usePresenceStreamMock);
 mockNuxtImport('useRoute', () => useRouteMock);
 mockNuxtImport('useWorkspaceTree', () => useWorkspaceTreeMock);
 mockNuxtImport('useWorkspaceDirectory', () => useWorkspaceDirectoryMock);
+mockNuxtImport('navigateTo', () => navigateToMock);
 
 const CHANGE = {
   revisionId: 'r1',
@@ -207,5 +209,16 @@ describe('workspace dashboard', () => {
     const before = load.mock.calls.length;
     await failed.get('[data-testid="dashboard-retry"]').trigger('click');
     expect(load.mock.calls.length).toBe(before + 1);
+  });
+
+  // One rule for a signed-out visit to a signed-in screen: leave for
+  // sign-in with this address as the return path, and show no card here —
+  // a card would be a dead end with a button on it (docs/UI-CHECKLIST.md §3).
+  test('a signed-out visitor is sent to sign in, to come back here afterwards, and shown no card', async () => {
+    mockAll({ status: 'unauthenticated' });
+    const component = await mountSuspended(PageInApp);
+
+    expect(navigateToMock).toHaveBeenCalledWith(expect.stringMatching(/^\/login(\?next=|$)/), { replace: true });
+    expect(component.findAll('a').find((a) => /sign in/i.test(a.text()))).toBeUndefined();
   });
 });

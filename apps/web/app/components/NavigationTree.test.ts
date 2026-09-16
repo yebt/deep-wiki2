@@ -142,6 +142,16 @@ describe('NavigationTree', () => {
       }
     });
 
+    // The tree is the frame's own request, made on every screen inside a
+    // workspace, so it is the frame's own signed-out state: the one rule —
+    // leave for sign-in and come back — applies here as on the screen.
+    test('a signed-out visitor is sent to sign in, and the pane shows no error', async () => {
+      mockTree({ status: 'unauthenticated' });
+      const component = await mount();
+      expect(navigateToMock).toHaveBeenCalledWith(expect.stringMatching(/^\/login(\?next=|$)/), { replace: true });
+      expect(component.find('[role="alert"]').exists()).toBe(false);
+    });
+
     test('with no workspace, nothing is requested', async () => {
       const { load } = mockTree({ status: 'idle' });
       await mount({ workspaceId: null });

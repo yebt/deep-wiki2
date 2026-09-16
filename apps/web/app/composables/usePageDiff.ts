@@ -1,4 +1,4 @@
-export type PageDiffStatus = 'idle' | 'loading' | 'success' | 'not-found' | 'network-error';
+export type PageDiffStatus = 'idle' | 'loading' | 'success' | 'not-found' | 'unauthenticated' | 'network-error';
 
 export type BlockChangeWithText =
   | { readonly kind: 'added'; readonly id: string; readonly slot: number; readonly splitFrom?: string; readonly text: string }
@@ -76,6 +76,13 @@ export function usePageDiff(nodeId: string, from: string, to: string, fetcher?: 
       message.value = '';
     } catch (error) {
       const code = httpStatusOf(error);
+      // Signed out: the screen's next move is sign-in, not a retry
+      // (`useSignInRedirect`), so this is never the network branch.
+      if (code === 401) {
+        status.value = 'unauthenticated';
+        message.value = 'Your session has ended.';
+        return;
+      }
       if (code === 403 || code === 404) {
         status.value = 'not-found';
         message.value = 'This page does not exist.';

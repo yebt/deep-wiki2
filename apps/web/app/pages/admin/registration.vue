@@ -90,6 +90,8 @@ const {
   saveDomains,
   sendSmtpTest,
 } = useInstanceSettings();
+// A signed-out visit leaves for sign-in and comes back (`useSignInRedirect`).
+useSignInRedirect().redirectWhenSignedOut(status);
 
 onMounted(() => {
   void load();
@@ -160,13 +162,6 @@ useSeoMeta({ title: 'Registration — deep-wiki' });
       <USkeleton class="h-10 w-5/6" />
       <USkeleton class="h-10 w-4/6" />
     </div>
-
-    <PageNotice v-else-if="status === 'unauthenticated'" icon="i-lucide-log-in" heading="Sign in to change registration" :level="2">
-      Your session has ended, or you have not signed in on this device yet.
-      <template #actions>
-        <UButton to="/login" color="primary" variant="solid" size="lg" icon="i-lucide-log-in">Sign in</UButton>
-      </template>
-    </PageNotice>
 
     <PageNotice v-else-if="status === 'forbidden'" icon="i-lucide-lock" heading="This is the instance operator's" :level="2">
       {{ message }} If that should be you, ask whoever set this deep-wiki up.

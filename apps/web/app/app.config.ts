@@ -480,7 +480,16 @@ export default defineAppConfig({
 
     // Overlays sit one rung above the panes they cover (§9.6).
     dropdownMenu: { slots: { content: 'bg-accented' } },
-    modal: { slots: { content: 'bg-accented' } },
+    // A dialog's headline is M3's `headline-small` — 24px / 32px / 400
+    // (§2.3, "Chrome") — stated here once so the confirm dialog and the
+    // tree's dialogs read alike; the library's own is `font-semibold` at
+    // the base size, a card title, not a dialog's. Spelled in the
+    // library's scale (`text-2xl` is 24px on a 32px line) for the
+    // tailwind-merge reason documented on `authForm.description`: a
+    // project `--text-*` role in a slot override is read as a colour and
+    // dropped. The description the library ships, `text-sm text-muted`
+    // (14px / 20px), already is `body-medium`.
+    modal: { slots: { content: 'bg-accented', title: 'text-2xl font-normal text-highlighted' } },
     popover: { slots: { content: 'bg-accented' } },
   },
 });

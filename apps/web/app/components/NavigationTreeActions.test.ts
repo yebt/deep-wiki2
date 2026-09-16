@@ -317,3 +317,24 @@ describe('NavigationTreeActions — the tree’s keyboard contract', () => {
     expect(mounted.wrapper.find('[role="tree"]').exists()).toBe(false);
   });
 });
+
+/*
+ * The toolbar's row, 2026-09-16: "+ New…" sat beside "Rename…" at its
+ * natural width and left the rest of the 280px pane empty to the right
+ * (the owner's screenshot). The row fills: New… grows, Rename… keeps its
+ * natural width. Geometry is the screenshots' to show; what a unit test
+ * can hold is the class that makes it so, and that both stay 32px chrome
+ * controls (docs/DESIGN-SYSTEM.md §7.2) — never below the 24px floor.
+ */
+describe('NavigationTreeActions — the toolbar row', () => {
+  test('New… grows to fill the row and Rename… keeps its natural width, both at the 32px chrome height', async () => {
+    const mounted = await mountActions({ selectedId: 'page-1' });
+
+    const create = byTestId(mounted, 'tree-create-open')!;
+    const rename = byTestId(mounted, 'tree-rename-open')!;
+    expect(create.className).toMatch(/\bflex-1\b/);
+    expect(rename.className).not.toMatch(/\bflex-1\b/);
+    expect(create.className).toMatch(/\bmin-h-8\b/);
+    expect(rename.className).toMatch(/\bmin-h-8\b/);
+  });
+});

@@ -1,4 +1,4 @@
-export type EditSessionStatus = 'idle' | 'loading' | 'ready' | 'refused' | 'locked' | 'forbidden' | 'not-found' | 'network-error';
+export type EditSessionStatus = 'idle' | 'loading' | 'ready' | 'refused' | 'locked' | 'forbidden' | 'not-found' | 'unauthenticated' | 'network-error';
 
 export interface EditSessionReady {
   readonly markdown: string;
@@ -67,6 +67,13 @@ export function useEditSession(nodeId: string, fetcher?: EditSessionFetcher, tak
 
   function applyFailure(error: unknown): void {
     const code = httpStatusOf(error);
+    // Signed out: the screen's next move is sign-in, not a retry
+    // (`useSignInRedirect`), so this is never the network branch.
+    if (code === 401) {
+      status.value = 'unauthenticated';
+      message.value = 'Your session has ended.';
+      return;
+    }
     if (code === 403) {
       status.value = 'forbidden';
       message.value = "You don't have access to edit this page.";

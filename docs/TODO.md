@@ -964,6 +964,79 @@ placeholder screens have no e2e of their own beyond the click-through in that sp
 under Known gaps.
 
 ---
+### 2026-09-16 — The owner's three frame requests: the signed-out bounce, native confirms, edit mode's bar
+
+Branch `feat/frame-review-shell`, one commit each; the Review Log entry of the same date in
+`docs/UI-CHECKLIST.md` carries the measurements.
+
+- **A 401 had no rule.** Four screens answered it with a card and a button that forgot where
+  the person was; eight composables (`useTree`, `useWorkspaceActivity`, `usePageRead`,
+  `useEditSession`, `usePageHistory`, `usePageDiff`, `useBookHistory`, `useBookDiff`) folded
+  it into `network-error`, so a signed-out visit to any screen inside the frame said "Cannot
+  reach the server" — false, and with a Retry that would 401 again. Now one composable,
+  `useSignInRedirect` (`localReturnPath`, `signInPath`, `redirectWhenSignedOut`), and one
+  query, `next`, read by `pages/login.vue`. The tree's own request is hooked too
+  (`NavigationTree`), so the frame bounces even when the screen's composable has not resolved.
+  `next` is read straight off the address bar: only a same-origin path passes, never `/login`,
+  so a sign-in can never end on another site or loop. Vue Router leaves `/` unencoded in the
+  query, so the address reads `/login?next=/workspaces`; `e2e/navigation.spec.ts` asserts
+  through `searchParams`, not a literal.
+- **`pages/[id]/diff.vue` rendered its loaded branch for any status it did not name.** A bare
+  `v-else` read `diff!.from` off `null` for the new `unauthenticated` status on the way out.
+  Now `v-else-if="diff"`. Worth a look on the other screens' last branches; none failed the
+  same test, but a `v-else` that assumes success is the shape.
+- **`UBreadcrumb` (Nuxt UI 4.11) has no overflow.** The generated theme
+  (`apps/web/.nuxt/ui/breadcrumb.ts`) has no ellipsis slot and the component no collapse
+  prop; the condensed bar's `…` is composed from the item slot and `UDropdownMenu`. If a
+  later Nuxt UI ships one, replace the composition rather than keep two.
+- **Reka's dialog returns focus to a trigger, and a promise-opened dialog has none.**
+  `DialogContentModal` prevents `FocusScope`'s default restore and focuses
+  `triggerElement`, which is `undefined` for `UModal v-model:open` with no trigger slot — so
+  focus fell to `body` on close. `ConfirmDialog` reads `document.activeElement` when a
+  question appears and restores it in `onCloseAutoFocus` (passed through `UModal`'s
+  `content` prop), preventing the default so the two do not race. `ConfirmDialog.test.ts`
+  holds it.
+- **`useState` cannot carry the promise's resolver.** `useConfirm` keeps the question
+  (serialisable) in `useState('dw-confirm')` and the resolver in a module-scope `Map` keyed
+  by the question's id; a second question while one is pending answers the first with
+  `false`.
+- **The dialog headline is now central.** `app.config.ts` sets `UModal`'s `title` to
+  `headline-small` (DESIGN-SYSTEM §2.3, "Chrome": 24px / 32px / 400); the description the
+  library ships (`text-sm text-muted`) already is `body-medium`. The tree's New/Rename
+  dialogs take it too — recorded so the change to those two unreviewed dialogs is a
+  decision, not a side effect. Spelled as `text-2xl font-normal`, not `text-headline-small`:
+  the first build shipped the token and the dialog rendered its headline at 16px semibold,
+  because tailwind-merge reads a project `--text-*` role in a slot override as a colour and
+  drops it — the caveat `app.config.ts` already documents on `authForm.description`, met
+  again.
+- **A dirty editor has a 300ms blind spot.** `EditorSurface` reports its document 300ms
+  after the last keystroke, and `isDirty` is set from that report; a person who types and
+  leaves within the window is not asked. `beforeunload` has the same window. The e2e waits
+  for Save to enable before navigating; the product does not mark the buffer dirty on the
+  first keystroke. Small, and the editor surface is another batch's — recorded, not fixed.
+- **`e2e/editor.spec.ts`'s real-backend Save test races the same window.** It types and
+  clicks Save; against a fast server the click landed inside the debounce once in four
+  runs and the PUT carried the pre-edit document, so the reload read back the original.
+  Pre-existing; it should wait for Save to enable the way the new dirty-editor test does.
+- **This host under six worktrees.** Load average 25–38 on 4 cores while this batch ran
+  (`fb-editor`, `fb-comments`, `fb-manage`, `fb-perf1`, `fb-perf2`, `fb-tree` each with a dev
+  server, typecheck or vitest up). Consequences seen: Playwright's 120s `webServer` timeout
+  missed the dev server's first response (110s measured by hand), `e2e/auth.spec.ts`'s
+  untouched tests timed out at `networkidle` on cold compiles, and `setupNuxt` exceeded
+  vitest's 60s hook on files this batch did not touch (`useFocusMode.test.ts`). Every
+  failure named in the report was re-run alone; what stayed red is listed there as
+  environmental with the evidence. `bun run e2e` refuses to reuse a dev server one started
+  by hand (the Nuxt lock preflight), so the runs here went through `playwright test
+  --config playwright.config.ts` directly with the server up — the same command the script
+  spawns after its preflight. Even so, a `nuxt dev` page load measured 29–35s to the
+  editor surface under load (about a thousand module requests per navigation), against
+  the suite's 30s waits, so the touched specs were finally run against a **production
+  build served by `node .output/server/index.mjs`** on the suite's web port, with the API
+  and database provisioned by the suite's own global setup as always: `editor.spec.ts`
+  14/14, `navigation.spec.ts`, `auth-layout.spec.ts` and `auth.spec.ts` 53/53. The
+  assertions are the same; what differs is that a page arrives in seconds. The full
+  `apps/web` unit suite passed 702/702 with `--hookTimeout=300000 --maxWorkers=2` — the
+  60s hook is the setup-under-load failure the 2026-09-06 review already recorded.
 
 ### 2026-09-15 — `ai-provider-foundation` integrated into `main`, 204 commits after its base
 
@@ -3816,6 +3889,17 @@ Fixtures kept permanently at `scripts/checks/__fixtures__/test-coverage/`:
 Decisions still owed. Move an entry out of this section once answered and record the answer
 in Findings.
 
+- **Should every frame screen's bar condense, or edit mode's alone?** `AppShell`'s
+  `condensed` folds the breadcrumb to its last two crumbs behind an overflow menu. Edit mode
+  takes it (the owner's request, 2026-09-16); the read, history, diff and members screens
+  keep the full path. The tree beside every one of them already shows the path, which is the
+  argument for condensing everywhere; the read screen passed review with the full path,
+  which is the argument for asking first. (Findings 2026-09-16.)
+- **Dialog corner: 16px or M3's 28px?** Every dialog ships at `UModal`'s `rounded-lg` (16px,
+  the container rung); DESIGN-SYSTEM §3.4 says dialogs keep `corner-extra-large` (28px), and
+  the radius ladder has no 28px rung (`rounded-xl` is 24, `rounded-2xl` 32). A central ruling
+  on `app.config.ts`'s `modal.slots.content`, once, or an amendment to §3.4. (Findings
+  2026-09-16.)
 - **Default plan policy — what a new account gets.** `createWorkspace` refuses a user whose
   `plan_id` is null (`NoPlanAssignedError` → `403 no_plan`), and both paths that create an
   account — self-registration and invitation acceptance — leave it null; only the seed

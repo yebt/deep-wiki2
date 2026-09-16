@@ -86,6 +86,7 @@ Derived from this project's actual stack and domain.
 - [ ] No wrapper component that exists only to rename a Nuxt UI prop.
 - [ ] **Anything that appears on more than one screen is one component, not one copy per screen.** The header, the footer, the page heading block, the card that holds a form, the panel a screen shows instead of its content. A second copy is a defect even while the two copies are identical, because they will not stay identical — this is how the app bar came to say two different things and only one of two screens got a layout fix.
 - [ ] **Before building a screen, open the screen nearest to it and match its measured values** — container radius and tone, control height, heading size, the gaps between blocks. A screen may pass every box below in isolation and still make the product look unsystematic; this checklist audits one screen, so the comparison to the others has to be made deliberately.
+- [ ] **No native `alert()`, `confirm()` or `prompt()`.** They are outside every theme, carry "OK" for a verb, trap nothing and return focus nowhere. A question is `useConfirm()` — the product's one dialog (`ConfirmDialog`, on `UModal`) — with the verb as the confirm label and the consequence as the description. The one exception is `beforeunload`, the prompt when a tab closes with unsaved work: the browser's own, not replaceable, and marked as such at the call site (2026-09-16 review).
 - [ ] **A hand-rolled replacement for a library primitive owes the keyboard and ARIA contract that primitive would have brought.** Reaching past the library for the one mechanism it lacks is sometimes right; dropping the mechanisms it *has* never is. Before writing one, list what the library component provides — tab order, roving focus, arrow keys, activation, `aria-*` wiring, focus return — and implement each. The navigation tree reached for drag-reorder, which `UTree` has no answer for, and shipped with zero tab stops: a screen whose whole purpose is finding a page could not open one without a mouse (2026-09-07 review).
 
 ### 4.2 Theming — user-selectable themes via CSS variables
@@ -1191,6 +1192,95 @@ too much:* the list is fixed and short; nothing to overflow.
 - Everything the 2026-09-15 entries carried forward and this batch did not touch: the
   contextual (third) pane is still an overlay, the sidebar's resize handle is pointer-only,
   the two-icon-pack requirement (§4.3) remains untested.
+### 2026-09-16 — Owner review of the frame: the signed-out bounce, native confirms, and edit mode's bar
+
+**Reviewer:** Eduardo
+**Verdict:** Pass with follow-ups (three requests, all shipped in `feat/frame-review-shell`)
+
+Measured in `e2e/navigation.spec.ts` and `e2e/editor.spec.ts` against the real backend, at
+1280×900 in both themes and 320×900 in light; screenshots `fb-shell-{login,edit,edit-confirm,
+sidebar}-*.png` in the session scratchpad.
+
+**Findings** (ordered by user impact)
+
+1. **A signed-out visit to `/workspaces` rendered a "Sign in to see your workspaces" card; the owner wanted a straight redirect that comes back.**
+   - *Observable evidence:* signed out, `/` → `/workspaces` showed a card with one button, and
+     the button led to `/login` and, after signing in, to `/` — never back to the address the
+     person had followed. Inside the frame it was worse: `/workspaces/:id`, `/pages/:id` and
+     every history and diff screen classified the same 401 as "Cannot reach the server", with
+     a Retry that would 401 again.
+   - *Root cause:* four screens each answered their own 401 with their own card (§4.1's copy
+     defect, four copies of one sentence), eight composables had no 401 branch at all, and
+     nothing carried the address across the sign-in.
+   - *Correction applied:* one rule in one composable, `useSignInRedirect`: the request that
+     loads a screen reads `unauthenticated` → `navigateTo('/login?next=<address>', { replace })`;
+     `pages/login.vue` reads `next` through `localReturnPath` (same-origin path only, never
+     `/login`) and returns there after a real `Set-Cookie`, explaining the bounce once in an
+     `InlineNotice tier="chip" tone="info"` — a polite status, not an alert, because nothing
+     failed. The four cards are gone; the eight composables classify 401. Measured: `/`
+     signed out lands on `/login?next=/workspaces`, the notice reads "Your session has ended…",
+     signing in lands on `/workspaces`; `/workspaces/:id` carries its own id; an off-origin
+     `next` is ignored and lands on `/`.
+   - *Rule added:* None new — §3's "never a dead end" and §4.1's one-component rule already
+     said it; the finding is that both were satisfied per screen and violated as a system.
+
+2. **Edit mode asked "unsaved changes?" with `window.confirm`, and take-over had a modal of its own on the page.**
+   - *Observable evidence:* leaving a dirty editor by a tree row, and the two Reload exits,
+     opened the browser's native box — outside every theme, with "OK" for a verb, and no
+     focus return; the take-over confirmation was a third dialog shape.
+   - *Root cause:* no confirm component existed, so each call site reached for what was
+     nearest.
+   - *Correction applied:* `ConfirmDialog.vue` on `UModal` — no "X", Escape and the scrim
+     cancel, focus lands on the safe action (Cancel first in the footer) and returns to the
+     control that asked (Reka returns to a *trigger*; a promise-opened dialog has none, so the
+     opener is read and restored in `onCloseAutoFocus`), the confirm action the one filled
+     button, `primary` or `error` — with `useConfirm()` returning a promise, so a call site is
+     `if (!(await confirm({ … }))) return`. Mounted once in `app.vue`. All three edit-mode
+     confirmations use it. `beforeunload` — a tab closing — stays: no page script may draw a
+     dialog while the document is torn down, so that one prompt is the browser's and is
+     commented as such. The dialog headline is set centrally on `UModal` (§2.3:
+     `headline-small`; the library's description already is `body-medium`), so the tree's
+     dialogs read alike. Measured: a dirty editor → tree row →
+     dialog; Escape and "Keep editing" keep the editor and its edits and return focus to the
+     row; "Leave" navigates.
+   - *Rule added:* §4.1 — no native `alert`/`confirm`/`prompt`; the product's dialog, through
+     `useConfirm`. `beforeunload` is the one exception, and it is the browser's.
+
+3. **"The top part is too much; the document loses importance" — edit mode's contextual bar.**
+   - *Observable evidence:* at 1280 the bar held the toggle, the brand, the full breadcrumb
+     (workspace › shelf › book › chapter › page › Editing), "Read page" and Save — restating
+     the path the tree beside the editor already shows. In the sidebar, "+ New…" and "Rename…"
+     sat at their natural widths with the right third of the 280px pane empty.
+   - *Root cause:* the bar is one component for every screen and had one density; the toolbar
+     row's controls had no fill rule.
+   - *Correction applied:* `AppShell` gains `condensed`: the breadcrumb keeps its last two
+     crumbs and folds the rest into one overflow control ("Show the full path", 32px, a
+     `UDropdownMenu` holding the folded crumbs — the workspace as a link, the places as
+     labels), composed from `UBreadcrumb`'s item slot because the installed 4.11 has no
+     overflow of its own. Save stays the one filled action, "Read page" the Text button; the
+     sidebar toggle's tooltip already states `Ctrl`/`⌘`+`\`. The bar's height is unchanged, so
+     the column starts where read mode's does — measured: the title and the first paragraph
+     at the same x, y and width in both modes, both themes, and the bar at 56px. In the
+     toolbar, `New…` grows (`flex-1`) and `Rename…` keeps its width; measured at 1280 and in
+     the 320 drawer: `Rename…` ends at the row's edge, both 32px tall.
+   - *Rule added:* None — one-off; whether the read screen's bar should condense too is an
+     open question for the owner (`docs/TODO.md`).
+
+**Follow-ups carried forward, not fixed**
+
+- Whether the condensed bar should be every frame screen's, not edit mode's alone.
+- Dialogs render at `rounded-lg` (16px), the container rung; M3's dialog is
+  `corner-extra-large` (28px) and §3.4 says dialogs keep it, but the ladder has no 28px rung
+  and every dialog in the product ships at 16px. A central ruling, recorded in `docs/TODO.md`
+  Open Questions rather than taken per component.
+- The host ran six concurrent worktrees (load average 25–139 on four cores) throughout;
+  the touched e2e specs were run green against a production build of this branch served on
+  the suite's web port, because `nuxt dev` could not serve a page inside the suite's 30s
+  waits. `docs/TODO.md` Findings has the numbers. A dirty editor's 300ms window before
+  `isDirty` is set, and the Save test that races it, are recorded there too.
+- Everything the 2026-09-15 entries carried: the contextual (third) pane is an overlay, the
+  resize handle is pointer-only, the mention count caps at twenty threads, the two-icon-pack
+  requirement (§4.3) is untested.
 
 ---
 

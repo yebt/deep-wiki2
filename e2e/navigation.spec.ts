@@ -105,15 +105,57 @@ test('a signed-in visitor who can read no workspace gets a coherent state, not a
   await expect(page.getByText('E2E Workspace')).toHaveCount(0);
 });
 
-test('a signed-out visitor reaches sign-in from the front door, by clicking', async ({ page }) => {
+/**
+ * One rule for a signed-out visit to a signed-in screen (2026-09-16): the
+ * screen leaves for sign-in with its address in `next`, sign-in says once
+ * why the person is there, and a successful sign-in returns them to that
+ * address. Until this batch `/workspaces` answered a signed-out visitor
+ * with a "Sign in to see your workspaces" card whose button forgot where
+ * they had been, and every screen inside the frame answered with "Cannot
+ * reach the server". Driven against the real backend, through the real
+ * form: the return path has to survive a real `Set-Cookie`.
+ */
+test('a signed-out visitor to the workspace list is sent to sign in, told why, and brought back after signing in', async ({ page }) => {
   await page.goto('/');
 
-  await expect(page.getByRole('heading', { name: 'Sign in to see your workspaces' })).toBeVisible({ timeout: 30000 });
-
-  await page.getByRole('link', { name: 'Sign in' }).click();
-
-  await expect(page).toHaveURL(/\/login$/);
+  // `/` reopens the last workspace, or the list; either way the redirect
+  // lands on sign-in carrying that address.
+  await expect(page).toHaveURL(/\/login\?next=/, { timeout: 30000 });
+  expect(new URL(page.url()).searchParams.get('next')).toBe('/workspaces');
   await expect(page.getByRole('heading', { level: 1, name: /sign in/i })).toBeVisible();
+  await expect(page.getByRole('status')).toContainText(/session has ended/i);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+
+  await gotoAndWaitForHydration(page, page.url());
+  await page.getByLabel('Email').fill(fixtures.superRootEmail);
+  await page.getByLabel('Password', { exact: true }).fill(fixtures.onboardingPassword);
+  await page.getByRole('button', { name: /^sign in$/i }).click();
+
+  await expect(page).toHaveURL(/\/workspaces$/, { timeout: 30000 });
+  await expect(page.getByRole('heading', { level: 1, name: 'Workspaces' })).toBeVisible({ timeout: 30000 });
+});
+
+test('a signed-out visitor to a screen inside the frame is sent to sign in with that screen as the way back', async ({ page }) => {
+  await page.goto(`/workspaces/${fixtures.workspaceId}`);
+
+  await expect(page).toHaveURL(/\/login\?next=/, { timeout: 30000 });
+  expect(new URL(page.url()).searchParams.get('next')).toBe(`/workspaces/${fixtures.workspaceId}`);
+  await expect(page.getByRole('status')).toContainText(/session has ended/i);
+  // The screen that bounced is gone, and nothing about it claimed a network fault.
+  await expect(page.getByRole('alert')).toHaveCount(0);
+});
+
+test('sign-in ignores a return address that would leave this origin', async ({ page }) => {
+  await gotoAndWaitForHydration(page, '/login?next=https%3A%2F%2Fevil.example%2F');
+
+  await expect(page.getByRole('status')).toHaveCount(0);
+
+  await page.getByLabel('Email').fill(fixtures.superRootEmail);
+  await page.getByLabel('Password', { exact: true }).fill(fixtures.onboardingPassword);
+  await page.getByRole('button', { name: /^sign in$/i }).click();
+
+  // The front door, on this origin: `/` then wherever it reopens.
+  await expect(page).toHaveURL(/^http:\/\/localhost:\d+\/(workspaces.*)?$/, { timeout: 30000 });
 });
 
 test('a signed-in member reaches the workspace members screen by clicking the tree’s Members link, never by typing the URL', async ({

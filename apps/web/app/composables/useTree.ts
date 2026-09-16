@@ -1,4 +1,4 @@
-export type TreeStatus = 'idle' | 'loading' | 'success' | 'forbidden' | 'not-found' | 'network-error';
+export type TreeStatus = 'idle' | 'loading' | 'success' | 'forbidden' | 'not-found' | 'unauthenticated' | 'network-error';
 
 export interface TreeNode {
   readonly id: string;
@@ -65,6 +65,13 @@ export function useTree(workspaceId: string, deps: UseTreeDeps = {}): UseTreeRes
       message.value = '';
     } catch (error) {
       const code = httpStatusOf(error);
+      // Signed out: the screen's next move is sign-in, not a retry
+      // (`useSignInRedirect`), so this is never the network branch.
+      if (code === 401) {
+        status.value = 'unauthenticated';
+        message.value = 'Your session has ended.';
+        return;
+      }
       if (code === 403) {
         status.value = 'forbidden';
         message.value = "You don't have access to this workspace's tree.";

@@ -4,7 +4,8 @@ import { afterEach, describe, expect, test, vi } from 'vitest';
 import { computed, defineComponent, h, ref } from 'vue';
 import DiffPage from './diff.vue';
 
-const { usePageDiffMock, useRouteMock, useCurrentWorkspaceMock, useWorkspaceTreeMock, useWorkspaceDirectoryMock } = vi.hoisted(() => ({
+const { usePageDiffMock, useRouteMock, useCurrentWorkspaceMock, useWorkspaceTreeMock, useWorkspaceDirectoryMock, navigateToMock } = vi.hoisted(() => ({
+  navigateToMock: vi.fn(async () => {}),
   usePageDiffMock: vi.fn(),
   useRouteMock: vi.fn(() => ({ params: { id: 'page-1' }, query: { from: 'rev-1', to: 'rev-2' } })),
   useCurrentWorkspaceMock: vi.fn(),
@@ -17,6 +18,7 @@ mockNuxtImport('useRoute', () => useRouteMock);
 mockNuxtImport('useCurrentWorkspace', () => useCurrentWorkspaceMock);
 mockNuxtImport('useWorkspaceTree', () => useWorkspaceTreeMock);
 mockNuxtImport('useWorkspaceDirectory', () => useWorkspaceDirectoryMock);
+mockNuxtImport('navigateTo', () => navigateToMock);
 
 /**
  * The frame's own collaborators, stubbed so this file stays about the diff
@@ -153,6 +155,17 @@ describe('page-diff screen', () => {
     await retry.trigger('click');
 
     expect(load).toHaveBeenCalled();
+  });
+
+  // One rule for a signed-out visit to a signed-in screen: leave for
+  // sign-in with this address as the return path, and show no card here —
+  // a card would be a dead end with a button on it (docs/UI-CHECKLIST.md §3).
+  test('a signed-out visitor is sent to sign in, to come back here afterwards, and shown no card', async () => {
+    mockDiff({ status: 'unauthenticated' });
+    const component = await mountSuspended(PageInApp, FRAME_STUBS);
+
+    expect(navigateToMock).toHaveBeenCalledWith(expect.stringMatching(/^\/login(\?next=|$)/), { replace: true });
+    expect(component.findAll('a').find((a) => /sign in/i.test(a.text()))).toBeUndefined();
   });
 
   // Two revisions with no differences is a real, reachable state

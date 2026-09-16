@@ -1,4 +1,4 @@
-export type PageReadStatus = 'idle' | 'loading' | 'success' | 'not-found' | 'forbidden' | 'network-error';
+export type PageReadStatus = 'idle' | 'loading' | 'success' | 'not-found' | 'forbidden' | 'unauthenticated' | 'network-error';
 
 export interface PageReadResponse {
   readonly html: string;
@@ -67,6 +67,13 @@ export function usePageRead(nodeId: string, fetcher?: PageReadFetcher): UsePageR
       message.value = '';
     } catch (error) {
       const code = httpStatusOf(error);
+      // Signed out: the screen's next move is sign-in, not a retry
+      // (`useSignInRedirect`), so this is never the network branch.
+      if (code === 401) {
+        status.value = 'unauthenticated';
+        message.value = 'Your session has ended.';
+        return;
+      }
       if (code === 403) {
         status.value = 'forbidden';
         message.value = "You don't have access to this page.";

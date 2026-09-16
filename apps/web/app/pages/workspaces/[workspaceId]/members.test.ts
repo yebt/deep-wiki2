@@ -5,13 +5,15 @@ import { afterEach, describe, expect, test, vi } from 'vitest';
 import { defineComponent, h, nextTick, ref } from 'vue';
 import MembersPage from './members.vue';
 
-const { useWorkspaceMembersMock, useRouteMock } = vi.hoisted(() => ({
+const { useWorkspaceMembersMock, useRouteMock, navigateToMock } = vi.hoisted(() => ({
+  navigateToMock: vi.fn(async () => {}),
   useWorkspaceMembersMock: vi.fn(),
   useRouteMock: vi.fn(() => ({ params: { workspaceId: 'ws-1' } })),
 }));
 
 mockNuxtImport('useWorkspaceMembers', () => useWorkspaceMembersMock);
 mockNuxtImport('useRoute', () => useRouteMock);
+mockNuxtImport('navigateTo', () => navigateToMock);
 
 // Every screen now renders inside the workspace frame. Its sidebar — the
 // tree, the switcher, the doors — is stubbed here so this file stays about
@@ -282,11 +284,15 @@ describe('workspace members screen', () => {
     expect(load).toHaveBeenCalled();
   });
 
-  test('a signed-out visitor is offered sign-in', async () => {
+  // One rule for a signed-out visit to a signed-in screen: leave for
+  // sign-in with this address as the return path, and show no card here —
+  // the card was a dead end with a button on it (docs/UI-CHECKLIST.md §3).
+  test('a signed-out visitor is sent to sign in, to come back here afterwards, and shown no card', async () => {
     mockMembers({ status: 'unauthenticated' });
     const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
-    expect(component.findAll('a').find((a) => /sign in/i.test(a.text()))?.attributes('href')).toBe('/login');
+    expect(navigateToMock).toHaveBeenCalledWith(expect.stringMatching(/^\/login(\?next=|$)/), { replace: true });
+    expect(component.findAll('a').find((a) => /sign in/i.test(a.text()))).toBeUndefined();
   });
 
   test('the breadcrumb offers the way back to the workspace\'s home', async () => {

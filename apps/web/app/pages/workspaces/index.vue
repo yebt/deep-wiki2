@@ -53,9 +53,13 @@
  *
  * `unauthenticated` is separate from the error state for the same reason
  * `useWorkspaces` separates them — the next action is to sign in, and a
- * "Retry" would only fail again.
+ * "Retry" would only fail again. Since 2026-09-16 that next action is
+ * taken for the person: the screen leaves for sign-in and comes back
+ * (`useSignInRedirect`), where it used to show a card with a button.
  */
 const { status, workspaces, message, load } = useWorkspaces();
+// A signed-out visit leaves for sign-in and comes back (`useSignInRedirect`).
+useSignInRedirect().redirectWhenSignedOut(status);
 
 onMounted(() => {
   void load();
@@ -101,18 +105,6 @@ useSeoMeta({ title: 'Workspaces — deep-wiki' });
         </div>
       </UCard>
     </template>
-
-    <PageNotice
-      v-else-if="status === 'unauthenticated'"
-      icon="i-lucide-log-in"
-      heading="Sign in to see your workspaces"
-      :level="2"
-    >
-      Your session has ended, or you have not signed in on this device yet.
-      <template #actions>
-        <UButton to="/login" color="primary" variant="solid" size="lg" icon="i-lucide-log-in">Sign in</UButton>
-      </template>
-    </PageNotice>
 
     <PageNotice
       v-else-if="status === 'network-error'"

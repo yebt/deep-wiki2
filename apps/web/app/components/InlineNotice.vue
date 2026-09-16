@@ -42,7 +42,8 @@
 const props = withDefaults(
   defineProps<{
     tier: 'bar' | 'chip';
-    tone: 'success' | 'error' | 'warning';
+    /** `info`: a fact to know that is neither a result nor a fault — "your session ended, sign in to go back". */
+    tone: 'success' | 'error' | 'warning' | 'info';
     /** Required on a bar (the non-colour signal beside the title); a chip's wording is its signal. */
     icon?: string;
     /** Bar only: the one-line result, `body-large-emphasized`. */
@@ -58,6 +59,7 @@ const TONE_CLASS: Record<typeof props.tone, string> = {
   success: 'bg-success-container text-on-success-container',
   error: 'bg-error-container text-on-error-container',
   warning: 'bg-warning-container text-on-warning-container',
+  info: 'bg-info-container text-on-info-container',
 };
 
 const root = ref<HTMLElement | null>(null);

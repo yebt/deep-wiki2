@@ -81,6 +81,9 @@ const nav = sinceIsValid
     })
   : null;
 
+// A signed-out visit leaves for sign-in and comes back (`useSignInRedirect`).
+if (nav) useSignInRedirect().redirectWhenSignedOut(nav.status);
+
 onMounted(() => {
   // A link with no (or an unparsable) `since` is a broken link, not a
   // network condition — rendered the same way page-diff.vue treats a

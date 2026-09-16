@@ -44,6 +44,8 @@ const route = useRoute();
 const workspaceId = route.params.workspaceId as string;
 
 const activity = useWorkspaceActivity(workspaceId);
+// A signed-out visit leaves for sign-in and comes back (`useSignInRedirect`).
+useSignInRedirect().redirectWhenSignedOut(activity.status);
 const presence = usePresenceStream(null);
 
 onMounted(() => {

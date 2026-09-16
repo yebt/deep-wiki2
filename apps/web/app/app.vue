@@ -4,7 +4,10 @@
 // a screen names (`layouts/workspace.vue` is the one that keeps the
 // sidebar mounted across navigations inside a workspace; a page that
 // names none renders bare, since there is deliberately no `default.vue`),
-// and the one head value a screen inherits rather than states.
+// the one head value a screen inherits rather than states, and the
+// product's one confirm dialog (`ConfirmDialog`), mounted once here so
+// any screen can ask a question through `useConfirm()` and await the
+// answer.
 useHead({
   htmlAttrs: { lang: 'en' },
 });
@@ -20,5 +23,6 @@ useSeoMeta({
     <NuxtLayout>
       <NuxtPage />
     </NuxtLayout>
+    <ConfirmDialog />
   </UApp>
 </template>
