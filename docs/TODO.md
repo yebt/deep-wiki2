@@ -532,6 +532,98 @@ makes conventions portable across projects.
 
 Discoveries and constraints. Newest first.
 
+### 2026-09-16 — The `/mount` API now carries everything a Notion-like block UI needs; the Vue side is the next batch
+
+**What happened.** Branch `feat/editor-block-commands` (worktree `fb-editor`, `packages/editor`
+only — `apps/web` untouched, because `perf/edit-chain-and-prebundle` owns `EditorSurface.vue`
+until it lands) built the editor half of the Phase 3.5 block-editing item, one commit per
+piece, each DOM-free and `bun test`-proven, with GATE-2 growing 168 -> 177 and staying
+byte-identical throughout. What `@deep-wiki/editor/mount` now exposes:
+
+- **`mountEditor(options): EditorHandle`** — `createEditorView` plus the command surface,
+  bound to the view: `{ view, undo, redo, toggleMark(name), setLink(href, title?), unsetLink,
+  moveBlockUp, moveBlockDown, deleteBlock, duplicateBlock, turnInto(slashCommandId),
+  blockAt(coords), startBlockDrag(pos, dataTransfer?), endBlockDrag, destroy }`. Every command
+  returns `false` and dispatches nothing where it cannot apply. `createEditorView` still returns
+  the bare view for the current `EditorSurface.vue`.
+- **`onUpdate(view, update: EditorUpdate)`** — the second argument is now
+  `{ transactionCount, undoDepth, redoDepth, selection }` (was the bare count). Undo/redo
+  buttons disable from the depths; `selection` is the DOM-free snapshot below.
+- **Selection state** (`selection-plugin.ts`): `selectionSnapshot(state)` reports
+  `{ kind: 'text'|'code'|'node'|'gap', from, to, empty, marks: { strong, emphasis, delete,
+  inlineCode, link }, link: { href, title } | null }`; the plugin's `view()` adds
+  `coords: { from, to }` from `coordsAtPos` (the only DOM call) and reports through
+  `options.selection.onChange` only when the snapshot changed. "Active" over a range means the
+  WHOLE range carries the mark; `toggleMark` uses `removeWhenPresent: false` to match, and
+  `Mod-b`/`Mod-i` share that factory (`toggleMarkCommand`), so a keystroke and a button agree.
+- **Gap cursor and drop cursor** are installed (`plugins.ts`, `buildEditorPlugins`); the drop
+  cursor element carries `DROP_CURSOR_CLASS = 'editor-drop-cursor'` and paints no colour of its
+  own, so the stylesheet owns it. `Alt-ArrowUp`/`Alt-ArrowDown` move the top-level block.
+- **`/` menu**: `text` (back to a paragraph — retypes a heading/code block in place, lifts a
+  list item or quoted paragraph one level), `task-list` (`- [ ]`, or marks an existing bullet
+  item in place), `table` (2x2, empty cells — the empty spelling `|   |   |` is canonical,
+  fixture `table-empty.md`, so no placeholder text), `footnote` (`[^n]` at the caret, empty
+  `[^n]:` at the end, caret moved into it; the one command a table cell can run).
+  Order: Text, Heading 1-3, Bulleted, Numbered, Task list, Quote, Code block, Divider, Table,
+  Footnote. On a plain paragraph `text` is inapplicable and therefore not offered, which is
+  why `e2e/editor.spec.ts`'s "second option is Heading 2" still holds.
+
+**Found on the way, fixed on the branch.**
+
+- `setBlockType` (prosemirror-commands) replaces a block's attrs wholesale, so `/heading` on
+  `First ^abc123` produced `# First` — the anchor, and every comment on it, gone. Fixed:
+  `setBlockTypeKeepingAnchor` (`slash-plugin.ts`), used by the heading and code commands and
+  therefore by `turnInto`.
+- An empty `blockquote`, `listItem` or `footnoteDefinition` (`>` / `-` / `[^1]:` alone — all
+  canonical, all what `/quote`, `/bullet`, `/footnote` leave on an empty line) threw a
+  `RangeError` in `fromMarkdown` that the probe reported as an unsupported construct named
+  "RangeError" at line 1: a page saved in that state could not be reopened. Fixed
+  symmetrically: `fromMarkdown` gives the container one empty paragraph, `toMarkdown` emits
+  that sole empty paragraph as zero children (the canonical spelling — `[^1]:`, not
+  `[^1]: `). Fixture `empty-containers.md`.
+- `duplicateBlock` strips every `blockAnchor` at every depth (a copied anchor is two blocks with
+  one id, the tombstone-resurrection class). Duplicating creates ADJACENT siblings, where the
+  serialiser must pick a spelling: adjacent lists come back with an alternated marker (`*`, or
+  `1)`) and re-open as two lists; each modelled block type is covered in
+  `block-commands.test.ts`.
+
+**Limits, recorded rather than hidden.**
+
+- GFM cannot spell an EMPTY task item: `listItem { checked: false }` with no text serialises
+  to `-` (a plain bullet) and `- [ ]` alone re-parses as literal text. A task list created on an
+  empty line and saved before anything is typed comes back as a bullet. Same class as the
+  existing `/bullet`-on-empty-line, and not fixable below the pipeline.
+- `turnInto` runs the slash command AT THE CARET, exactly as typing `/` there would: a caret
+  in a list item turned into a heading yields `- # Title` (a heading inside the item), not a
+  heading in place of the list. The tunes menu should offer `text` first for that case, or the
+  Vue batch can chain `text` then the target.
+- The drop cursor's `move` decision is ProseMirror's at drop time (`dragMoves`: the Ctrl/Alt
+  modifier copies), so `startBlockDrag`'s `move: true` is the default, not a lock.
+- `mountEditor` lives in `create-editor-view.ts`, the one DOM-bound file, exempt in
+  `test-coverage.ts` under its existing entry; everything it binds is tested through fake
+  views, and it stays a thin composition so the exemption covers nothing else.
+
+**What the Vue batch must build** (after `perf/edit-chain-and-prebundle` lands on
+`EditorSurface.vue`; read `docs/UI-CHECKLIST.md` and `docs/DESIGN-SYSTEM.md` in full first):
+
+1. Switch `EditorSurface.vue` from `createEditorView` to `mountEditor`, keep the handle.
+2. A `role="toolbar"` bubble positioned from `selection.onChange`'s `coords` via
+   `positionMenu`, shown for `kind === 'text' && !empty`: Bold, Italic, Strikethrough, Code
+   (`toggleMark`, pressed state from `marks`), Link (`setLink`/`unsetLink`, prefilled from
+   `link`), and a "Turn into" select over `SLASH_COMMANDS` minus `BLOCK_COMMANDS_NOT_TURNABLE`.
+3. Undo/redo buttons in the contextual bar, disabled from `update.undoDepth`/`redoDepth`.
+4. One absolutely-positioned handle (`mousemove` -> `blockAt(coords)` -> `rect`), `draggable`,
+   `dragstart` -> `startBlockDrag(pos, event.dataTransfer)`, `dragend` -> `endBlockDrag()`,
+   plus a `⋮` menu outside the contenteditable (`@mousedown.prevent`) with move up/down,
+   delete, duplicate, turn into. Style `.editor-drop-cursor` from the design tokens.
+5. e2e: select text -> toolbar appears -> Bold -> markdown updates; `page.dragAndDrop` between
+   two paragraphs asserting the emitted order; `/table` and `/footnote` land the caret where
+   this batch says they do.
+
+**Impact.** None of `apps/web`, `apps/api` or `packages/markdown`'s code changed; three fixtures
+and their chunk goldens were added. The `onUpdate` second-argument change is source-compatible
+with the one caller (`EditorSurface.vue` reads only `view`).
+
 ### 2026-09-16 — Owner review of the workspace frame: eight defects, all in flight
 
 **What happened.** The owner reviewed the workspace frame shipped across the 2026-09-15
