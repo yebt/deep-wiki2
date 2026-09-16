@@ -1188,6 +1188,16 @@ test.describe('inside the workspace frame, 320x900 light', () => {
     await page.getByRole('button', { name: 'Open sidebar' }).click();
     const drawer = page.getByRole('dialog');
     await expect(drawer.getByTestId('tree-create-open')).toBeVisible({ timeout: 30000 });
+    // The drawer slides in; measured mid-animation the row is still
+    // narrower than it will be (21.9px short under load, 2026-09-16), so
+    // the geometry is polled until the row has settled at its width.
+    await expect
+      .poll(async () => {
+        const rename = (await drawer.getByTestId('tree-rename-open').boundingBox())!;
+        const row = (await drawer.getByTestId('tree-create-open').locator('..').boundingBox())!;
+        return Math.abs(rename.x + rename.width - (row.x + row.width));
+      })
+      .toBeLessThanOrEqual(1);
     const createBox = (await drawer.getByTestId('tree-create-open').boundingBox())!;
     const renameBox = (await drawer.getByTestId('tree-rename-open').boundingBox())!;
     const rowBox = (await drawer.getByTestId('tree-create-open').locator('..').boundingBox())!;
