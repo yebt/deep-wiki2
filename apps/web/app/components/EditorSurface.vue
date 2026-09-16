@@ -29,6 +29,7 @@
  */
 import type { MentionCandidate, MentionState, SlashState } from '@deep-wiki/editor';
 import type { EditorView } from 'prosemirror-view';
+import { blockTunesMenu, caretBlock, currentTurnIntoTarget, placeCaretIn, TURN_INTO_TARGET_IDS, type BlockLike, type TunesActions, type TunesItem } from '~/utils/block-tunes';
 import { loadEditorMount, type EditorMountModule } from '~/utils/editor-mount';
 import { positionMenu, positionToolbar } from '~/utils/menu-position';
 
@@ -144,18 +145,174 @@ function onFocusOut(event: FocusEvent): void {
 }
 
 /**
- * `Ctrl`/`⌘`+`Shift`+`.` moves focus from the editor into the toolbar —
- * the keyboard's way to a surface a pointer reaches by hovering (checklist
- * §5). Read by `code`, because `Shift`+`.` reports `>` on a US layout and
- * something else on others. Only while the toolbar is up: with no range
- * there is nothing to focus.
+ * The keyboard's ways to the two surfaces a pointer reaches by hovering
+ * (checklist §5): `Ctrl`/`⌘`+`Shift`+`.` moves focus from the editor into
+ * the selection toolbar — read by `code`, because `Shift`+`.` reports `>`
+ * on a US layout and something else on others — and `Ctrl`/`⌘`+`/` opens
+ * the tunes menu for the caret's block. Any other key hides the block
+ * handle: it is the pointer's, and typing is not the moment for it.
  */
 function onHostKeydown(event: KeyboardEvent): void {
-  if (!(event.ctrlKey || event.metaKey) || !event.shiftKey || event.altKey) return;
-  if (event.code !== 'Period' && event.key !== '.' && event.key !== '>') return;
-  if (!toolbarVisible.value) return;
-  event.preventDefault();
-  selectionToolbar.value?.focus();
+  const modifier = (event.ctrlKey || event.metaKey) && !event.altKey;
+  if (modifier && event.shiftKey && (event.code === 'Period' || event.key === '.' || event.key === '>')) {
+    if (!toolbarVisible.value) return;
+    event.preventDefault();
+    selectionToolbar.value?.focus();
+    return;
+  }
+  if (modifier && !event.shiftKey && (event.code === 'Slash' || event.key === '/')) {
+    event.preventDefault();
+    void openTunesForCaret();
+    return;
+  }
+  if (!tunesOpen.value) hoveredBlock.value = null;
+}
+
+/* ─── The block handle ─────────────────────────────────────────────────
+ * One `EditorBlockHandle`, moved to whichever top-level block the pointer
+ * is over (`blockAt`, one lookup per frame), gone when the pointer leaves
+ * or a key lands, kept while its menu is open or a drag is under way. The
+ * drag is bridged to ProseMirror through `startBlockDrag`/`endBlockDrag`
+ * (`block-drag.ts`: from there its own `drop` handler moves the node and
+ * the drop cursor draws the target). The tunes act on the block the
+ * *selection* is in, so opening the menu first places the caret in the
+ * hovered block (`placeCaretIn`), then dry-runs every command on it so
+ * the menu can say what it withholds and why (`utils/block-tunes.ts`).
+ */
+interface HoveredBlock {
+  readonly pos: number;
+  readonly node: BlockLike;
+  /** Offset from this component's top edge, so the handle sits on the block's first line. */
+  readonly top: number;
+}
+
+const HANDLE_SIZE = 24;
+const hoveredBlock = ref<HoveredBlock | null>(null);
+const tunesOpen = ref(false);
+const tunesItems = ref<TunesItem[][]>([]);
+let handleFrame: number | null = null;
+let hideTimer: ReturnType<typeof setTimeout> | undefined;
+let dragging = false;
+
+/** The platform's modifier as text for `aria-keyshortcuts`, read on mount because the platform is the client's (the same reading `SidebarToggle` makes). */
+const modifierName = ref('Control');
+onMounted(() => {
+  modifierName.value = /Macintosh;/.test(navigator.userAgent) ? 'Meta' : 'Control';
+});
+
+function placeHandleAt(hit: { pos: number; node: BlockLike; rect: { top: number } | null }): void {
+  const host = hostEl.value;
+  if (!host || !hit.rect) return;
+  const dom = editorView?.nodeDOM(hit.pos);
+  const lineHeight = dom instanceof HTMLElement ? Number.parseFloat(getComputedStyle(dom).lineHeight) : Number.NaN;
+  const centred = Number.isFinite(lineHeight) ? Math.max(0, (lineHeight - HANDLE_SIZE) / 2) : 0;
+  hoveredBlock.value = { pos: hit.pos, node: hit.node, top: hit.rect.top - host.getBoundingClientRect().top + centred };
+}
+
+function onPointerMove(event: PointerEvent): void {
+  if (tunesOpen.value || dragging || !handle) return;
+  if (!(event.target instanceof Node) || !rootEl.value?.contains(event.target)) return;
+  if (handleFrame !== null) return;
+  const coords = { left: event.clientX, top: event.clientY };
+  handleFrame = requestAnimationFrame(() => {
+    handleFrame = null;
+    const hit = handle?.blockAt(coords);
+    if (hit?.rect) placeHandleAt(hit);
+  });
+}
+
+/** The pointer left the editor: the handle goes after a beat, unless it went to the handle itself (8px away, across nothing). */
+function scheduleHandleHide(): void {
+  cancelHandleHide();
+  hideTimer = setTimeout(() => {
+    if (!tunesOpen.value && !dragging) hoveredBlock.value = null;
+  }, 200);
+}
+
+function cancelHandleHide(): void {
+  if (hideTimer) clearTimeout(hideTimer);
+  hideTimer = undefined;
+}
+
+const tunesActions: TunesActions = {
+  moveUp: () => void handle?.moveBlockUp(),
+  moveDown: () => void handle?.moveBlockDown(),
+  duplicate: () => void handle?.duplicateBlock(),
+  remove: () => void handle?.deleteBlock(),
+  // `turnInto` runs the `/` command at the caret, exactly as typing `/`
+  // there would: inside a list item that yields `- # Title`, a heading
+  // inside the item. Text lifts the item out first, then the target
+  // applies to the paragraph it became — except task list, which marks
+  // the item in place (docs/TODO.md Findings 2026-09-16, "limits").
+  turnInto: (id) => {
+    if (hoveredBlock.value?.node.type.name === 'list' && id !== 'task-list') handle?.turnInto('text');
+    handle?.turnInto(id);
+  },
+};
+
+/** Builds the menu for the hovered block: the caret goes into it, then every command is dry-run there. */
+function prepareTunes(): void {
+  const block = hoveredBlock.value;
+  const mod = editorModule;
+  if (!block || !mod || !editorView) return;
+  placeCaretIn(editorView, block.pos);
+  const state = editorView.state;
+  const inList = block.node.type.name === 'list';
+  const turnInto = mod.SLASH_COMMANDS.filter((command) => TURN_INTO_TARGET_IDS.includes(command.id)).map((command) => ({
+    id: command.id,
+    label: command.label,
+    applicable: inList && command.id !== 'task-list' ? mod.turnInto('text')(state) : mod.turnInto(command.id)(state),
+  }));
+  tunesItems.value = blockTunesMenu(
+    {
+      blockType: block.node.type.name,
+      canMoveUp: mod.moveBlockUp(state),
+      canMoveDown: mod.moveBlockDown(state),
+      canDuplicate: mod.duplicateBlock(state),
+      canDelete: mod.deleteBlock(state),
+      turnInto,
+      currentTargetId: currentTurnIntoTarget(block.node),
+    },
+    tunesActions,
+  );
+}
+
+watch(tunesOpen, (open) => {
+  if (open) prepareTunes();
+});
+
+/** The menu closed: focus back to the editor, and the handle — stale after a move or a delete — goes. */
+function onTunesClosed(): void {
+  focusEditor();
+  hoveredBlock.value = null;
+}
+
+/** `Ctrl`/`⌘`+`/`: the handle at the caret's block, and its menu open. */
+async function openTunesForCaret(): Promise<void> {
+  if (!editorView || !handle) return;
+  const block = caretBlock(editorView.state);
+  if (!block) return;
+  const dom = editorView.nodeDOM(block.pos);
+  placeHandleAt({ pos: block.pos, node: block.node as BlockLike, rect: dom instanceof HTMLElement ? dom.getBoundingClientRect() : null });
+  await nextTick();
+  tunesOpen.value = true;
+}
+
+function onHandleDragStart(event: DragEvent): void {
+  const block = hoveredBlock.value;
+  if (!block || !handle) return;
+  dragging = true;
+  const dom = editorView?.nodeDOM(block.pos);
+  // The block itself as the drag image, not the 24px handle: what moves
+  // is what the person sees moving.
+  if (event.dataTransfer && dom instanceof HTMLElement && typeof event.dataTransfer.setDragImage === 'function') event.dataTransfer.setDragImage(dom, 0, 0);
+  handle.startBlockDrag(block.pos, event.dataTransfer ?? undefined);
+}
+
+function onHandleDragEnd(): void {
+  dragging = false;
+  handle?.endBlockDrag();
+  hoveredBlock.value = null;
 }
 
 function focusEditor(): void {
@@ -332,7 +489,16 @@ defineExpose({
 </script>
 
 <template>
-  <div ref="hostEl" class="relative" @focusin="onFocusIn" @focusout="onFocusOut" @keydown="onHostKeydown">
+  <div
+    ref="hostEl"
+    class="relative"
+    @focusin="onFocusIn"
+    @focusout="onFocusOut"
+    @keydown="onHostKeydown"
+    @pointermove="onPointerMove"
+    @pointerenter="cancelHandleHide"
+    @pointerleave="scheduleHandleHide"
+  >
     <!-- No `focus-within:ring-*` here. `main.css` declares the focus
          indicator unlayered — 3px `secondary` at 2px offset — so it lands
          on the editor when it takes focus like it lands on every other
@@ -414,6 +580,21 @@ defineExpose({
       option-id-prefix="dw-mention-option-"
       :position="mentionCaretRect"
       @select="confirmMentionAt"
+    />
+
+    <!-- The block handle: one, beside the hovered block, gone otherwise —
+         the measure column carries no permanent chrome. -->
+    <EditorBlockHandle
+      v-if="hoveredBlock"
+      v-model:open="tunesOpen"
+      :top="hoveredBlock.top"
+      :items="tunesItems"
+      :modifier-name="modifierName"
+      @drag-start="onHandleDragStart"
+      @drag-end="onHandleDragEnd"
+      @closed="onTunesClosed"
+      @pointer-enter="cancelHandleHide"
+      @pointer-leave="scheduleHandleHide"
     />
 
     <!-- The selection toolbar: the one formatting chrome, and only while

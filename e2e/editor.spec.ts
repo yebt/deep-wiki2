@@ -639,6 +639,176 @@ test.describe('the block UI against the real backend, 1280x900', () => {
   });
 });
 
+/** Hovers the editor's `nth` top-level block and returns the one block handle once it stands beside it. */
+async function hoverBlock(page: Page, editor: ReturnType<Page['getByTestId']>, nth: number) {
+  const block = editor.locator(':scope > *').nth(nth);
+  await block.hover({ position: { x: 20, y: 8 } });
+  const handle = page.getByRole('button', { name: 'Block options' });
+  await expect(handle).toBeVisible();
+  return handle;
+}
+
+test.describe('the block handle against the real backend, 1280x900', () => {
+  test.use({ viewport: { width: 1280, height: 900 } });
+
+  test('one handle follows the hovered block in the left margin; dragging it below the last block moves the block, anchor and all, in the saved markdown', async ({ page }) => {
+    test.setTimeout(120000);
+    const block = await seedBlockPage(page, 'First paragraph. ^blk0001\n\nSecond paragraph. ^blk0002\n\nThird paragraph. ^blk0003\n');
+    const editor = await openBlockPage(page, block, 'First paragraph.');
+    await expect(page.getByRole('button', { name: 'Block options' })).toHaveCount(0);
+
+    const first = editor.locator(':scope > p').nth(0);
+    const third = editor.locator(':scope > p').nth(2);
+    const handle = await hoverBlock(page, editor, 0);
+    const handleBox = (await handle.boundingBox())!;
+    const firstBox = (await first.boundingBox())!;
+    expect(handleBox.width, '24px target (§5)').toBeGreaterThanOrEqual(24);
+    expect(handleBox.height).toBeGreaterThanOrEqual(24);
+    expect(handleBox.x + handleBox.width, 'in the margin, left of the text').toBeLessThanOrEqual(firstBox.x);
+    expect(Math.abs(handleBox.y + handleBox.height / 2 - (firstBox.y + 13)), 'centred on the first line').toBeLessThanOrEqual(2);
+    // The same handle, moved: hovering the third block puts it there.
+    await hoverBlock(page, editor, 2);
+    const thirdBox = (await third.boundingBox())!;
+    const movedBox = (await handle.boundingBox())!;
+    expect(Math.abs(movedBox.y - thirdBox.y)).toBeLessThanOrEqual(4);
+    await expect(page.getByRole('button', { name: 'Block options' })).toHaveCount(1);
+
+    // Drag the first block to below the third.
+    await hoverBlock(page, editor, 0);
+    await handle.dragTo(third, { targetPosition: { x: (await third.boundingBox())!.width - 4, y: 12 } });
+    await expect(editor.locator(':scope > p').nth(0)).toHaveText('Second paragraph.');
+    await expect(editor.locator(':scope > p').nth(2)).toHaveText('First paragraph.');
+    await saveAndConfirm(page);
+    expect(await savedMarkdown(page, block.pageId)).toBe('Second paragraph. ^blk0002\n\nThird paragraph. ^blk0003\n\nFirst paragraph. ^blk0001\n');
+  });
+
+  test('the tunes menu: Duplicate inserts a copy without the anchor, so the saved markdown carries one ^id; Move up and the keys move it back', async ({ page }) => {
+    test.setTimeout(120000);
+    const block = await seedBlockPage(page, 'Only paragraph. ^dupl0001\n\nA second one.\n');
+    const editor = await openBlockPage(page, block, 'Only paragraph.');
+
+    const handle = await hoverBlock(page, editor, 0);
+    await handle.click();
+    const menu = page.getByRole('menu');
+    await expect(menu).toBeVisible();
+    const items = menu.getByRole('menuitem');
+    await expect(items.filter({ hasText: 'Turn into' })).toBeVisible();
+    // The first block: Move up stays in the menu, disabled, with its reason on show (§3, §5).
+    const moveUp = items.filter({ hasText: 'Move up' });
+    await expect(moveUp).toHaveAttribute('aria-disabled', 'true');
+    await expect(moveUp).toContainText('Already the first block.');
+    await shotUi(page, 'tunes-1280-light');
+
+    await items.filter({ hasText: 'Duplicate' }).click();
+    await expect(menu).toBeHidden();
+    await expect(editor.locator(':scope > p')).toHaveCount(3);
+    await expect(editor).toBeFocused();
+    await saveAndConfirm(page);
+    const afterDuplicate = await savedMarkdown(page, block.pageId);
+    expect(afterDuplicate).toBe('Only paragraph. ^dupl0001\n\nOnly paragraph.\n\nA second one.\n');
+    expect(afterDuplicate.match(/\^/g)).toHaveLength(1);
+
+    // Move the last block up through the menu, then back down with the keys the menu names.
+    await hoverBlock(page, editor, 2);
+    await handle.click();
+    await menu.getByRole('menuitem').filter({ hasText: 'Move up' }).click();
+    await expect(editor.locator(':scope > p').nth(1)).toHaveText('A second one.');
+    await editor.locator(':scope > p').nth(1).click();
+    await page.keyboard.press('Alt+ArrowDown');
+    await expect(editor.locator(':scope > p').nth(2)).toHaveText('A second one.');
+  });
+
+  test('Ctrl+/ opens the tunes for the caret\'s block; Turn into on a list item lifts it to text first, so the heading is not nested in the item', async ({ page }) => {
+    test.setTimeout(120000);
+    const block = await seedBlockPage(page, '- item one\n- item two\n');
+    const editor = await openBlockPage(page, block, 'item one');
+
+    await editor.locator('li').first().click();
+    await page.keyboard.press('Control+Slash');
+    const menu = page.getByRole('menu');
+    await expect(menu).toBeVisible();
+    const turnInto = menu.getByRole('menuitem').filter({ hasText: 'Turn into' });
+    await turnInto.hover();
+    const submenu = page.getByRole('menu').last();
+    await expect(submenu.getByRole('menuitem').first()).toHaveText(/^Text/);
+    await expect(submenu.getByRole('menuitem').filter({ hasText: 'Bulleted list' })).toHaveAttribute('aria-disabled', 'true');
+    await submenu.getByRole('menuitem').filter({ hasText: 'Heading 1' }).click();
+
+    await expect(editor.locator('h1')).toHaveText('item one');
+    await expect(editor.locator('li')).toHaveCount(1);
+    await saveAndConfirm(page);
+    expect(await savedMarkdown(page, block.pageId)).toBe('# item one\n\n- item two\n');
+  });
+});
+
+/**
+ * The block UI at the sizes and themes the review asks for, measured
+ * where a screenshot cannot see: nothing scrolls sideways at 320 with
+ * the toolbar, the menu or a drag up; every floating surface stays inside
+ * the viewport. The screenshots are the review material
+ * (`fb-editor-ui-*.png`).
+ */
+for (const { theme, width } of [
+  { theme: 'light', width: 1280 },
+  { theme: 'dark', width: 1280 },
+  { theme: 'light', width: 320 },
+] as const) {
+  test.describe(`the block UI at ${width} ${theme}`, () => {
+    test.use({ viewport: { width, height: 900 } });
+
+    test('idle surface, selection toolbar, tunes menu and a drag in progress all stay inside the viewport', async ({ page }) => {
+      test.setTimeout(120000);
+      await useTheme(page, theme);
+      const block = await seedBlockPage(page, 'First paragraph of the page. ^shot0001\n\nSecond paragraph, a little longer than the first. ^shot0002\n\nThird and last. ^shot0003\n');
+      const editor = await openBlockPage(page, block, 'First paragraph');
+      await expect(page.locator('html')).toHaveClass(theme === 'dark' ? /dark/ : /light/);
+      const label = `block ui ${width} ${theme}`;
+      // Idle: no chrome inside the column at all.
+      await expect(page.getByRole('button', { name: 'Block options' })).toHaveCount(0);
+      await expect(page.getByRole('toolbar')).toHaveCount(0);
+      await expectNoHorizontalOverflow(page, `${label} idle`);
+      await shotUi(page, `surface-${width}-${theme}`);
+
+      await editor.click();
+      await selectWord(editor, 1, 'longer');
+      const toolbar = page.getByRole('toolbar', { name: 'Text formatting' });
+      await expect(toolbar).toBeVisible();
+      const toolbarBox = (await toolbar.boundingBox())!;
+      expect(toolbarBox.x).toBeGreaterThanOrEqual(0);
+      expect(toolbarBox.x + toolbarBox.width, 'the toolbar fits the viewport').toBeLessThanOrEqual(width);
+      await expectNoHorizontalOverflow(page, `${label} toolbar`);
+      await shotUi(page, `toolbar-${width}-${theme}`);
+
+      const handle = await hoverBlock(page, editor, 1);
+      await handle.click();
+      const menu = page.getByRole('menu');
+      await expect(menu).toBeVisible();
+      const menuBox = (await menu.boundingBox())!;
+      expect(menuBox.x).toBeGreaterThanOrEqual(0);
+      expect(menuBox.x + menuBox.width, 'the menu fits the viewport').toBeLessThanOrEqual(width);
+      await expectNoHorizontalOverflow(page, `${label} tunes`);
+      await shotUi(page, `tunes-${width}-${theme}`);
+      await page.keyboard.press('Escape');
+      await expect(menu).toBeHidden();
+      await expect(editor).toBeFocused();
+
+      // A drag in progress: pressed on the handle, moved over the third
+      // block, not yet released — the drop cursor is up.
+      await hoverBlock(page, editor, 0);
+      const handleBox = (await handle.boundingBox())!;
+      const third = (await editor.locator(':scope > p').nth(2).boundingBox())!;
+      await page.mouse.move(handleBox.x + handleBox.width / 2, handleBox.y + handleBox.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(third.x + third.width - 8, third.y + third.height - 4, { steps: 12 });
+      await expect(page.locator('.editor-drop-cursor')).toBeVisible();
+      await expectNoHorizontalOverflow(page, `${label} drag`);
+      await shotUi(page, `drag-${width}-${theme}`);
+      await page.mouse.up();
+      await expect(editor.locator(':scope > p').nth(2)).toHaveText('First paragraph of the page.');
+    });
+  });
+}
+
 /**
  * Inside the workspace frame (docs/UI-CHECKLIST.md Review Log, 2026-09-15:
  * every screen opts into `layouts/workspace.vue`; the owner's pass on the

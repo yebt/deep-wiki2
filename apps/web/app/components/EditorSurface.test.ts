@@ -119,6 +119,12 @@ const { harness } = vi.hoisted(() => ({
     focusCalls: 0,
     /** Every `EditorHandle` command the host called, in order. */
     handleCalls: [] as HandleCall[],
+    /** What the fake handle's `blockAt` answers — the block under the pointer, or none. */
+    blockHit: null as null | { pos: number; node: { type: { name: string }; attrs: Record<string, unknown>; firstChild: null }; rect: { left: number; top: number; right: number; bottom: number; width: number; height: number } },
+    /** What each block command's dry run answers (`moveBlockUp(state)` with no dispatch). */
+    dryRuns: { moveBlockUp: true, moveBlockDown: true, deleteBlock: true, duplicateBlock: true, turnInto: true },
+    /** The document a `dispatch` of a selection landed on: what `placeCaretIn` asked for. */
+    caretPlacedAt: null as null | number,
   },
 }));
 
@@ -140,24 +146,51 @@ vi.mock('@deep-wiki/editor/mount', async (importOriginal) => {
       harness.confirmed = { kind: 'slash', id: command.id };
       return state.tr.setMeta(actual.slashPluginKey, { type: 'dismiss' });
     },
+    // The block commands' dry runs (`command(state)` with no dispatch): the
+    // real ones read a real `EditorState`, which the fake view has no room
+    // for; the answers are the harness's, and the host's handling of them
+    // is what is under test.
+    moveBlockUp: () => harness.dryRuns.moveBlockUp,
+    moveBlockDown: () => harness.dryRuns.moveBlockDown,
+    deleteBlock: () => harness.dryRuns.deleteBlock,
+    duplicateBlock: () => harness.dryRuns.duplicateBlock,
+    turnInto: () => () => harness.dryRuns.turnInto,
     mountEditor(options: FakeViewOptions) {
       let mention = actual.INACTIVE_MENTION_STATE;
       let slash = actual.INACTIVE_SLASH_STATE;
 
+      // The selection's class is how `placeCaretIn` reaches `Selection.near`
+      // (`utils/block-tunes.ts`); this one answers with the position asked.
+      class FakeSelection {
+        from = 1;
+        static near(resolved: { pos: number }) {
+          return { placedAt: resolved.pos };
+        }
+      }
+      const blockDom = document.createElement('p');
       const view = {
         dom: options.dom,
         coordsAtPos: () => harness.caret,
+        nodeDOM: () => blockDom,
         state: {
           // The real document the host parsed, so the debounced `toMarkdown`
           // the host runs after an update has something to serialise; a
           // test swaps it (`harness.replaceDoc`) to stand for a transaction
           // with steps, which is the only kind that yields a new instance.
           doc: options.doc,
+          selection: new FakeSelection(),
           get tr() {
-            return { setMeta: (key: unknown, action: unknown) => ({ key, action }) };
+            return {
+              setMeta: (key: unknown, action: unknown) => ({ key, action }),
+              setSelection: (selection: { placedAt: number }) => ({ selection }),
+            };
           },
         },
-        dispatch(tr: { key: unknown; action: MentionAction | SlashAction }) {
+        dispatch(tr: { key?: unknown; action?: MentionAction | SlashAction; selection?: { placedAt: number } }) {
+          if (tr.selection) {
+            harness.caretPlacedAt = tr.selection.placedAt;
+            return;
+          }
           if (tr.key === actual.mentionPluginKey) applyMention(tr.action as MentionAction);
           else applySlash(tr.action as SlashAction);
         },
@@ -225,7 +258,7 @@ vi.mock('@deep-wiki/editor/mount', async (importOriginal) => {
         deleteBlock: record('deleteBlock'),
         duplicateBlock: record('duplicateBlock'),
         turnInto: record('turnInto'),
-        blockAt: () => null,
+        blockAt: () => harness.blockHit,
         startBlockDrag: record('startBlockDrag'),
         endBlockDrag: () => {
           harness.handleCalls.push({ command: 'endBlockDrag', args: [] });
@@ -305,6 +338,9 @@ describe('EditorSurface', () => {
     harness.confirmed = null;
     harness.focusCalls = 0;
     harness.handleCalls = [];
+    harness.blockHit = null;
+    harness.dryRuns = { moveBlockUp: true, moveBlockDown: true, deleteBlock: true, duplicateBlock: true, turnInto: true };
+    harness.caretPlacedAt = null;
     harness.doc = null;
     harness.gate = Promise.resolve();
   });
@@ -519,6 +555,158 @@ describe('EditorSurface', () => {
 
       await bold.trigger('keydown', { key: 'Escape' });
       expect(harness.focusCalls).toBe(focusBefore + 1);
+      component.unmount();
+    });
+  });
+
+  /**
+   * The block handle (`EditorBlockHandle`) and its tunes: one handle that
+   * follows the block under the pointer through the handle's `blockAt`,
+   * drags it through `startBlockDrag`/`endBlockDrag`, and opens a menu
+   * whose items come from dry-running the block commands on the block
+   * (`utils/block-tunes.ts`) after the caret has been placed in it. The
+   * keyboard reaches the same menu for the caret's block.
+   */
+  describe('the block handle and its tunes', () => {
+    const HIT = {
+      pos: 0,
+      node: { type: { name: 'paragraph' }, attrs: {}, firstChild: null },
+      rect: { left: 300, top: 140, right: 900, bottom: 166, width: 600, height: 26 },
+    };
+
+    async function hover(component: Awaited<ReturnType<typeof mountSurface>>): Promise<void> {
+      const editor = component.get('[data-testid="editor-surface"]');
+      editor.element.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: 400, clientY: 150 }));
+      // Throttled to one lookup per frame.
+      await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+      await component.vm.$nextTick();
+    }
+
+    function handle(component: Awaited<ReturnType<typeof mountSurface>>) {
+      return component.find('[data-testid="block-handle"]');
+    }
+
+    function menuItems(): HTMLElement[] {
+      return Array.from(document.body.querySelectorAll<HTMLElement>('[role="menuitem"]'));
+    }
+
+    async function settle(): Promise<void> {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+
+    test('appears beside the block under the pointer, at its top, and not while no block is under it', async () => {
+      const component = await mountSurface({ attachTo: document.body });
+      expect(handle(component).exists()).toBe(false);
+
+      await hover(component);
+      expect(handle(component).exists(), 'nothing under the pointer').toBe(false);
+
+      harness.blockHit = HIT;
+      await hover(component);
+      expect(handle(component).exists()).toBe(true);
+      // happy-dom lays nothing out: the host's box is at 0, so the block's
+      // viewport top is the handle's offset.
+      expect((handle(component).element as HTMLElement).style.top).toBe(`${HIT.rect.top}px`);
+      component.unmount();
+    });
+
+    test('opening the menu places the caret in the block first, then offers the tunes from dry runs — a refused move disabled with its reason', async () => {
+      harness.blockHit = HIT;
+      harness.dryRuns.moveBlockUp = false;
+      const component = await mountSurface({ attachTo: document.body });
+      await hover(component);
+      expect(harness.caretPlacedAt).toBeNull();
+
+      await handle(component).get('button').trigger('click');
+      await settle();
+
+      expect(harness.caretPlacedAt).toBe(HIT.pos);
+      const items = menuItems();
+      const labels = items.map((item) => item.textContent?.replace(/\s+/g, ' ').trim());
+      expect(labels.some((label) => label?.startsWith('Turn into'))).toBe(true);
+      const up = items.find((item) => item.textContent?.includes('Move up'))!;
+      expect(up.getAttribute('aria-disabled')).toBe('true');
+      expect(up.textContent).toContain('Already the first block.');
+      const down = items.find((item) => item.textContent?.includes('Move down'))!;
+      expect(down.getAttribute('aria-disabled')).toBeNull();
+
+      const focusBefore = harness.focusCalls;
+      down.click();
+      await settle();
+      expect(harness.handleCalls.map((call) => call.command)).toContain('moveBlockDown');
+      expect(harness.focusCalls, 'focus goes back to the editor').toBeGreaterThan(focusBefore);
+      component.unmount();
+    });
+
+    test('Duplicate and Delete run the handle\'s commands', async () => {
+      harness.blockHit = HIT;
+      const component = await mountSurface({ attachTo: document.body });
+      await hover(component);
+
+      await handle(component).get('button').trigger('click');
+      await settle();
+      menuItems().find((item) => item.textContent?.includes('Duplicate'))!.click();
+      await settle();
+      // The menu closed and the handle went with it (the block it stood
+      // beside may have moved); the pointer brings it back.
+      expect(handle(component).exists()).toBe(false);
+      await hover(component);
+      await handle(component).get('button').trigger('click');
+      await settle();
+      menuItems().find((item) => item.textContent?.includes('Delete'))!.click();
+      await settle();
+
+      expect(harness.handleCalls.map((call) => call.command)).toEqual(['duplicateBlock', 'deleteBlock']);
+      component.unmount();
+    });
+
+    test('Turn into on a list item chains Text first, so a heading does not land inside the item', async () => {
+      harness.blockHit = { ...HIT, node: { type: { name: 'list' }, attrs: { ordered: false }, firstChild: null } };
+      const component = await mountSurface({ attachTo: document.body });
+      await hover(component);
+      await handle(component).get('button').trigger('click');
+      await settle();
+
+      const turnInto = menuItems().find((item) => item.textContent?.includes('Turn into'))!;
+      turnInto.dispatchEvent(new PointerEvent('pointermove', { bubbles: true }));
+      turnInto.click();
+      await settle();
+      const heading = menuItems().find((item) => item.textContent?.includes('Heading 1'))!;
+      heading.click();
+      await settle();
+
+      expect(harness.handleCalls).toEqual([
+        { command: 'turnInto', args: ['text'] },
+        { command: 'turnInto', args: ['heading-1'] },
+      ]);
+      component.unmount();
+    });
+
+    test('a drag from the handle starts the block drag with the event\'s dataTransfer, and its end clears it', async () => {
+      harness.blockHit = { ...HIT, pos: 4 };
+      const component = await mountSurface({ attachTo: document.body });
+      await hover(component);
+      const button = handle(component).get('button');
+
+      const dragstart = new DragEvent('dragstart', { bubbles: true, cancelable: true, dataTransfer: new DataTransfer() });
+      button.element.dispatchEvent(dragstart);
+      button.element.dispatchEvent(new DragEvent('dragend', { bubbles: true }));
+
+      expect(harness.handleCalls[0]).toEqual({ command: 'startBlockDrag', args: [4, dragstart.dataTransfer] });
+      expect(harness.handleCalls[1]?.command).toBe('endBlockDrag');
+      component.unmount();
+    });
+
+    test('Ctrl+/ from the editor opens the menu for the caret\'s block, without a pointer', async () => {
+      const component = await mountSurface({ attachTo: document.body });
+      expect(handle(component).exists()).toBe(false);
+
+      await component.get('[data-testid="editor-surface"]').trigger('keydown', { key: '/', code: 'Slash', ctrlKey: true });
+      await settle();
+
+      expect(handle(component).exists()).toBe(true);
+      expect(harness.caretPlacedAt, 'the caret\'s own block: no move needed').toBe(0);
+      expect(menuItems().length).toBeGreaterThan(0);
       component.unmount();
     });
   });
