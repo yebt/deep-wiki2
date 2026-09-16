@@ -14,7 +14,7 @@ import postgres from 'postgres';
 import { expectNoDisclosure } from '../../testing/expect-no-disclosure';
 import { SESSION_COOKIE_NAME } from '../middleware/session';
 import { PresenceStreamRegistry } from '../presence/registry';
-import { createPresenceRoutes } from './presence';
+import { createPresenceRoutes, SSE_KEEP_ALIVE_SECONDS } from './presence';
 
 let db: ProvisionedTestDatabase;
 let sql: postgres.Sql;
@@ -133,16 +133,49 @@ async function buildFixture(): Promise<Fixture> {
 function buildApp(deps: {
   broadcaster: PresenceBroadcaster;
   registry?: PresenceStreamRegistry;
+  pollSeconds?: number;
   keepAliveSeconds?: number;
+  sleep?: (ms: number) => Promise<void>;
 }) {
   return createPresenceRoutes({
     sql,
     sessionIdleTimeoutMinutes: 30,
     broadcaster: deps.broadcaster,
     pageLockTtlSeconds: TTL_SECONDS,
-    keepAliveSeconds: deps.keepAliveSeconds ?? 30,
+    pollSeconds: deps.pollSeconds ?? 30,
+    keepAliveSeconds: deps.keepAliveSeconds,
+    sleep: deps.sleep,
     registry: deps.registry,
   });
+}
+
+/**
+ * A clock the test advances by hand: every `sleep` the route asks for is
+ * recorded and parked until `tick()` releases the oldest one. That is what
+ * makes "a frame every N seconds" a fact the test can state rather than a
+ * timing it has to wait out — and what lets it prove that the poll does
+ * *not* run on every keep-alive.
+ */
+function manualClock() {
+  const requested: number[] = [];
+  const pending: (() => void)[] = [];
+  return {
+    requested,
+    sleep: (ms: number) =>
+      new Promise<void>((resolve) => {
+        requested.push(ms);
+        pending.push(resolve);
+      }),
+    /** Releases the oldest parked sleep, waiting for the route to ask for one first. */
+    async tick(): Promise<void> {
+      const deadline = Date.now() + 2000;
+      while (pending.length === 0) {
+        if (Date.now() > deadline) throw new Error('the route never went to sleep');
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+      pending.shift()!();
+    },
+  };
 }
 
 /**
@@ -167,6 +200,13 @@ class FrameReader {
   private readonly decoder = new TextDecoder();
   /** Every raw byte this reader has ever decoded, regardless of framing — the non-disclosure check scans this, not a single frame. */
   private transcriptText = '';
+  /**
+   * A read that a timeout abandoned is still a read: the chunk it
+   * eventually resolves with is consumed from the stream whether or not
+   * anyone is waiting. Kept here so the next call takes it over instead of
+   * losing a frame that arrived just after a deadline.
+   */
+  private inFlight: Promise<{ done: boolean; value?: Uint8Array }> | null = null;
 
   constructor(private readonly reader: RawStreamReader) {}
 
@@ -188,11 +228,13 @@ class FrameReader {
       }
       const remaining = deadline - Date.now();
       if (remaining <= 0) return null;
+      this.inFlight ??= this.reader.read();
       const outcome = await Promise.race([
-        this.reader.read().then((result) => ({ timedOut: false as const, result })),
+        this.inFlight.then((result) => ({ timedOut: false as const, result })),
         new Promise<{ timedOut: true }>((resolve) => setTimeout(() => resolve({ timedOut: true }), remaining)),
       ]);
       if (outcome.timedOut) return null;
+      this.inFlight = null;
       if (outcome.result.done) return null;
       const chunk = this.decoder.decode(outcome.result.value, { stream: true });
       this.buffer += chunk;
@@ -360,7 +402,7 @@ describe('multiple-API-processes poll fallback', () => {
     // delivery came from the poll path alone, not from bypassing an
     // in-memory relay that happened to still be wired.
     const broadcaster = new TestBroadcaster();
-    const app = buildApp({ broadcaster, keepAliveSeconds: 30 });
+    const app = buildApp({ broadcaster, pollSeconds: 30 });
 
     const lock = await acquireLock(sql, {
       nodeId: fixture.pageId,
@@ -389,7 +431,7 @@ describe('multiple-API-processes poll fallback', () => {
   test('a later keep-alive tick discovers presence that started after connect', async () => {
     const fixture = await buildFixture();
     const broadcaster = new TestBroadcaster();
-    const app = buildApp({ broadcaster, keepAliveSeconds: 0.05 });
+    const app = buildApp({ broadcaster, pollSeconds: 0.05, keepAliveSeconds: 0.05 });
 
     const res = await app.request(`/workspaces/${fixture.workspaceId}/presence/stream`, {
       headers: { cookie: fixture.readerCookie },
@@ -406,6 +448,74 @@ describe('multiple-API-processes poll fallback', () => {
 
     const frame = await fr.nextPresenceFrame(3000);
     expect(frame).not.toBeNull();
+  });
+});
+
+/**
+ * `Bun.serve` closes a connection that has been idle for ten seconds
+ * (its default `idleTimeout`; measured on Bun 1.4.2, the stream ended with
+ * "timed out a request after 10 seconds" and the browser reported
+ * `ERR_INCOMPLETE_CHUNKED_ENCODING`). The route's only defence is to
+ * write something inside that window: a comment frame every
+ * `SSE_KEEP_ALIVE_SECONDS`, which a proxy with a read timeout also
+ * counts as traffic. The poll over the `presence` view is a database read
+ * and keeps its own, slower cadence — `PAGE_LOCK_HEARTBEAT_SECONDS`, the
+ * interval the two used to share.
+ */
+describe('keep-alive inside the server idle timeout', () => {
+  test('a `: keep-alive` comment leaves every SSE_KEEP_ALIVE_SECONDS, well inside the 10-second idle timeout', async () => {
+    const fixture = await buildFixture();
+    const clock = manualClock();
+    const app = buildApp({ broadcaster: new TestBroadcaster(), pollSeconds: 20, sleep: clock.sleep });
+
+    const res = await app.request(`/workspaces/${fixture.workspaceId}/presence/stream`, {
+      headers: { cookie: fixture.readerCookie },
+    });
+    const fr = new FrameReader(res.body!.getReader());
+    expect(await fr.next()).toBe(': connected');
+
+    expect(SSE_KEEP_ALIVE_SECONDS).toBeLessThan(10);
+    await clock.tick();
+    expect(clock.requested[0]).toBe(SSE_KEEP_ALIVE_SECONDS * 1000);
+    expect(await fr.next()).toBe(': keep-alive');
+
+    await clock.tick();
+    expect(clock.requested[1]).toBe(SSE_KEEP_ALIVE_SECONDS * 1000);
+    expect(await fr.next()).toBe(': keep-alive');
+  });
+
+  test('the poll over the presence view keeps PAGE_LOCK_HEARTBEAT_SECONDS as its cadence, not the keep-alive one', async () => {
+    const fixture = await buildFixture();
+    const clock = manualClock();
+    const broadcaster = new TestBroadcaster();
+    // Four keep-alives to one poll.
+    const app = buildApp({ broadcaster, pollSeconds: 20, keepAliveSeconds: 5, sleep: clock.sleep });
+
+    const res = await app.request(`/workspaces/${fixture.workspaceId}/presence/stream`, {
+      headers: { cookie: fixture.readerCookie },
+    });
+    const fr = new FrameReader(res.body!.getReader());
+    expect(await fr.next()).toBe(': connected'); // and the initial poll found nothing
+
+    await acquireLock(sql, {
+      nodeId: fixture.pageId,
+      workspaceId: fixture.workspaceId,
+      userId: fixture.editorUserId,
+      ttlSeconds: TTL_SECONDS,
+    });
+
+    for (let tick = 1; tick <= 3; tick += 1) {
+      await clock.tick();
+      expect(await fr.next()).toBe(': keep-alive');
+      // A read of the view here would have delivered the lock already.
+      expect(await fr.nextPresenceFrame(150)).toBeNull();
+    }
+
+    await clock.tick();
+    expect(await fr.next()).toBe(': keep-alive');
+    const frame = await fr.nextPresenceFrame();
+    expect(frame).not.toBeNull();
+    expect(PresenceEventSchema.parse(payloadOf(frame!)).pageId).toBe(fixture.pageId);
   });
 });
 

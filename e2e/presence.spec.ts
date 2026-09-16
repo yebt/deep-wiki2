@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
 import { API_URL } from './ports';
 
@@ -23,6 +24,16 @@ import { API_URL } from './ports';
  */
 
 test.describe.configure({ mode: 'serial' });
+
+interface SeedFixtures {
+  readonly readPageId: string;
+  readonly historyPageId: string;
+  readonly workspaceId: string;
+  readonly readerSessionToken: string;
+}
+
+/** The real backend's seed, for the two tests below that count requests against `apps/api` itself rather than a mocked stream. */
+const seed: SeedFixtures = JSON.parse(readFileSync(new URL('.auth-fixtures.json', import.meta.url), 'utf8'));
 
 const PAGE_ID = '44444444-4444-4444-4444-444444444444';
 const WORKSPACE_ID = 'ws-presence-e2e';
@@ -249,3 +260,36 @@ test('a reader sees who is editing the page, and since when, without acquiring a
   expect(lockRequests).toEqual([]);
 });
 
+
+/**
+ * The transport itself, against the real `apps/api` on `Bun.serve`. Until
+ * 2026-09-16 the server closed every presence stream after ten idle
+ * seconds (`Bun.serve`'s default `idleTimeout`; the browser reported
+ * `ERR_INCOMPLETE_CHUNKED_ENCODING`) and `EventSource` reconnected — a new
+ * request every ~10 s for as long as a screen stayed open. The route now
+ * writes a keep-alive comment inside that window
+ * (`apps/api/src/routes/presence.ts`, `SSE_KEEP_ALIVE_SECONDS`), so a stream
+ * held open for 25 s is one request. A request count, on purpose: the
+ * observable of a dropped stream is the reconnect, and nothing a person
+ * sees changes between one connection and a chain of them — this is a
+ * transport contract, not a screen contract (docs/UI-CHECKLIST.md §7).
+ */
+test('a presence stream held open for 25 seconds is one request — the server keeps it alive inside its idle timeout', async ({ page }) => {
+  test.setTimeout(240_000);
+  await signIn(page, seed.readerSessionToken);
+  const streamRequests: number[] = [];
+  page.on('request', (request) => {
+    if (request.url().endsWith(`/workspaces/${seed.workspaceId}/presence/stream`)) streamRequests.push(Date.now());
+  });
+
+  await page.goto(`/pages/${seed.readPageId}`);
+  // The stream opens once the read response has named the workspace;
+  // under load, hydration alone can take tens of seconds.
+  await expect.poll(() => streamRequests.length, { timeout: 120_000, message: 'the presence stream never opened' }).toBe(1);
+
+  // Two and a half idle timeouts: a stream the server still dropped
+  // would have reconnected at least twice in this window.
+  await page.waitForTimeout(25_000);
+
+  expect(streamRequests, `stream requests at ${streamRequests.map((at) => at - streamRequests[0]!).join(', ')} ms`).toHaveLength(1);
+});

@@ -111,7 +111,7 @@ describe('GET /workspaces/:workspaceId/presence/stream — mounted like every ot
         sessionIdleTimeoutMinutes: 30,
         broadcaster: new NoopBroadcaster(),
         pageLockTtlSeconds: 120,
-        keepAliveSeconds: 20,
+        pollSeconds: 20,
       }),
     );
 

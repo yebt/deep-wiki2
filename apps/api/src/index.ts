@@ -216,7 +216,7 @@ export function composeApp(adapters: AppAdapters, settings: AppSettings): Hono {
       sessionIdleTimeoutMinutes,
       broadcaster: presenceBroadcaster,
       pageLockTtlSeconds: settings.pageLockTtlSeconds,
-      keepAliveSeconds: settings.pageLockHeartbeatSeconds,
+      pollSeconds: settings.pageLockHeartbeatSeconds,
       registry: presenceStreamRegistry,
     }),
   );
