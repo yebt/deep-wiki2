@@ -420,6 +420,38 @@ describe('EditorSurface', () => {
     });
   });
 
+  describe('flush', () => {
+    /**
+     * Save reads the buffer the surface last reported, and the surface
+     * reports 300ms after the last transaction — so a Save inside that
+     * window saved the document before the edit (docs/TODO.md, "a dirty
+     * editor has a 300ms blind spot"). `flush()` reports what is pending
+     * now; the screen calls it before it saves.
+     */
+    test('reports a pending document at once, and reports nothing when nothing is pending', async () => {
+      vi.useFakeTimers();
+      try {
+        const component = await mountSurface();
+        const surface = component.findComponent(EditorSurface);
+        const flush = (surface.vm as unknown as { flush: () => void }).flush;
+
+        flush();
+        expect(surface.emitted('update')).toBeUndefined();
+
+        harness.replaceDoc('# Hi\n\nPending.\n');
+        harness.update({ undoDepth: 1, redoDepth: 0 });
+        flush();
+        expect(surface.emitted('update')).toEqual([['# Hi\n\nPending.\n']]);
+
+        // The timer was cleared with it: nothing reports twice.
+        await vi.advanceTimersByTimeAsync(400);
+        expect(surface.emitted('update')).toHaveLength(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
   describe('undo and redo for the contextual bar', () => {
     test('reports the history depths of every transaction, undebounced, as a `history` event', async () => {
       const component = await mountSurface();
@@ -802,6 +834,62 @@ describe('EditorSurface', () => {
   });
 
   /**
+   * Since `keymap.ts` bound `Enter` (2026-09-14) the keymap plugin — first
+   * in `buildEditorPlugins`' list — claims Enter before the menus, so
+   * Enter in an open `/` or `@` menu split the block instead of confirming
+   * (docs/TODO.md Findings, 2026-09-16). The package is another batch's;
+   * the host confirms on the capture phase of its own wrapper, where the
+   * key can be taken before ProseMirror's listener on the editor sees it,
+   * through the same one-transaction confirm the click uses.
+   */
+  describe('Enter and Tab in an open menu confirm, before the keymap can split the block', () => {
+    test('Enter with the slash menu open runs the highlighted command and never reaches the editor', async () => {
+      const component = await mountSurface();
+      openSlashMenu('');
+      await component.vm.$nextTick();
+      const editor = component.get('[data-testid="editor-surface"]');
+      let reachedEditor = false;
+      editor.element.addEventListener('keydown', () => {
+        reachedEditor = true;
+      });
+
+      const enter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+      editor.element.dispatchEvent(enter);
+      await component.vm.$nextTick();
+
+      expect(enter.defaultPrevented).toBe(true);
+      expect(reachedEditor, 'stopped on the capture phase').toBe(false);
+      const first = (await import('@deep-wiki/editor/mount')).SLASH_COMMANDS[0]!;
+      expect(harness.confirmed).toEqual({ kind: 'slash', id: first.id });
+      expect(component.find('[role="listbox"]').exists()).toBe(false);
+    });
+
+    test('Tab with the mention menu open inserts the highlighted candidate', async () => {
+      const component = await mountSurface();
+      await openMentionMenu('a');
+      const editor = component.get('[data-testid="editor-surface"]');
+
+      const tab = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true });
+      editor.element.dispatchEvent(tab);
+      await component.vm.$nextTick();
+
+      expect(tab.defaultPrevented).toBe(true);
+      expect(harness.confirmed).toEqual({ kind: 'mention', label: PEOPLE[0]!.label });
+    });
+
+    test('Enter with no menu open is the editor\'s own', async () => {
+      const component = await mountSurface();
+      const editor = component.get('[data-testid="editor-surface"]');
+
+      const enter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+      editor.element.dispatchEvent(enter);
+
+      expect(enter.defaultPrevented).toBe(false);
+      expect(harness.confirmed).toBeNull();
+    });
+  });
+
+  /**
    * The editor is a contenteditable with no name and no relationship to
    * the menus it drives (audit, 2026-09-14; checklist §5). A combobox-style
    * chain needs: the editor named as a multiline textbox, `aria-haspopup`
@@ -903,6 +991,31 @@ describe('EditorSurface', () => {
       expect(menu.findAll('[role="option"]').length).toBeGreaterThan(0);
       expect(menu.text()).toContain('Heading 1');
       expect(menu.text()).not.toMatch(/no matching commands/i);
+    });
+
+    /**
+     * The `/` menu is data-driven from the shipped `SLASH_COMMANDS`, which
+     * gained Text, Task list, Table and Footnote on 2026-09-16; each row
+     * carries an icon *beside* its label, never instead of it (§4.3), from
+     * the one map the tunes menu's "Turn into" reads too.
+     */
+    test('the slash menu lists the block commands the package ships, each with an icon beside its label', async () => {
+      const component = await mountSurface();
+
+      openSlashMenu('');
+      await component.vm.$nextTick();
+
+      const menu = component.get('[role="listbox"][aria-label="Block commands"]');
+      const options = menu.findAll('[role="option"]');
+      const labels = options.map((option) => option.text());
+      for (const expected of ['Text', 'Task list', 'Table', 'Footnote']) {
+        expect(labels.some((label) => label.startsWith(expected)), expected).toBe(true);
+      }
+      for (const option of options) {
+        const icon = option.find('[class*="i-lucide-"], .iconify, svg');
+        expect(icon.exists(), `${option.text()} has an icon`).toBe(true);
+        expect(icon.attributes('aria-hidden')).toBe('true');
+      }
     });
 
     test('a slash query that matches no command shows the no-results state', async () => {

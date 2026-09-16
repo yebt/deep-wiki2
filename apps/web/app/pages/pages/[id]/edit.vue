@@ -157,7 +157,9 @@ function onEditorUpdate(markdown: string): void {
 // `Ctrl+Shift+Z` run inside it — so a button and its keys never disagree.
 // A remounted editor (the corrected/canonical document loaded back)
 // starts with an empty history, and the buttons say so until it reports.
-const editorSurface = ref<{ undo: () => void; redo: () => void; focus: () => void } | null>(null);
+// `flush` is optional in the type only because this screen's tests stub
+// the surface as an empty component; the real one always exposes it.
+const editorSurface = ref<{ undo: () => void; redo: () => void; flush?: () => void; focus: () => void } | null>(null);
 const history = ref({ undoDepth: 0, redoDepth: 0 });
 watch(editorRemountKey, () => {
   history.value = { undoDepth: 0, redoDepth: 0 };
@@ -204,6 +206,9 @@ const saveDisabledReason = computed<string | null>(() => {
 });
 
 async function onSave(): Promise<void> {
+  // The surface reports 300ms after the last transaction; a Save inside
+  // that window read the document before the edit. It reports now.
+  editorSurface.value?.flush?.();
   if (saveDisabledReason.value !== null) return;
   await save(currentMarkdown.value, contentHash.value ?? null);
   if (saveStatus.value === 'success') {

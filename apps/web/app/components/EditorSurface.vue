@@ -29,7 +29,17 @@
  */
 import type { MentionCandidate, MentionState, SlashState } from '@deep-wiki/editor';
 import type { EditorView } from 'prosemirror-view';
-import { blockTunesMenu, caretBlock, currentTurnIntoTarget, placeCaretIn, TURN_INTO_TARGET_IDS, type BlockLike, type TunesActions, type TunesItem } from '~/utils/block-tunes';
+import {
+  blockTunesMenu,
+  caretBlock,
+  currentTurnIntoTarget,
+  placeCaretIn,
+  slashCommandIcon,
+  TURN_INTO_TARGET_IDS,
+  type BlockLike,
+  type TunesActions,
+  type TunesItem,
+} from '~/utils/block-tunes';
 import { loadEditorMount, type EditorMountModule } from '~/utils/editor-mount';
 import { positionMenu, positionToolbar } from '~/utils/menu-position';
 
@@ -105,6 +115,23 @@ type MountOptions = Parameters<EditorMountModule['mountEditor']>[0];
 type SelectionReport = Parameters<NonNullable<NonNullable<MountOptions['selection']>['onChange']>>[0];
 let handle: EditorHandle | undefined;
 let editorView: EditorView | undefined;
+let debounceTimer: ReturnType<typeof setTimeout> | undefined;
+/** The report the debounce is holding, so `flush()` can send it now. */
+let pendingReport: (() => void) | null = null;
+
+/**
+ * Reports the pending document at once, if any. The screen calls it
+ * before Save reads the buffer, closing the 300ms window in which a Save
+ * took the document before the edit (docs/TODO.md, "a dirty editor has a
+ * 300ms blind spot").
+ */
+function flush(): void {
+  if (debounceTimer) clearTimeout(debounceTimer);
+  debounceTimer = undefined;
+  const report = pendingReport;
+  pendingReport = null;
+  report?.();
+}
 /** The `"./mount"` module, kept from `loadEditorMount()` so the click paths below can build the same transactions the plugins build on Enter. */
 let editorModule: Awaited<ReturnType<typeof loadEditorMount>> | undefined;
 
@@ -319,6 +346,34 @@ function focusEditor(): void {
   editorView?.focus();
 }
 
+/**
+ * Enter and Tab while a menu is open confirm the highlighted row — here,
+ * on the capture phase of this wrapper, before ProseMirror's own listener
+ * on the editor sees the key. Since `keymap.ts` bound `Enter`
+ * (2026-09-14) the keymap plugin, first in `buildEditorPlugins`' list,
+ * claims it before the mention and slash plugins can, so Enter in an
+ * open menu split the block and left `/query` in place (docs/TODO.md
+ * Findings, 2026-09-16). The package is another batch's; the host runs
+ * the same one-transaction confirm the click paths run, so undo removes
+ * the whole insertion as one step either way.
+ */
+function onHostKeydownCapture(event: KeyboardEvent): void {
+  if (event.key !== 'Enter' && event.key !== 'Tab') return;
+  if (event.ctrlKey || event.metaKey || event.altKey) return;
+  if (!(event.target instanceof Node) || !rootEl.value?.contains(event.target)) return;
+  if (mentionState.value?.active) {
+    event.preventDefault();
+    event.stopPropagation();
+    confirmMentionAt(mentionState.value.selectedIndex);
+    return;
+  }
+  if (slashState.value?.active) {
+    event.preventDefault();
+    event.stopPropagation();
+    confirmSlashAt(slashState.value.selectedIndex);
+  }
+}
+
 function onToolbarToggle(name: Parameters<EditorHandle['toggleMark']>[0]): void {
   handle?.toggleMark(name);
 }
@@ -382,7 +437,6 @@ async function mount(): Promise<void> {
   editorModule = mod;
   if (!rootEl.value) return;
 
-  let debounceTimer: ReturnType<typeof setTimeout> | undefined;
   let lastMentionQuery: string | null = null;
   const initialDoc = mod.fromMarkdown(props.markdown);
   /** The document last handed to `update` — by identity: ProseMirror keeps the same `Node` through a transaction with no steps. */
@@ -450,7 +504,8 @@ async function mount(): Promise<void> {
       if (view.state.doc === lastReportedDoc) return;
       lastReportedDoc = view.state.doc;
       if (debounceTimer) clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(() => emit('update', mod.toMarkdown(view.state.doc)), 300);
+      pendingReport = () => emit('update', mod.toMarkdown(view.state.doc));
+      debounceTimer = setTimeout(flush, 300);
     },
   });
   editorView = handle.view;
@@ -485,6 +540,7 @@ defineExpose({
   focus: () => editorView?.focus(),
   undo,
   redo,
+  flush,
 });
 </script>
 
@@ -495,6 +551,7 @@ defineExpose({
     @focusin="onFocusIn"
     @focusout="onFocusOut"
     @keydown="onHostKeydown"
+    @keydown.capture="onHostKeydownCapture"
     @pointermove="onPointerMove"
     @pointerenter="cancelHandleHide"
     @pointerleave="scheduleHandleHide"
@@ -635,13 +692,18 @@ defineExpose({
           :key="command.id"
           role="option"
           :aria-selected="index === slashState.selectedIndex"
-          class="dw-state-layer cursor-pointer rounded-md px-3 py-2"
+          class="dw-state-layer flex cursor-pointer items-start gap-2 rounded-md px-3 py-2"
           :class="index === slashState.selectedIndex ? 'bg-secondary-container text-on-secondary-container' : 'text-default'"
           @mousedown.prevent
           @click="confirmSlashAt(index)"
         >
-          <p class="text-body-medium">{{ command.label }}</p>
-          <p class="text-body-small text-muted">{{ command.description }}</p>
+          <!-- The icon beside the label, never instead of it (§4.3), from
+               the one map "Turn into" reads too (`utils/block-tunes.ts`). -->
+          <span class="flex h-5 shrink-0 items-center"><UIcon :name="slashCommandIcon(command.id)" class="size-4" aria-hidden="true" /></span>
+          <span>
+            <span class="block text-body-medium">{{ command.label }}</span>
+            <span class="block text-body-small text-muted">{{ command.description }}</span>
+          </span>
         </li>
       </ul>
     </div>

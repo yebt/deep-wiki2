@@ -555,12 +555,13 @@ describe('edit-mode page', () => {
   describe('Undo and Redo in the contextual bar', () => {
     const undo = vi.fn();
     const redo = vi.fn();
+    const flush = vi.fn();
     /** The surface with its exposed commands, so the bar's click has something real to call. */
     const SurfaceStub = defineComponent({
       name: 'EditorSurface',
       emits: ['update', 'history'],
       setup(_, { expose }) {
-        expose({ undo, redo, focus: vi.fn() });
+        expose({ undo, redo, flush, focus: vi.fn() });
         return () => h('div', { 'data-testid': 'editor-surface-stub' });
       },
     });
@@ -568,6 +569,7 @@ describe('edit-mode page', () => {
     async function mountReady() {
       undo.mockReset();
       redo.mockReset();
+      flush.mockReset();
       loadEditorMountMock.mockResolvedValue({});
       mockDefaults();
       mockSession({ status: 'ready', session: READY_SESSION });
@@ -577,6 +579,20 @@ describe('edit-mode page', () => {
     function bar(component: Awaited<ReturnType<typeof mountReady>>) {
       return component.get('#content-bar');
     }
+
+    // Save reads what the surface last reported, 300ms after the last
+    // keystroke; flushing first closes that window (docs/TODO.md, "a
+    // dirty editor has a 300ms blind spot").
+    test('Save asks the surface to report its pending document before it reads the buffer', async () => {
+      const component = await mountReady();
+      const surface = component.findComponent({ name: 'EditorSurface' });
+      surface.vm.$emit('update', '# Hi\n\nedited\n');
+      await component.vm.$nextTick();
+
+      await bar(component).findAll('button').find((button) => /^Save/.test(button.text()))!.trigger('click');
+
+      expect(flush).toHaveBeenCalledTimes(1);
+    });
 
     test('both stand in the bar before Save, named, with the keys stated for assistive technology', async () => {
       const component = await mountReady();

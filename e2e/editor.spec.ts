@@ -742,6 +742,63 @@ test.describe('the block handle against the real backend, 1280x900', () => {
 });
 
 /**
+ * The `/` menu's newest commands, landed where the editor package says
+ * they land (docs/TODO.md Findings 2026-09-16): `/table` puts the caret
+ * in the first cell of an empty 2x2 table, `/footnote` puts `[^n]` at the
+ * caret and the caret in the empty definition at the end. Proved by what
+ * typing next does, and by the saved bytes.
+ */
+test.describe('the / menu against the real backend', () => {
+  test.use({ viewport: { width: 1280, height: 900 } });
+
+  test('/table inserts an empty 2x2 table with the caret in its first cell, and the saved markdown spells it canonically', async ({ page }) => {
+    test.setTimeout(120000);
+    const block = await seedBlockPage(page, 'Before the table.\n');
+    const editor = await openBlockPage(page, block, 'Before the table.');
+
+    await editor.click();
+    await page.keyboard.press('End');
+    await page.keyboard.press('Enter');
+    await page.keyboard.type('/tab');
+    const menu = page.getByRole('listbox', { name: 'Block commands' });
+    const table = menu.getByRole('option', { name: /Table/ });
+    await expect(table).toBeVisible();
+    // The icon is beside the label, never instead of it (§4.3).
+    await expect(table).toContainText('Table');
+    await expect(table.locator('svg, [class*="i-lucide"]').first()).toHaveAttribute('aria-hidden', 'true');
+    await page.keyboard.press('Enter');
+    await expect(editor.locator('table')).toHaveCount(1);
+    await expect(editor.locator('td, th')).toHaveCount(4);
+    await page.keyboard.type('cell');
+    await expect(editor.locator('td, th').first()).toHaveText('cell');
+
+    await saveAndConfirm(page);
+    expect(await savedMarkdown(page, block.pageId)).toBe('Before the table.\n\n| cell |   |\n| ---- | - |\n|      |   |\n');
+  });
+
+  test('/footnote puts the reference at the caret and the caret in the note at the end; the note typed next saves with it', async ({ page }) => {
+    test.setTimeout(120000);
+    const block = await seedBlockPage(page, 'A claim worth a note.\n');
+    const editor = await openBlockPage(page, block, 'A claim worth a note.');
+
+    await editor.click();
+    await page.keyboard.press('End');
+    // The trigger fires after whitespace or at a line's start, never mid-word.
+    await page.keyboard.type(' /foot');
+    const menu = page.getByRole('listbox', { name: 'Block commands' });
+    await expect(menu.getByRole('option', { name: /Footnote/ })).toBeVisible();
+    await page.keyboard.press('Enter');
+    await expect(menu).toHaveCount(0);
+    await page.keyboard.type('The note itself.');
+    await expect(editor).toContainText('The note itself.');
+    await expect(editor.locator(':scope > p').first()).not.toContainText('The note itself.');
+
+    await saveAndConfirm(page);
+    expect(await savedMarkdown(page, block.pageId)).toBe('A claim worth a note. [^1]\n\n[^1]: The note itself.\n');
+  });
+});
+
+/**
  * The block UI at the sizes and themes the review asks for, measured
  * where a screenshot cannot see: nothing scrolls sideways at 320 with
  * the toolbar, the menu or a drag up; every floating surface stays inside
