@@ -587,8 +587,14 @@ proves the attribute follows every reported transaction.
 33 passed, 5 failed, 106 skipped before. `--repeat-each 3`: see the verification line in the
 commit.
 
-**Not fixed here.** `e2e/comments.spec.ts:332` presses `End` on a focused gutter control, not in
-the editor — a different `End`, no race. The 20 ms focus timer ProseMirror schedules
+**Not fixed here.** `bun run e2e -- e2e/editor.spec.ts --repeat-each 3` (parallel workers, the
+default): 75 passed, 1 failed, 2 did not run on the first invocation; 78 passed on the second.
+The one failure is unrelated to the caret: `:1203` ("the drawer's toolbar row fills its width",
+320x900) measured `Rename…` 17.17 px off the row's edge *after* its own `expect.poll` had just
+seen the difference at ≤ 1 — the poll accepts a single settled-looking sample mid-animation and
+the next measurement disagrees. A poll that requires two consecutive samples with the same row
+width would close it; left as found, it is not on this branch's path. `e2e/comments.spec.ts:332`
+presses `End` on a focused gutter control, not in the editor — a different `End`, no race. The 20 ms focus timer ProseMirror schedules
 (`handlers.focus`: push its selection to the DOM if the two disagree) never fired first in any
 logged run, but it is the other half of the same frame arithmetic and would produce the same
 outcome by a different route; `caretToEnd` covers both because it waits for the transaction
