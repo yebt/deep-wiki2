@@ -5,9 +5,9 @@
  * — no network round trip, unlike mentions — so filtering is synchronous
  * and the reducer never needs a `setCandidates` action.
  */
-import { setBlockType, wrapIn } from 'prosemirror-commands';
-import type { NodeType } from 'prosemirror-model';
-import { EditorState, Plugin, PluginKey, Selection, type Transaction } from 'prosemirror-state';
+import { wrapIn } from 'prosemirror-commands';
+import type { Attrs, NodeType } from 'prosemirror-model';
+import { type Command, EditorState, Plugin, PluginKey, Selection, type Transaction } from 'prosemirror-state';
 import { wrapInList } from 'prosemirror-schema-list';
 import { schema } from '../schema';
 import type { SlashCommandSummary, SlashState } from '../types';
@@ -56,6 +56,46 @@ function canInsertAtCaret(state: EditorState, type: NodeType): boolean {
   return $from.node(depth).canReplaceWith(index, index, type);
 }
 
+/**
+ * `prosemirror-commands`' `setBlockType`, with one difference: the block's
+ * `blockAnchor` survives. That command replaces a block's attrs wholesale,
+ * so `/heading` on `First ^abc123` produced `# First` — the anchor, with
+ * every comment and citation hanging from it, silently gone. A retyped
+ * block is the same block. Built on `Transform.setBlockType`'s
+ * per-node attrs callback, which `prosemirror-commands` (1.7) does not
+ * yet expose; the applicability check is the original's, unchanged.
+ */
+export function setBlockTypeKeepingAnchor(type: NodeType, attrs: Attrs | null = null): Command {
+  const keepsAnchor = 'blockAnchor' in type.spec.attrs!;
+  const attrsFor = (node: { readonly attrs: Attrs }): Attrs =>
+    keepsAnchor ? { ...attrs, blockAnchor: node.attrs.blockAnchor ?? null } : { ...attrs };
+  return (state, dispatch) => {
+    let applicable = false;
+    for (const { $from, $to } of state.selection.ranges) {
+      state.doc.nodesBetween($from.pos, $to.pos, (node, pos) => {
+        if (applicable) return false;
+        if (!node.isTextblock || node.hasMarkup(type, attrsFor(node))) return;
+        if (node.type === type) {
+          applicable = true;
+        } else {
+          const $pos = state.doc.resolve(pos);
+          const index = $pos.index();
+          applicable = $pos.parent.canReplaceWith(index, index + 1, type);
+        }
+        return;
+      });
+      if (applicable) break;
+    }
+    if (!applicable) return false;
+    if (dispatch) {
+      const tr = state.tr;
+      for (const { $from, $to } of state.selection.ranges) tr.setBlockType($from.pos, $to.pos, type, attrsFor);
+      dispatch(tr.scrollIntoView());
+    }
+    return true;
+  };
+}
+
 function typeOf(name: string): NodeType {
   const type = schema.nodes[name];
   if (!type) throw new Error(`slash command references unknown node type "${name}"`);
@@ -63,9 +103,9 @@ function typeOf(name: string): NodeType {
 }
 
 export const SLASH_COMMANDS: readonly SlashCommand[] = [
-  { id: 'heading-1', label: 'Heading 1', description: 'Big section heading', run: (s, d) => setBlockType(typeOf('heading'), { level: 1 })(s, d) },
-  { id: 'heading-2', label: 'Heading 2', description: 'Medium section heading', run: (s, d) => setBlockType(typeOf('heading'), { level: 2 })(s, d) },
-  { id: 'heading-3', label: 'Heading 3', description: 'Small section heading', run: (s, d) => setBlockType(typeOf('heading'), { level: 3 })(s, d) },
+  { id: 'heading-1', label: 'Heading 1', description: 'Big section heading', run: (s, d) => setBlockTypeKeepingAnchor(typeOf('heading'), { level: 1 })(s, d) },
+  { id: 'heading-2', label: 'Heading 2', description: 'Medium section heading', run: (s, d) => setBlockTypeKeepingAnchor(typeOf('heading'), { level: 2 })(s, d) },
+  { id: 'heading-3', label: 'Heading 3', description: 'Small section heading', run: (s, d) => setBlockTypeKeepingAnchor(typeOf('heading'), { level: 3 })(s, d) },
   { id: 'bullet-list', label: 'Bulleted list', description: 'A simple bulleted list', run: (s, d) => wrapInList(typeOf('list'), { ordered: false })(s, d) },
   {
     id: 'numbered-list',
@@ -74,7 +114,11 @@ export const SLASH_COMMANDS: readonly SlashCommand[] = [
     run: (s, d) => wrapInList(typeOf('list'), { ordered: true, start: 1 })(s, d),
   },
   { id: 'quote', label: 'Quote', description: 'A blockquote', run: (s, d) => wrapIn(typeOf('blockquote'))(s, d) },
-  { id: 'code-block', label: 'Code block', description: 'A fenced code block', run: (s, d) => setBlockType(typeOf('code'))(s, d) },
+  // A code block keeps the attr too, but `to-markdown.ts` has no anchor
+  // spelling for a fence, so it is dropped at serialisation — see the
+  // `code` case there. The attr is preserved here so turning the fence
+  // back into a paragraph within one session restores the anchor.
+  { id: 'code-block', label: 'Code block', description: 'A fenced code block', run: (s, d) => setBlockTypeKeepingAnchor(typeOf('code'))(s, d) },
   {
     id: 'divider',
     label: 'Divider',

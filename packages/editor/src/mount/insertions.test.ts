@@ -341,3 +341,31 @@ describe('mention and slash insertions undo as ONE step', () => {
     expect(undo(view.state, view.dispatch)).toBe(false);
   });
 });
+
+// A block anchor is an attr on the block it anchors (schema.ts), and
+// `setBlockType(type, attrs)` REPLACES a block's attrs wholesale — so
+// `/heading` on `First ^abc123` produced `# First` and the anchor, with
+// every comment and citation hanging from it, was gone. The retyped block
+// is the same block; its anchor must stay on it.
+describe('a retyping slash command keeps the block anchor of the block it retypes', () => {
+  function anchoredParagraph(): EditorState {
+    const doc = schema.node('doc', null, [schema.node('paragraph', { blockAnchor: 'abc123' }, schema.text('First'))]);
+    return EditorState.create({ schema, doc, selection: TextSelection.create(doc, 3) });
+  }
+
+  for (const [id, markdown] of [
+    ['heading-1', '# First ^abc123\n'],
+    ['heading-2', '## First ^abc123\n'],
+    ['heading-3', '### First ^abc123\n'],
+  ] as const) {
+    test(`${id} on an anchored paragraph serialises to ${JSON.stringify(markdown)}`, () => {
+      const next = applyCommand(id, anchoredParagraph());
+      expect(next.doc.firstChild!.attrs.blockAnchor).toBe('abc123');
+      expect(toMarkdown(next.doc)).toBe(markdown);
+    });
+  }
+
+  test('heading-1 on a paragraph WITHOUT an anchor still has none — nothing is invented', () => {
+    expect(applyCommand('heading-1', paragraphState('First')).doc.firstChild!.attrs.blockAnchor).toBeNull();
+  });
+});
