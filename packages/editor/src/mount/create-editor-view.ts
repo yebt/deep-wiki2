@@ -21,6 +21,7 @@ import { Node } from 'prosemirror-model';
 import { EditorState } from 'prosemirror-state';
 import { EditorView } from 'prosemirror-view';
 import { schema } from '../schema';
+import { createBlockDragHooks, type BlockDragHooks } from './block-drag';
 import { createEditorCommands, describeUpdate, type EditorCommands, type EditorUpdate } from './editor-commands';
 import { insertMention, type MentionPluginOptions } from './mention-plugin';
 import { buildEditorPlugins } from './plugins';
@@ -96,12 +97,12 @@ export function createEditorView(options: CreateEditorViewOptions): EditorView {
 
 /**
  * What the host holds after mounting: the live view plus the command
- * surface (`editor-commands.ts`) bound to it. `view` stays exposed for
- * what the commands do not cover — `focus()`, `coordsAtPos()` for menu
- * placement, `state` for the plugins' own keys — and `destroy()` tears
- * the view down.
+ * surface (`editor-commands.ts`) and the drag-handle hooks
+ * (`block-drag.ts`) bound to it. `view` stays exposed for what those do
+ * not cover — `focus()`, `coordsAtPos()` for menu placement, `state` for
+ * the plugins' own keys — and `destroy()` tears the view down.
  */
-export interface EditorHandle extends EditorCommands {
+export interface EditorHandle extends EditorCommands, BlockDragHooks {
   readonly view: EditorView;
   destroy(): void;
 }
@@ -113,5 +114,5 @@ export interface EditorHandle extends EditorCommands {
  */
 export function mountEditor(options: CreateEditorViewOptions): EditorHandle {
   const view = createEditorView(options);
-  return { view, ...createEditorCommands(view), destroy: () => view.destroy() };
+  return { view, ...createEditorCommands(view), ...createBlockDragHooks(view), destroy: () => view.destroy() };
 }

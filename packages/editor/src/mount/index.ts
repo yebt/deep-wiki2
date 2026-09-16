@@ -34,3 +34,6 @@ export type { BuildEditorPluginsOptions } from './plugins';
 
 export { BLOCK_COMMANDS_NOT_TURNABLE, deleteBlock, duplicateBlock, moveBlockDown, moveBlockUp, topLevelBlock, turnInto, withoutAnchors } from './block-commands';
 export type { TopLevelBlock } from './block-commands';
+
+export { blockAt, createBlockDragHooks } from './block-drag';
+export type { BlockDragHooks, BlockHit, BlockRect, DragTransfer, DragView } from './block-drag';
