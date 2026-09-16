@@ -1,6 +1,13 @@
-import { describe, expect, test, vi } from 'vitest';
+import { afterEach, describe, expect, test, vi } from 'vitest';
 import type { PresenceEventSourceLike } from './usePresenceStream';
-import { usePresenceStream } from './usePresenceStream';
+import { closePresenceStreams, usePresenceStream } from './usePresenceStream';
+
+// The connection is shared per workspace and outlives the screen that
+// opened it (see the suite at the end), so each test starts with none.
+afterEach(() => {
+  closePresenceStreams();
+  vi.useRealTimers();
+});
 
 /**
  * `PresenceEventSourceLike` fake that hands the test direct control over
@@ -81,10 +88,11 @@ describe('usePresenceStream', () => {
     stop();
   });
 
-  test('stop() closes the connection and clears the roster', () => {
+  test('stop() clears this screen\'s editors at once, and closes the connection once nobody has wanted it for the linger window', async () => {
+    vi.useFakeTimers();
     const fake = fakeEventSource();
     const createEventSource = vi.fn(() => fake.source);
-    const { editors, start, stop } = usePresenceStream('page-1', { createEventSource });
+    const { editors, start, stop } = usePresenceStream('page-1', { createEventSource, lingerMs: 3_000 });
 
     start('ws-1');
     fake.emit('presence', presenceEvent());
@@ -92,8 +100,12 @@ describe('usePresenceStream', () => {
 
     stop();
 
-    expect(fake.closed).toHaveBeenCalledTimes(1);
     expect(editors.value).toEqual([]);
+    // Not yet: the next screen in the same workspace is about to ask for it.
+    await vi.advanceTimersByTimeAsync(2_999);
+    expect(fake.closed).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(fake.closed).toHaveBeenCalledTimes(1);
   });
 
   test('a dropped connection reconnects with backoff, not a tight retry loop', async () => {
@@ -235,5 +247,112 @@ describe('usePresenceStream across the whole workspace', () => {
 
     expect(editors.value).toHaveLength(2);
     stop();
+  });
+});
+
+/**
+ * One stream per workspace, not per screen. Until 2026-09-16 every screen
+ * owned its own `EventSource`, so a hop from one page to the next closed
+ * the stream in `onBeforeUnmount` and opened a new one once the next
+ * page's response had named the workspace — a fresh connection, a fresh
+ * membership check and a fresh poll of the presence view on every click
+ * (docs/TODO.md Findings, 2026-09-16, "edit-mode latency"). The connection
+ * now lives with the workspace: a screen subscribes to it with its page
+ * filter, a hop hands it from one subscriber to the next inside a linger
+ * window, and it closes only once nobody has wanted it for that long.
+ * The server still authorises every event per subscriber; the page filter
+ * is only about what a screen has a place to render.
+ */
+describe('usePresenceStream is workspace-scoped', () => {
+  test('two consecutive page hops open one stream', () => {
+    const fake = fakeEventSource();
+    const createEventSource = vi.fn(() => fake.source);
+
+    const first = usePresenceStream('page-1', { createEventSource });
+    first.start('ws-1');
+    first.stop(); // the first screen unmounts…
+
+    const second = usePresenceStream('page-2', { createEventSource });
+    second.start('ws-1'); // …and the next one asks for the same workspace
+
+    expect(createEventSource).toHaveBeenCalledTimes(1);
+    expect(fake.closed).not.toHaveBeenCalled();
+    expect(second.connectionMode.value).toBe('sse');
+  });
+
+  test('a screen joining the shared stream sees only its own page, and what the stream already knew about it', () => {
+    const fake = fakeEventSource();
+    const createEventSource = vi.fn(() => fake.source);
+
+    const dashboard = usePresenceStream(null, { createEventSource });
+    dashboard.start('ws-1');
+    fake.emit('presence', presenceEvent({ pageId: 'page-1', userId: 'user-1', userDisplayName: 'Ana' }));
+    fake.emit('presence', presenceEvent({ pageId: 'page-2', userId: 'user-2', userDisplayName: 'Bo' }));
+    dashboard.stop();
+
+    const pageTwo = usePresenceStream('page-2', { createEventSource });
+    pageTwo.start('ws-1');
+
+    // Known before this screen subscribed — a hop shows who is editing at once, not after the next heartbeat.
+    expect(pageTwo.editors.value.map((editor) => editor.userDisplayName)).toEqual(['Bo']);
+    fake.emit('presence', presenceEvent({ pageId: 'page-1', userId: 'user-3', userDisplayName: 'Cy' }));
+    expect(pageTwo.editors.value.map((editor) => editor.userDisplayName)).toEqual(['Bo']);
+  });
+
+  test('two screens on the same workspace share one connection and each filters it for themselves', () => {
+    const fake = fakeEventSource();
+    const createEventSource = vi.fn(() => fake.source);
+
+    const pageOne = usePresenceStream('page-1', { createEventSource });
+    const everything = usePresenceStream(null, { createEventSource });
+    pageOne.start('ws-1');
+    everything.start('ws-1');
+    fake.emit('presence', presenceEvent({ pageId: 'page-1', userId: 'user-1' }));
+    fake.emit('presence', presenceEvent({ pageId: 'page-2', userId: 'user-2' }));
+
+    expect(createEventSource).toHaveBeenCalledTimes(1);
+    expect(pageOne.editors.value).toHaveLength(1);
+    expect(everything.editors.value).toHaveLength(2);
+
+    // One leaving does not take the other's connection with it.
+    pageOne.stop();
+    expect(fake.closed).not.toHaveBeenCalled();
+    expect(everything.editors.value).toHaveLength(2);
+  });
+
+  test('a different workspace is a different stream, and leaving one for another releases the first', async () => {
+    vi.useFakeTimers();
+    const sources = new Map<string, ReturnType<typeof fakeEventSource>>();
+    const createEventSource = vi.fn((url: string) => {
+      const fake = fakeEventSource();
+      sources.set(url, fake);
+      return fake.source;
+    });
+
+    const { start } = usePresenceStream(null, { createEventSource, lingerMs: 1_000 });
+    start('ws-1');
+    start('ws-2');
+
+    expect([...sources.keys()].map((url) => url.split('/workspaces/')[1])).toEqual(['ws-1/presence/stream', 'ws-2/presence/stream']);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect([...sources.values()].map((fake) => fake.closed.mock.calls.length)).toEqual([1, 0]);
+  });
+
+  test('the poll fallback is shared the same way: a hop does not restart the polling', async () => {
+    vi.useFakeTimers();
+    const pollOnce = vi.fn().mockResolvedValue([]);
+
+    const first = usePresenceStream('page-1', { forcePollFallback: true, pollOnce, pollIntervalMs: 5_000 });
+    first.start('ws-1');
+    await vi.advanceTimersByTimeAsync(0);
+    first.stop();
+    const second = usePresenceStream('page-2', { forcePollFallback: true, pollOnce, pollIntervalMs: 5_000 });
+    second.start('ws-1');
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(pollOnce).toHaveBeenCalledTimes(1);
+    expect(second.connectionMode.value).toBe('poll');
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(pollOnce).toHaveBeenCalledTimes(2);
   });
 });

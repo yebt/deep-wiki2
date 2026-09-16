@@ -6,10 +6,23 @@
  * The stream is workspace-scoped and fans out every editing session in the
  * workspace, filtered per subscriber server-side before an event ever
  * leaves — this composable additionally narrows to the one `pageId` it was
- * built for and drops everything else without ever rendering or storing it,
- * so a page this screen never opened never accumulates state here either
- * (never caching an event for a page it cannot, or does not currently,
- * show).
+ * built for and drops everything else from what it renders. Nothing is
+ * filtered here that the server did not already authorise per event; the
+ * page filter is only about what this screen has a place to show.
+ *
+ * **One connection per workspace, shared by every screen in it** (since
+ * 2026-09-16). Until then each screen owned its own `EventSource`, so a hop
+ * from one page to the next closed the stream in `onBeforeUnmount` and
+ * opened a new one once the next response had named the workspace — a
+ * fresh connection, membership check and poll of the presence view on
+ * every click. The connection now lives in a module-level registry keyed
+ * by workspace: `start()` subscribes this screen to it (creating it on the
+ * first ask), `stop()` unsubscribes, and a connection nobody has wanted
+ * for `lingerMs` closes. The linger is what carries it across a hop, whose
+ * gap is the next screen's response. The roster is the connection's —
+ * every page the server let this person see — and each subscriber reads
+ * its own page out of it, which is also why a hop shows who is editing at
+ * once instead of after their next heartbeat.
  *
  * There is no explicit "stopped editing" event (design.md: "no expiry
  * column, no sweeper, no second TTL" — presence is derived from the lock,
@@ -31,11 +44,12 @@
  *   2. `EventSource` unavailable at all -> fall back to periodically
  *      fetching the same endpoint and reading whatever SSE frames arrive
  *      before the response is released, on `pollIntervalMs`. The server
- *      already does its own poll-tick over the `presence` view on every
- *      keep-alive (design.md "Multiple API processes"), so a bounded read
- *      of the response body catches that same snapshot without holding a
- *      connection open — the client-side analogue of the same "correctness
- *      never depends on a live push" property the server design has.
+ *      already does its own poll-tick over the `presence` view on connect
+ *      and on its poll cadence (design.md "Multiple API processes"), so a
+ *      bounded read of the response body catches that same snapshot without
+ *      holding a connection open — the client-side analogue of the same
+ *      "correctness never depends on a live push" property the server
+ *      design has.
  */
 
 const DEFAULT_RECONNECT_BASE_MS = 1_000;
@@ -50,6 +64,16 @@ const DEFAULT_POLL_INTERVAL_MS = 20_000;
  */
 const DEFAULT_EXPIRY_MS = 120_000;
 const DEFAULT_EXPIRY_TICK_MS = 5_000;
+/**
+ * How long a workspace's connection outlives its last subscriber. A hop
+ * between two screens in the same workspace is one `stop()` at unmount and
+ * one `start()` once the next screen's response has named the workspace —
+ * milliseconds in production, seconds on a loaded dev server — and the
+ * connection must still be there for the second. Long enough for the
+ * slowest hop measured on 2026-09-16, short enough that leaving the
+ * workspace for the list costs one idle stream for a few seconds.
+ */
+const DEFAULT_LINGER_MS = 10_000;
 
 export interface PresencePageEntry {
   readonly pageId: string;
@@ -87,6 +111,8 @@ export interface UsePresenceStreamOptions {
   readonly pollIntervalMs?: number;
   readonly expiryMs?: number;
   readonly expiryTickMs?: number;
+  /** How long the workspace's connection outlives its last subscriber — the window a hop has to reclaim it. */
+  readonly lingerMs?: number;
   /** Pause the connection while the tab is hidden; see the cost note on the read screen (index.vue). Defaults to true. */
   readonly pauseWhenHidden?: boolean;
   /** Test-only: skip the `EventSource` feature check and go straight to the poll fallback. */
@@ -95,8 +121,8 @@ export interface UsePresenceStreamOptions {
 
 export interface UsePresenceStreamResult {
   /** Unexpired `editing` presence for this composable's one page. */
-  readonly editors: Ref<readonly PresencePageEntry[]>;
-  readonly connectionMode: Ref<PresenceConnectionMode>;
+  readonly editors: ComputedRef<readonly PresencePageEntry[]>;
+  readonly connectionMode: ComputedRef<PresenceConnectionMode>;
   readonly start: (workspaceId: string) => void;
   readonly stop: () => void;
 }
@@ -146,6 +172,221 @@ function defaultPollOnce(url: string): Promise<readonly RawPresenceEvent[]> {
     .catch(() => []);
 }
 
+/** Everything a connection needs that the first subscriber to ask for it decided. */
+interface ConnectionSettings {
+  readonly url: string;
+  readonly createSource: CreatePresenceEventSource;
+  readonly poll: PollPresenceOnce;
+  readonly useSse: boolean;
+  readonly reconnectBaseMs: number;
+  readonly reconnectMaxMs: number;
+  readonly pollIntervalMs: number;
+  readonly expiryMs: number;
+  readonly expiryTickMs: number;
+  readonly lingerMs: number;
+  readonly pauseWhenHidden: boolean;
+}
+
+/**
+ * One workspace's live connection: the transport, its reconnect and poll
+ * timers, the roster of everyone the server said is editing, and the
+ * screens currently reading it. Owned by the module-level registry below,
+ * never by a screen.
+ */
+class PresenceConnection {
+  /** Every unexpired entry the server let this person see, workspace-wide. Subscribers filter it. */
+  readonly snapshot = shallowRef<readonly PresencePageEntry[]>([]);
+  readonly mode = ref<PresenceConnectionMode>('idle');
+  private readonly roster = new Map<string, { entry: PresencePageEntry; lastSeenAt: number }>();
+  private subscribers = 0;
+  private source: PresenceEventSourceLike | null = null;
+  private reconnectDelay: number;
+  private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+  private pollTimer: ReturnType<typeof setInterval> | undefined;
+  private readonly expiryTimer: ReturnType<typeof setInterval>;
+  private lingerTimer: ReturnType<typeof setTimeout> | undefined;
+  private visibilityHandler: (() => void) | undefined;
+  private closed = false;
+
+  constructor(
+    readonly workspaceId: string,
+    private readonly settings: ConnectionSettings,
+    private readonly onClosed: () => void,
+  ) {
+    this.reconnectDelay = settings.reconnectBaseMs;
+    this.expiryTimer = setInterval(() => this.recompute(), settings.expiryTickMs);
+
+    if (settings.pauseWhenHidden && typeof document !== 'undefined') {
+      this.visibilityHandler = () => {
+        if (this.closed) return;
+        if (document.visibilityState === 'hidden') {
+          this.disconnect();
+          this.mode.value = 'idle';
+        } else {
+          this.connect();
+        }
+      };
+      document.addEventListener('visibilitychange', this.visibilityHandler);
+    }
+
+    if (settings.pauseWhenHidden && typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+      this.mode.value = 'idle';
+    } else {
+      this.connect();
+    }
+  }
+
+  /** A screen starts reading this connection; a pending close is called off. */
+  subscribe(): void {
+    this.subscribers += 1;
+    if (this.lingerTimer !== undefined) {
+      clearTimeout(this.lingerTimer);
+      this.lingerTimer = undefined;
+    }
+  }
+
+  /** A screen stops reading; the last one out starts the linger clock rather than closing at once. */
+  unsubscribe(): void {
+    this.subscribers = Math.max(0, this.subscribers - 1);
+    if (this.subscribers > 0 || this.closed) return;
+    if (this.settings.lingerMs <= 0) {
+      this.close();
+      return;
+    }
+    this.lingerTimer = setTimeout(() => this.close(), this.settings.lingerMs);
+  }
+
+  close(): void {
+    if (this.closed) return;
+    this.closed = true;
+    if (this.lingerTimer !== undefined) clearTimeout(this.lingerTimer);
+    clearInterval(this.expiryTimer);
+    this.disconnect();
+    if (this.visibilityHandler !== undefined && typeof document !== 'undefined') {
+      document.removeEventListener('visibilitychange', this.visibilityHandler);
+    }
+    this.roster.clear();
+    this.snapshot.value = [];
+    this.mode.value = 'idle';
+    this.onClosed();
+  }
+
+  private recompute(): void {
+    const cutoff = Date.now() - this.settings.expiryMs;
+    const fresh: PresencePageEntry[] = [];
+    for (const [key, tracked] of this.roster) {
+      if (tracked.lastSeenAt <= cutoff) {
+        this.roster.delete(key);
+      } else {
+        fresh.push(tracked.entry);
+      }
+    }
+    this.snapshot.value = fresh;
+  }
+
+  private onRawEvent(raw: RawPresenceEvent): void {
+    // One person on two pages is two entries: the key is the pair, not the person.
+    this.roster.set(`${raw.pageId}:${raw.userId}`, {
+      entry: { pageId: raw.pageId, pageTitle: raw.pageTitle, userId: raw.userId, userDisplayName: raw.userDisplayName, since: raw.since },
+      lastSeenAt: Date.now(),
+    });
+    this.recompute();
+  }
+
+  private connect(): void {
+    if (this.settings.useSse) this.connectSse();
+    else this.connectPoll();
+  }
+
+  private disconnect(): void {
+    if (this.reconnectTimer !== undefined) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = undefined;
+    }
+    if (this.pollTimer !== undefined) {
+      clearInterval(this.pollTimer);
+      this.pollTimer = undefined;
+    }
+    this.source?.close();
+    this.source = null;
+  }
+
+  private scheduleReconnect(): void {
+    this.mode.value = 'reconnecting';
+    if (this.reconnectTimer !== undefined) clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectDelay = Math.min(this.reconnectDelay * 2, this.settings.reconnectMaxMs);
+      this.connectSse();
+    }, this.reconnectDelay);
+  }
+
+  private connectSse(): void {
+    this.source?.close();
+    const es = this.settings.createSource(this.settings.url);
+    this.source = es;
+    es.addEventListener('open', () => {
+      this.reconnectDelay = this.settings.reconnectBaseMs;
+      this.mode.value = 'sse';
+    });
+    es.addEventListener('presence', (event) => {
+      if (!event.data) return;
+      try {
+        this.onRawEvent(JSON.parse(event.data) as RawPresenceEvent);
+      } catch {
+        // A malformed frame is dropped, never a crash.
+      }
+    });
+    es.addEventListener('error', () => {
+      if (this.closed || this.source !== es) return;
+      this.scheduleReconnect();
+    });
+    // `EventSource` has no reliable "connected" signal in every
+    // environment this composable's fake stands in for, so a first
+    // successful construction is treated as live immediately; `open`
+    // above corrects it if the real transport confirms it later.
+    this.mode.value = 'sse';
+  }
+
+  private connectPoll(): void {
+    this.mode.value = 'poll';
+    const tick = (): void => {
+      void this.settings.poll(this.settings.url).then((events) => {
+        if (this.closed) return;
+        for (const raw of events) this.onRawEvent(raw);
+      });
+    };
+    tick();
+    if (this.pollTimer !== undefined) clearInterval(this.pollTimer);
+    this.pollTimer = setInterval(tick, this.settings.pollIntervalMs);
+  }
+}
+
+/** The live connections, one per workspace, for this browser tab. */
+const connections = new Map<string, PresenceConnection>();
+
+function acquireConnection(workspaceId: string, settings: ConnectionSettings): PresenceConnection {
+  let connection = connections.get(workspaceId);
+  if (!connection) {
+    connection = new PresenceConnection(workspaceId, settings, () => {
+      if (connections.get(workspaceId) === connection) connections.delete(workspaceId);
+    });
+    connections.set(workspaceId, connection);
+  }
+  connection.subscribe();
+  return connection;
+}
+
+/**
+ * Closes every workspace connection at once, linger or not. For tests,
+ * which otherwise hand a lingering fake from one case to the next; nothing
+ * in the product calls it — a screen that leaves a workspace lets the
+ * connection linger for the next screen, by design.
+ */
+export function closePresenceStreams(): void {
+  for (const connection of [...connections.values()]) connection.close();
+  connections.clear();
+}
+
 /**
  * `pageId` is the one page this consumer shows — read and edit mode — or
  * `null` for every page in the workspace, which is what the dashboard's
@@ -155,122 +396,6 @@ function defaultPollOnce(url: string): Promise<readonly RawPresenceEvent[]> {
  */
 export function usePresenceStream(pageId: string | null, options: UsePresenceStreamOptions = {}): UsePresenceStreamResult {
   const config = useRuntimeConfig();
-  const createSource = options.createEventSource ?? defaultCreateEventSource;
-  const poll = options.pollOnce ?? defaultPollOnce;
-  const reconnectBaseMs = options.reconnectBaseMs ?? DEFAULT_RECONNECT_BASE_MS;
-  const reconnectMaxMs = options.reconnectMaxMs ?? DEFAULT_RECONNECT_MAX_MS;
-  const pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
-  const expiryMs = options.expiryMs ?? DEFAULT_EXPIRY_MS;
-  const expiryTickMs = options.expiryTickMs ?? DEFAULT_EXPIRY_TICK_MS;
-  const pauseWhenHidden = options.pauseWhenHidden ?? true;
-
-  const editors = ref<readonly PresencePageEntry[]>([]);
-  const connectionMode = ref<PresenceConnectionMode>('idle');
-
-  const roster = new Map<string, { entry: PresencePageEntry; lastSeenAt: number }>();
-  let currentWorkspaceId: string | null = null;
-  let source: PresenceEventSourceLike | null = null;
-  let reconnectDelay = reconnectBaseMs;
-  let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
-  let pollTimer: ReturnType<typeof setInterval> | undefined;
-  let expiryTimer: ReturnType<typeof setInterval> | undefined;
-  let visibilityHandler: (() => void) | undefined;
-  let running = false;
-
-  function recomputeEditors(): void {
-    const cutoff = Date.now() - expiryMs;
-    const fresh: PresencePageEntry[] = [];
-    for (const [key, tracked] of roster) {
-      if (tracked.lastSeenAt <= cutoff) {
-        roster.delete(key);
-      } else {
-        fresh.push(tracked.entry);
-      }
-    }
-    editors.value = fresh;
-  }
-
-  function onRawEvent(raw: RawPresenceEvent): void {
-    if (pageId !== null && raw.pageId !== pageId) return; // never surfaced — not this page
-    // One person on two pages is two entries: the key is the pair, not the person.
-    roster.set(`${raw.pageId}:${raw.userId}`, {
-      entry: { pageId: raw.pageId, pageTitle: raw.pageTitle, userId: raw.userId, userDisplayName: raw.userDisplayName, since: raw.since },
-      lastSeenAt: Date.now(),
-    });
-    recomputeEditors();
-  }
-
-  function streamUrl(workspaceId: string): string {
-    return `${config.public.apiBaseUrl}/workspaces/${workspaceId}/presence/stream`;
-  }
-
-  function clearReconnectTimer(): void {
-    if (reconnectTimer !== undefined) {
-      clearTimeout(reconnectTimer);
-      reconnectTimer = undefined;
-    }
-  }
-
-  function clearPollTimer(): void {
-    if (pollTimer !== undefined) {
-      clearInterval(pollTimer);
-      pollTimer = undefined;
-    }
-  }
-
-  function closeSource(): void {
-    source?.close();
-    source = null;
-  }
-
-  function scheduleReconnect(workspaceId: string): void {
-    connectionMode.value = 'reconnecting';
-    clearReconnectTimer();
-    reconnectTimer = setTimeout(() => {
-      reconnectDelay = Math.min(reconnectDelay * 2, reconnectMaxMs);
-      connectSse(workspaceId);
-    }, reconnectDelay);
-  }
-
-  function connectSse(workspaceId: string): void {
-    closeSource();
-    const es = createSource(streamUrl(workspaceId));
-    source = es;
-    es.addEventListener('open', () => {
-      reconnectDelay = reconnectBaseMs;
-      connectionMode.value = 'sse';
-    });
-    es.addEventListener('presence', (event) => {
-      if (!event.data) return;
-      try {
-        onRawEvent(JSON.parse(event.data) as RawPresenceEvent);
-      } catch {
-        // A malformed frame is dropped, never a crash.
-      }
-    });
-    es.addEventListener('error', () => {
-      if (!running) return;
-      scheduleReconnect(workspaceId);
-    });
-    // `EventSource` has no reliable "connected" signal in every
-    // environment this composable's fake stands in for, so a first
-    // successful construction is treated as live immediately; `open`
-    // above corrects it if the real transport confirms it later.
-    connectionMode.value = 'sse';
-  }
-
-  function connectPoll(workspaceId: string): void {
-    connectionMode.value = 'poll';
-    const url = streamUrl(workspaceId);
-    const tick = (): void => {
-      void poll(url).then((events) => {
-        for (const raw of events) onRawEvent(raw);
-      });
-    };
-    tick();
-    clearPollTimer();
-    pollTimer = setInterval(tick, pollIntervalMs);
-  }
 
   function eventSourceAvailable(): boolean {
     if (options.forcePollFallback) return false;
@@ -282,61 +407,45 @@ export function usePresenceStream(pageId: string | null, options: UsePresenceStr
     return typeof EventSource !== 'undefined';
   }
 
-  function connect(workspaceId: string): void {
-    if (eventSourceAvailable()) connectSse(workspaceId);
-    else connectPoll(workspaceId);
+  function settingsFor(workspaceId: string): ConnectionSettings {
+    return {
+      url: `${config.public.apiBaseUrl}/workspaces/${workspaceId}/presence/stream`,
+      createSource: options.createEventSource ?? defaultCreateEventSource,
+      poll: options.pollOnce ?? defaultPollOnce,
+      useSse: eventSourceAvailable(),
+      reconnectBaseMs: options.reconnectBaseMs ?? DEFAULT_RECONNECT_BASE_MS,
+      reconnectMaxMs: options.reconnectMaxMs ?? DEFAULT_RECONNECT_MAX_MS,
+      pollIntervalMs: options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS,
+      expiryMs: options.expiryMs ?? DEFAULT_EXPIRY_MS,
+      expiryTickMs: options.expiryTickMs ?? DEFAULT_EXPIRY_TICK_MS,
+      lingerMs: options.lingerMs ?? DEFAULT_LINGER_MS,
+      pauseWhenHidden: options.pauseWhenHidden ?? true,
+    };
   }
 
-  function disconnect(): void {
-    clearReconnectTimer();
-    clearPollTimer();
-    closeSource();
+  /** The workspace connection this screen is subscribed to, if any. */
+  const connection = shallowRef<PresenceConnection | null>(null);
+
+  const editors = computed<readonly PresencePageEntry[]>(() => {
+    const live = connection.value;
+    if (!live) return [];
+    const all = live.snapshot.value;
+    return pageId === null ? all : all.filter((entry) => entry.pageId === pageId);
+  });
+
+  const connectionMode = computed<PresenceConnectionMode>(() => connection.value?.mode.value ?? 'idle');
+
+  function stop(): void {
+    const live = connection.value;
+    if (!live) return;
+    connection.value = null;
+    live.unsubscribe();
   }
 
   function start(workspaceId: string): void {
-    running = true;
-    currentWorkspaceId = workspaceId;
-    reconnectDelay = reconnectBaseMs;
-    roster.clear();
-    editors.value = [];
-
-    if (pauseWhenHidden && typeof document !== 'undefined' && document.visibilityState === 'hidden') {
-      connectionMode.value = 'idle';
-    } else {
-      connect(workspaceId);
-    }
-
-    if (expiryTimer === undefined) expiryTimer = setInterval(recomputeEditors, expiryTickMs);
-
-    if (pauseWhenHidden && typeof document !== 'undefined' && visibilityHandler === undefined) {
-      visibilityHandler = () => {
-        if (!running || currentWorkspaceId === null) return;
-        if (document.visibilityState === 'hidden') {
-          disconnect();
-          connectionMode.value = 'idle';
-        } else {
-          connect(currentWorkspaceId);
-        }
-      };
-      document.addEventListener('visibilitychange', visibilityHandler);
-    }
-  }
-
-  function stop(): void {
-    running = false;
-    currentWorkspaceId = null;
-    disconnect();
-    if (expiryTimer !== undefined) {
-      clearInterval(expiryTimer);
-      expiryTimer = undefined;
-    }
-    if (visibilityHandler !== undefined && typeof document !== 'undefined') {
-      document.removeEventListener('visibilitychange', visibilityHandler);
-      visibilityHandler = undefined;
-    }
-    roster.clear();
-    editors.value = [];
-    connectionMode.value = 'idle';
+    if (connection.value?.workspaceId === workspaceId) return;
+    stop();
+    connection.value = acquireConnection(workspaceId, settingsFor(workspaceId));
   }
 
   return { editors, connectionMode, start, stop };

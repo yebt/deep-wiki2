@@ -28,6 +28,8 @@ test.describe.configure({ mode: 'serial' });
 interface SeedFixtures {
   readonly readPageId: string;
   readonly historyPageId: string;
+  readonly bookHistoryPageAId: string;
+  readonly bookHistoryPageBId: string;
   readonly workspaceId: string;
   readonly readerSessionToken: string;
 }
@@ -292,4 +294,36 @@ test('a presence stream held open for 25 seconds is one request — the server k
   await page.waitForTimeout(25_000);
 
   expect(streamRequests, `stream requests at ${streamRequests.map((at) => at - streamRequests[0]!).join(', ')} ms`).toHaveLength(1);
+});
+
+/**
+ * The stream is the workspace's, not the screen's (`usePresenceStream.ts`,
+ * 2026-09-16): a hop from one page to the next hands the one connection
+ * from the leaving screen to the arriving one instead of closing it and
+ * opening another. Two pages in the same book, reached by the tree — the
+ * way a person hops — and one stream request for both.
+ */
+test('two consecutive page hops open one presence stream', async ({ page }) => {
+  test.setTimeout(240_000);
+  await signIn(page, seed.readerSessionToken);
+  const streamRequests: string[] = [];
+  page.on('request', (request) => {
+    if (request.url().endsWith(`/workspaces/${seed.workspaceId}/presence/stream`)) streamRequests.push(request.url());
+  });
+
+  await page.goto(`/pages/${seed.bookHistoryPageAId}`);
+  await expect(page.getByRole('main').getByRole('heading', { level: 1, name: 'E2E Book Page Alpha' })).toBeVisible({ timeout: 120_000 });
+  await expect.poll(() => streamRequests.length, { timeout: 60_000, message: 'the presence stream never opened' }).toBe(1);
+
+  // The hop: a tree row, so the frame stays and only the pane changes.
+  const sidebar = page.getByRole('navigation', { name: 'Workspace' });
+  const beta = sidebar.getByRole('treeitem', { name: /E2E Book Page Beta/ });
+  await expect(beta).toBeVisible({ timeout: 60_000 });
+  await beta.locator('[draggable="true"]').first().click();
+  await expect(page).toHaveURL(new RegExp(`/pages/${seed.bookHistoryPageBId}$`));
+  await expect(page.getByRole('main').getByRole('heading', { level: 1, name: 'E2E Book Page Beta' })).toBeVisible({ timeout: 60_000 });
+
+  // Long enough for a second screen that reopened the stream to have done so.
+  await page.waitForTimeout(3_000);
+  expect(streamRequests).toHaveLength(1);
 });
