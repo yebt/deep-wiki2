@@ -17,27 +17,31 @@
  * slash-plugin.ts for the DOM-independent state-machine logic this
  * factory only wires together.
  */
-import { inputRules } from 'prosemirror-inputrules';
 import { Node } from 'prosemirror-model';
 import { EditorState } from 'prosemirror-state';
 import { EditorView } from 'prosemirror-view';
 import { schema } from '../schema';
-import { buildInputRules } from './input-rules';
-import { buildHistory, buildKeymap } from './keymap';
-import { createMentionPlugin, insertMention, type MentionPluginOptions } from './mention-plugin';
-import { createSlashPlugin, type SlashPluginOptions } from './slash-plugin';
+import { createBlockDragHooks, type BlockDragHooks } from './block-drag';
+import { createEditorCommands, describeUpdate, type EditorCommands, type EditorUpdate } from './editor-commands';
+import { insertMention, type MentionPluginOptions } from './mention-plugin';
+import { buildEditorPlugins } from './plugins';
+import type { SelectionPluginOptions } from './selection-plugin';
+import type { SlashPluginOptions } from './slash-plugin';
 
 export interface CreateEditorViewOptions {
   readonly dom: HTMLElement;
   /** The starting document, already produced by `fromMarkdown()` (root `"."` export) — this module never parses Markdown itself. */
   readonly doc: Node;
   readonly editable?: boolean;
-  readonly onUpdate?: (view: EditorView, transactionCount: number) => void;
+  /** Fired after every transaction with the summary a toolbar renders from (`editor-commands.ts`: undo/redo depths). */
+  readonly onUpdate?: (view: EditorView, update: EditorUpdate) => void;
   readonly mention?: Omit<MentionPluginOptions, 'onConfirm'> & {
     /** Fired once a candidate is confirmed and inserted — apps/web uses this to run the "Mentioning A User Does Not Silently Grant Them Access" check, which needs a network round trip this package never makes itself. */
     readonly onConfirmed?: (candidate: Parameters<MentionPluginOptions['onConfirm']>[0]) => void;
   };
   readonly slash?: SlashPluginOptions;
+  /** The bubble toolbar's feed: the selection snapshot plus `coordsAtPos` of both ends, whenever either changes (`selection-plugin.ts`). */
+  readonly selection?: SelectionPluginOptions;
 }
 
 /**
@@ -51,19 +55,22 @@ export interface CreateEditorViewOptions {
  * MUST reserve its height before this rule is satisfied for it too.
  */
 export function createEditorView(options: CreateEditorViewOptions): EditorView {
-  const mentionPlugin = createMentionPlugin({
-    ...options.mention,
-    onConfirm: (candidate, range, tr) => {
-      options.mention?.onConfirmed?.(candidate);
-      return insertMention(candidate, range, tr);
-    },
-  });
-  const slashPlugin = createSlashPlugin(options.slash);
-
   const state = EditorState.create({
     schema,
     doc: options.doc,
-    plugins: [buildKeymap(), buildHistory(), inputRules({ rules: buildInputRules(schema) }), mentionPlugin, slashPlugin],
+    // The list itself (order, gap cursor, drop cursor) lives in plugins.ts
+    // where `bun test` can reach it; this DOM-bound file only installs it.
+    plugins: buildEditorPlugins({
+      mention: {
+        ...options.mention,
+        onConfirm: (candidate, range, tr) => {
+          options.mention?.onConfirmed?.(candidate);
+          return insertMention(candidate, range, tr);
+        },
+      },
+      slash: options.slash,
+      selection: options.selection,
+    }),
   });
 
   let transactionCount = 0;
@@ -82,8 +89,30 @@ export function createEditorView(options: CreateEditorViewOptions): EditorView {
       const next = view.state.apply(tr);
       view.updateState(next);
       transactionCount += 1;
-      options.onUpdate?.(view, transactionCount);
+      options.onUpdate?.(view, describeUpdate(next, transactionCount));
     },
   });
   return view;
+}
+
+/**
+ * What the host holds after mounting: the live view plus the command
+ * surface (`editor-commands.ts`) and the drag-handle hooks
+ * (`block-drag.ts`) bound to it. `view` stays exposed for what those do
+ * not cover — `focus()`, `coordsAtPos()` for menu placement, `state` for
+ * the plugins' own keys — and `destroy()` tears the view down.
+ */
+export interface EditorHandle extends EditorCommands, BlockDragHooks {
+  readonly view: EditorView;
+  destroy(): void;
+}
+
+/**
+ * `createEditorView` plus the command surface, in one object. This is the
+ * entry point the Vue surface should hold; `createEditorView` remains
+ * exported for the current caller and for hosts that only need the view.
+ */
+export function mountEditor(options: CreateEditorViewOptions): EditorHandle {
+  const view = createEditorView(options);
+  return { view, ...createEditorCommands(view), ...createBlockDragHooks(view), destroy: () => view.destroy() };
 }

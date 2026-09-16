@@ -193,7 +193,26 @@ function convertInline(node: PMNode): PhrasingContent[] {
   return root;
 }
 
+/** True for the one empty paragraph `from-markdown.ts` puts in an empty container — see `convertContainerChildren` there. */
+function isEmptyParagraph(node: PMNode): boolean {
+  return node.type.name === 'paragraph' && node.content.size === 0 && !node.attrs.blockAnchor;
+}
+
 class ToMarkdownConverter {
+  /**
+   * A container's mdast children. A container holding only the empty
+   * paragraph `from-markdown.ts` gave it goes back as ZERO children, which
+   * is how `mdast-util-to-markdown` spells the canonical empty container:
+   * `[^1]:` rather than `[^1]: ` (the empty paragraph costs a trailing
+   * space there, which the save path then refuses as non-canonical).
+   */
+  private containerChildren(node: PMNode): BlockContent[] {
+    if (node.childCount === 1 && isEmptyParagraph(node.child(0))) return [];
+    const children: BlockContent[] = [];
+    node.forEach((child) => children.push(this.convertBlock(child) as BlockContent));
+    return children;
+  }
+
   convertRoot(doc: PMNode): Root {
     const children: RootContent[] = [];
     doc.forEach((node) => children.push(this.convertBlock(node) as RootContent));
@@ -212,11 +231,8 @@ class ToMarkdownConverter {
           depth: node.attrs.level,
           children: withBlockAnchor(convertInline(node), blockAnchor),
         } as BlockContent;
-      case 'blockquote': {
-        const children: BlockContent[] = [];
-        node.forEach((child) => children.push(this.convertBlock(child) as BlockContent));
-        return { type: 'blockquote', children: withBlockAnchor(children, blockAnchor) } as BlockContent;
-      }
+      case 'blockquote':
+        return { type: 'blockquote', children: withBlockAnchor(this.containerChildren(node), blockAnchor) } as BlockContent;
       case 'list': {
         const children: DefinitionContent[] = [];
         node.forEach((child) => children.push(this.convertBlock(child) as DefinitionContent));
@@ -229,16 +245,13 @@ class ToMarkdownConverter {
           children,
         } as unknown as BlockContent;
       }
-      case 'listItem': {
-        const children: BlockContent[] = [];
-        node.forEach((child) => children.push(this.convertBlock(child) as BlockContent));
+      case 'listItem':
         return {
           type: 'listItem',
           checked: node.attrs.checked,
           spread: node.attrs.spread,
-          children: withBlockAnchor(children, blockAnchor),
+          children: withBlockAnchor(this.containerChildren(node), blockAnchor),
         } as unknown as DefinitionContent;
-      }
       case 'code':
         return {
           type: 'code',
@@ -261,15 +274,12 @@ class ToMarkdownConverter {
         });
         return { type: 'table', align, children: rows } as unknown as BlockContent;
       }
-      case 'footnoteDefinition': {
-        const children: BlockContent[] = [];
-        node.forEach((child) => children.push(this.convertBlock(child) as BlockContent));
+      case 'footnoteDefinition':
         return {
           type: 'footnoteDefinition',
           identifier: node.attrs.identifier,
-          children: withBlockAnchor(children, blockAnchor),
+          children: withBlockAnchor(this.containerChildren(node), blockAnchor),
         } as unknown as BlockContent;
-      }
       case 'verbatim': {
         // A join-sensitive carried type (today: `definition`) is re-emitted
         // as its own mdast node so `mdast-util-to-markdown`'s type-keyed

@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { history, undo } from 'prosemirror-history';
 import { EditorState, TextSelection, type Transaction } from 'prosemirror-state';
+import { fromMarkdown } from '../from-markdown';
 import { schema } from '../schema';
 import { toMarkdown } from '../to-markdown';
 import { createMentionPlugin, insertMention, type MentionCandidate } from './mention-plugin';
@@ -110,13 +111,14 @@ const SLASH_EXPECTATIONS: ReadonlyArray<{
   { id: 'heading-3', topLevelType: 'heading', markdown: '### Section title\n' },
   { id: 'bullet-list', topLevelType: 'list', markdown: '- Section title\n' },
   { id: 'numbered-list', topLevelType: 'list', markdown: '1. Section title\n' },
+  { id: 'task-list', topLevelType: 'list', markdown: '- [ ] Section title\n' },
   { id: 'quote', topLevelType: 'blockquote', markdown: '> Section title\n' },
   { id: 'code-block', topLevelType: 'code', markdown: '```\nSection title\n```\n' },
 ];
 
 describe('SLASH_COMMANDS: every command runs and produces the construct it promises', () => {
   test('the expectation table covers every declared command', () => {
-    const covered = new Set([...SLASH_EXPECTATIONS.map((e) => e.id), 'divider']);
+    const covered = new Set([...SLASH_EXPECTATIONS.map((e) => e.id), 'divider', 'text', 'table', 'footnote']);
     expect(SLASH_COMMANDS.map((command) => command.id).filter((id) => !covered.has(id))).toEqual([]);
   });
 
@@ -160,7 +162,9 @@ describe('SLASH_COMMANDS: every command runs and produces the construct it promi
 // commands are inapplicable there — and the menu opened there anyway,
 // deleted the trigger text, transformed nothing, and swallowed the key.
 describe('a slash command that cannot apply consumes nothing', () => {
-  for (const command of SLASH_COMMANDS) {
+  // `footnote` is the one command that CAN run in a cell — a reference is
+  // inline and GFM allows it there — and is covered by its own describe.
+  for (const command of SLASH_COMMANDS.filter((candidate) => candidate.id !== 'footnote')) {
     test(`${command.id} confirmed inside a table cell leaves the document exactly as it was`, () => {
       const state = tableCellState('/x');
       const before = state.doc.toJSON();
@@ -173,9 +177,9 @@ describe('a slash command that cannot apply consumes nothing', () => {
     });
   }
 
-  test('every command reports inapplicability when run without a dispatch, as a ProseMirror Command must', () => {
+  test('every command but footnote reports inapplicability when run without a dispatch, as a ProseMirror Command must', () => {
     const state = tableCellState('/x');
-    expect(SLASH_COMMANDS.filter((command) => command.run(state)).map((c) => c.id)).toEqual([]);
+    expect(SLASH_COMMANDS.filter((command) => command.run(state)).map((c) => c.id)).toEqual(['footnote']);
   });
 
   test('divider does not escape the table it cannot be placed in', () => {
@@ -190,14 +194,14 @@ describe('a slash command that cannot apply consumes nothing', () => {
     expect(toMarkdown(next.doc)).toBe(toMarkdown(state.doc));
   });
 
-  test('the menu offers nothing inside a table cell — an offer it cannot honour is not an offer', () => {
+  test('the menu offers only footnote inside a table cell — an offer it cannot honour is not an offer', () => {
     const plugin = createSlashPlugin();
     const view = fakeView(tableCellState('/', [plugin]));
     view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, 4)));
 
     const slash = slashPluginKey.getState(view.state)!;
     expect(slash.active).toBe(true);
-    expect(slash.commands).toEqual([]);
+    expect(slash.commands.map((c) => c.id)).toEqual(['footnote']);
   });
 
   test('Enter inside a table cell changes nothing at all', () => {
@@ -212,13 +216,13 @@ describe('a slash command that cannot apply consumes nothing', () => {
     expect(view.state.doc.toJSON()).toEqual(before);
   });
 
-  test('a paragraph still offers all eight, so the filter narrows nothing it should not', () => {
+  test('a paragraph still offers every command but "text" (it already is one), so the filter narrows nothing it should not', () => {
     const plugin = createSlashPlugin();
     const view = fakeView(paragraphState('/', [plugin]));
     view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, 2)));
 
     expect(slashPluginKey.getState(view.state)!.commands.map((c) => c.id)).toEqual(
-      SLASH_COMMANDS.map((c) => c.id),
+      SLASH_COMMANDS.map((c) => c.id).filter((id) => id !== 'text'),
     );
   });
 });
@@ -339,5 +343,126 @@ describe('mention and slash insertions undo as ONE step', () => {
     expect(undo(view.state, view.dispatch)).toBe(true);
     expect(view.state.doc.toJSON()).toEqual(before.doc.toJSON());
     expect(undo(view.state, view.dispatch)).toBe(false);
+  });
+});
+
+// A block anchor is an attr on the block it anchors (schema.ts), and
+// `setBlockType(type, attrs)` REPLACES a block's attrs wholesale — so
+// `/heading` on `First ^abc123` produced `# First` and the anchor, with
+// every comment and citation hanging from it, was gone. The retyped block
+// is the same block; its anchor must stay on it.
+describe('a retyping slash command keeps the block anchor of the block it retypes', () => {
+  function anchoredParagraph(): EditorState {
+    const doc = schema.node('doc', null, [schema.node('paragraph', { blockAnchor: 'abc123' }, schema.text('First'))]);
+    return EditorState.create({ schema, doc, selection: TextSelection.create(doc, 3) });
+  }
+
+  for (const [id, markdown] of [
+    ['heading-1', '# First ^abc123\n'],
+    ['heading-2', '## First ^abc123\n'],
+    ['heading-3', '### First ^abc123\n'],
+  ] as const) {
+    test(`${id} on an anchored paragraph serialises to ${JSON.stringify(markdown)}`, () => {
+      const next = applyCommand(id, anchoredParagraph());
+      expect(next.doc.firstChild!.attrs.blockAnchor).toBe('abc123');
+      expect(toMarkdown(next.doc)).toBe(markdown);
+    });
+  }
+
+  test('heading-1 on a paragraph WITHOUT an anchor still has none — nothing is invented', () => {
+    expect(applyCommand('heading-1', paragraphState('First')).doc.firstChild!.attrs.blockAnchor).toBeNull();
+  });
+});
+
+/** A round trip in the save direction: the built document's Markdown re-opens as the identical document. */
+function expectReopens(state: EditorState, markdown: string): void {
+  expect(toMarkdown(state.doc)).toBe(markdown);
+  expect(fromMarkdown(markdown).toJSON()).toEqual(state.doc.toJSON());
+}
+
+function stateOf(markdown: string, pos: number): EditorState {
+  const doc = fromMarkdown(markdown);
+  return EditorState.create({ schema, doc, selection: TextSelection.create(doc, pos) });
+}
+
+// The four commands the perf report found missing for the schema the
+// editor already had: Text (back to a paragraph), task list, table and
+// footnote. Each has a round-trip fixture under packages/markdown/fixtures
+// (task-list.md, table-empty.md, empty-containers.md) proving the
+// construct it inserts is canonical; these cases prove the command builds
+// that construct.
+describe('"text": back to a plain paragraph', () => {
+  test('a heading becomes a paragraph, keeping its anchor', () => {
+    const next = applyCommand('text', stateOf('## Title ^abc123\n', 3));
+    expectReopens(next, 'Title ^abc123\n');
+  });
+
+  test('a code block becomes a paragraph', () => {
+    const next = applyCommand('text', stateOf('```js\ncode\n```\n', 2));
+    expectReopens(next, 'code\n');
+  });
+
+  test('a list item is lifted out of its list', () => {
+    // list opens at 0, listItem at 1, paragraph at 2, "one" 3..6; the second listItem opens at 8, its paragraph at 9, "two" at 10.
+    const next = applyCommand('text', stateOf('- one\n- two\n', 10));
+    expectReopens(next, '- one\n\ntwo\n');
+  });
+
+  test('a quoted paragraph is lifted out of the quote', () => {
+    const next = applyCommand('text', stateOf('> quoted\n', 3));
+    expectReopens(next, 'quoted\n');
+  });
+
+  test('a plain top-level paragraph is already text: inapplicable', () => {
+    expect(commandById('text').run(paragraphState('plain'))).toBe(false);
+  });
+});
+
+describe('"task-list"', () => {
+  test('a paragraph becomes an unchecked task item', () => {
+    expectReopens(applyCommand('task-list', paragraphState('Section title')), '- [ ] Section title\n');
+  });
+
+  test('an existing bullet item becomes a task item in place, not a list inside a list', () => {
+    const next = applyCommand('task-list', stateOf('- one\n- two\n', 3));
+    expectReopens(next, '- [ ] one\n- two\n');
+  });
+
+  test('an item that is already a task is left alone: inapplicable', () => {
+    expect(commandById('task-list').run(stateOf('- [ ] one\n', 3))).toBe(false);
+  });
+});
+
+describe('"table": a 2x2 table with empty cells', () => {
+  test('on an empty line, inserts the table in its place with the caret in the first cell', () => {
+    const next = applyCommand('table', paragraphState(''));
+    expectReopens(next, '|   |   |\n| - | - |\n|   |   |\n');
+    expect(next.selection.$from.parent.type.name).toBe('tableCell');
+    expect(next.selection.from).toBe(3);
+  });
+
+  test('after a paragraph with text, inserts the table below it', () => {
+    const next = applyCommand('table', paragraphState('Section title'));
+    expectReopens(next, 'Section title\n\n|   |   |\n| - | - |\n|   |   |\n');
+    expect(next.selection.$from.parent.type.name).toBe('tableCell');
+  });
+});
+
+describe('"footnote": a reference at the caret and its definition at the end', () => {
+  test('inserts [^1] and an empty definition, with the caret inside the definition ready to type', () => {
+    const next = applyCommand('footnote', paragraphState('A claim'));
+    expectReopens(next, 'A claim[^1]\n\n[^1]:\n');
+    expect(next.selection.$from.node(1).type.name).toBe('footnoteDefinition');
+    expect(next.selection.$from.parent.type.name).toBe('paragraph');
+  });
+
+  test('picks the first unused identifier, never one already defined or referenced', () => {
+    const next = applyCommand('footnote', stateOf('A[^1] B[^3]\n\n[^1]: one\n\n[^3]: three\n', 2));
+    expectReopens(next, 'A[^2][^1] B[^3]\n\n[^1]: one\n\n[^3]: three\n\n[^2]:\n');
+  });
+
+  test('works inside a table cell, where GFM allows a reference', () => {
+    const next = applyCommand('footnote', tableCellState('x'));
+    expectReopens(next, '| x[^1] |\n| ----- |\n\n[^1]:\n');
   });
 });

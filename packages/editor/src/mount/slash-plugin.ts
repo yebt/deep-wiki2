@@ -5,10 +5,10 @@
  * — no network round trip, unlike mentions — so filtering is synchronous
  * and the reducer never needs a `setCandidates` action.
  */
-import { setBlockType, wrapIn } from 'prosemirror-commands';
-import type { NodeType } from 'prosemirror-model';
-import { EditorState, Plugin, PluginKey, Selection, type Transaction } from 'prosemirror-state';
-import { wrapInList } from 'prosemirror-schema-list';
+import { lift, wrapIn } from 'prosemirror-commands';
+import type { Attrs, Node as PMNode, NodeType, ResolvedPos } from 'prosemirror-model';
+import { type Command, EditorState, Plugin, PluginKey, Selection, TextSelection, type Transaction } from 'prosemirror-state';
+import { liftListItem, wrapInList } from 'prosemirror-schema-list';
 import { schema } from '../schema';
 import type { SlashCommandSummary, SlashState } from '../types';
 import { moveSelection } from './mention-plugin';
@@ -56,16 +56,174 @@ function canInsertAtCaret(state: EditorState, type: NodeType): boolean {
   return $from.node(depth).canReplaceWith(index, index, type);
 }
 
+/**
+ * `prosemirror-commands`' `setBlockType`, with one difference: the block's
+ * `blockAnchor` survives. That command replaces a block's attrs wholesale,
+ * so `/heading` on `First ^abc123` produced `# First` — the anchor, with
+ * every comment and citation hanging from it, silently gone. A retyped
+ * block is the same block. Built on `Transform.setBlockType`'s
+ * per-node attrs callback, which `prosemirror-commands` (1.7) does not
+ * yet expose; the applicability check is the original's, unchanged.
+ */
+export function setBlockTypeKeepingAnchor(type: NodeType, attrs: Attrs | null = null): Command {
+  const keepsAnchor = 'blockAnchor' in type.spec.attrs!;
+  const attrsFor = (node: { readonly attrs: Attrs }): Attrs =>
+    keepsAnchor ? { ...attrs, blockAnchor: node.attrs.blockAnchor ?? null } : { ...attrs };
+  return (state, dispatch) => {
+    let applicable = false;
+    for (const { $from, $to } of state.selection.ranges) {
+      state.doc.nodesBetween($from.pos, $to.pos, (node, pos) => {
+        if (applicable) return false;
+        if (!node.isTextblock || node.hasMarkup(type, attrsFor(node))) return;
+        if (node.type === type) {
+          applicable = true;
+        } else {
+          const $pos = state.doc.resolve(pos);
+          const index = $pos.index();
+          applicable = $pos.parent.canReplaceWith(index, index + 1, type);
+        }
+        return;
+      });
+      if (applicable) break;
+    }
+    if (!applicable) return false;
+    if (dispatch) {
+      const tr = state.tr;
+      for (const { $from, $to } of state.selection.ranges) tr.setBlockType($from.pos, $to.pos, type, attrsFor);
+      dispatch(tr.scrollIntoView());
+    }
+    return true;
+  };
+}
+
 function typeOf(name: string): NodeType {
   const type = schema.nodes[name];
   if (!type) throw new Error(`slash command references unknown node type "${name}"`);
   return type;
 }
 
+/** The depth of the nearest `listItem` ancestor of `$pos`, or `null`. */
+function listItemDepth($pos: ResolvedPos): number | null {
+  for (let depth = $pos.depth; depth >= 1; depth--) if ($pos.node(depth).type === typeOf('listItem')) return depth;
+  return null;
+}
+
+/**
+ * "Text": the way back to a plain paragraph, which is what every other
+ * command here starts from. A heading or code block is retyped in place
+ * (anchor kept); a list item is lifted out of its list, and a quoted
+ * paragraph out of its quote — one level, the same step `Shift-Tab`
+ * takes. A top-level paragraph is already text, so the command is
+ * inapplicable there and the menu does not offer it.
+ */
+const textCommand: Command = (state, dispatch) => {
+  const { $from } = state.selection;
+  const paragraph = typeOf('paragraph');
+  if ($from.parent.isTextblock && $from.parent.type !== paragraph && $from.parent.type !== typeOf('tableCell')) {
+    return setBlockTypeKeepingAnchor(paragraph)(state, dispatch);
+  }
+  if ($from.depth >= 2 && $from.node($from.depth - 1).type === typeOf('listItem')) return liftListItem(typeOf('listItem'))(state, dispatch);
+  if ($from.depth >= 2 && $from.node($from.depth - 1).type === typeOf('blockquote')) return lift(state, dispatch);
+  return false;
+};
+
+/**
+ * A task list: the current block wrapped in a bullet list whose item is
+ * `checked: false` (GFM `- [ ]`), or — inside an existing bullet item —
+ * that item made a task in place, rather than a list nested in a list.
+ * An item that is already a task is left alone.
+ */
+const taskListCommand: Command = (state, dispatch) => {
+  const { $from } = state.selection;
+  const itemDepth = listItemDepth($from);
+  if (itemDepth !== null) {
+    const item = $from.node(itemDepth);
+    if (item.attrs.checked !== null) return false;
+    dispatch?.(state.tr.setNodeMarkup($from.before(itemDepth), undefined, { ...item.attrs, checked: false }));
+    return true;
+  }
+  return wrapInList(typeOf('list'), { ordered: false })(
+    state,
+    dispatch &&
+      ((tr) => {
+        const depth = listItemDepth(tr.selection.$from);
+        if (depth !== null) {
+          const item = tr.selection.$from.node(depth);
+          tr.setNodeMarkup(tr.selection.$from.before(depth), undefined, { ...item.attrs, checked: false });
+        }
+        dispatch(tr);
+      }),
+  );
+};
+
+/**
+ * A 2x2 table with empty cells. The empty spelling is canonical —
+ * `|   |   |` / `| - | - |` / `|   |   |`, fixture `table-empty.md` —
+ * so no placeholder text is needed. The caret lands in the first cell.
+ * Placement is `divider`'s: only where the caret's own container can
+ * hold a block (see `canInsertAtCaret`).
+ */
+const tableCommand: Command = (state, dispatch) => {
+  const type = typeOf('table');
+  if (!canInsertAtCaret(state, type)) return false;
+  if (dispatch) {
+    const cell = (): PMNode => typeOf('tableCell').create({ align: null });
+    const row = (): PMNode => typeOf('tableRow').create(null, [cell(), cell()]);
+    const table = type.create({ blockAnchor: null }, [row(), row()]);
+    const tr = state.tr.replaceSelectionWith(table);
+    let tablePos: number | null = null;
+    tr.doc.descendants((node, pos) => {
+      if (node === table) tablePos = pos;
+      return tablePos === null;
+    });
+    // table(+1) > tableRow(+1) > tableCell(+1): the first cell's content.
+    if (tablePos !== null) tr.setSelection(TextSelection.create(tr.doc, tablePos + 3));
+    dispatch(tr.scrollIntoView());
+  }
+  return true;
+};
+
+/** The first positive integer no `footnoteDefinition` or `footnoteReference` in `doc` already uses. */
+function nextFootnoteIdentifier(doc: PMNode): string {
+  const used = new Set<string>();
+  doc.descendants((node) => {
+    if (node.type.name === 'footnoteDefinition' || node.type.name === 'footnoteReference') used.add(node.attrs.identifier as string);
+    return true;
+  });
+  let n = 1;
+  while (used.has(String(n))) n++;
+  return String(n);
+}
+
+/**
+ * A footnote: `[^n]` at the caret and an empty `[^n]:` definition at the
+ * end of the document, with the caret moved into the definition so the
+ * user types the note next. The empty definition is canonical
+ * (`empty-containers.md`) — no placeholder text to delete. The reference
+ * is inline, so this is the one command a table cell can run.
+ */
+const footnoteCommand: Command = (state, dispatch) => {
+  const { $from } = state.selection;
+  const reference = typeOf('footnoteReference');
+  const index = $from.index();
+  if (!$from.parent.canReplaceWith(index, index, reference)) return false;
+  if (dispatch) {
+    const identifier = nextFootnoteIdentifier(state.doc);
+    const tr = state.tr.replaceSelectionWith(reference.create({ identifier }), false);
+    const definition = typeOf('footnoteDefinition').create({ identifier, blockAnchor: null }, [typeOf('paragraph').create()]);
+    tr.insert(tr.doc.content.size, definition);
+    // doc end(-0) > definition close(-1) > paragraph close(-2): inside the empty paragraph.
+    tr.setSelection(TextSelection.create(tr.doc, tr.doc.content.size - 2));
+    dispatch(tr.scrollIntoView());
+  }
+  return true;
+};
+
 export const SLASH_COMMANDS: readonly SlashCommand[] = [
-  { id: 'heading-1', label: 'Heading 1', description: 'Big section heading', run: (s, d) => setBlockType(typeOf('heading'), { level: 1 })(s, d) },
-  { id: 'heading-2', label: 'Heading 2', description: 'Medium section heading', run: (s, d) => setBlockType(typeOf('heading'), { level: 2 })(s, d) },
-  { id: 'heading-3', label: 'Heading 3', description: 'Small section heading', run: (s, d) => setBlockType(typeOf('heading'), { level: 3 })(s, d) },
+  { id: 'text', label: 'Text', description: 'Plain paragraph', run: textCommand },
+  { id: 'heading-1', label: 'Heading 1', description: 'Big section heading', run: (s, d) => setBlockTypeKeepingAnchor(typeOf('heading'), { level: 1 })(s, d) },
+  { id: 'heading-2', label: 'Heading 2', description: 'Medium section heading', run: (s, d) => setBlockTypeKeepingAnchor(typeOf('heading'), { level: 2 })(s, d) },
+  { id: 'heading-3', label: 'Heading 3', description: 'Small section heading', run: (s, d) => setBlockTypeKeepingAnchor(typeOf('heading'), { level: 3 })(s, d) },
   { id: 'bullet-list', label: 'Bulleted list', description: 'A simple bulleted list', run: (s, d) => wrapInList(typeOf('list'), { ordered: false })(s, d) },
   {
     id: 'numbered-list',
@@ -73,8 +231,13 @@ export const SLASH_COMMANDS: readonly SlashCommand[] = [
     description: 'A list with numbering',
     run: (s, d) => wrapInList(typeOf('list'), { ordered: true, start: 1 })(s, d),
   },
+  { id: 'task-list', label: 'Task list', description: 'A list with checkboxes', run: taskListCommand },
   { id: 'quote', label: 'Quote', description: 'A blockquote', run: (s, d) => wrapIn(typeOf('blockquote'))(s, d) },
-  { id: 'code-block', label: 'Code block', description: 'A fenced code block', run: (s, d) => setBlockType(typeOf('code'))(s, d) },
+  // A code block keeps the attr too, but `to-markdown.ts` has no anchor
+  // spelling for a fence, so it is dropped at serialisation — see the
+  // `code` case there. The attr is preserved here so turning the fence
+  // back into a paragraph within one session restores the anchor.
+  { id: 'code-block', label: 'Code block', description: 'A fenced code block', run: (s, d) => setBlockTypeKeepingAnchor(typeOf('code'))(s, d) },
   {
     id: 'divider',
     label: 'Divider',
@@ -86,6 +249,8 @@ export const SLASH_COMMANDS: readonly SlashCommand[] = [
       return true;
     },
   },
+  { id: 'table', label: 'Table', description: 'A 2x2 table', run: tableCommand },
+  { id: 'footnote', label: 'Footnote', description: 'A reference here and its note at the end', run: footnoteCommand },
 ];
 
 /**

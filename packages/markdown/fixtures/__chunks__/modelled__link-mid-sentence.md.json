@@ -1,0 +1,9 @@
+[
+  {
+    "blockIds": [
+      "d:68a586e535e2#0"
+    ],
+    "text": "Read the [docs](https://example.com/docs) before the [FAQ](https://example.com/faq \"Questions\") and __the [bold link](https://example.com/bold)__.",
+    "ordinal": 0
+  }
+]
