@@ -532,6 +532,99 @@ makes conventions portable across projects.
 
 Discoveries and constraints. Newest first.
 
+### 2026-09-16 — No data layer: measured and fixed
+
+**What happened.** The 2026-09-16 performance report (read-only, `main` at `4987cd9`) found
+that every read in `apps/web` was a bare `$fetch` from `onMounted`: nothing server-rendered,
+nothing kept between screens, nothing deduped, every hop re-skeletoned and the presence
+stream reopened. Measured on the dev server with the worktree's own stack (load average
+25–45 on 4 cores throughout, so timings are inflated and quoted as ranges; request counts
+and ordering are exact): the dashboard's full load reached content only after hydration
+plus four requests (30.8–48.0 s); going back to it re-fetched the activity and showed the
+skeleton again (1.24–1.68 s, the `activity` response arriving *before* the lists could
+paint); returning to a page did the same (0.83–1.76 s, `GET /pages/:id` answered before
+the article appeared). Two more findings rode along: icons were fetched at runtime per
+screen and fell through to `api.iconify.design` (three of seven icon requests on the
+dashboard → page → edit → page path went to the public API, on a product whose config
+says air-gapped instances must not depend on Iconify), and the contracts barrel shipped
+the server env schema — `AI_KEK_*`, `DATABASE_URL` — to every page (263 KB / 75 KB gzip,
+uncompressed on the wire).
+
+**What changed** (branch `perf/data-layer-icons-bundle`, one commit per piece):
+
+- **A read layer**, `useApiRead` (`apps/web/app/composables/useApiRead.ts`): `useAsyncData`
+  under a stable key (`app/utils/api-keys.ts`), `getCachedData` over the payload, `dedupe:
+  'defer'`, and a server-side fetch when the request carries a session cookie — the Nuxt
+  server forwards it with `useRequestHeaders` (`useApiClient`). That works because
+  `apps/web` and `apps/api` share the host in dev and e2e (`localhost:<web>`,
+  `localhost:<api>`; a `SameSite=Lax` host cookie reaches both); on a deployment where the
+  API is on another host the cookie never reaches the Nuxt server and the read waits for the
+  browser, exactly as before. A server-side 401 or no response is recorded as "nothing
+  known", never cached. Answers are outcomes, not thrown errors: Nuxt's error reducer keeps
+  `statusCode` and drops ofetch's `response`, so a thrown server-side 404 would have reached
+  `httpStatusOf` as a network failure. A failed outcome is never served from the cache, so
+  absence and denial are asked again identically. `load()` on a warm answer refreshes after
+  the next frame, behind the content; during hydration it takes the server's answer without
+  repeating the request. Moved: `usePageRead`, `useWorkspaceActivity`, `usePageHistory`,
+  `useBookHistory`, `usePageDiff`, `useBookDiff`, `useWorkspaceMembers` (fetch only; the
+  screen is another branch's). `useSavePage` clears what a save stales (`keysStaledBySave`).
+  The tree keeps its own `useState` cache. **Left for after the merge:** `usePageComments`
+  — another branch owns its writes; it is the one read composable still fetching bare, and
+  the one whose writes (reply, resolve) should also clear `workspace-activity:*`.
+- **Measured after** (same stack, same load band): full load of the dashboard 2.1–5.0 s to
+  content with 0 browser requests before it (server-rendered); hops 3, 4 and 6 (back to
+  the dashboard, back to a page, edit → read) show the content with **0 API responses
+  before it** — the content no longer waits on the network; the refresh is dispatched after
+  the first frame. The requests still issued in the same mount task are `comments` and the
+  presence stream (other branches' composables, above). Absolute time-to-content on these
+  hops stayed in the 0.3–1.9 s band on this machine because the dev-mode client is
+  CPU-bound under a load average of 30 (fix A of the report, prebundling reka-ui, is the
+  other half); the deterministic proof is the request ordering, held by
+  `e2e/data-layer.spec.ts` against a real backend (article and lists in the server-rendered
+  document; going back shows content while the browser's refresh is still held).
+- **Icons** (`nuxt.config.ts` `icon`): `clientBundle.scan` (43 → 85 icons, 22 KB
+  uncompressed) and `fallbackToApi: false`. `e2e/icons.spec.ts`: 7 → 0 icon requests
+  across dashboard → page → edit → page. `docs/UI-CHECKLIST.md` §4.3 records the gotcha.
+- **Bundle hygiene:** `@deep-wiki/contracts/env` is a subpath export and the barrel no
+  longer names `env.ts`; `sideEffects: false` on contracts and core;
+  `nitro.compressPublicAssets`. `bun run check:bundle` now fails on any client chunk that
+  carries `AI_KEK` (red on `main`, green here). Production builds of `main` and this branch:
+  the shared chunk 263,207 / 74,839 B gzip → 197,795 / 59,365 B; JS a page loads eagerly:
+  read 251.7 → 238.8 KB gzip, dashboard 244.7 → 231.7, edit 298.5 → 285.0; and every
+  asset now leaves with `content-encoding` (gzip 59.6 KB / brotli 51.9 KB for that chunk
+  instead of 197.8 KB).
+
+**Found, not fixed.**
+
+- **The frame's sidebar server-renders "Choose a workspace" on a first visit.** The layout
+  renders `WorkspaceSidebar` from `useCurrentWorkspace()` *before* the page's `AppShell`
+  enters the workspace, so on a request with no `dw-workspace` cookie the server sends the
+  no-workspace branch and the client hydrates the tree — a hydration mismatch (in
+  production: "Hydration completed but contains mismatches", the sidebar re-rendered). It
+  was already there on the dashboard on `main` (verified on a build of `4987cd9`); since
+  the read, history and members screens know their workspace on the server now, they show
+  it on a first visit too. With the cookie set — every visit after the first — there is
+  no mismatch on any screen (verified in dev and on the production build). The fix belongs
+  to the frame: learn the workspace before the sidebar renders (the route names it for
+  `/workspaces/:id/*`; a page names it only in its response).
+- **Template comments between `v-if` branches were a dev-only hydration mismatch** the
+  moment a branch was server-rendered (the dev client keeps them as the branch's first
+  node, the server renderer does not). Fixed globally with `vue.compilerOptions.comments:
+  false` rather than by moving every comment; noted here because the codebase documents
+  its branches exactly there.
+- **A server-prefetching component is an async boundary for `useId()`**, on both sides only
+  if the client mirrors the server's choice; `useApiRead` reads whether the server answered
+  a key from the payload and sets `server` on the client accordingly. Without that, every
+  generated id after the dashboard's setup hydrated against a different one.
+- **e2e tests now race hydration.** Content is in the HTML long before the dev client has
+  hydrated (51 s on `/login` under load 42), so a test that asserts content and then
+  presses a key or expects a client-side hop must wait for `waitForHydration`
+  (`e2e/hydration.ts`); the three skeleton tests, the history keyboard test and the new
+  specs do. Other specs may hit the same race under load and should adopt the helper when
+  they do.
+- **Test sessions idle out at 30 minutes** (`SESSION_IDLE_TIMEOUT_MINUTES` in the harness):
+  a seeded token unused for half an hour answers 401, which read like a broken cookie
+  forward for a while. Re-seed or touch the session first when measuring by hand.
 ### 2026-09-16 — The `/mount` API now carries everything a Notion-like block UI needs; the Vue side is the next batch
 
 **What happened.** Branch `feat/editor-block-commands` (worktree `fb-editor`, `packages/editor`
