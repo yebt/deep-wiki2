@@ -94,6 +94,17 @@ describe('treeRowActions', () => {
       }
     });
 
+    test('the history item names what it is the history of — "Page history", "Book history" — never a bare "History"', () => {
+      // A screen-reader user hears the menu item, not the row it belongs
+      // to (docs/UI-CHECKLIST.md §5: an accessible name is specific enough
+      // out of context); and the visible label is the accessible name, so
+      // the sighted reader hears the same words (§4.3).
+      const [pageHistory] = byKind(treeRowActions(node('page', 'p1'), MIDDLE), 'history');
+      expect(pageHistory?.label).toBe('Page history');
+      const [bookHistory] = byKind(treeRowActions(node('book', 'b1'), MIDDLE), 'history');
+      expect(bookHistory?.label).toBe('Book history');
+    });
+
     test('"Copy link" is on every row: live on a page, disabled with a reason elsewhere', () => {
       for (const type of ['shelf', 'book', 'chapter', 'page']) {
         const [copy] = byKind(treeRowActions(node(type), MIDDLE), 'copy-link');

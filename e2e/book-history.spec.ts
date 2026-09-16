@@ -115,7 +115,10 @@ test('a reader reaches book history from the tree, and book diff from history, e
   // (`useBookDiffNavigator`'s `pageOrder`), and the seed places Alpha
   // before Beta under the book — so which comes first is asserted, not
   // read off the screen the way the previous version of this test had to.
-  const focused = page.getByRole('link', { name: /E2E Book Page (Alpha|Beta)/ });
+  // Scoped to the contextual bar: since 2026-09-16 every page row in the
+  // sidebar's tree is a link named for its page too (`NavigationTreeNode`),
+  // so the name alone resolves to the two rows as well as the switcher.
+  const focused = page.locator('#content-bar').getByRole('link', { name: /E2E Book Page (Alpha|Beta)/ });
   await expect(focused).toBeVisible({ timeout: 30000 });
   await expect(focused).toHaveText(/E2E Book Page Alpha \(1\/2\)/);
 
