@@ -1,3 +1,5 @@
+import { pageReadKey } from '~/utils/api-keys';
+
 export type PageReadStatus = 'idle' | 'loading' | 'success' | 'not-found' | 'forbidden' | 'unauthenticated' | 'network-error';
 
 export interface PageReadResponse {
@@ -11,11 +13,12 @@ export type PageReadFetcher = (nodeId: string) => Promise<PageReadResponse>;
 
 export interface UsePageReadResult {
   readonly status: Ref<PageReadStatus>;
-  readonly html: Ref<string>;
-  readonly title: Ref<string>;
+  readonly html: ComputedRef<string>;
+  readonly title: ComputedRef<string>;
   /** `null` until a successful response names it. */
-  readonly workspaceId: Ref<string | null>;
-  readonly message: Ref<string>;
+  readonly workspaceId: ComputedRef<string | null>;
+  readonly message: ComputedRef<string>;
+  /** Fetch, or — with the page already on screen — refresh behind it. */
   readonly load: () => Promise<void>;
 }
 
@@ -39,53 +42,51 @@ export interface UsePageReadResult {
  * navigate to; a subject who directly requests a page URL and is denied
  * is told so, consistent with how `pages.ts` itself already returns a
  * distinct 403 for this exact route.
+ *
+ * The answer lives in the read layer (`useApiRead`, keyed by
+ * `pageReadKey`): server-rendered into the document when the request can
+ * be authenticated, kept across screens so coming back to a page renders
+ * it from memory and refreshes behind the article, and cleared by
+ * `useSavePage` when this page is saved. A failed answer is never kept
+ * (useApiRead's rule), so a denied page and an absent one are asked again
+ * identically on the next visit — the cache cannot tell them apart either.
  */
 export function usePageRead(nodeId: string, fetcher?: PageReadFetcher): UsePageReadResult {
   const get =
     fetcher ??
     ((id: string) => {
-      const config = useRuntimeConfig();
-      return $fetch<PageReadResponse>(`${config.public.apiBaseUrl}/pages/${id}`, { credentials: 'include' });
+      const api = useApiClient();
+      return api<PageReadResponse>(`/pages/${id}`);
     });
 
-  const status = ref<PageReadStatus>('idle');
-  const html = ref('');
-  const title = ref('');
-  const workspaceId = ref<string | null>(null);
-  const message = ref('');
+  const read = useApiRead<PageReadResponse>(pageReadKey(nodeId), () => get(nodeId));
 
-  async function load(): Promise<void> {
-    status.value = 'loading';
-    message.value = 'Loading page…';
+  const status = useReadStatus(read, (code) => {
+    // Signed out: the screen's next move is sign-in, not a retry
+    // (`useSignInRedirect`), so this is never the network branch. Only the
+    // browser ever sees it — a 401 during the server's render is "nothing
+    // known" (useApiRead), and the browser asks again with its own cookie.
+    if (code === 401) return 'unauthenticated';
+    if (code === 403) return 'forbidden';
+    if (code === 404) return 'not-found';
+    return 'network-error';
+  });
 
-    try {
-      const response = await get(nodeId);
-      html.value = response.html;
-      title.value = response.title;
-      workspaceId.value = response.workspaceId;
-      status.value = 'success';
-      message.value = '';
-    } catch (error) {
-      const code = httpStatusOf(error);
-      // Signed out: the screen's next move is sign-in, not a retry
-      // (`useSignInRedirect`), so this is never the network branch.
-      if (code === 401) {
-        status.value = 'unauthenticated';
-        message.value = 'Your session has ended.';
-        return;
-      }
-      if (code === 403) {
-        status.value = 'forbidden';
-        message.value = "You don't have access to this page.";
-      } else if (code === 404) {
-        status.value = 'not-found';
-        message.value = 'This page does not exist.';
-      } else {
-        status.value = 'network-error';
-        message.value = 'Cannot reach the server. Check your connection and try again.';
-      }
-    }
-  }
+  const value = computed(() => (read.outcome.value?.ok ? read.outcome.value.value : null));
+  const html = computed(() => value.value?.html ?? '');
+  const title = computed(() => value.value?.title ?? '');
+  const workspaceId = computed(() => value.value?.workspaceId ?? null);
 
-  return { status, html, title, workspaceId, message, load };
+  const MESSAGES: Record<PageReadStatus, string> = {
+    'idle': '',
+    'loading': 'Loading page…',
+    'success': '',
+    'forbidden': "You don't have access to this page.",
+    'not-found': 'This page does not exist.',
+    'unauthenticated': 'Your session has ended.',
+    'network-error': 'Cannot reach the server. Check your connection and try again.',
+  };
+  const message = computed(() => MESSAGES[status.value]);
+
+  return { status, html, title, workspaceId, message, load: read.load };
 }

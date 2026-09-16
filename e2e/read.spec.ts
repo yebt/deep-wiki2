@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 import { boundaryContrast } from './contrast';
+import { waitForHydration } from './hydration';
 import { expectNoHorizontalOverflow } from './overflow';
 
 /**
@@ -106,8 +107,17 @@ for (const theme of ['light', 'dark'] as const) {
  * first paragraph 32px under the `h1` (`PageHeading`'s `mb-8`), on 26px
  * `doc-body` lines rather than 16px ones. happy-dom has no layout engine,
  * so this file is the owner: hold the response, measure, release, measure.
+ *
+ * The page is reached by a client-side navigation (from its history
+ * screen, through "Read page"): a full load is answered on the server
+ * since the data layer (`useApiRead`) — the article is in the document
+ * and no skeleton ever shows, which `e2e/data-layer.spec.ts` holds. The
+ * skeleton is for a page the browser has not seen yet, and that is the
+ * hop this test makes.
  */
 test('the read skeleton occupies the box the loaded document takes: title and first paragraph line up', async ({ page, context }) => {
+  // Waits for hydration before the hop (below): dev mode under load.
+  test.setTimeout(240_000);
   await signInAs(context, fixtures.readerSessionToken);
   let release!: () => void;
   const held = new Promise<void>((resolve) => {
@@ -119,7 +129,9 @@ test('the read skeleton occupies the box the loaded document takes: title and fi
     await route.continue();
   });
 
-  await page.goto(`/pages/${fixtures.readPageId}`);
+  await page.goto(`/pages/${fixtures.readPageId}/history`);
+  await waitForHydration(page);
+  await page.getByRole('link', { name: 'Read page' }).click({ timeout: 30000 });
   const skeleton = page.getByTestId('read-skeleton');
   await expect(skeleton).toBeVisible({ timeout: 30000 });
   const skeletonTitle = (await skeleton.getByTestId('read-skeleton-title').boundingBox())!;

@@ -52,6 +52,22 @@ export default defineNuxtConfig({
     },
   },
 
+  vue: {
+    compilerOptions: {
+      // Template comments are stripped from the client bundle in
+      // production and kept in development. The server renderer does not
+      // keep a comment that sits between `v-if`/`v-else` branches, and
+      // this codebase documents its branches exactly there — so in
+      // development every server-rendered branch hydrated against one
+      // comment node more than the server sent, and Vue reported a
+      // mismatch on the read, history and dashboard screens the moment
+      // the read layer began answering them on the server (2026-09-16).
+      // Stripping comments on both sides in every mode makes development
+      // hydrate what production hydrates.
+      comments: false,
+    },
+  },
+
   typescript: {
     // Matches the strictness of the repository's shared tsconfig.base.json
     // (see apps/web/tsconfig.json for why this project does not extend it
