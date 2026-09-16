@@ -6,7 +6,8 @@ import rehypeSanitize, { defaultSchema, type Options as SanitizeSchema } from 'r
 import remarkRehype from 'remark-rehype';
 import { unified } from 'unified';
 import { visit } from 'unist-util-visit';
-import { findBlockAnchor } from './extensions/block-anchor';
+import { sliceBlocks } from './blocks';
+import { findBlockAnchor, isAnchorableBlock } from './extensions/block-anchor';
 import type { TagNode } from './extensions/tag';
 import type { WikiLinkNode } from './extensions/wiki-link';
 import { parse } from './pipeline';
@@ -36,6 +37,21 @@ const MACHINE_MINTED_IDS = [/^user-content-fn(?:ref)?-/, 'footnote-label'] as co
  * reaches the same rule.
  */
 const BLOCK_ANCHOR_ID = /^[0-9A-Za-z]+$/;
+
+/**
+ * `data-derived-block-id` carries the *derived* identity of a top-level
+ * block that has no persisted anchor yet — `deriveBlockId`'s
+ * `d:<12 hex>#<occurrence>` (`match-blocks.ts`). It is the id a reader
+ * hands `POST /pages/:id/comments` to start a thread on such a block:
+ * the read screen composes its overlay over this cached HTML and never
+ * parses, so an identity that lives only in `sliceBlocks` would be one
+ * no reader could name (`apps/web/app/pages/pages/[id]/index.vue`).
+ * Kept apart from `data-block-id` — which stays "a persisted anchor,
+ * nothing else", exactly as the comment-overlay spec states it — so the
+ * two attributes never have to be told apart by their value's shape.
+ * Pinned to its grammar for the same reason `BLOCK_ANCHOR_ID` is.
+ */
+const DERIVED_BLOCK_ID = /^d:[0-9a-f]{12}#[0-9]+$/;
 
 /**
  * Elements removed **with their children** rather than unwrapped. The
@@ -104,6 +120,7 @@ const SANITIZE_SCHEMA: SanitizeSchema = {
       ...(defaultSchema.attributes?.['*'] ?? []).filter((property) => property !== 'id' && property !== 'name'),
       ['id', ...MACHINE_MINTED_IDS],
       ['dataBlockId', BLOCK_ANCHOR_ID],
+      ['dataDerivedBlockId', DERIVED_BLOCK_ID],
     ],
   },
   // `mdast-util-to-hast`'s footnote handlers already apply their own
@@ -212,8 +229,15 @@ const blockAnchorHandler: Handler = () => undefined;
  * `backfillStaleRenders` (`packages/db/src/content/backfill-render.ts`)
  * re-renders every row with `pipeline_version < CURRENT_PIPELINE_VERSION`,
  * which is what carries the fix to the existing corpus.
+ *
+ * 4: `data-derived-block-id` on every unanchored paragraph and heading
+ * (`DERIVED_BLOCK_ID` above), so a reader can start a thread on a block
+ * that has no persisted anchor yet. Same shape as 3: the Markdown did not
+ * change, so only the bump carries the attribute to the existing corpus.
+ * Until the backfill reaches a page, its unanchored blocks simply offer no
+ * comment affordance — degraded, never wrong.
  */
-export const CURRENT_PIPELINE_VERSION = 3;
+export const CURRENT_PIPELINE_VERSION = 4;
 
 /**
  * Removes a `className` that sanitisation emptied rather than removed.
@@ -289,9 +313,23 @@ export function render(markdown: string): string {
   // `blockAnchorHandler` above still renders nothing for the anchor's own
   // inline node — it cannot set an attribute on its parent block, which is
   // exactly why this runs one level up instead.
-  for (const child of tree.children) {
+  // The same slicing `mintAnchorAtBlock` performs on the way back in: a
+  // derived id emitted here is, by construction, the one that call will
+  // find when the reader posts it — as long as the document has not
+  // changed since, which is exactly what a content-hashed id checks.
+  const slices = sliceBlocks(tree, markdown);
+  tree.children.forEach((child, index) => {
     const anchor = findBlockAnchor(child);
-    if (!anchor) continue;
+    if (!anchor) {
+      // Only a block a persisted anchor could later live on gets a derived
+      // id (`ANCHORABLE_BLOCKS`: paragraph and heading at this level). A
+      // list, a code block or a table cannot carry ` ^id`, so an identity
+      // for one would be an affordance that fails at the mint.
+      if (!isAnchorableBlock(child)) return;
+      const existingData = child.data as { hProperties?: Record<string, unknown> } | undefined;
+      child.data = { ...child.data, hProperties: { ...existingData?.hProperties, dataDerivedBlockId: slices[index]!.id } };
+      return;
+    }
     // The hProperty key is the camelCase *property* name (`dataBlockId`),
     // not the kebab-case attribute (`data-block-id`) — `hast-util-sanitize`
     // resolves an unknown property strictly by this camelCase form via
@@ -309,7 +347,7 @@ export function render(markdown: string): string {
     // block ever reaches this loop as one of those two node types.
     const existingData = child.data as { hProperties?: Record<string, unknown> } | undefined;
     child.data = { ...child.data, hProperties: { ...existingData?.hProperties, dataBlockId: anchor.id } };
-  }
+  });
 
   const hast = renderTransform.runSync(tree);
   return toHtml(hast);

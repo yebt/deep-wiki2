@@ -18,11 +18,17 @@ export const CommentIndicatorsResponseSchema = z.object({
 export type CommentIndicatorsResponse = z.infer<typeof CommentIndicatorsResponseSchema>;
 
 export const CreateCommentRequestSchema = z.object({
-  /** The block id the client believes the comment is anchored to — persisted or still-derived. Required for a new thread; omitted for a reply. */
+  /** The block id the client believes the comment is anchored to — persisted (`data-block-id`) or still-derived (`data-derived-block-id`). Required for a new thread; omitted for a reply. */
   blockId: z.string().optional(),
+  /**
+   * The *visible* text the reader selected, or absent for a comment on
+   * the block as a whole. The server locates it in the block's canonical
+   * source and stores that (`locateQuoteInBlock`); the offsets below are
+   * only a hint between repeated occurrences, never stored as sent.
+   */
+  quote: z.string().optional(),
   offsetStart: z.number().int().nonnegative().optional(),
   offsetEnd: z.number().int().nonnegative().optional(),
-  quote: z.string().optional(),
   body: z.string().min(1),
   /** A reply joins this thread's root instead of anchoring a new one. */
   parentId: z.string().optional(),
@@ -99,5 +105,14 @@ export type CommentThread = z.infer<typeof CommentThreadSchema>;
  */
 export const PageCommentsResponseSchema = z.object({
   threads: z.array(CommentThreadSchema),
+  /**
+   * Whether the caller may start a thread here — their *own* grant, which
+   * a POST would tell them anyway. It says nothing about the page's
+   * comments: a reader without `comment` gets `false` and `threads: []`
+   * whether the page has threads or none. Without it the read screen
+   * could not tell a commenter on a page with no threads yet from a
+   * reader, and no page's first thread could ever be started.
+   */
+  canComment: z.boolean(),
 });
 export type PageCommentsResponse = z.infer<typeof PageCommentsResponseSchema>;

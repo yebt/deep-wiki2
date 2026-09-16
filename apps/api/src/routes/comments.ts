@@ -28,7 +28,7 @@ import {
   PageCommentsResponseSchema,
   SetThreadResolvedRequestSchema,
 } from '@deep-wiki/contracts';
-import { mintAnchorAtBlock } from '@deep-wiki/markdown';
+import { locateQuoteInBlock, mintAnchorAtBlock, parse, sliceBlocks } from '@deep-wiki/markdown';
 import { Hono, type Context } from 'hono';
 import type postgres from 'postgres';
 import { sessionMiddleware, type SessionVariables } from '../middleware/session';
@@ -122,12 +122,13 @@ export function createCommentRoutes(deps: CommentRouteDeps): Hono<{ Variables: S
 
     const canComment = await can(deps.sql, { subjectType: 'user', subjectId: session.userId, resourceId: pageId, action: 'comment' });
     if (!canComment) {
-      return c.json(PageCommentsResponseSchema.parse({ threads: [] }));
+      return c.json(PageCommentsResponseSchema.parse({ threads: [], canComment: false }));
     }
 
     const threads = await listCommentThreads(deps.sql, { pageId });
     return c.json(
       PageCommentsResponseSchema.parse({
+        canComment: true,
         threads: threads.map((thread) => ({
           id: thread.id,
           body: thread.body,
@@ -212,17 +213,47 @@ export function createCommentRoutes(deps: CommentRouteDeps): Hono<{ Variables: S
       });
       created = { id: reply.id };
     } else {
-      if (parsed.data.blockId === undefined || parsed.data.quote === undefined || parsed.data.offsetStart === undefined || parsed.data.offsetEnd === undefined) {
-        return c.json(ErrorResponseSchema.parse({ error: 'blockId, offsetStart, offsetEnd and quote are required for a new thread' }), 400);
+      if (parsed.data.blockId === undefined) {
+        return c.json(ErrorResponseSchema.parse({ error: 'blockId is required for a new thread' }), 400);
       }
 
       const content = await readPageMarkdown(deps.sql, { nodeId: pageId, workspaceId: node.workspace_id });
       if (!content) return notFound(c);
 
-      const minted = mintAnchorAtBlock(content.markdown, parsed.data.blockId);
-      let resolvedBlockId = parsed.data.blockId;
+      // The page's full id registry, every status — the mint must avoid a
+      // tombstoned or superseded id the current markdown no longer shows,
+      // or the save below refuses its own anchor as dead (docs/TODO.md,
+      // 2026-09-13 follow-up; `reconcileBlocks` passes the same set).
+      const knownRows = await deps.sql<{ block_id: string }[]>`
+        SELECT block_id FROM page_blocks WHERE page_id = ${pageId} AND workspace_id = ${node.workspace_id}
+      `;
+      const reservedIds = new Set(knownRows.map((row) => row.block_id));
 
-      if (minted && minted.markdown !== content.markdown) {
+      const minted = mintAnchorAtBlock(content.markdown, parsed.data.blockId, reservedIds);
+      // The client named a block off the cached HTML it was served. A page
+      // saved since then has a new render, and a derived id — a hash of the
+      // block's text — stops resolving the moment that text changes, which
+      // is what makes a stale one fail closed rather than land on another
+      // block. Until now this fell through to `createRootComment` with the
+      // unresolved id and surfaced as `comments_block_fk` — a 500 for an
+      // ordinary stale-page conflict.
+      if (!minted) {
+        return c.json(ErrorResponseSchema.parse({ error: 'that block has changed since this page was loaded' }), 409);
+      }
+      let resolvedBlockId = minted.blockId;
+
+      // The anchor is located in the block's *source* — the reader selected
+      // visible text off cached HTML and holds no offsets into the
+      // canonical Markdown. `locateQuoteInBlock` guarantees the stored quote
+      // is a source substring, which save-time reconciliation's exact rows
+      // need; the client's offsets, when sent, only break a tie between
+      // repeated occurrences. Located before the mint's save so the
+      // trailing ` ^id` the mint appends is never part of the excerpt.
+      const slices = sliceBlocks(parse(content.markdown), content.markdown);
+      const block = slices.find((slice) => slice.id === parsed.data.blockId)!;
+      const anchor = locateQuoteInBlock(block.text, parsed.data.quote, parsed.data.offsetStart);
+
+      if (minted.markdown !== content.markdown) {
         const [currentRow] = await deps.sql<{ content_hash: string }[]>`
           SELECT content_hash FROM page_content WHERE node_id = ${pageId} AND workspace_id = ${node.workspace_id}
         `;
@@ -235,8 +266,6 @@ export function createCommentRoutes(deps: CommentRouteDeps): Hono<{ Variables: S
           changesetWindowMinutes: deps.changesetWindowMinutes,
         });
         resolvedBlockId = minted.blockId;
-      } else if (minted) {
-        resolvedBlockId = minted.blockId;
       }
 
       const root = await createRootComment(deps.sql, {
@@ -245,10 +274,10 @@ export function createCommentRoutes(deps: CommentRouteDeps): Hono<{ Variables: S
         authorId: session.userId,
         body: parsed.data.body,
         blockId: resolvedBlockId,
-        offsetStart: parsed.data.offsetStart,
-        offsetEnd: parsed.data.offsetEnd,
-        quote: parsed.data.quote,
-        quoteHash: quoteHashOf(parsed.data.quote),
+        offsetStart: anchor.offsetStart,
+        offsetEnd: anchor.offsetEnd,
+        quote: anchor.quote,
+        quoteHash: quoteHashOf(anchor.quote),
       });
       created = { id: root.id, blockId: resolvedBlockId };
     }

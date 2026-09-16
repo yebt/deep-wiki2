@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { canonicalise, parse, stringify } from './index';
-import { render } from './render';
+import { CURRENT_PIPELINE_VERSION, render } from './render';
+import { sliceBlocks } from './blocks';
 
 // Threat matrix — executable-file/active-content classification: markdown
 // carries raw HTML verbatim (bucket B) and the rendered HTML is served to
@@ -153,6 +154,63 @@ describe('data-block-id emission', () => {
     expect(html.split('data-block-id').length - 1).toBe(1);
   });
 
+  // A block with no persisted anchor has no id the client could send to
+  // `POST /pages/:id/comments` — its derived identity lives only in the
+  // parser (`sliceBlocks`). The read screen composes the overlay over
+  // cached HTML and never parses, so the render has to carry that identity
+  // too, under its own attribute: `data-block-id` stays "persisted anchor
+  // only", exactly as the comment-overlay spec states it.
+  describe('data-derived-block-id emission', () => {
+    test('an unanchored paragraph carries its derived identity, and still no data-block-id', () => {
+      const markdown = 'A paragraph with no persisted anchor at all.\n';
+      const [slice] = sliceBlocks(parse(markdown), markdown);
+      expect(slice!.anchorId).toBeNull();
+
+      const html = render(markdown);
+      expect(html).toContain(`data-derived-block-id="${slice!.id}"`);
+      expect(html).not.toContain('data-block-id');
+    });
+
+    test('an anchored block carries data-block-id and never a derived id', () => {
+      const html = render('Anchored. ^abc123\n');
+      expect(html).toContain('data-block-id="abc123"');
+      expect(html).not.toContain('data-derived-block-id');
+    });
+
+    test('a heading carries a derived id; a list, a code block and a table carry neither attribute', () => {
+      const markdown = '## A heading\n\n- one\n- two\n\n```\ncode\n```\n\n| a |\n| - |\n| b |\n';
+      const html = render(markdown);
+      const [heading] = sliceBlocks(parse(markdown), markdown);
+      expect(html).toContain(`<h2 data-derived-block-id="${heading!.id}">`);
+      // Only the heading: a persisted anchor cannot live on the other three
+      // (`ANCHORABLE_BLOCKS`), so offering them an identity a mint could not
+      // honour would be an affordance that fails on use.
+      expect(html.split('data-derived-block-id').length - 1).toBe(1);
+      expect(html).not.toContain('data-block-id');
+    });
+
+    test('two identical unanchored paragraphs get distinct derived ids, in document order', () => {
+      const markdown = 'Same text.\n\nSame text.\n';
+      const html = render(markdown);
+      const [first, second] = sliceBlocks(parse(markdown), markdown);
+      expect(first!.id).not.toBe(second!.id);
+      expect(html.indexOf(`data-derived-block-id="${first!.id}"`)).toBeLessThan(html.indexOf(`data-derived-block-id="${second!.id}"`));
+    });
+
+    test('a well-formed derived id on raw HTML survives; a malformed one is stripped while the element survives', () => {
+      const forged = render('<p data-derived-block-id="d:0123456789ab#0">x</p>\n');
+      expect(forged).toContain('data-derived-block-id="d:0123456789ab#0"');
+
+      const malformed = render('<p data-derived-block-id="not an id">x</p>\n');
+      expect(malformed).toContain('>x</p>');
+      expect(malformed).not.toContain('data-derived-block-id');
+    });
+
+    test('CURRENT_PIPELINE_VERSION moved past the derived-id emission so the backfill re-renders every older row', () => {
+      expect(CURRENT_PIPELINE_VERSION).toBeGreaterThanOrEqual(4);
+    });
+  });
+
   // GATE-2: the hProperties mutation must never touch the tree
   // reconcileDerived receives — render() parses and mutates its own local
   // tree, so stringifying a tree built the ordinary way (parse ->
@@ -188,7 +246,10 @@ test('a wiki-link to a title that could resolve and one that could not render wi
   // structure around their own bracketed text.
   expect(resolvable).not.toContain('<a ');
   expect(unresolvable).not.toContain('<a ');
-  expect(resolvable.replace('Existing Page', 'X')).toBe(unresolvable.replace('Totally Nonexistent Page', 'X'));
+  // The derived block id is a hash of the block's own text, so it differs
+  // between the two by construction — an identity, not a treatment.
+  const withoutIdentity = (html: string) => html.replace(/ data-derived-block-id="[^"]*"/, '');
+  expect(withoutIdentity(resolvable).replace('Existing Page', 'X')).toBe(withoutIdentity(unresolvable).replace('Totally Nonexistent Page', 'X'));
 });
 
 // docs/TODO.md Finding (2026-09-09), "two pipelines agreeing on the bytes
@@ -236,7 +297,7 @@ describe('raw HTML reaches the reader (SPECS §5.1, Verbatim)', () => {
 
     const html = render(markdown);
     expect(html).toContain('<div>');
-    expect(html).toContain('<h2>A real heading</h2>');
+    expect(html).toMatch(/<h2 data-derived-block-id="[^"]+">A real heading<\/h2>/);
   });
 });
 

@@ -84,7 +84,7 @@ describe('savePage', () => {
 
     const result = await savePage(sql, { nodeId, workspaceId, markdown: '# Hi\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
 
-    expect(result.renderedHtml).toContain('<h1>');
+    expect(result.renderedHtml).toMatch(/<h1[ >]/);
     expect(result.renderedHtml).toContain('Hi');
 
     const [row] = await sql`SELECT rendered_html, block_index FROM page_content WHERE node_id = ${nodeId}`;

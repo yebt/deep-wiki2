@@ -35,6 +35,11 @@ const ESCAPED_CARET_SENTINEL = '\uE000';
 
 const TRAILING_ANCHOR = / \^([0-9A-Za-z]+)$/;
 
+/** The block's source text without its trailing ` ^id`, if it carries one — the excerpt half of a block, as opposed to its identity. */
+export function stripTrailingAnchor(blockSource: string): string {
+  return blockSource.replace(TRAILING_ANCHOR, '');
+}
+
 /** Protects `\^` sequences in raw Markdown before it reaches remark-parse. */
 export function protectEscapedCarets(markdown: string): string {
   return markdown.replaceAll('\\^', ESCAPED_CARET_SENTINEL);
@@ -67,6 +72,11 @@ function phrasingChildrenOf(node: Node): Node[] | undefined {
 }
 
 const ANCHORABLE_BLOCKS = new Set(['paragraph', 'heading', 'listItem']);
+
+/** Whether a persisted anchor could live on `node` at all — the same set `findBlockAnchor` consults, exported so `render.ts` offers a derived identity only where a later mint could honour it. */
+export function isAnchorableBlock(node: Node): boolean {
+  return ANCHORABLE_BLOCKS.has(node.type);
+}
 
 /**
  * Whether `node` is a kind of block a persisted anchor can live on, and if
