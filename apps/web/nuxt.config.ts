@@ -1,6 +1,18 @@
 // https://nuxt.com/docs/api/configuration/nuxt-config
 export default defineNuxtConfig({
-  modules: ['@nuxt/eslint', '@nuxt/ui'],
+  // `./modules/perf-prebundle` is dev-only and exists because a plain
+  // `vite.optimizeDeps.include: ['reka-ui']` here is silently discarded:
+  // `@nuxt/ui` transpiles `reka-ui` (node_modules/@nuxt/ui/dist/module.mjs:109),
+  // `@nuxt/vite-builder` turns every transpile pattern into an
+  // `optimizeDeps.exclude` entry for the client, and then drops any
+  // `include` entry that is also excluded (dist/index.mjs:1115-1124). The
+  // module hooks `vite:extendConfig` after both and moves the package from
+  // `exclude` to `include`. Measured 2026-09-16: 1027 → 432 requests before
+  // hydration on /pages/:id/edit in dev (docs/TODO.md Findings, "edit-mode
+  // latency"). Nuxt scans `modules/` on its own; it is listed here so the
+  // intent is visible from the config rather than from a directory
+  // listing, and its `meta.name` keeps the two registrations one install.
+  modules: ['@nuxt/eslint', '@nuxt/ui', './modules/perf-prebundle'],
 
   devtools: { enabled: true },
 
