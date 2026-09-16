@@ -219,3 +219,23 @@ describe('setLink / unsetLink', () => {
     expect(update.selection).toMatchObject({ kind: 'text', from: 1, to: 4, empty: false, marks: { strong: true, emphasis: false } });
   });
 });
+
+describe('the block tunes are on the handle, bound to the same view', () => {
+  test('moveBlockUp/moveBlockDown/deleteBlock/duplicateBlock/turnInto run the block-commands.ts commands', () => {
+    const view = fakeView(stateOf('# Title\n\nBody ^abc123\n'));
+    view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, 10)));
+    expect(view.state.selection.$from.parent.textContent).toBe('Body');
+    const commands = createEditorCommands(view);
+
+    expect(commands.moveBlockUp()).toBe(true);
+    expect(toMarkdown(view.state.doc)).toBe('Body ^abc123\n\n# Title\n');
+    expect(commands.moveBlockDown()).toBe(true);
+    expect(toMarkdown(view.state.doc)).toBe('# Title\n\nBody ^abc123\n');
+    expect(commands.duplicateBlock()).toBe(true);
+    expect(toMarkdown(view.state.doc)).toBe('# Title\n\nBody ^abc123\n\nBody\n');
+    expect(commands.turnInto('heading-3')).toBe(true);
+    expect(toMarkdown(view.state.doc)).toBe('# Title\n\nBody ^abc123\n\n### Body\n');
+    expect(commands.deleteBlock()).toBe(true);
+    expect(toMarkdown(view.state.doc)).toBe('# Title\n\nBody ^abc123\n');
+  });
+});

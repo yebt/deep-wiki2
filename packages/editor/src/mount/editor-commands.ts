@@ -18,6 +18,7 @@ import { redo, redoDepth, undo, undoDepth } from 'prosemirror-history';
 import type { MarkType } from 'prosemirror-model';
 import type { Command, EditorState, Transaction } from 'prosemirror-state';
 import { schema } from '../schema';
+import { deleteBlock, duplicateBlock, moveBlockDown, moveBlockUp, turnInto } from './block-commands';
 import { selectionSnapshot, type SelectionSnapshot, type ToolbarMarkName } from './selection-plugin';
 
 /** The two members of `EditorView` a command needs; a fake view with these two runs the exact production path. */
@@ -123,6 +124,14 @@ export interface EditorCommands {
   setLink(href: string, title?: string | null): boolean;
   /** Removes the link over the selected range, or the whole link a caret sits in. `false` when there is none. */
   unsetLink(): boolean;
+  /** The block tunes (block-commands.ts), over the top-level block the selection is in. Each is `false`, dispatching nothing, where it cannot apply. */
+  moveBlockUp(): boolean;
+  moveBlockDown(): boolean;
+  deleteBlock(): boolean;
+  /** Inserts a copy directly below, with every block anchor stripped. */
+  duplicateBlock(): boolean;
+  /** Runs the slash command with this id on the current block; refused on `table`/`footnoteDefinition`/`verbatim`. */
+  turnInto(slashCommandId: string): boolean;
 }
 
 export function createEditorCommands(target: CommandTarget): EditorCommands {
@@ -148,5 +157,10 @@ export function createEditorCommands(target: CommandTarget): EditorCommands {
       dispatch(state.tr.removeMark(range.from, range.to, type));
       return true;
     },
+    moveBlockUp: () => moveBlockUp(target.state, dispatch),
+    moveBlockDown: () => moveBlockDown(target.state, dispatch),
+    deleteBlock: () => deleteBlock(target.state, dispatch),
+    duplicateBlock: () => duplicateBlock(target.state, dispatch),
+    turnInto: (slashCommandId) => turnInto(slashCommandId)(target.state, dispatch),
   };
 }

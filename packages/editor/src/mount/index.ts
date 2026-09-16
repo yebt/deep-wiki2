@@ -31,3 +31,6 @@ export { buildInputRules } from './input-rules';
 
 export { buildEditorPlugins, DROP_CURSOR_CLASS } from './plugins';
 export type { BuildEditorPluginsOptions } from './plugins';
+
+export { BLOCK_COMMANDS_NOT_TURNABLE, deleteBlock, duplicateBlock, moveBlockDown, moveBlockUp, topLevelBlock, turnInto, withoutAnchors } from './block-commands';
+export type { TopLevelBlock } from './block-commands';

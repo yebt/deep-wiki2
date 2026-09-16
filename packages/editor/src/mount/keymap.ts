@@ -15,6 +15,7 @@ import { keymap } from 'prosemirror-keymap';
 import type { Command, Plugin } from 'prosemirror-state';
 import { liftListItem, sinkListItem, splitListItem } from 'prosemirror-schema-list';
 import { schema } from '../schema';
+import { moveBlockDown, moveBlockUp } from './block-commands';
 import { toggleMarkCommand } from './editor-commands';
 
 /**
@@ -37,6 +38,10 @@ export const EDITOR_KEY_BINDINGS: Readonly<Record<string, Command>> = {
   Tab: sinkListItem(schema.nodes.listItem!),
   'Shift-Tab': liftListItem(schema.nodes.listItem!),
   'Mod-Enter': exitCode,
+  // The keyboard half of the block drag handle (block-commands.ts): the
+  // same idiom the navigation tree already uses for reordering.
+  'Alt-ArrowUp': moveBlockUp,
+  'Alt-ArrowDown': moveBlockDown,
 };
 
 /** The `prosemirror-keymap` plugin `createEditorView` installs, built from `EDITOR_KEY_BINDINGS`. */
