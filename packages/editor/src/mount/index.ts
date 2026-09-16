@@ -21,7 +21,7 @@ export type { LinkAttrs, Rect, SelectionCoords, SelectionPluginOptions, Selectio
 export { createMentionPlugin, insertMention, mentionPluginKey, moveSelection, reduceMentionState, INACTIVE_MENTION_STATE } from './mention-plugin';
 export type { MentionAction, MentionCandidate, MentionPluginOptions, MentionState } from './mention-plugin';
 
-export { applicableSlashCommandIds, confirmSlashCommand, createSlashPlugin, filterSlashCommands, reduceSlashState, slashPluginKey, SLASH_COMMANDS, INACTIVE_SLASH_STATE } from './slash-plugin';
+export { applicableSlashCommandIds, confirmSlashCommand, createSlashPlugin, filterSlashCommands, reduceSlashState, setBlockTypeKeepingAnchor, slashPluginKey, SLASH_COMMANDS, INACTIVE_SLASH_STATE } from './slash-plugin';
 export type { SlashAction, SlashCommand, SlashPluginOptions, SlashState } from './slash-plugin';
 
 export { isInsideCodeBlock, matchTrigger } from './trigger';

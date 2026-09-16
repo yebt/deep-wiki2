@@ -200,6 +200,11 @@ describe('turnInto: the slash commands, applied to the current block', () => {
     expectRoundTrip(next, '# Title\n\n## First ^abc123\n\n- one\n- two\n\n***\n');
   });
 
+  test('"text" takes a heading back to a paragraph, anchor intact', () => {
+    const { next } = run(turnInto('text'), caretIn('## First ^abc123\n', 'First'));
+    expectRoundTrip(next, 'First ^abc123\n');
+  });
+
   test('a heading becomes a quote', () => {
     const { next } = run(turnInto('quote'), caretIn(DOC, 'Title'));
     expectRoundTrip(next, '> # Title\n\nFirst ^abc123\n\n- one\n- two\n\n***\n');
