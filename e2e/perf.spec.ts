@@ -50,6 +50,18 @@ async function signInAs(page: Page, token: string): Promise<void> {
   await page.context().addCookies([{ name: 'session', value: token, domain: 'localhost', path: '/', httpOnly: true, secure: true, sameSite: 'Lax' }]);
 }
 
+/**
+ * Opens the read screen and waits until it is *hydrated*: "Edit" is
+ * server-rendered and visible long before Vue has attached a listener to
+ * it (tens of seconds, under load), and a hover in that window reaches
+ * nothing. The article's title is fetched from `onMounted`, so its
+ * presence means hydration is done.
+ */
+async function openReadScreenHydrated(page: Page): Promise<void> {
+  await page.goto(`/pages/${fixtures.editablePageId}`);
+  await expect(page.getByRole('main').getByRole('heading', { level: 1, name: fixtures.editablePageTitle })).toBeVisible({ timeout: 120_000 });
+}
+
 /** The editor is live: ProseMirror has attached and the seeded text is in the document. */
 async function expectEditorLive(page: Page): Promise<void> {
   await expect(page.getByTestId('editor-surface')).toContainText(fixtures.editablePageMarkdown.trim(), { timeout: 120_000 });
@@ -57,6 +69,8 @@ async function expectEditorLive(page: Page): Promise<void> {
 
 /** The `"./mount"` entry of packages/editor, as the dev server names it. */
 const MOUNT_CHUNK = /packages\/editor\/src\/mount\/index\.ts/;
+/** The edit route's component chunk, as the dev server names it. */
+const EDIT_ROUTE_CHUNK = /pages\/pages\/\[id\]\/edit\.vue/;
 
 /**
  * Fix A — prebundle reka-ui (apps/web/modules/perf-prebundle.ts).
@@ -128,3 +142,126 @@ test('the editor chunk is requested while the edit-session request is still in f
   await expectEditorLive(page);
   expect(mountRequestedAt[0]!, 'the chunk request preceded the session response').toBeLessThan(releasedAt);
 });
+
+/**
+ * Fix D — the read screen warms the edit route before the click.
+ *
+ * In dev nothing prefetched: `NuxtLink` skips `preloadRouteComponents`
+ * under `import.meta.dev`, so every one of the edit route's modules was
+ * requested on the click (52 of them, measured). Pointer intent — hover
+ * or focus on "Edit" — is when they should start.
+ */
+test('hovering "Edit" on the read screen requests the edit route and the editor chunk before the click', async ({ page }) => {
+  test.setTimeout(300_000);
+  await signInAs(page, fixtures.writerSessionToken);
+  const seen: string[] = [];
+  page.on('request', (request) => seen.push(request.url()));
+
+  await openReadScreenHydrated(page);
+  const edit = page.getByRole('link', { name: 'Edit', exact: true });
+  await expect(edit).toBeVisible();
+  seen.length = 0;
+
+  await edit.hover();
+  await expect
+    .poll(() => seen.some((url) => EDIT_ROUTE_CHUNK.test(url)), { timeout: 30_000, message: 'the edit route chunk was not requested on hover' })
+    .toBe(true);
+  await expect
+    .poll(() => seen.some((url) => MOUNT_CHUNK.test(url)), { timeout: 30_000, message: 'the editor chunk was not requested on hover' })
+    .toBe(true);
+
+  // And the hop still lands where it should.
+  await edit.click();
+  await expect(page).toHaveURL(new RegExp(`/pages/${fixtures.editablePageId}/edit$`));
+  await expectEditorLive(page);
+});
+
+test('focusing "Edit" with the keyboard warms the same chunks', async ({ page }) => {
+  test.setTimeout(300_000);
+  await signInAs(page, fixtures.writerSessionToken);
+  const seen: string[] = [];
+  page.on('request', (request) => seen.push(request.url()));
+
+  await openReadScreenHydrated(page);
+  const edit = page.getByRole('link', { name: 'Edit', exact: true });
+  await expect(edit).toBeVisible();
+  seen.length = 0;
+
+  await edit.focus();
+  await expect
+    .poll(() => seen.some((url) => EDIT_ROUTE_CHUNK.test(url)), { timeout: 30_000, message: 'the edit route chunk was not requested on focus' })
+    .toBe(true);
+  await expect
+    .poll(() => seen.some((url) => MOUNT_CHUNK.test(url)), { timeout: 30_000, message: 'the editor chunk was not requested on focus' })
+    .toBe(true);
+});
+
+/**
+ * Fix D — route-change feedback. `NuxtLoadingIndicator` in `app.vue`,
+ * in the primary role at 3px (docs/DESIGN-SYSTEM.md §1.2: the single most
+ * important thing on the screen while a hop is in flight is that it is
+ * in flight). Visible only for a hop slower than its 200 ms throttle, so
+ * the route chunk is held back to make one.
+ */
+test('a slow hop shows the loading indicator, in the primary colour, and hides it once the screen lands', async ({ page }) => {
+  test.setTimeout(300_000);
+  await signInAs(page, fixtures.writerSessionToken);
+  await page.route((url) => EDIT_ROUTE_CHUNK.test(url.href), async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 2_000));
+    await route.continue();
+  });
+
+  await openReadScreenHydrated(page);
+  const edit = page.getByRole('link', { name: 'Edit', exact: true });
+  await expect(edit).toBeVisible();
+
+  const indicator = page.locator('.nuxt-loading-indicator');
+  await expect(indicator).toHaveCount(1);
+  await expect(indicator).toHaveCSS('opacity', '0');
+
+  await edit.click();
+  await expect(indicator).toHaveCSS('opacity', '1', { timeout: 10_000 });
+  const primary = await page.evaluate(() => {
+    const probe = document.createElement('span');
+    probe.style.color = 'var(--ui-primary)';
+    document.body.append(probe);
+    const color = getComputedStyle(probe).color;
+    probe.remove();
+    return color;
+  });
+  await expect(indicator).toHaveCSS('background-color', primary);
+  await expect(indicator).toHaveCSS('height', '3px');
+
+  await expectEditorLive(page);
+  await expect(indicator).toHaveCSS('opacity', '0', { timeout: 10_000 });
+});
+
+/**
+ * The same indicator under `prefers-reduced-motion`: drawn full from its
+ * first visible frame — no creeping growth to animate — and gone when
+ * the screen lands (docs/UI-CHECKLIST.md §5; docs/DESIGN-SYSTEM.md §6.6,
+ * "verify the reduced-motion path with the OS setting actually on").
+ */
+test('under prefers-reduced-motion the indicator is drawn full at once and still disappears when the screen lands', async ({ page }) => {
+  test.setTimeout(300_000);
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await signInAs(page, fixtures.writerSessionToken);
+  await page.route((url) => EDIT_ROUTE_CHUNK.test(url.href), async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 2_000));
+    await route.continue();
+  });
+
+  await openReadScreenHydrated(page);
+  const edit = page.getByRole('link', { name: 'Edit', exact: true });
+  await expect(edit).toBeVisible();
+  const indicator = page.locator('.nuxt-loading-indicator');
+
+  await edit.click();
+  await expect(indicator).toHaveCSS('opacity', '1', { timeout: 10_000 });
+  // scaleX(100%) — the identity matrix — from the first frame it is seen.
+  await expect(indicator).toHaveCSS('transform', 'matrix(1, 0, 0, 1, 0, 0)');
+
+  await expectEditorLive(page);
+  await expect(indicator).toHaveCSS('opacity', '0', { timeout: 10_000 });
+});
+

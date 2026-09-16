@@ -17,6 +17,17 @@ const { usePageReadMock, usePresenceStreamMock, usePageCommentsMock, usePageMent
   }));
 
 mockNuxtImport('usePageRead', () => usePageReadMock);
+
+// Fix D (docs/TODO.md Findings 2026-09-16, "edit-mode latency"): pointer
+// intent towards "Edit" is when the edit route and the editor chunk
+// should start loading. Both are mocked at their boundary; what this file
+// holds is that the control fires them, on hover and on focus.
+const { preloadRouteComponentsMock, loadEditorMountMock } = vi.hoisted(() => ({
+  preloadRouteComponentsMock: vi.fn(async () => {}),
+  loadEditorMountMock: vi.fn(async () => ({})),
+}));
+mockNuxtImport('preloadRouteComponents', () => preloadRouteComponentsMock);
+vi.mock('~/utils/editor-mount', () => ({ loadEditorMount: loadEditorMountMock }));
 mockNuxtImport('usePresenceStream', () => usePresenceStreamMock);
 mockNuxtImport('usePageComments', () => usePageCommentsMock);
 mockNuxtImport('usePageMentions', () => usePageMentionsMock);
@@ -279,6 +290,37 @@ describe('read-mode page', () => {
    * the theme toggle is the chrome's other icon-only control and carries
    * exactly the same pair (checklist §4.1, match the nearest control).
    */
+  describe('warming edit mode on intent', () => {
+    for (const event of ['pointerenter', 'focus'] as const) {
+      test(`${event} on "Edit" preloads the edit route and starts the editor chunk, before any click`, async () => {
+        preloadRouteComponentsMock.mockClear();
+        loadEditorMountMock.mockClear();
+        mockRead({ status: 'success', title: 'A Page', html: '<p>Hello from cache</p>' });
+        const component = await mount();
+        const edit = component.get('header a[href="/pages/page-1/edit"]');
+
+        expect(preloadRouteComponentsMock).not.toHaveBeenCalled();
+        expect(loadEditorMountMock).not.toHaveBeenCalled();
+        await edit.trigger(event);
+
+        expect(preloadRouteComponentsMock).toHaveBeenCalledWith('/pages/page-1/edit');
+        expect(loadEditorMountMock).toHaveBeenCalledTimes(1);
+      });
+    }
+
+    test('a chunk that fails to load on hover is swallowed: the click still navigates', async () => {
+      loadEditorMountMock.mockRejectedValueOnce(new Error('Failed to fetch dynamically imported module'));
+      mockRead({ status: 'success', title: 'A Page', html: '<p>Hello from cache</p>' });
+      const component = await mount();
+      const edit = component.get('header a[href="/pages/page-1/edit"]');
+
+      await edit.trigger('pointerenter');
+      await component.vm.$nextTick();
+
+      expect(edit.attributes('href')).toBe('/pages/page-1/edit');
+    });
+  });
+
   test('offers this page’s revision history from the app bar, as a real link', async () => {
     mockRead({ status: 'success', title: 'A Page', html: '<p>Hello from cache</p>' });
     const component = await mount();

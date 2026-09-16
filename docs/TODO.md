@@ -591,9 +591,27 @@ re-export is a binding, not a second pipeline.
 **Cause 3 — no route-change feedback, and nothing prefetched in dev.** `NuxtLoadingIndicator`
 was not mounted anywhere; `NuxtLink` skips `preloadRouteComponents` under `import.meta.dev`,
 so a read → edit hop paid all 52 of the route's module requests on the click.
-*Fix D (partial)*: see the entry's continuation below once that commit lands. Out of this
-batch, deliberately: turning the tree rows into `NuxtLink`s (the `feat/tree-context-menu-filter`
-branch owns `NavigationTree.vue`), and the presence `EventSource` reopened on every hop.
+*Fix D (partial)*: `app.vue` mounts `NuxtLoadingIndicator` once for every route — `primary`
+role at 3px, `error` for a failed hop, off for any hop under its 200 ms throttle, and under
+`prefers-reduced-motion` drawn full at once instead of creeping
+(`apps/web/app/utils/loading-progress.ts`; `docs/DESIGN-SYSTEM.md` §14). The read screen's
+"Edit" control preloads the edit route's components and starts the editor chunk on
+`pointerenter` and on `focus` (`pages/[id]/index.vue`), through the same importer fix C added.
+Measured, read → edit hop in dev (2 runs each, load average ~22): without intent, **49–50
+module requests after the click**, click → editable 1.1–2.3 s; with a hover first, **49
+requests during the hover and 0 after the click**, click → editable 0.85–1.26 s. Proof:
+`e2e/perf.spec.ts` asserts the route chunk and the mount chunk are requested on hover and on
+focus before any click, that a hop whose chunk is held shows the indicator at opacity 1 in
+the computed `--ui-primary` at 3px and hides it once the screen lands, and — with
+`reducedMotion: 'reduce'` emulated — that the bar's transform is the identity matrix from its
+first visible frame. Out of this batch, deliberately: turning the tree rows into
+`NuxtLink`s (the `feat/tree-context-menu-filter` branch owns `NavigationTree.vue`), and the
+presence `EventSource` reopened on every hop. Two things learned on the way, worth their own
+line: "Edit" is server-rendered and visible tens of seconds before Vue attaches a listener to
+it under load, so a browser test that hovers it must first wait for something only hydration
+can render (the article's title); and `NuxtLink`'s own `prefetchOn="interaction"` would not
+have done this in dev, because `nuxt-link.js` skips `preloadRouteComponents` under
+`import.meta.dev` — the owner's environment is exactly the one it would have left cold.
 
 **Cause 4 — small serial costs at open.** `useLockHeartbeat.start()` sent a `PATCH …/lock`
 the instant the editor opened, renewing a lock the session response had acquired 100 ms
