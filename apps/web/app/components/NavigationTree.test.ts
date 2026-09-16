@@ -284,6 +284,161 @@ describe('NavigationTree', () => {
   });
 
   /*
+   * The filter above the tree — VS Code's explorer filter. Hidden until
+   * asked for, by the header's button or `Ctrl`/`⌘`+`Shift`+`F` while the
+   * sidebar has focus; typing prunes the tree to matches and their
+   * ancestors, expanded; Escape clears, hides and hands focus back to the
+   * tree; the count is announced; the person's folds come back on clear.
+   */
+  describe('the filter', () => {
+    function filterToggle(component: Awaited<ReturnType<typeof mount>>) {
+      return component.get('button[aria-label="Filter tree"]');
+    }
+
+    function filterBox(component: Awaited<ReturnType<typeof mount>>) {
+      return component.find('input[aria-label="Filter tree by title"]');
+    }
+
+    async function openAndType(component: Awaited<ReturnType<typeof mount>>, text: string) {
+      await filterToggle(component).trigger('click');
+      await nextTick();
+      const box = filterBox(component);
+      await box.setValue(text);
+      await nextTick();
+      return box;
+    }
+
+    test('is hidden by default, behind a named toggle that says what it controls', async () => {
+      mockTree({ status: 'success', nodes: NODES });
+      const component = await mount();
+
+      const toggle = filterToggle(component);
+      expect(toggle.attributes('aria-expanded')).toBe('false');
+      expect(toggle.attributes('aria-controls')).toBeTruthy();
+      expect(filterBox(component).exists()).toBe(false);
+      expect(component.find(`#${toggle.attributes('aria-controls')}`).exists()).toBe(false);
+    });
+
+    test('the toggle shows the box, expanded and focused; the same toggle hides it again', async () => {
+      mockTree({ status: 'success', nodes: NODES });
+      const component = await mount();
+
+      await filterToggle(component).trigger('click');
+      await nextTick();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      const toggle = filterToggle(component);
+      expect(toggle.attributes('aria-expanded')).toBe('true');
+      const box = filterBox(component);
+      expect(box.exists()).toBe(true);
+      expect(component.get(`#${toggle.attributes('aria-controls')}`).element.contains(box.element)).toBe(true);
+      expect(document.activeElement).toBe(box.element);
+
+      await toggle.trigger('click');
+      await nextTick();
+      expect(filterBox(component).exists()).toBe(false);
+      expect(filterToggle(component).attributes('aria-expanded')).toBe('false');
+    });
+
+    test('typing keeps matches and their ancestors, marks the matched text, and announces the count', async () => {
+      mockTree({ status: 'success', nodes: NODES });
+      const component = await mount();
+
+      await openAndType(component, 'SECOND');
+
+      const rows = component.findAll('[role="treeitem"]');
+      expect(rows.map((row) => row.attributes('data-node-id'))).toEqual(['shelf-1', 'book-1', 'page-2']);
+      const mark = component.get('[data-node-id="page-2"] mark');
+      expect(mark.text()).toBe('Second');
+      // The shelf's own row carries no mark; the mark under it is the page's.
+      expect(component.find('[data-node-id="shelf-1"] > [draggable="true"] mark').exists()).toBe(false);
+      expect(component.get('[data-testid="tree-filter-status"]').text()).toBe('1 match for “SECOND”.');
+      expect(component.get('[data-testid="tree-filter-status"]').attributes('role')).toBe('status');
+    });
+
+    test('no match is its own state, distinct from an empty tree, with the way out beside it', async () => {
+      mockTree({ status: 'success', nodes: NODES });
+      const component = await mount();
+
+      await openAndType(component, 'zzz');
+
+      expect(component.find('[role="tree"]').exists()).toBe(false);
+      expect(component.find('[data-testid="tree-empty"]').exists()).toBe(false);
+      const empty = component.get('[data-testid="tree-filter-empty"]');
+      expect(empty.text()).toMatch(/no .* match “zzz”/i);
+      expect(component.get('[data-testid="tree-filter-status"]').text()).toBe('No matches for “zzz”.');
+
+      await empty.get('button').trigger('click');
+      await nextTick();
+      expect(component.findAll('[role="treeitem"]')).toHaveLength(4);
+      // Cleared, not hidden: the box stays for the next attempt.
+      expect(filterBox(component).exists()).toBe(true);
+    });
+
+    test('Escape in the box clears it, hides it, and puts focus back on the tree', async () => {
+      mockTree({ status: 'success', nodes: NODES });
+      const component = await mount();
+
+      const box = await openAndType(component, 'first');
+      expect(component.findAll('[role="treeitem"]')).toHaveLength(3);
+
+      await box.trigger('keydown', { key: 'Escape' });
+      await nextTick();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(filterBox(component).exists()).toBe(false);
+      expect(component.findAll('[role="treeitem"]')).toHaveLength(4);
+      expect(document.activeElement?.getAttribute('role')).toBe('treeitem');
+    });
+
+    test('a fold the person made survives a filter and is back when the filter clears', async () => {
+      mockTree({ status: 'success', nodes: NODES });
+      const component = await mount();
+
+      // Fold the shelf: one row.
+      await component.findAll('[role="treeitem"]')[0]!.trigger('keydown', { key: 'Enter' });
+      expect(component.findAll('[role="treeitem"]')).toHaveLength(1);
+
+      // The match inside it is shown anyway, ancestors open.
+      await openAndType(component, 'second');
+      expect(component.findAll('[role="treeitem"]').map((row) => row.attributes('data-node-id'))).toEqual(['shelf-1', 'book-1', 'page-2']);
+      expect(component.get('[data-node-id="shelf-1"]').attributes('aria-expanded')).toBe('true');
+
+      // Cleared: the fold is exactly as it was left.
+      await filterBox(component).setValue('');
+      await nextTick();
+      expect(component.findAll('[role="treeitem"]')).toHaveLength(1);
+      expect(component.get('[data-node-id="shelf-1"]').attributes('aria-expanded')).toBe('false');
+    });
+
+    test('Ctrl+Shift+F while focus is in the tree opens the box; Ctrl+F is left to the browser', async () => {
+      mockTree({ status: 'success', nodes: NODES });
+      const component = await mount();
+
+      const row = component.get('[role="treeitem"]');
+      (row.element as HTMLElement).focus();
+
+      const plainFind = new KeyboardEvent('keydown', { key: 'f', ctrlKey: true, bubbles: true, cancelable: true });
+      row.element.dispatchEvent(plainFind);
+      await nextTick();
+      expect(filterBox(component).exists()).toBe(false);
+      expect(plainFind.defaultPrevented).toBe(false);
+
+      row.element.dispatchEvent(new KeyboardEvent('keydown', { key: 'F', ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true }));
+      await nextTick();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(filterBox(component).exists()).toBe(true);
+      expect(document.activeElement).toBe(filterBox(component).element);
+    });
+
+    test('is not offered while the tree has nothing to filter', async () => {
+      mockTree({ status: 'success', nodes: [] });
+      const component = await mount();
+      expect(component.find('button[aria-label="Filter tree"]').exists()).toBe(false);
+    });
+  });
+
+  /*
    * Every row carries a context menu: right-click, the `⋯` button at the
    * row's end, `Shift+F10` and the `ContextMenu` key all open the same
    * one. Its items come from `treeRowActions` — the one table in

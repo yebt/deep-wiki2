@@ -32,10 +32,20 @@
  *   same `reorder` the `Alt`-arrows make. Focus returns to the row when
  *   the menu closes, and a dialog the menu opened is opened *after* that
  *   return, so the dialog's own focus return lands on the row too.
+ * - A filter above the tree (2026-09-16), VS Code's explorer filter:
+ *   hidden until the header's button or `Ctrl`/`⌘`+`Shift`+`F` (while the
+ *   sidebar has focus — `Ctrl`+`F` stays the browser's, `Ctrl`+`K` is
+ *   kept for the command palette) shows it. `useTreeFilter` prunes the
+ *   tree to matches and their ancestors and keeps the person's folds
+ *   out of it, so clearing the query gives the tree back exactly as it
+ *   was folded; the rows draw the matched text in a `<mark>`, the count
+ *   is announced, and Escape in the box clears, hides and hands focus
+ *   back to the tree's row.
  */
 import type { ContextMenuItem } from '@nuxt/ui';
 import NavigationTreeActions from '~/components/NavigationTreeActions.vue';
 import type { TreeNode } from '~/composables/useTree';
+import { useTreeFilter } from '~/composables/useTreeFilter';
 import { treeRowActions, type TreeRowAction } from '~/composables/useTreeRowActions';
 
 const props = defineProps<{
@@ -45,7 +55,18 @@ const props = defineProps<{
 }>();
 
 const tree = useWorkspaceTree(() => props.workspaceId);
-const { status, nodes, rootId, message, collapsedIds, selectedId, load, reorder, toggleCollapsed, reveal } = tree;
+const { status, nodes, rootId, message, collapsedIds, selectedId, load, reorder, reveal } = tree;
+
+/**
+ * The filter owns which rows are shown and which folds apply: the
+ * person's own, or a per-query set while a query is active. Everything
+ * below that draws or walks the tree reads these two, never `nodes` and
+ * `collapsedIds` directly.
+ */
+const filter = useTreeFilter(nodes, collapsedIds, tree.toggleCollapsed);
+const shownNodes = filter.shownNodes;
+const shownCollapsedIds = filter.effectiveCollapsedIds;
+const toggleCollapsed = filter.toggleCollapsed;
 
 /** The row holding the tree's single tab stop; the selection is `useWorkspaceTree`'s and outlives this component. */
 const activeId = ref<string | null>(null);
@@ -104,10 +125,10 @@ const visible = computed<FlatNode[]>(() => {
   const walk = (list: readonly TreeNode[], parentId: string): void => {
     list.forEach((node, index) => {
       out.push({ node, parentId, index, siblings: list });
-      if (node.children.length > 0 && !collapsedIds.value.has(node.id)) walk(node.children, node.id);
+      if (node.children.length > 0 && !shownCollapsedIds.value.has(node.id)) walk(node.children, node.id);
     });
   };
-  walk(nodes.value, rootId.value ?? '');
+  walk(shownNodes.value, rootId.value ?? '');
   return out;
 });
 
@@ -171,12 +192,12 @@ function onKeydown({ event, node, parentId, index }: { event: KeyboardEvent; nod
       break;
     case 'ArrowRight':
       event.preventDefault();
-      if (node.children.length > 0 && collapsedIds.value.has(node.id)) toggleCollapsed(node.id);
+      if (node.children.length > 0 && shownCollapsedIds.value.has(node.id)) toggleCollapsed(node.id);
       else focusNode(node.children[0]?.id);
       break;
     case 'ArrowLeft':
       event.preventDefault();
-      if (node.children.length > 0 && !collapsedIds.value.has(node.id)) toggleCollapsed(node.id);
+      if (node.children.length > 0 && !shownCollapsedIds.value.has(node.id)) toggleCollapsed(node.id);
       else focusNode(flat.find((v) => v.node.id === parentId)?.node.id);
       break;
     case 'Home':
@@ -324,6 +345,59 @@ function runAction(entry: FlatNode, action: TreeRowAction): void {
   }
 }
 
+/* ─── The filter ──────────────────────────────────────────────────────── */
+const FILTER_BOX_ID = 'navigation-tree-filter';
+const filterInput = ref<{ inputRef?: HTMLInputElement | null } | null>(null);
+const rootEl = ref<HTMLElement | null>(null);
+/** The sidebar the tree stands in, by the id `WorkspaceSidebar` gives it — or this component when it stands alone. */
+const SIDEBAR_ELEMENT_ID = 'dw-frame-sidebar-workspace';
+
+function focusFilterBox(): void {
+  void nextTick(() => filterInput.value?.inputRef?.focus());
+}
+
+function showFilter(): void {
+  filter.show();
+  focusFilterBox();
+}
+
+/** Hide, and hand focus to the tree — the row that holds the tab stop. */
+function hideFilter(): void {
+  filter.hide();
+  focusNode(activeId.value ?? undefined);
+}
+
+function toggleFilter(): void {
+  if (filter.open.value) hideFilter();
+  else showFilter();
+}
+
+function onFilterEscape(): void {
+  hideFilter();
+}
+
+/**
+ * `Ctrl`/`⌘`+`Shift`+`F` while the sidebar has focus. The chord is
+ * registered only while focus is inside the sidebar, so anywhere else it
+ * is not swallowed and not answered: `Ctrl`+`F` is the browser's find
+ * everywhere, and `Ctrl`+`K` is reserved for the command palette.
+ */
+const focusInSidebar = ref(false);
+function readFocus(): void {
+  const scope = document.getElementById(SIDEBAR_ELEMENT_ID) ?? rootEl.value;
+  focusInSidebar.value = Boolean(scope && document.activeElement && scope.contains(document.activeElement));
+}
+onMounted(() => {
+  document.addEventListener('focusin', readFocus);
+  document.addEventListener('focusout', readFocus);
+  readFocus();
+});
+onBeforeUnmount(() => {
+  document.removeEventListener('focusin', readFocus);
+  document.removeEventListener('focusout', readFocus);
+});
+defineShortcuts(computed(() => (focusInSidebar.value ? { meta_shift_f: { usingInput: true, handler: toggleFilter } } : {})));
+
 const menuItems = computed<ContextMenuItem[][]>(() => {
   const entry = menuEntry.value;
   if (!entry) return [];
@@ -341,7 +415,7 @@ const menuItems = computed<ContextMenuItem[][]>(() => {
 </script>
 
 <template>
-  <div class="flex min-h-0 flex-1 flex-col gap-2">
+  <div ref="rootEl" class="flex min-h-0 flex-1 flex-col gap-2">
     <!-- The write affordances, above the tree and outside it: a control
          inside a row would sit on top of the row's drag-and-drop and its
          `Alt`-arrow reorder. -->
@@ -358,22 +432,63 @@ const menuItems = computed<ContextMenuItem[][]>(() => {
       <!-- The section headline of a navigation drawer: `title-small` on
            `on-surface-variant` (docs/DESIGN-SYSTEM.md §9.2). -->
       <span id="navigation-tree-heading" class="text-title-small text-muted">Contents</span>
-      <!-- The keyboard contract is one tooltip away rather than a paragraph
-           on every screen; the same sentence is the tree's description for
-           assistive technology, always in the DOM. -->
-      <UTooltip :text="KEYBOARD_HELP" :ui="{ content: 'max-w-64 h-auto py-2 text-wrap' }">
-        <UButton
-          icon="i-lucide-circle-help"
-          variant="ghost"
-          color="neutral"
-          size="xs"
-          square
-          aria-label="Keyboard help"
-          aria-describedby="navigation-tree-keyboard-help"
-        />
-      </UTooltip>
+      <span class="flex items-center gap-1">
+        <!-- The filter's toggle: icon-only, so a name and a tooltip
+             (§4.3); `aria-expanded` and `aria-controls` say what it does
+             to what. Offered only once there is a tree to filter. -->
+        <UTooltip v-if="status === 'success' && nodes.length > 0" text="Filter tree" :kbds="['meta', 'shift', 'F']">
+          <UButton
+            icon="i-lucide-filter"
+            variant="ghost"
+            color="neutral"
+            size="xs"
+            square
+            aria-label="Filter tree"
+            :aria-expanded="filter.open.value"
+            :aria-controls="FILTER_BOX_ID"
+            :class="filter.open.value ? 'text-secondary' : undefined"
+            @click="toggleFilter"
+          />
+        </UTooltip>
+        <!-- The keyboard contract is one tooltip away rather than a paragraph
+             on every screen; the same sentence is the tree's description for
+             assistive technology, always in the DOM. -->
+        <UTooltip :text="KEYBOARD_HELP" :ui="{ content: 'max-w-64 h-auto py-2 text-wrap' }">
+          <UButton
+            icon="i-lucide-circle-help"
+            variant="ghost"
+            color="neutral"
+            size="xs"
+            square
+            aria-label="Keyboard help"
+            aria-describedby="navigation-tree-keyboard-help"
+          />
+        </UTooltip>
+      </span>
       <p id="navigation-tree-keyboard-help" class="sr-only">{{ KEYBOARD_HELP }}</p>
     </div>
+
+    <!-- The filter box, only while asked for. A text field in chrome:
+         `h-10`, the tree row's own height (docs/DESIGN-SYSTEM.md §7.2),
+         not the 56px content-area field — recorded in that file's §14;
+         the text stays 16px (§9.5). Escape clears, hides and hands focus
+         back to the tree. -->
+    <div v-if="filter.open.value" :id="FILTER_BOX_ID" class="px-2">
+      <UInput
+        ref="filterInput"
+        v-model="filter.query.value"
+        type="search"
+        icon="i-lucide-filter"
+        placeholder="Filter by title"
+        aria-label="Filter tree by title"
+        autocomplete="off"
+        class="w-full"
+        :ui="{ base: 'h-10' }"
+        @keydown.escape.prevent="onFilterEscape"
+      />
+    </div>
+    <!-- The count, announced: always in the DOM, only its text changes (§5). -->
+    <p data-testid="tree-filter-status" role="status" aria-live="polite" class="sr-only">{{ filter.announcement.value }}</p>
 
     <!-- Loading: rows the shape of the rows that will replace them. -->
     <div v-if="status === 'idle' || status === 'loading'" data-testid="tree-skeleton" class="space-y-1 px-2" aria-hidden="true">
@@ -408,6 +523,13 @@ const menuItems = computed<ContextMenuItem[][]>(() => {
         No shelves yet. Use New… above to create the first shelf, then fill it with books, chapters and pages.
       </p>
 
+      <!-- Filtered-empty is not first-run empty (§3): the tree has rows,
+           none match, and the way out is to clear the filter. -->
+      <div v-else-if="filter.active.value && shownNodes.length === 0" data-testid="tree-filter-empty" class="space-y-2 px-2">
+        <p class="text-body-medium text-muted">No shelves, books, chapters or pages match “{{ filter.query.value.trim() }}”.</p>
+        <UButton size="sm" variant="outline" color="neutral" icon="i-lucide-x" @click="filter.clear()">Clear filter</UButton>
+      </div>
+
       <template v-else>
         <InlineNotice v-if="reorderError" tier="chip" tone="error" role="alert">{{ reorderError }}</InlineNotice>
         <!-- The list scrolls inside the pane: a 400-page book scrolls the
@@ -436,17 +558,18 @@ const menuItems = computed<ContextMenuItem[][]>(() => {
             @contextmenu="onContextMenu"
           >
             <NavigationTreeNode
-              v-for="(node, index) in nodes"
+              v-for="(node, index) in shownNodes"
               :key="node.id"
               :node="node"
               :depth="0"
               :parent-id="rootId ?? ''"
               :index="index"
-              :set-size="nodes.length"
+              :set-size="shownNodes.length"
               :active-id="activeId"
               :selected-id="selectedId"
-              :collapsed-ids="collapsedIds"
+              :collapsed-ids="shownCollapsedIds"
               :current-id="currentNodeId ?? null"
+              :highlight="filter.active.value ? filter.query.value : undefined"
               @reorder="onReorder"
               @activate="onActivate"
               @open="onOpen"

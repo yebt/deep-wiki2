@@ -5,13 +5,16 @@ import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 import { expectNoHorizontalOverflow } from './overflow';
 
 /**
- * The navigation tree's context menu, driven in a real browser.
+ * The navigation tree's two 2026-09-16 additions, driven in a real
+ * browser: the context menu on every row, and the toggleable filter
+ * above the tree.
  *
  * The menu's tests use the writer `e2e/editor-fixtures.bun.ts` mints —
  * a caller with `write` on exactly one page — because "Rename…" from
  * the menu has to land on the server and come back as the row's new
- * title, which a read-only session cannot prove. The rest use the seeded
- * reader, who can see a shelf, a book and four pages.
+ * title, which a read-only session cannot prove. The filter's tests use
+ * the seeded reader, who can see a shelf, a book and four pages: enough
+ * to show that a match keeps its ancestors and drops its cousins.
  *
  * `page.keyboard.press('Shift+F10')` is the real key chord, not a
  * synthetic event: the tree handles the chord itself and the test
@@ -179,6 +182,99 @@ test.describe('the row context menu', () => {
   });
 });
 
+test.describe('the filter', () => {
+  test.use({ viewport: { width: 1280, height: 900 } });
+
+  test('toggle → type → matches with their ancestors, marked and counted → Escape clears, hides and returns focus to the tree', async ({
+    page,
+    context,
+  }) => {
+    await signInAs(context, seed.readerSessionToken);
+    await page.goto(`/workspaces/${seed.workspaceId}`);
+
+    const shelf = page.getByRole('treeitem', { name: new RegExp(seed.bookHistoryShelfTitle) });
+    await expect(shelf).toBeVisible({ timeout: FIRST_ROW_TIMEOUT });
+    const before = await page.getByRole('treeitem').count();
+    expect(before).toBeGreaterThan(3);
+
+    // Hidden by default, behind a named toggle that says what it controls.
+    const toggle = page.getByRole('button', { name: 'Filter tree' });
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    const box = page.getByRole('searchbox', { name: 'Filter tree by title' });
+    await expect(box).toHaveCount(0);
+
+    await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    await expect(box).toBeVisible();
+    await expect(box).toBeFocused();
+    const boxHeight = (await box.boundingBox())!.height;
+    expect(boxHeight, 'the filter field is the tree row height, 40px').toBeLessThanOrEqual(41);
+    expect(boxHeight).toBeGreaterThanOrEqual(39);
+
+    // Type: the book's page A matches; its book and shelf stay as the road
+    // to it; the rest of the tree is gone; the match is marked.
+    await box.fill('page alpha');
+    await expect(page.getByRole('treeitem', { name: /Page Alpha/ })).toBeVisible();
+    await expect(shelf).toBeVisible();
+    await expect(page.getByRole('treeitem', { name: new RegExp(seed.bookHistoryBookTitle) })).toBeVisible();
+    await expect(page.getByRole('treeitem', { name: /E2E Read Page/ })).toHaveCount(0);
+    await expect(page.locator('[role="treeitem"] mark')).toHaveCount(1);
+    await expect(page.locator('[role="treeitem"] mark')).toHaveText(/page alpha/i);
+    await expect(page.getByRole('status').filter({ hasText: 'match for “page alpha”' })).toHaveCount(1);
+    await expectNoHorizontalOverflow(page, 'filter active 1280');
+
+    // No match is its own state, with the way out beside it.
+    await box.fill('nothing like this');
+    await expect(page.getByText(/no shelves, books, chapters or pages match/i)).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Clear filter' })).toBeVisible();
+    await expect(page.getByRole('tree')).toHaveCount(0);
+
+    // Escape: cleared, hidden, and focus is on a row of the tree.
+    await box.fill('page alpha');
+    await page.keyboard.press('Escape');
+    await expect(box).toHaveCount(0);
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await expect(page.getByRole('treeitem')).toHaveCount(before);
+    await expect(page.locator('[role="treeitem"]:focus')).toHaveCount(1);
+  });
+
+  test('the person’s folds survive the filter, and Ctrl+Shift+F opens it from the sidebar only', async ({ page, context }) => {
+    await signInAs(context, seed.readerSessionToken);
+    await page.goto(`/workspaces/${seed.workspaceId}`);
+
+    const shelf = page.getByRole('treeitem', { name: new RegExp(seed.bookHistoryShelfTitle) });
+    await expect(shelf).toBeVisible({ timeout: FIRST_ROW_TIMEOUT });
+    const book = page.getByRole('treeitem', { name: new RegExp(seed.bookHistoryBookTitle) });
+
+    // Fold the shelf.
+    await shelf.focus();
+    await page.keyboard.press('Enter');
+    await expect(shelf).toHaveAttribute('aria-expanded', 'false');
+    await expect(book).toHaveCount(0);
+
+    // The chord from inside the sidebar opens the box; the match inside
+    // the folded shelf is shown anyway.
+    await page.keyboard.press('Control+Shift+F');
+    const box = page.getByRole('searchbox', { name: 'Filter tree by title' });
+    await expect(box).toBeFocused();
+    await box.fill('page alpha');
+    await expect(shelf).toHaveAttribute('aria-expanded', 'true');
+    await expect(page.getByRole('treeitem', { name: /Page Alpha/ })).toBeVisible();
+
+    // Cleared: the fold is exactly as it was left.
+    await box.fill('');
+    await expect(shelf).toHaveAttribute('aria-expanded', 'false');
+    await expect(book).toHaveCount(0);
+    await page.keyboard.press('Escape');
+    await expect(box).toHaveCount(0);
+
+    // The chord from the content pane does nothing to the tree.
+    await page.getByRole('heading', { level: 1, name: 'E2E Workspace' }).click();
+    await page.keyboard.press('Control+Shift+F');
+    await expect(box).toHaveCount(0);
+  });
+});
+
 for (const [width, theme] of [
   [1280, 'light'],
   [1280, 'dark'],
@@ -212,6 +308,27 @@ for (const [width, theme] of [
       await expectNoHorizontalOverflow(page, `menu ${width} ${theme}`);
       await page.keyboard.press('Escape');
       await expect(page.getByRole('menu')).toBeHidden();
+    });
+
+    test('the active filter, screenshotted, with no sideways scroll', async ({ page, context }) => {
+      await signInAs(context, seed.readerSessionToken);
+      await useTheme(page, theme);
+      await page.goto(`/workspaces/${seed.workspaceId}`);
+      await expect(page.getByRole('heading', { level: 1, name: 'E2E Workspace' })).toBeVisible({ timeout: FIRST_ROW_TIMEOUT });
+      await openDrawerIfNarrow(page);
+
+      await expect(page.getByRole('treeitem', { name: new RegExp(seed.bookHistoryBookTitle) })).toBeVisible({ timeout: 30000 });
+      await page.getByRole('button', { name: 'Filter tree' }).click();
+      const box = page.getByRole('searchbox', { name: 'Filter tree by title' });
+      await box.fill('page');
+      await expect(page.locator('[role="treeitem"] mark').first()).toBeVisible();
+      await shot(page, `filter-${width}-${theme}`);
+      await expectNoHorizontalOverflow(page, `filter ${width} ${theme}`);
+
+      await box.fill('nothing like this');
+      await expect(page.getByRole('button', { name: 'Clear filter' })).toBeVisible();
+      await shot(page, `filter-empty-${width}-${theme}`);
+      await expectNoHorizontalOverflow(page, `filter empty ${width} ${theme}`);
     });
   });
 }
