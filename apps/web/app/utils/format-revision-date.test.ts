@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from 'vitest';
+import { markHydrated, markHydrating } from '~/composables/useViewerTimeZone';
 import { formatRevisionDate } from './format-revision-date';
 
 /**
@@ -73,5 +74,22 @@ describe('formatRevisionDate', () => {
 
   test('throws on an unparsable timestamp rather than rendering "Invalid Date"', () => {
     expect(() => formatRevisionDate('not-a-date')).toThrow();
+  });
+});
+
+describe('formatRevisionDate while a server-rendered document is hydrating', () => {
+  afterEach(() => markHydrated());
+
+  test('renders UTC, labelled, so the client hydrates exactly what the server sent, then the viewer zone', () => {
+    markHydrating();
+    expect(formatRevisionDate('2026-09-08T15:45:00.000Z')).toBe('Sep 8, 2026, 3:45 PM UTC');
+
+    markHydrated();
+    expect(formatRevisionDate('2026-09-08T15:45:00.000Z')).not.toMatch(/UTC$/);
+  });
+
+  test('an explicit timeZone wins over the hydration window', () => {
+    markHydrating();
+    expect(formatRevisionDate('2026-09-08T15:45:00.000Z', 'Asia/Tokyo')).toBe('Sep 9, 2026, 12:45 AM GMT+9');
   });
 });

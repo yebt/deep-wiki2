@@ -193,6 +193,8 @@ function expectedIn(iso: string, timeZone: string): string {
 }
 
 test("a revision's timestamp reads in each viewer's own timezone, and hydrates without a mismatch", async ({ browser }) => {
+  // Two full loads, each waiting for hydration: dev mode under load.
+  test.setTimeout(360_000);
   const rendered = new Map<string, { text: string; datetime: string }>();
 
   for (const timezoneId of VIEWER_ZONES) {
@@ -216,6 +218,12 @@ test("a revision's timestamp reads in each viewer's own timezone, and hydrates w
 
     const datetime = await timestamp.getAttribute('datetime');
     expect(datetime, 'the machine-readable instant must survive whatever the human sees').not.toBeNull();
+    // The list is server-rendered now, in UTC — what the server and the
+    // hydrating client can both render byte for byte — and the viewer's
+    // zone takes over when hydration resolves (`useViewerTimeZone`). The
+    // assertion is about the zone the viewer ends up reading in.
+    await waitForHydration(page);
+    await expect(timestamp).not.toHaveText(/\bUTC$/, { timeout: 30000 });
     const text = (await timestamp.innerText()).trim();
 
     expect(text).toBe(expectedIn(datetime!, timezoneId));
