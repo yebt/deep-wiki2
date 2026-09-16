@@ -3,6 +3,7 @@ import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime';
 import { describe, expect, test, vi } from 'vitest';
 import { ref } from 'vue';
 import App from './app.vue';
+import ConfirmDialog from './components/ConfirmDialog.vue';
 import WorkspacesPage from './pages/workspaces/index.vue';
 
 /**
@@ -61,6 +62,16 @@ describe('app root', () => {
     const layout = component.findComponent(NuxtLayout);
     expect(layout.exists()).toBe(true);
     expect(layout.findComponent(WorkspacesPage).exists()).toBe(true);
+  });
+
+  // The product's one confirm dialog is mounted here, once, inside the
+  // provider it needs, so any screen can ask through `useConfirm()`; a
+  // screen that mounted its own would be a second dialog (§4.1).
+  test('mounts the confirm dialog host once, inside UApp', async () => {
+    const component = await mountApp();
+
+    const hosts = component.findComponent(UApp).findAllComponents(ConfirmDialog);
+    expect(hosts).toHaveLength(1);
   });
 
   test('the routed screen really is the one the router resolved', async () => {

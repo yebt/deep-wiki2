@@ -117,6 +117,58 @@ test('saving an already-saved page persists the edit and reads back for real, wi
   await expect(editorAfterReload).toContainText('Edited for real, through the real backend.', { timeout: 30000 });
 });
 
+/**
+ * docs/UI-CHECKLIST.md §4.5: "Leaving edit mode with unsaved changes
+ * prompts." Since 2026-09-16 the prompt is the product's own dialog
+ * (`ConfirmDialog` through `useConfirm`), not `window.confirm`: driven
+ * here through the transition a person actually makes — a click on a
+ * tree row beside the editor — against the real backend. Cancel keeps
+ * the editor with its edits; confirm leaves. (A tab closing is the
+ * browser's own `beforeunload` prompt and cannot be driven from here.)
+ */
+test('leaving a dirty editor by clicking a tree row asks in the product\'s dialog: cancel keeps the editor and its edits, confirm leaves', async ({ page }) => {
+  test.setTimeout(90000);
+  await signInAs(page, editorFixtures.writerSessionToken);
+
+  await page.goto(`/pages/${editorFixtures.editablePageId}/edit`);
+  const editor = page.getByTestId('editor-surface');
+  await expect(editor).toContainText(editorFixtures.editablePageMarkdown.trim(), { timeout: 30000 });
+  const sidebar = page.getByRole('navigation', { name: 'Workspace' });
+  const otherRow = sidebar.getByRole('treeitem', { name: /E2E Read Page/ });
+  await expect(otherRow).toBeVisible({ timeout: 30000 });
+
+  await editor.click();
+  await page.keyboard.press('End');
+  await page.keyboard.type(' Not saved yet.');
+  await expect(editor).toContainText('Not saved yet.');
+
+  // Escape is one exit (§5); Cancel is the other. Both keep the editor.
+  await otherRow.getByText('E2E Read Page').click();
+  const dialog = page.getByRole('dialog', { name: 'Leave without saving?' });
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText(/unsaved changes in this tab will be lost/i);
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+  await expect(page).toHaveURL(new RegExp(`/pages/${editorFixtures.editablePageId}/edit$`));
+  await expect(editor).toContainText('Not saved yet.');
+
+  await otherRow.getByText('E2E Read Page').click();
+  await expect(dialog).toBeVisible();
+  await shotShell(page, 'edit-confirm-1280-light');
+  await dialog.getByRole('button', { name: 'Keep editing' }).click();
+  await expect(dialog).toBeHidden();
+  await expect(page).toHaveURL(new RegExp(`/pages/${editorFixtures.editablePageId}/edit$`));
+  await expect(editor).toContainText('Not saved yet.');
+  // Focus came back to the control that asked (§5).
+  await expect(otherRow).toBeFocused();
+
+  await otherRow.getByText('E2E Read Page').click();
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('button', { name: 'Leave' }).click();
+  await expect(page).toHaveURL(/\/pages\/[0-9a-f-]+$/, { timeout: 30000 });
+  await expect(page.getByRole('heading', { level: 1, name: 'E2E Read Page' })).toBeVisible({ timeout: 30000 });
+});
+
 test('typing markdown syntax renders the formatted result inline, with no separate preview pane', async ({ page }) => {
   test.setTimeout(60000);
   await signIn(page);
@@ -328,6 +380,12 @@ const SHOTS = process.env.DEEPWIKI_FRAME_SHOTS ?? '';
 async function shot3(page: Page, name: string): Promise<void> {
   if (!SHOTS) return;
   await page.screenshot({ path: `${SHOTS}/frame3-edit-${name}.png`, fullPage: false });
+}
+
+/** The 2026-09-16 batch's review material: the condensed bar, the toolbar row, the confirm dialog. */
+async function shotShell(page: Page, name: string): Promise<void> {
+  if (!SHOTS) return;
+  await page.screenshot({ path: `${SHOTS}/fb-shell-${name}.png`, fullPage: false });
 }
 
 async function useTheme(page: Page, theme: 'light' | 'dark'): Promise<void> {
@@ -560,3 +618,45 @@ test.describe('inside the workspace frame, 320x900 light', () => {
     await shot3(page, '320-light');
   });
 });
+
+/**
+ * The confirm dialog, at the sizes and themes the review asks for. The
+ * behaviour is held above at 1280 light; these hold that it renders
+ * whole — no sideways scroll at 320 — and shoot it.
+ */
+for (const { theme, width } of [
+  { theme: 'dark', width: 1280 },
+  { theme: 'light', width: 320 },
+] as const) {
+  test.describe(`the confirm dialog at ${width} ${theme}`, () => {
+    test.use({ viewport: { width, height: 900 } });
+
+    test('renders the leave question whole, with cancel and confirm reachable', async ({ page }) => {
+      test.setTimeout(90000);
+      await signInAs(page, editorFixtures.writerSessionToken);
+      await useTheme(page, theme);
+
+      await page.goto(`/pages/${editorFixtures.editablePageId}/edit`);
+      const editor = page.getByTestId('editor-surface');
+      await expect(editor).toContainText(editorFixtures.editablePageMarkdown.trim(), { timeout: 30000 });
+      await editor.click();
+      await page.keyboard.press('End');
+      await page.keyboard.type(' Not saved yet.');
+
+      await page.locator('#content-bar').getByRole('link', { name: 'Read page' }).click();
+      const dialog = page.getByRole('dialog', { name: 'Leave without saving?' });
+      await expect(dialog).toBeVisible();
+      await expect(dialog.getByRole('button', { name: 'Keep editing' })).toBeVisible();
+      await expect(dialog.getByRole('button', { name: 'Leave' })).toBeVisible();
+      const dialogBox = (await dialog.boundingBox())!;
+      expect(dialogBox.x).toBeGreaterThanOrEqual(0);
+      expect(dialogBox.x + dialogBox.width, 'the dialog fits the viewport').toBeLessThanOrEqual(width);
+      await expect(page.locator('html')).toHaveClass(theme === 'dark' ? /dark/ : /light/);
+      await shotShell(page, `edit-confirm-${width}-${theme}`);
+
+      await dialog.getByRole('button', { name: 'Keep editing' }).click();
+      await expect(dialog).toBeHidden();
+      await expect(editor).toContainText('Not saved yet.');
+    });
+  });
+}

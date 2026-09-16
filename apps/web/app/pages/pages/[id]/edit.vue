@@ -53,7 +53,14 @@ const otherEditors = computed(() => presence.editors.value.filter((editor) => ed
 const currentMarkdown = ref('');
 const savedContentHash = ref<string | null>(null);
 const isDirty = ref(false);
-const takeOverConfirmOpen = ref(false);
+
+// Every "are you sure" on this screen is the product's one confirm
+// dialog (`ConfirmDialog`, mounted in `app.vue`), asked as a promise:
+// themed, focus-trapped, Escape cancels, focus returns to the control
+// that asked (docs/UI-CHECKLIST.md §4.1, §5). Until 2026-09-16 the two
+// unsaved-changes prompts were `window.confirm` and the take-over one
+// was a modal of its own on this page.
+const { confirm } = useConfirm();
 
 // docs/UI-CHECKLIST.md §3: "Saved." persisting over a document the user
 // has since kept editing is worse than no confirmation at all — it claims
@@ -162,37 +169,63 @@ async function onSave(): Promise<void> {
 // buffer is confirmed first, explicitly naming what is about to be lost
 // (docs/UI-CHECKLIST.md §3, "Error — fatal … says explicitly whether the
 // work was lost or preserved"). One helper for the two states that name a
-// reload, so the confirmation cannot drift between them.
-function reloadDiscardingBuffer(warning: string): void {
-  if (isDirty.value && !window.confirm(warning)) return;
+// reload, so the confirmation cannot drift between them. Destructive:
+// saying yes loses the edits.
+async function reloadDiscardingBuffer(why: string): Promise<void> {
+  if (isDirty.value && !(await confirm({ title: 'Reload and lose your unsaved changes?', description: why, confirmLabel: 'Reload', tone: 'destructive' }))) return;
   window.location.reload();
 }
 
 // The `stale` 409 carries no document body to merge (unlike `not
 // canonical`/`dead anchor`) — the only honest recovery is the reload
 // `saveMessage` already names.
-function reloadForNewerVersion(): void {
-  reloadDiscardingBuffer('Someone else saved a newer version. Reloading now will discard your unsaved changes in this tab. Reload anyway?');
+function reloadForNewerVersion(): Promise<void> {
+  return reloadDiscardingBuffer('Someone else saved a newer version. Reloading now discards the unsaved changes in this tab.');
 }
 
 // The lock was lost mid-session (the heartbeat answered `lost`): this
 // tab can no longer save, and a new session needs a reload.
-function reloadAfterLockLost(): void {
-  reloadDiscardingBuffer('This tab no longer holds the lock. Reloading now will discard your unsaved changes in this tab. Reload anyway?');
+function reloadAfterLockLost(): Promise<void> {
+  return reloadDiscardingBuffer('This tab no longer holds the lock. Reloading now discards the unsaved changes in this tab.');
 }
 
+// "Take over" states its consequence for the other person before it is
+// confirmed (docs/UI-CHECKLIST.md §4.8) — the same dialog as every other
+// confirmation on this screen, in the destructive colour.
 async function confirmTakeOver(): Promise<void> {
-  takeOverConfirmOpen.value = false;
+  const proceed = await confirm({
+    title: 'Take over editing?',
+    description:
+      'The current editor will lose the ability to save further changes immediately, and any unsaved edits in their browser will be lost. This cannot be undone.',
+    confirmLabel: 'Take over',
+    tone: 'destructive',
+  });
+  if (!proceed) return;
   await takeOver();
 }
 
 // docs/UI-CHECKLIST.md §4.5: "Leaving edit mode with unsaved changes
-// prompts. Browser navigation away with unsaved changes prompts."
-onBeforeRouteLeave(() => {
+// prompts." An in-app navigation — a tree row, "Read page", the browser's
+// Back — is the router's, so the guard awaits the same dialog; the
+// person stays on the editor with nothing lost when they cancel.
+onBeforeRouteLeave(async () => {
   if (!isDirty.value) return true;
-  return window.confirm('You have unsaved changes. Leave without saving?');
+  return confirm({
+    title: 'Leave without saving?',
+    description: 'Your unsaved changes in this tab will be lost.',
+    confirmLabel: 'Leave',
+    cancelLabel: 'Keep editing',
+    tone: 'destructive',
+  });
 });
 
+// "Browser navigation away with unsaved changes prompts" (§4.5): a tab
+// closing, a reload, an address typed over this one. That prompt is the
+// browser's own and cannot be replaced — no page script may draw a
+// dialog while the document is being torn down, and the browser shows
+// its generic wording regardless of what is passed — so `beforeunload`
+// stays exactly as it is: the one prompt in the product that is not
+// `ConfirmDialog`.
 function onBeforeUnload(event: BeforeUnloadEvent): void {
   if (!isDirty.value) return;
   event.preventDefault();
@@ -322,7 +355,7 @@ useSeoMeta({ title: () => (session.value?.title ? `Editing ${session.value.title
       Taking over will immediately end their editing session — their unsaved changes, if any, will be lost.
       <template #actions>
         <UButton variant="outline" icon="i-lucide-eye" :to="`/pages/${nodeId}`">Open read-only</UButton>
-        <UButton color="error" variant="solid" icon="i-lucide-log-in" @click="takeOverConfirmOpen = true">Take over editing</UButton>
+        <UButton color="error" variant="solid" icon="i-lucide-log-in" @click="confirmTakeOver">Take over editing</UButton>
       </template>
     </PageNotice>
 
@@ -471,18 +504,5 @@ useSeoMeta({ title: () => (session.value?.title ? `Editing ${session.value.title
         @update="onEditorUpdate"
       />
     </template>
-
-    <UModal v-model:open="takeOverConfirmOpen" title="Take over editing?">
-      <template #body>
-        <p class="text-body-medium text-default">
-          The current editor will lose the ability to save further changes immediately, and any unsaved edits in their browser will be lost.
-          This cannot be undone.
-        </p>
-      </template>
-      <template #footer>
-        <UButton variant="outline" color="neutral" @click="takeOverConfirmOpen = false">Cancel</UButton>
-        <UButton color="error" @click="confirmTakeOver">Take over</UButton>
-      </template>
-    </UModal>
   </AppShell>
 </template>
