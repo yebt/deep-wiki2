@@ -151,6 +151,43 @@ function onEditorUpdate(markdown: string): void {
   isDirty.value = true;
 }
 
+// Undo and Redo in the bar, beside Save. The depths are the history
+// plugin's own, reported by the surface after every transaction; the
+// commands run through the surface's handle — the same ones `Ctrl+Z` and
+// `Ctrl+Shift+Z` run inside it — so a button and its keys never disagree.
+// A remounted editor (the corrected/canonical document loaded back)
+// starts with an empty history, and the buttons say so until it reports.
+const editorSurface = ref<{ undo: () => void; redo: () => void; focus: () => void } | null>(null);
+const history = ref({ undoDepth: 0, redoDepth: 0 });
+watch(editorRemountKey, () => {
+  history.value = { undoDepth: 0, redoDepth: 0 };
+});
+
+function onEditorHistory(depths: { undoDepth: number; redoDepth: number }): void {
+  history.value = depths;
+}
+
+// §3 "Disabled": the reason on hover and focus; §5: `aria-disabled`, so
+// the control stays in the tab order and the reason with it.
+const undoDisabledReason = computed<string | null>(() => (history.value.undoDepth === 0 ? 'Nothing to undo yet.' : null));
+const redoDisabledReason = computed<string | null>(() => (history.value.redoDepth === 0 ? 'Nothing to redo.' : null));
+
+function onUndo(): void {
+  if (undoDisabledReason.value !== null) return;
+  editorSurface.value?.undo();
+}
+
+function onRedo(): void {
+  if (redoDisabledReason.value !== null) return;
+  editorSurface.value?.redo();
+}
+
+/** The platform's modifier as text for `aria-keyshortcuts`, read on mount because the platform is the client's (the same reading `SidebarToggle` makes). */
+const modifierName = ref('Control');
+onMounted(() => {
+  modifierName.value = /Macintosh;/.test(navigator.userAgent) ? 'Meta' : 'Control';
+});
+
 // docs/UI-CHECKLIST.md §3 ("Disabled: every disabled control explains why")
 // and §5 (`aria-disabled`, never the bare `disabled` attribute, so the
 // reason survives keyboard focus) — the same rule `AuthSubmit.vue` and the
@@ -281,9 +318,51 @@ useSeoMeta({ title: () => (session.value?.title ? `Editing ${session.value.title
            "Read" (eye) here and "Back to page" (arrow-left) there. The
            eye is what every "Open read-only" exit already uses for read
            mode, so it is the one (checklist §4.1). -->
-      <UButton v-if="status === 'ready'" icon="i-lucide-eye" variant="ghost" color="neutral" size="sm" :to="`/pages/${nodeId}`">
-        Read page
-      </UButton>
+      <!-- Below `sm` the label is for assistive technology only and the
+           control is icon-only with its tooltip (§4.3): at 320 the bar
+           holds the drawer toggle, the crumb, this, Undo, Redo and Save,
+           and with the label drawn the "Editing" crumb clipped (measured
+           in `e2e/editor.spec.ts` when Undo and Redo arrived). -->
+      <UTooltip v-if="status === 'ready'" text="Read page">
+        <UButton icon="i-lucide-eye" variant="ghost" color="neutral" size="sm" :to="`/pages/${nodeId}`" label="Read page" :ui="{ label: 'max-sm:sr-only' }" />
+      </UTooltip>
+      <!-- Undo and Redo, beside Save: icon-only, so a name and a tooltip
+           that also shows the keys (§4.3); `aria-disabled` with the reason
+           while that side of the history is empty (§3, §5). `mousedown`
+           is cancelled so a pointer click leaves the caret where it is —
+           the command acts on the editor, and the surface hands focus
+           back to it — while a keyboard user keeps focus on the button
+           they activated. -->
+      <template v-if="status === 'ready'">
+        <UTooltip :text="undoDisabledReason ?? 'Undo'" :kbds="['meta', 'Z']">
+          <UButton
+            icon="i-lucide-undo-2"
+            variant="ghost"
+            color="neutral"
+            size="sm"
+            square
+            aria-label="Undo"
+            :aria-keyshortcuts="`${modifierName}+Z`"
+            :aria-disabled="undoDisabledReason ? 'true' : undefined"
+            @mousedown.prevent
+            @click="onUndo"
+          />
+        </UTooltip>
+        <UTooltip :text="redoDisabledReason ?? 'Redo'" :kbds="['meta', 'shift', 'Z']">
+          <UButton
+            icon="i-lucide-redo-2"
+            variant="ghost"
+            color="neutral"
+            size="sm"
+            square
+            aria-label="Redo"
+            :aria-keyshortcuts="`${modifierName}+Shift+Z`"
+            :aria-disabled="redoDisabledReason ? 'true' : undefined"
+            @mousedown.prevent
+            @click="onRedo"
+          />
+        </UTooltip>
+      </template>
       <!-- `aria-disabled`, never `disabled` (docs/UI-CHECKLIST.md §3, §5 —
            the same rule `AuthSubmit.vue` and the `refused` panel's
            "Normalise" button already follow): a disabled control with no
@@ -509,11 +588,13 @@ useSeoMeta({ title: () => (session.value?.title ? `Editing ${session.value.title
       </InlineNotice>
       <EditorSurface
         v-if="session"
+        ref="editorSurface"
         :key="editorRemountKey"
         :markdown="currentMarkdown"
         :workspace-id="session.workspaceId"
         :page-id="nodeId"
         @update="onEditorUpdate"
+        @history="onEditorHistory"
       />
     </template>
   </AppShell>

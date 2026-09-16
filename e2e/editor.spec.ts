@@ -384,6 +384,71 @@ test('clicking the second slash command runs it, closes the menu and leaves the 
   await expect(editor.locator('h2')).toHaveText('Second');
 });
 
+/** A mocked, editable session for the block-UI tests: the editor opens on `markdown` with nothing else on the wire. */
+async function openMockedEditor(page: Page, markdown: string, title = 'Block UI Test'): Promise<ReturnType<Page['getByTestId']>> {
+  await signIn(page);
+  await page.route(`${apiOrigin()}/pages/${PAGE_ID}/edit-session`, (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        markdown,
+        title,
+        workspaceId: 'ws-e2e',
+        lock: { holderUserId: 'me', acquiredAt: new Date().toISOString(), heartbeatAt: new Date().toISOString() },
+      }),
+    }),
+  );
+  await page.route(`${apiOrigin()}/pages/${PAGE_ID}/lock`, (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ status: 'ok' }) }),
+  );
+  await page.goto(`/pages/${PAGE_ID}/edit`);
+  const editor = page.getByTestId('editor-surface');
+  await expect(editor).toBeVisible({ timeout: 30000 });
+  return editor;
+}
+
+/**
+ * Undo and Redo in the contextual bar (docs/TODO.md Findings 2026-09-16,
+ * "the `/mount` API"): named, tooltipped with their keys, `aria-disabled`
+ * with a reason until there is history on that side, and acting through
+ * the same commands `Ctrl+Z` runs inside the editor — so a button press
+ * and the keystroke agree on what one step is.
+ */
+test('Undo and Redo stand beside Save: disabled with a reason until there is history, undo takes the edit back and redo restores it', async ({ page }) => {
+  test.setTimeout(60000);
+  const editor = await openMockedEditor(page, 'Start.\n');
+  await expect(editor).toContainText('Start.', { timeout: 30000 });
+  const bar = page.locator('#content-bar');
+  const undo = bar.getByRole('button', { name: 'Undo' });
+  const redo = bar.getByRole('button', { name: 'Redo' });
+  await expect(undo).toHaveAttribute('aria-disabled', 'true');
+  await expect(redo).toHaveAttribute('aria-disabled', 'true');
+  // The reason and the keys are in the tooltip, which opens on focus as
+  // on hover and names itself in `aria-describedby` (§3, §4.3, §5).
+  await undo.focus();
+  const describedBy = await undo.getAttribute('aria-describedby');
+  expect(describedBy, 'focus must open the tooltip').not.toBeNull();
+  await expect(page.locator(`#${describedBy}`)).toContainText(/nothing to undo/i);
+  await expect(page.locator(`#${describedBy}`)).toContainText('Z');
+  await expect(undo).toHaveAttribute('aria-keyshortcuts', /Z$/);
+
+  await editor.click();
+  await page.keyboard.press('End');
+  await page.keyboard.type(' Then more.');
+  await expect(editor).toContainText('Start. Then more.');
+  await expect(undo).not.toHaveAttribute('aria-disabled');
+
+  await undo.click();
+  await expect(editor).not.toContainText('Then more.');
+  await expect(redo).not.toHaveAttribute('aria-disabled');
+  // The caret stayed in the document: the next keys land there, not on the button.
+  await expect(editor).toBeFocused();
+
+  await redo.click();
+  await expect(editor).toContainText('Start. Then more.');
+  await expect(redo).toHaveAttribute('aria-disabled', 'true');
+});
 
 /**
  * Inside the workspace frame (docs/UI-CHECKLIST.md Review Log, 2026-09-15:

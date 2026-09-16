@@ -49,6 +49,15 @@ interface FakeViewOptions {
   readonly doc: { textContent: string };
   readonly mention?: { readonly onStateChange?: (state: MentionState, view: unknown) => void; readonly onConfirmed?: (candidate: MentionCandidate) => void };
   readonly slash?: { readonly onStateChange?: (state: SlashState) => void };
+  readonly onUpdate?: (view: unknown, update: EditorUpdate) => void;
+}
+
+/** What the shipped `describeUpdate` reports after a transaction (`editor-commands.ts`). */
+interface EditorUpdate {
+  readonly transactionCount: number;
+  readonly undoDepth: number;
+  readonly redoDepth: number;
+  readonly selection: { readonly kind: 'text'; readonly from: number; readonly to: number; readonly empty: boolean; readonly marks: Record<string, boolean>; readonly link: null };
 }
 
 /** A handle command the host called, by name and arguments. */
@@ -71,6 +80,10 @@ const { harness } = vi.hoisted(() => ({
       throw new Error('no editor mounted');
     },
     dispatchSlash: (_action: SlashAction): void => {
+      throw new Error('no editor mounted');
+    },
+    /** Reports a transaction to the host the way the real `dispatchTransaction` does, with these history depths. */
+    update: (_depths: { undoDepth: number; redoDepth: number }): void => {
       throw new Error('no editor mounted');
     },
     /** What the host asked the editor to insert on a click — the fake `insertMention` / `confirmSlashCommand` record it here instead of touching a document. */
@@ -108,6 +121,9 @@ vi.mock('@deep-wiki/editor/mount', async (importOriginal) => {
         dom: options.dom,
         coordsAtPos: () => harness.caret,
         state: {
+          // The real document the host parsed, so the debounced `toMarkdown`
+          // the host runs after an update has something to serialise.
+          doc: options.doc,
           get tr() {
             return { setMeta: (key: unknown, action: unknown) => ({ key, action }) };
           },
@@ -143,6 +159,16 @@ vi.mock('@deep-wiki/editor/mount', async (importOriginal) => {
         else if (event.key === 'Escape') dispatchAction({ type: 'dismiss' });
       });
 
+      let transactionCount = 0;
+      harness.update = ({ undoDepth, redoDepth }) => {
+        transactionCount += 1;
+        options.onUpdate?.(view, {
+          transactionCount,
+          undoDepth,
+          redoDepth,
+          selection: { kind: 'text', from: 1, to: 1, empty: true, marks: { strong: false, emphasis: false, delete: false, inlineCode: false, link: false }, link: null },
+        });
+      };
       harness.dispatchMention = applyMention;
       harness.dispatchSlash = applySlash;
       harness.doc = options.doc;
@@ -283,6 +309,39 @@ describe('EditorSurface', () => {
       const valueImports = [...editorSurfaceSource.matchAll(/^import\s+(?!type\b)[^;]*from\s+'@deep-wiki\/editor'/gm)];
 
       expect(valueImports.map((match) => match[0])).toEqual([]);
+    });
+  });
+
+  /**
+   * Undo and redo live in the contextual bar (`pages/[id]/edit.vue`),
+   * outside this component, so the bar needs two things from it: the
+   * history depths after every transaction — read from the history
+   * plugin's own counters by the shipped `describeUpdate`, never inferred
+   * from keystrokes — and the two commands, which run through the handle
+   * so the button and `Ctrl+Z` can never disagree.
+   */
+  describe('undo and redo for the contextual bar', () => {
+    test('reports the history depths of every transaction, undebounced, as a `history` event', async () => {
+      const component = await mountSurface();
+      const surface = component.findComponent(EditorSurface);
+
+      harness.update({ undoDepth: 1, redoDepth: 0 });
+      harness.update({ undoDepth: 2, redoDepth: 0 });
+      harness.update({ undoDepth: 1, redoDepth: 1 });
+
+      expect(surface.emitted('history')).toEqual([[{ undoDepth: 1, redoDepth: 0 }], [{ undoDepth: 2, redoDepth: 0 }], [{ undoDepth: 1, redoDepth: 1 }]]);
+    });
+
+    test('exposes undo and redo that run the handle\'s commands and hand focus back to the editor', async () => {
+      const component = await mountSurface();
+      const surface = component.findComponent(EditorSurface).vm as unknown as { undo: () => void; redo: () => void };
+      const focusBefore = harness.focusCalls;
+
+      surface.undo();
+      surface.redo();
+
+      expect(harness.handleCalls.map((call) => call.command)).toEqual(['undo', 'redo']);
+      expect(harness.focusCalls).toBe(focusBefore + 2);
     });
   });
 

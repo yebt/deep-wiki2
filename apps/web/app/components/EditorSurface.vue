@@ -39,7 +39,15 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
+  /** The document as markdown, 300ms after the last transaction. */
   update: [markdown: string];
+  /**
+   * The history plugin's own depths after every transaction, undebounced
+   * — what the contextual bar's Undo and Redo disable from
+   * (`editor-commands.ts`, `EditorUpdate`). Read from the plugin's
+   * counters, never inferred from keystrokes, so grouping is seen.
+   */
+  history: [depths: { undoDepth: number; redoDepth: number }];
 }>();
 
 const rootEl = ref<HTMLElement | null>(null);
@@ -197,7 +205,8 @@ async function mount(): Promise<void> {
         }
       },
     },
-    onUpdate: (view) => {
+    onUpdate: (view, update) => {
+      emit('history', { undoDepth: update.undoDepth, redoDepth: update.redoDepth });
       if (debounceTimer) clearTimeout(debounceTimer);
       debounceTimer = setTimeout(() => emit('update', mod.toMarkdown(view.state.doc)), 300);
     },
@@ -214,8 +223,26 @@ onBeforeUnmount(() => {
   handle?.destroy();
 });
 
+/**
+ * The bar's Undo and Redo, run through the handle — the same commands
+ * `Mod-z` / `Shift-Mod-z` run inside the editor (`keymap.ts`) — and then
+ * focus back where the caret is, so the next keystroke lands in the
+ * document rather than on the button.
+ */
+function undo(): void {
+  handle?.undo();
+  editorView?.focus();
+}
+
+function redo(): void {
+  handle?.redo();
+  editorView?.focus();
+}
+
 defineExpose({
   focus: () => editorView?.focus(),
+  undo,
+  redo,
 });
 </script>
 
