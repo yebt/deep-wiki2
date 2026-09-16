@@ -115,4 +115,78 @@ describe('useWorkspaceTree', () => {
     expect(tree.rootId.value).toBe('root-ws-b');
     expect(tree.nodes.value).toEqual([]);
   });
+
+  // ── Optimistic writes, seen through the shared record (2026-09-16) ──
+  // The record is what the sidebar draws; a local move that only reached
+  // the transport would be invisible until the next full load.
+
+  test('a reorder moves the row in the shared record at once, before the server answers, and never refetches on success', async () => {
+    const fetchTree = vi.fn(async () => ({ rootId: 'root-1', nodes: TWO_PAGES() }));
+    let release!: () => void;
+    const reorderFetcher = vi.fn(() => new Promise<{ ok: boolean }>((resolve) => { release = () => resolve({ ok: true }); }));
+    const tree = useWorkspaceTree(ref<string | null>('ws-optimistic'), { fetchTree, reorderFetcher });
+    await tree.load();
+
+    const pending = tree.reorder('page-2', 'book-1', 0);
+
+    expect(tree.nodes.value[0]!.children.map((node) => node.title)).toEqual(['Second page', 'First page']);
+    expect(tree.status.value).toBe('success');
+    release();
+    await expect(pending).resolves.toBe(true);
+    expect(fetchTree).toHaveBeenCalledTimes(1);
+    expect(tree.nodes.value[0]!.children.map((node) => node.title)).toEqual(['Second page', 'First page']);
+  });
+
+  test('a refused reorder puts the row back in the shared record', async () => {
+    const fetchTree = vi.fn(async () => ({ rootId: 'root-1', nodes: TWO_PAGES() }));
+    const reorderFetcher = vi.fn(async () => { throw { response: { status: 403 } }; });
+    const tree = useWorkspaceTree(ref<string | null>('ws-refused'), { fetchTree, reorderFetcher });
+    await tree.load();
+
+    await expect(tree.reorder('page-2', 'book-1', 0)).resolves.toBe(false);
+
+    expect(tree.nodes.value[0]!.children.map((node) => node.title)).toEqual(['First page', 'Second page']);
+    expect(tree.status.value).toBe('success');
+  });
+
+  test('a second instance draws a created and a renamed node from the response, and a refresh keeps the rows on screen', async () => {
+    const fetchTree = vi.fn(async () => ({ rootId: 'root-1', nodes: TWO_PAGES() }));
+    const first = useWorkspaceTree(ref<string | null>('ws-created'), { fetchTree });
+    await first.load();
+    const second = useWorkspaceTree(ref<string | null>('ws-created'), { fetchTree });
+
+    second.applyCreated({ id: 'page-3', parentId: 'book-1', type: 'page', slug: 'third', title: 'Third page', position: 2 });
+    second.applyRenamed({ id: 'page-1', slug: 'renamed', title: 'Renamed page' });
+
+    expect(first.nodes.value[0]!.children.map((node) => node.title)).toEqual(['Renamed page', 'Second page', 'Third page']);
+    expect(fetchTree).toHaveBeenCalledTimes(1);
+
+    // A refresh from the second instance — whose own transport started
+    // empty — keeps the rows up while the answer is on its way.
+    let release!: () => void;
+    fetchTree.mockImplementationOnce(() => new Promise((resolve) => { release = () => resolve({ rootId: 'root-1', nodes: TWO_PAGES() }); }));
+    const refreshing = second.load();
+    expect(second.status.value).toBe('success');
+    expect(second.nodes.value[0]!.children).toHaveLength(3);
+    release();
+    await refreshing;
+    expect(second.nodes.value[0]!.children).toHaveLength(2);
+  });
 });
+
+/** book-1 > [page-1, page-2]; a function so no test hands another a mutated copy. */
+function TWO_PAGES(): TreeNode[] {
+  return [
+    {
+      id: 'book-1',
+      type: 'book',
+      slug: 'book',
+      title: 'Handbook',
+      position: 0,
+      children: [
+        { id: 'page-1', type: 'page', slug: 'one', title: 'First page', position: 0, children: [] },
+        { id: 'page-2', type: 'page', slug: 'two', title: 'Second page', position: 1, children: [] },
+      ],
+    },
+  ];
+}

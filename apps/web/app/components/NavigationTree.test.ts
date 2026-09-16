@@ -24,6 +24,8 @@ function mockTree(overrides: { status?: string; nodes?: unknown[]; message?: str
   navigateToMock.mockClear();
   const load = vi.fn(async () => {});
   const reorder = vi.fn(async () => true);
+  const applyCreated = vi.fn();
+  const applyRenamed = vi.fn();
   const collapsed = ref(new Set<string>());
   const selectedId = ref<string | null>(null);
   const nodes = ref(overrides.nodes ?? []);
@@ -37,6 +39,8 @@ function mockTree(overrides: { status?: string; nodes?: unknown[]; message?: str
     selectedId,
     load,
     reorder,
+    applyCreated,
+    applyRenamed,
     toggleCollapsed: (id: string) => {
       const next = new Set(collapsed.value);
       if (next.has(id)) next.delete(id);
@@ -46,7 +50,7 @@ function mockTree(overrides: { status?: string; nodes?: unknown[]; message?: str
     reveal,
     pathTo: () => [],
   });
-  return { load, reorder, reveal, selectedId };
+  return { load, reorder, applyCreated, applyRenamed, reveal, selectedId };
 }
 
 // Attached to the document: focus and the menu's focus return are real
@@ -243,6 +247,44 @@ describe('NavigationTree', () => {
       await items[2]!.trigger('keydown', { key: 'ArrowDown', altKey: true });
       expect(reorder).toHaveBeenCalledWith('page-1', 'book-1', 1);
     });
+
+    /**
+     * A pointer drop names a slot in the list as drawn — the dragged row
+     * still in it — while the server counts slots once the moved row has
+     * left (`packages/db/src/nodes/reorder.ts`). Dropping the first page
+     * *after* the second therefore reached the server as index 2 of a
+     * one-page list and landed one row further than the pointer said, and
+     * dropping it *before* a third page landed after it. Found on
+     * 2026-09-16 when the local move started to mirror the server's
+     * arithmetic; the keyboard and the menu were never affected, because
+     * "move down" already counts from the row's own place.
+     */
+    test('a drop below the dragged row among its own siblings lands where the pointer was, not one row further', async () => {
+      const { reorder } = mockTree({ status: 'success', nodes: NODES });
+      const component = await mount();
+      const rows = component.findAll('.dw-tree-row');
+      const secondPage = rows[3]!;
+
+      // page-1 (index 0) dropped in page-2's (index 1) bottom quarter: the node reports slot 2.
+      const rect = { top: 100, height: 40 };
+      secondPage.element.getBoundingClientRect = () => ({ ...rect, bottom: 140, left: 0, right: 200, width: 200, x: 0, y: 100, toJSON: () => ({}) });
+      await secondPage.trigger('dragover', { clientY: 138 });
+      await secondPage.trigger('drop', { dataTransfer: { getData: () => 'page-1' } });
+
+      expect(reorder).toHaveBeenCalledWith('page-1', 'book-1', 1);
+    });
+
+    test('a drop above the dragged row is unchanged: the rows before it have not moved', async () => {
+      const { reorder } = mockTree({ status: 'success', nodes: NODES });
+      const component = await mount();
+      const firstPage = component.findAll('.dw-tree-row')[2]!;
+
+      firstPage.element.getBoundingClientRect = () => ({ top: 60, height: 40, bottom: 100, left: 0, right: 200, width: 200, x: 0, y: 60, toJSON: () => ({}) });
+      await firstPage.trigger('dragover', { clientY: 62 });
+      await firstPage.trigger('drop', { dataTransfer: { getData: () => 'page-2' } });
+
+      expect(reorder).toHaveBeenCalledWith('page-2', 'book-1', 0);
+    });
   });
 
   describe('creating and renaming', () => {
@@ -255,15 +297,20 @@ describe('NavigationTree', () => {
       expect(component.find('[role="tree"]').element.contains(actions.element)).toBe(false);
     });
 
-    test('a write reloads the tree, so the new node is the server’s answer and not a guess', async () => {
-      const { load } = mockTree({ status: 'success', nodes: NODES });
+    test('a created or renamed node is drawn from the server’s response, never by reloading the tree', async () => {
+      const { load, applyCreated, applyRenamed } = mockTree({ status: 'success', nodes: NODES });
       const component = await mount();
       const before = load.mock.calls.length;
 
-      component.findComponent(NavigationTreeActions).vm.$emit('changed');
+      const created = { id: 'page-3', parentId: 'book-1', type: 'page', slug: 'three', title: 'Third page', position: 2 };
+      component.findComponent(NavigationTreeActions).vm.$emit('created', created);
+      const renamed = { id: 'page-1', slug: 'first', title: 'First page, renamed' };
+      component.findComponent(NavigationTreeActions).vm.$emit('renamed', renamed);
       await nextTick();
 
-      expect(load.mock.calls.length).toBe(before + 1);
+      expect(applyCreated).toHaveBeenCalledWith(created);
+      expect(applyRenamed).toHaveBeenCalledWith(renamed);
+      expect(load.mock.calls.length).toBe(before);
     });
 
     test('the toolbar has no selection until the user picks a row; picking one hands it over and marks it', async () => {

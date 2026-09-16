@@ -190,7 +190,10 @@ describe('NavigationTreeActions — creating', () => {
     await typeAndSubmit(mounted, 'tree-create-title', 'tree-create-submit', 'Day two');
 
     expect(createFetcher).toHaveBeenCalledWith({ parentId: 'chapter-1', type: 'page', title: 'Day two' });
-    expect(mounted.wrapper.findComponent(NavigationTreeActions).emitted('changed')).toHaveLength(1);
+    // The response is the row: the tree draws it from this, not from a reload.
+    expect(mounted.wrapper.findComponent(NavigationTreeActions).emitted('created')).toEqual([
+      [{ id: 'new-1', parentId: 'chapter-1', type: 'page', slug: 'day-two', title: 'Day two', position: 1 }],
+    ]);
   });
 
   test('success is announced specifically, naming what was created and where it went', async () => {
@@ -293,7 +296,7 @@ describe('NavigationTreeActions — renaming', () => {
     await typeAndSubmit(mounted, 'tree-rename-title', 'tree-rename-submit', 'Day zero');
 
     expect(renameFetcher).toHaveBeenCalledWith('page-1', { title: 'Day zero' });
-    expect(mounted.wrapper.findComponent(NavigationTreeActions).emitted('changed')).toHaveLength(1);
+    expect(mounted.wrapper.findComponent(NavigationTreeActions).emitted('renamed')).toEqual([[{ id: 'page-1', slug: 'day-zero', title: 'Day zero' }]]);
   });
 
   test('a rename that collides is reported on the field, exactly as creation reports it', async () => {
