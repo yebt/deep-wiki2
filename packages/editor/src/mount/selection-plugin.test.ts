@@ -133,6 +133,21 @@ describe('createSelectionPlugin: the view half', () => {
     expect(reports).toHaveLength(1);
   });
 
+  test('a view that cannot measure yet reports null coords instead of throwing inside the EditorView constructor', () => {
+    const reports: SelectionReport[] = [];
+    const plugin = createSelectionPlugin({ onChange: (report) => reports.push(report) });
+    const view: FakeEditorView = {
+      state: stateOf('plain text', 3),
+      coordsAtPos: () => {
+        throw new RangeError('Position out of range');
+      },
+    };
+
+    expect(() => plugin.spec.view!(view as never)).not.toThrow();
+    expect(reports).toHaveLength(1);
+    expect(reports[0]).toMatchObject({ from: 3, to: 3, coords: null });
+  });
+
   test('the plugin is part of the surface: buildEditorPlugins installs it with the supplied onChange', () => {
     const reports: SelectionReport[] = [];
     const plugins = buildEditorPlugins({ selection: { onChange: (report) => reports.push(report) } });

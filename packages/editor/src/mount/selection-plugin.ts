@@ -58,7 +58,8 @@ export interface SelectionCoords {
 }
 
 export interface SelectionReport extends SelectionSnapshot {
-  readonly coords: SelectionCoords;
+  /** `null` when the view could not measure — a toolbar then hides rather than the whole editor failing to mount. */
+  readonly coords: SelectionCoords | null;
 }
 
 const NO_MARKS: Readonly<Record<ToolbarMarkName, boolean>> = {
@@ -141,9 +142,20 @@ function sameSnapshot(a: SelectionSnapshot, b: SelectionSnapshot): boolean {
   );
 }
 
-/** The DOM measurement, and the only one: both ends of the selection, so a toolbar can centre over the range or sit beside a caret. */
-function measure(view: Pick<EditorView, 'coordsAtPos'>, snapshot: SelectionSnapshot): SelectionCoords {
-  return { from: view.coordsAtPos(snapshot.from, 1), to: view.coordsAtPos(snapshot.to, -1) };
+/**
+ * The DOM measurement, and the only one: both ends of the selection, so a
+ * toolbar can centre over the range or sit beside a caret. Fail-safe:
+ * this runs inside `EditorView`'s own constructor (the first report) and
+ * inside every `updateState`, and a throw from either would take the
+ * editor down with it — `coordsAtPos` can throw for a position the DOM
+ * has not rendered — so a failed measurement reports `null` coordinates.
+ */
+function measure(view: Pick<EditorView, 'coordsAtPos'>, snapshot: SelectionSnapshot): SelectionCoords | null {
+  try {
+    return { from: view.coordsAtPos(snapshot.from, 1), to: view.coordsAtPos(snapshot.to, -1) };
+  } catch {
+    return null;
+  }
 }
 
 export const selectionPluginKey = new PluginKey('selection');
