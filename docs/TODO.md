@@ -337,6 +337,28 @@ gate (tasks 10.2–10.12) — a tick here means built, mounted and tested, not r
 - [ ] Surface "what the team is working on right now" in the workspace UI. Not scoped by
       the change; presence is shown per page only.
 
+### Phase 3.5 — Workspace polish
+
+Opened 2026-09-16. The owner reviewed the workspace frame shipped in Phase 3 and returned a
+mix of immediate defects (see Findings, 2026-09-16 — those are in flight, not roadmap) and
+product decisions that do not fit any existing phase. This phase holds the latter.
+
+- [ ] ZEN mode for both Read and Edit: hide everything non-essential from the screen.
+      Distinct from focus mode (Phase 3, `Ctrl`/`⌘`+`\`), which hides only the sidebar.
+- [ ] `Ctrl`/`⌘`+`K` quick search / command palette.
+- [ ] Workspace dashboard: render shelves as bookshelves holding books, each book carrying a
+      user-chosen colour and cover for recognition — replaces the current card-list dashboard.
+- [ ] Management sidebar: inside management screens (members, registration, and future
+      settings screens) the sidebar switches from the navigation tree to a dedicated
+      management sidebar. Team-level settings for sharing models and rule packs/cells
+      (`docs/SPECS.md`) and personal settings will live here once built — Phase 6 owns the
+      rule pack model itself; this phase only owns where its UI lives.
+- [ ] Notion-like block editing on the existing ProseMirror schema: a block handle, an inline
+      floating toolbar, and `/` to insert tables/headings/etc., replacing the crowded
+      breadcrumb-plus-buttons contextual bar. Editor direction confirmed 2026-09-16: stay on
+      ProseMirror rather than migrate — Tiptap is ProseMirror with a wrapper, and Editor.js
+      stores JSON blocks, which would break markdown-as-truth and GATE-2.
+
 ### Phase 4 — Diagrams
 
 - [ ] Adopt Mermaid (and D2) fenced code blocks as the primary diagram format. Diagrams
@@ -347,6 +369,8 @@ gate (tasks 10.2–10.12) — a tick here means built, mounted and tested, not r
       Keep headless browsers out of the API container.
 - [ ] Add a diagram-focused slash command with starter templates (flowchart, sequence,
       ER, C4-style architecture).
+- [ ] Support images and SVG assets inline in pages — upload through the `BlobStore` port
+      (Phase 1), render in Read and Edit. Scoped into this phase 2026-09-16.
 - [ ] Explicitly defer Excalidraw. Record the tradeoff: freehand scenes do not diff and
       are not RAG-indexable, so they are an escape hatch, never the default.
 
@@ -404,6 +428,9 @@ accordingly rather than left as a blanket unchecked list.
 - [ ] Implement AI actions scoped to a selection: expand, summarise, critique, convert to
       diagram, extract tasks — anchored on block ranges. — *deferred; needs `packages/markdown`
       block anchoring from Phase 2.*
+- [ ] Post-AI interaction mechanics scoped to a selection: ask a question about the selected
+      text, and comment on a selection — confirmed 2026-09-16, alongside the selection-scoped
+      actions bullet above.
 - [ ] Land every AI edit as a **pending revision** reviewed through the diff view, never a
       direct write. — *deferred; needs the diff view (Phase 2).*
 - [x] Order every prompt for cache reuse: stable prefix first (tools, then resolved rule
@@ -469,6 +496,9 @@ makes conventions portable across projects.
 - [ ] Implement user-selectable themes as CSS-variable blocks, in the spirit of DaisyUI:
       each theme is a token set, not a rebuild.
 - [ ] Persist theme as a workspace default with a per-user override.
+- [ ] Support user-contributed colour themes, in the spirit of Obsidian's theme community, on
+      top of the CSS-variable token system above. Confirmed 2026-09-16 — the design system
+      already commits to surviving theme and icon-pack selection (`apps/web/PRODUCT.md`).
 - [ ] Implement icon-pack selection via `@nuxt/icon` + Iconify: store the collection prefix
       (`lucide`, `heroicons`, `tabler`) and resolve icon names against it.
 - [ ] Bundle the supported collections locally via `@iconify-json/*` packages so
@@ -501,6 +531,49 @@ makes conventions portable across projects.
 ## Findings
 
 Discoveries and constraints. Newest first.
+
+### 2026-09-16 — Owner review of the workspace frame: eight defects, all in flight
+
+**What happened.** The owner reviewed the workspace frame shipped across the 2026-09-15
+batches and returned eight defects. Agents are assigned to each already — status **in
+flight** on all eight, not "found, not yet picked up":
+
+1. **Signed-out `/workspaces` shows a "Sign in to see your workspaces" card.** Wanted:
+   redirect straight to `/login`, returning to `/workspaces` afterwards.
+2. **The invite form on Members is a permanent column, and management screens keep the
+   navigation-tree sidebar.** Wanted: the invite form as a modal; and inside management
+   screens (members, registration, future settings) the sidebar should switch to a dedicated
+   **management sidebar** instead of the tree. The management-sidebar decision is also now a
+   Phase 3.5 roadmap item.
+3. **Tree rows have no context menu, and there is no filter/search box.** Wanted: a context
+   menu on rows (folders and pages) for actions, and a toggleable filter/search box like VS
+   Code's explorer filter.
+4. **Edit mode's contextual bar (breadcrumb + "Read page" + "Save") crowds the top; the
+   document loses importance.** Wanted: clean, Notion-like editing — a block handle, inline
+   floating tools, `/` to insert tables/headings/etc. The editor-direction decision behind
+   this (stay on ProseMirror, build Notion-like block UX on the existing schema) is also now
+   a Phase 3.5 roadmap item.
+5. **`pages/[id]/edit.vue` uses a native `window.confirm`.** Wanted: an internal dialog
+   component; no native alerts/confirms anywhere in the product.
+6. **The sidebar toolbar's "+ New…" button does not fill its row.**
+7. **Starting a comment thread from read mode does not exist** — only reply/resolve do — so
+   the owner could not comment on a document from Read. This blocks gate 10.8
+   (`openspec/changes/versioning-and-collaboration/tasks.md`).
+8. **Entering edit mode is slow to load** (being measured). Wanted: an nprogress-style top
+   progress bar, skeletons for every request-backed area, correct caching, optimistic
+   updates, and deferred loading — "the UI must feel fast."
+
+The same review also settled eight product decisions that do not describe defects — these
+are recorded as new roadmap items, not here: ZEN mode and the `Ctrl`/`⌘`+`K` command palette
+(Phase 3.5), the bookshelves-with-covers workspace dashboard (Phase 3.5), the management
+sidebar as the future home for team and personal settings (Phase 3.5), the ProseMirror
+editor-direction confirmation (Phase 3.5), inline image/SVG support (Phase 4), post-AI
+selection interactions — ask about a selection, comment on a selection (Phase 5) — and
+user-contributed colour themes (Phase 8).
+
+**Impact.** None of the eight defects are fixed by this entry; it is the record of what was
+asked, on 2026-09-16, and that work on all eight is already in flight. `apps/web/PRODUCT.md`'s
+"Not yet" list and Product Principles are updated to match the decisions above.
 
 ### 2026-09-15 — `ai-provider-foundation` integrated into `main`, 204 commits after its base
 

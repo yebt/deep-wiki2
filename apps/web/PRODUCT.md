@@ -63,7 +63,10 @@ screen.
 
 Not yet: deleting anything (three open questions), starting a thread from read mode,
 self-registration that leads anywhere (no default plan), clickable wiki-links, backlinks or
-tags in the UI, logout, diagram rendering (Phase 4), any AI or MCP surface (Phases 5, 7).
+tags in the UI, logout, diagram/image/SVG rendering (Phase 4), any AI or MCP surface
+(Phases 5, 7), a `Ctrl`/`⌘`+`K` command palette, ZEN mode, user-contributed colour themes, and
+the workspace dashboard as bookshelves with user-chosen book colours and covers (owner
+decisions, 2026-09-16 — `docs/TODO.md` Phase 3.5).
 
 Technical constraints that bind every screen: Nuxt 4 + Nuxt UI v4 on Bun; `packages/core`
 has zero framework imports; one markdown parser; the ProseMirror document is a view, never
@@ -96,6 +99,8 @@ fabricate any.
 4. Every state is honest: loading looks like the thing loading, errors say what survived,
    denial looks like absence.
 5. Density serves scanning, not cleverness: a mixed team reads more than it edits.
+6. Interface chrome recedes so the document stays the primary surface — ZEN mode is the
+   extreme of this, focus mode a lighter one (owner review, 2026-09-16).
 
 ## Accessibility & Inclusion
 
