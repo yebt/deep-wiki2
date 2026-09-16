@@ -534,6 +534,111 @@ makes conventions portable across projects.
 
 Discoveries and constraints. Newest first.
 
+### 2026-09-16 — Integration regressions after the eight merges
+
+**What happened.** `main` at `cc88265` (`v0.5.0-rc.8`) merged eight branches in one day. Each
+had run its own e2e green; the full suite on `main` left four failures that reproduced alone,
+twice, with `--workers 1`. Every one was two branches, each right on its own, wrong together.
+Fixed on `fix/integration-regressions` (worktree `fb-fix1`), one commit each, each with the
+failing e2e as the red and a unit test where the cause lives. Screenshots
+`fb-fix1-{tree-menu,tree-book-menu,edit-confirm,edit-confirm-returned,selection,management}-{1280-light,1280-dark,320-light}.png`
+in the session scratchpad, `expectNoHorizontalOverflow` measured on each.
+
+1. **`e2e/book-history.spec.ts`: `menuitem "Book history"` never found.** The dashboard batch
+   (`937cca3`) had given a book row a per-row `⋯` menu with one item, "Book history", and the
+   spec reached the history screen through it. `feat/tree-context-menu-filter` replaced that
+   menu with the row's context menu, whose `treeRowActions` labelled the item "History" on a
+   page and on a book alike, and its own tests asked for `/^History/`. Decided with
+   `docs/UI-CHECKLIST.md` §5: a screen-reader user hears the menu item, not the row it hangs
+   off, so the name has to say what it is the history of on its own — **"Page history" /
+   "Book history"**, visible label and accessible name the same words (§4.3). The menu changed,
+   not the test (`6331e2d`). Behind that failure the same spec hid a second one: its
+   page-switcher locator matched links by name alone, and since `fix/frame-followups` every
+   page row in the tree is a link named for its page, so it resolved to three elements; scoped
+   to the contextual bar.
+
+2. **`e2e/editor.spec.ts`: after Cancel on "Leave without saving?", `expect(otherRow).toBeFocused()`
+   got `inactive`.** `feat/frame-review-shell`'s `ConfirmDialog` returns focus to the element
+   that held it when `confirm()` ran — `document.activeElement`, read in a `watch` on the
+   pending question — because a promise-opened dialog has no Reka trigger. `fix/frame-followups`
+   made a page row's title a `NuxtLink` with `tabindex="-1"`. A mouse click focuses the element
+   under the pointer, `tabindex` or not, so the element that held focus was the `<a>` inside the
+   `treeitem`, and focus came back to a link the keyboard cannot reach while the tree's one tab
+   stop (the `treeitem`) was no longer where focus was. Fixed where the cause is
+   (`NavigationTreeNode.vue`, `ba82a37`): focus arriving on the link is handed straight to the
+   `treeitem` (`onLinkFocus`), so a click leaves the tree in the state the ARIA tree pattern
+   describes and the dialog finds the row; the click still runs on the link, which is what
+   navigates; the `⋯` button is not a link and keeps its own focus. Unit test on the node holds
+   it; `ConfirmDialog`'s own return-focus test already held and was not the defect.
+
+3. **`e2e/management.spec.ts` at 320: "Open sidebar" opened no `dialog`.** The spec clicked the
+   toggle once the reader's denied state was on screen, reasoning that the denied state was the
+   client's answer and so proved the page hydrated. `perf/data-layer-icons-bundle` put the
+   members listing on the read layer — denied state included, server-rendered — so the wait
+   proved nothing and the click landed on a button whose listener did not exist yet. Measured by
+   hand: with a real wait the drawer opens on members, on settings and on the dashboard, in
+   management mode and in tree mode. `fix/frame-followups` had met the same shape on three
+   other screens and answered with `e2e/hydration.ts`'s `waitForHydration` — but that helper's
+   signal, `__vue_app__` on the root, is set when the app **mounts**, and Nuxt hydrates a screen
+   with asynchronous setup only when its `<Suspense>` resolves, a frame to a second later; the
+   toggle is inert in exactly that window. The helper now also waits for Nuxt's own
+   `isHydrating` to turn `false` (the flag it clears as `app:suspense:resolve` fires), and the
+   management spec uses it (`e955685`). The product's half is pinned in `WorkspaceSidebar`'s unit
+   suite: in management mode the drawer holds the management doors and no tree, and closes on
+   the same toggle. Writing that test found the suite never unmounted its panes, so every
+   earlier pane still answered the group's toggle hook and opened a drawer of its own — torn
+   down after each test now.
+
+4. **`e2e/comments.spec.ts`: the floating "Comment" never appeared for a selection.** The spec
+   selected words as soon as the heading was visible. Since the read layer the article is
+   server-rendered, so that was before hydration — and hydration re-sets the article's `v-html`
+   (Vue patches a **dynamic** `innerHTML` while hydrating: `hydrateElement` runs `patchProp` for
+   every key in `dynamicProps`), replacing the text nodes the selection was anchored in. The
+   browser collapses such a selection (`rangeCount 1, collapsed true`, anchored on the wrapper
+   `div` after hydration — measured), and no listener, on the article or on `document`, can bring
+   it back; the listener was on `document` all along. Measured by hand with Playwright: after
+   hydration a programmatic `Range` and a pointer drag both fire `selectionchange` on `document`
+   and both show the action; before hydration neither survives. So it was neither the synthetic
+   selection nor the listener's target: the spec now waits for the hydrated app and for the "+"
+   that says the caller may comment, then selects (`b157cd3`); the `Range` is kept because it
+   names the phrase, and the read screen's unit suite pins that `document` is what it listens to.
+   The neighbouring window was real and is closed in the product: the threads response, which
+   carries `canComment`, arrives after hydration, and a selection made in between got no
+   affordance because the browser fires `selectionchange` when the selection changes, not when
+   the screen becomes able to act on it. The screen now reads the selection it already holds on
+   mount and when `canStart` turns true; a unit test states it. A selection made *during*
+   hydration stays lost — Vue's `v-html` contract, a window of one frame to a second, recorded
+   here rather than worked around.
+
+**The general lesson.** Each branch was green alone and `main` was red. A per-branch run
+proves the branch against the base it was cut from; the base moved eight times that day. Two
+of the four were the read layer moving a screen's content into the server's HTML, which turned
+every "the content is on screen, so the page is hydrated" wait in the other branches' specs
+into a wait for nothing; one was a link arriving under a dialog that reads focus; one was a
+label renamed on a branch whose own tests followed while another spec did not. **The full e2e
+on `main` is the gate, not the per-branch runs** — it is what `bun run verify` runs, and it is
+the only run that sees two branches at once. Corollaries: an e2e that proxies hydration by
+content is wrong the day that content is server-rendered (use `waitForHydration`, which now
+waits for the suspense, not the mount); and a locator by name alone breaks the day another
+screen names the same thing (scope it to the region).
+
+**Found on the way, not fixed.** At 320, a click on a tree row *in the drawer* while the editor
+is dirty opens "Leave without saving?" **behind the drawer**: both are Reka dialogs at
+`z-index: auto`, the drawer's portal is appended after the confirm dialog's (mounted once in
+`app.vue`), so DOM order puts the drawer on top and `document.elementFromPoint` at the Cancel
+button's centre returns the drawer (measured). Escape still answers the dialog; a pointer
+cannot. Not one of the four (it predates today's merges — the shell batch's own 320
+screenshot was taken, not clicked), and it is a stacking ruling between two overlays, so it is
+recorded rather than improvised: either the drawer closes before the guard asks, or the
+confirm dialog outranks every other overlay. Also: after Cancel, focus is on the row (the e2e
+asserts it) but Chrome draws no `:focus-visible` ring for a programmatic focus that follows a
+pointer interaction — a keyboard user, who opened the dialog with Enter, gets the ring.
+
+**Stages** (each its own process, load average < 2 throughout): `bun run check` ok;
+`bun run typecheck` 0 errors; `bun run lint` clean; `bun run -F @deep-wiki/web test` 105 files /
+950 tests passed; `bun run e2e -- e2e/book-history.spec.ts e2e/editor.spec.ts
+e2e/management.spec.ts e2e/comments.spec.ts e2e/tree.spec.ts e2e/frame.spec.ts` 66 passed.
+
 ### 2026-09-16 — Frame follow-ups: the presence stream that died every 10 s, one stream per workspace, optimistic tree writes, tree rows as links
 
 **What happened.** Four of the follow-ups the 2026-09-16 latency report and the frame batches
