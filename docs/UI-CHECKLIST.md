@@ -1064,10 +1064,6 @@ typed Post explains itself, and a 12,000-word page's two hundred slots are one t
 
 ---
 
-*The next entry goes below this one.*
-
----
-
 ### 2026-09-16 — The navigation tree's context menu and filter — awaiting the owner's eye
 
 **Reviewer:** none yet — this entry is what was shipped for review, not a review.
@@ -1120,6 +1116,81 @@ refused by the server — no `write` signal per node reaches the client (Open Qu
 amended); SSR renders the sidebar's no-workspace state under the dashboard and hydrates
 the tree over it, with console mismatches (`AppShell`, not this branch's file); the
 two-icon-pack requirement (§4.3) remains untested.
+
+---
+
+### 2026-09-16 — The management sidebar, and the invite dialog — awaiting the owner's eye
+
+**Reviewer:** none yet — this entry is what was shipped for review, not a review.
+**Verdict:** Pending
+
+Two of the owner's review items from the 2026-09-15 frame batch, one commit each on
+`feat/management-sidebar`; full reasoning in `docs/TODO.md` Findings, 2026-09-16.
+
+**Pre-build contract (§2), the management sidebar.** *Who:* a workspace admin on a
+management screen (members today; settings, AI & models and the person's profile when
+built), and the operator on registration. *Goal:* "get to the other management things
+without going back through the tree." *Primary action:* none of its own — it is
+navigation; the screen beside it keeps the one primary. *Data:* the workspace's id and name
+(the directory), the route. Nothing is drawn against a permission the client does not have
+— see below. *Non-goals:* no gating on `manage` or `is_super_root` (no signal reaches the
+client, Open Questions 2026-09-14); no building of the three placeholder screens. *Empty /
+too much:* the list is fixed and short; nothing to overflow.
+
+**What to look at**
+
+1. **The sidebar switches region on a management screen and back.** On
+   `/workspaces/:id/members` the tree steps out and `ManagementSidebar` (`UNavigationMenu`
+   vertical) steps in: "Back to workspace", then Workspace (Members · Settings · AI &
+   models), Instance (Registration settings), You (Profile). The open door carries
+   `aria-current="page"`; "Back to workspace" never does (`exact`). The switcher stays at
+   the top in both modes — the person is still in the room — and the footer keeps only the
+   theme toggle, because Members and Registration settings now stand in the sections (§4.1:
+   once, not twice). Measured in `e2e/management.spec.ts` at 1280×900 in both themes and at
+   320×900: the drawer holds the same region; nothing scrolls sideways at the pane or in the
+   list; every door is a tab stop in reading order and Enter opens it.
+2. **Unbuilt doors are honest screens, not disabled rows.** Settings, AI & models and
+   Profile open a `PageNotice` "Not built yet" naming what exists today and one real next
+   action. A disabled `UNavigationMenu` item is `tabindex="-1"` — out of the tab order, its
+   reason behind a hover — the §5 failure this file names, so the route is the honest
+   shape.
+3. **The active indicator is `secondary-container`, not the pane's own rung.** Nuxt UI's
+   active pill is `before:bg-elevated` on a `bg-elevated` pane — the 2026-09-07 tree-row
+   defect in a second component (§5.2, "a state is a layer, never a step to another surface
+   rung"). Corrected centrally in `app.config.ts`, with the tree's selected fill, the
+   `currentColor` hover/focus/pressed layer and the global 3px `secondary` focus ring.
+4. **The invite form is a dialog.** "Invite someone" — Filled, `size="sm"`, in the
+   contextual bar beside the breadcrumb, where edit mode's Save stands — opens a `UModal`
+   holding the reviewed fields unchanged (email, the access radio group with its four
+   descriptions, the help sentence). Escape with the field empty closes; with an address
+   typed the footer swaps to "Discard this invitation?" — Keep editing (focused) / Discard —
+   inside the dialog, never `window.confirm` and never a second dialog (`ConfirmDialog.vue`
+   is arriving on another branch and this must not grow a copy). Sent closes the dialog,
+   focus returns to the button, the live region on the screen announces it and the pending
+   list updates. The two lists are the screen's single `measure` column — Members, then
+   Pending — for the tree's §2.4 reason; two columns at `@2xl` were measured against and
+   rejected (a pending row wraps at ~490px). `e2e/onboarding.spec.ts` drives the button, the
+   dialog, the real Escape in both states, the focus return, the 320px pane and the dialog's
+   own box.
+
+**Screenshots** `fb-manage-{members,settings,registration}-1280-{light,dark}.png`,
+`fb-manage-{members,settings,drawer}-320-light.png`, `fb-manage-invite-{1280-light,
+1280-dark,320-light}.png`, `fb-manage-members-1280-dark.png` in the session scratchpad.
+
+**Follow-ups carried forward, not fixed**
+
+- `is_super_root` and `manage` still do not reach the client, so "Registration settings"
+  renders for every caller in the Instance section as the footer door did; the destination
+  refuses (Open Questions, 2026-09-14).
+- tailwind-merge drops a project `--text-*` role written into a `:ui` slot override
+  (`WorkspaceSwitcher`'s name, the breadcrumb links) — a central `ui.tv.twMergeConfig`
+  fix exists and is the owner's call, since it changes reviewed screens (`docs/TODO.md`
+  Findings and Open Questions, 2026-09-16).
+- The confirm-on-dirty pair in the dialog's footer is the placeholder for the shared
+  `useConfirm()` arriving on another branch.
+- Everything the 2026-09-15 entries carried forward and this batch did not touch: the
+  contextual (third) pane is still an overlay, the sidebar's resize handle is pointer-only,
+  the two-icon-pack requirement (§4.3) remains untested.
 
 ---
 
