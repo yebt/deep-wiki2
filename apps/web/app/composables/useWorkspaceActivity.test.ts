@@ -1,4 +1,5 @@
-import { describe, expect, test, vi } from 'vitest';
+import { beforeAll, describe, expect, test, vi } from 'vitest';
+import { useNuxtApp } from '#imports';
 import { useWorkspaceActivity, type WorkspaceActivityResponse } from './useWorkspaceActivity';
 
 function response(overrides: Partial<WorkspaceActivityResponse> = {}): WorkspaceActivityResponse {
@@ -8,6 +9,23 @@ function response(overrides: Partial<WorkspaceActivityResponse> = {}): Workspace
 function responseError(status: number) {
   return { response: { status } };
 }
+
+/**
+ * Every test reads its own id: the read layer (`useApiRead`) keeps one
+ * answer per key across screens — that is the cache — so two tests sharing
+ * an id would share an answer. And the test app never leaves hydration on
+ * its own (there is no server render to resolve), so each file says it is
+ * on the client, where `load()` fetches.
+ */
+let ids = 0;
+function nextId(prefix: string): string {
+  ids += 1;
+  return `${prefix}-${ids}`;
+}
+
+beforeAll(() => {
+  useNuxtApp().isHydrating = false;
+});
 
 describe('useWorkspaceActivity', () => {
   test('starts idle and lands in success with the three lists', async () => {
@@ -25,7 +43,7 @@ describe('useWorkspaceActivity', () => {
         ],
       }),
     );
-    const { status, recent, workspaceName, load } = useWorkspaceActivity('ws-1', fetcher);
+    const { status, recent, workspaceName, load } = useWorkspaceActivity(nextId('ws'), fetcher);
 
     expect(status.value).toBe('idle');
     await load();
@@ -33,7 +51,7 @@ describe('useWorkspaceActivity', () => {
     expect(status.value).toBe('success');
     expect(workspaceName.value).toBe('Acme');
     expect(recent.value[0]!.pageTitle).toBe('Roadmap');
-    expect(fetcher).toHaveBeenCalledWith('ws-1');
+    expect(fetcher).toHaveBeenCalledWith(expect.stringMatching(/^ws-\d+$/));
   });
 
   // A 401 is neither denial nor a dead connection: the person is signed
@@ -41,7 +59,7 @@ describe('useWorkspaceActivity', () => {
   // a retry that would 401 again. Before 2026-09-16 it fell through to
   // network-error and the screen said "Cannot reach the server".
   test('a 401 resolves to unauthenticated, not to a network error', async () => {
-    const { status, load } = useWorkspaceActivity('ws-1', vi.fn(async () => { throw responseError(401); }));
+    const { status, load } = useWorkspaceActivity(nextId('ws'), vi.fn(async () => { throw responseError(401); }));
     await load();
     expect(status.value).toBe('unauthenticated');
   });
@@ -50,17 +68,17 @@ describe('useWorkspaceActivity', () => {
   // one byte-identical 404 — a distinct `forbidden` here would undo that on
   // the one client that could tell.
   test('403 and 404 both land in not-found', async () => {
-    const forbidden = useWorkspaceActivity('ws-1', vi.fn(async () => { throw responseError(403); }));
+    const forbidden = useWorkspaceActivity(nextId('ws'), vi.fn(async () => { throw responseError(403); }));
     await forbidden.load();
     expect(forbidden.status.value).toBe('not-found');
 
-    const missing = useWorkspaceActivity('ws-1', vi.fn(async () => { throw responseError(404); }));
+    const missing = useWorkspaceActivity(nextId('ws'), vi.fn(async () => { throw responseError(404); }));
     await missing.load();
     expect(missing.status.value).toBe('not-found');
   });
 
   test('a dead connection is a recoverable network error with a message in the user\'s terms', async () => {
-    const { status, message, load } = useWorkspaceActivity('ws-1', vi.fn(async () => { throw new TypeError('fetch failed'); }));
+    const { status, message, load } = useWorkspaceActivity(nextId('ws'), vi.fn(async () => { throw new TypeError('fetch failed'); }));
     await load();
     expect(status.value).toBe('network-error');
     expect(message.value).toMatch(/connection/i);

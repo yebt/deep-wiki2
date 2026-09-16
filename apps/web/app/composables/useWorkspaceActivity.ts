@@ -1,4 +1,5 @@
 import type { WorkspaceActivityResponse } from '@deep-wiki/contracts';
+import { workspaceActivityKey } from '~/utils/api-keys';
 
 export type { WorkspaceActivityResponse } from '@deep-wiki/contracts';
 
@@ -8,11 +9,12 @@ export type WorkspaceActivityFetcher = (workspaceId: string) => Promise<Workspac
 
 export interface UseWorkspaceActivityResult {
   readonly status: Ref<WorkspaceActivityStatus>;
-  readonly workspaceName: Ref<string>;
-  readonly recent: Ref<WorkspaceActivityResponse['recent']>;
-  readonly mine: Ref<WorkspaceActivityResponse['mine']>;
-  readonly threads: Ref<WorkspaceActivityResponse['threads']>;
-  readonly message: Ref<string>;
+  readonly workspaceName: ComputedRef<string>;
+  readonly recent: ComputedRef<WorkspaceActivityResponse['recent']>;
+  readonly mine: ComputedRef<WorkspaceActivityResponse['mine']>;
+  readonly threads: ComputedRef<WorkspaceActivityResponse['threads']>;
+  readonly message: ComputedRef<string>;
+  /** Fetch, or — with the dashboard already on screen — refresh behind it. */
   readonly load: () => Promise<void>;
 }
 
@@ -25,50 +27,41 @@ export interface UseWorkspaceActivityResult {
  * `useBookHistory` does: the route answers both with a byte-identical 404,
  * and a distinct `forbidden` branch here would undo that on the one client
  * that happened to see a 403.
+ *
+ * The answer lives in the read layer (`useApiRead`, keyed by
+ * `workspaceActivityKey`): server-rendered when the request can be
+ * authenticated, kept across screens so coming back to the dashboard
+ * renders the lists from memory and refreshes behind them, and cleared by
+ * `useSavePage` — a save is the newest "what changed".
  */
 export function useWorkspaceActivity(workspaceId: string, fetcher?: WorkspaceActivityFetcher): UseWorkspaceActivityResult {
   const get =
     fetcher ??
     ((id: string) => {
-      const config = useRuntimeConfig();
-      return $fetch<WorkspaceActivityResponse>(`${config.public.apiBaseUrl}/workspaces/${id}/activity`, { credentials: 'include' });
+      const api = useApiClient();
+      return api<WorkspaceActivityResponse>(`/workspaces/${id}/activity`);
     });
 
-  const status = ref<WorkspaceActivityStatus>('idle');
-  const workspaceName = ref('');
-  const recent = ref<WorkspaceActivityResponse['recent']>([]);
-  const mine = ref<WorkspaceActivityResponse['mine']>([]);
-  const threads = ref<WorkspaceActivityResponse['threads']>([]);
-  const message = ref('');
+  const read = useApiRead<WorkspaceActivityResponse>(workspaceActivityKey(workspaceId), () => get(workspaceId));
+  const status = useReadStatus(read, (code) => {
+    // Signed out: the screen's next move is sign-in, not a retry
+    // (`useSignInRedirect`). Only the browser ever sees it — a 401 during
+    // the server's render is "nothing known" (useApiRead).
+    if (code === 401) return 'unauthenticated';
+    return code === 403 || code === 404 ? 'not-found' : 'network-error';
+  });
 
-  async function load(): Promise<void> {
-    status.value = 'loading';
-    try {
-      const response = await get(workspaceId);
-      workspaceName.value = response.workspace.name;
-      recent.value = response.recent;
-      mine.value = response.mine;
-      threads.value = response.threads;
-      status.value = 'success';
-      message.value = '';
-    } catch (error) {
-      const code = httpStatusOf(error);
-      // Signed out: the screen's next move is sign-in, not a retry
-      // (`useSignInRedirect`), so this is never the network branch.
-      if (code === 401) {
-        status.value = 'unauthenticated';
-        message.value = 'Your session has ended.';
-        return;
-      }
-      if (code === 403 || code === 404) {
-        status.value = 'not-found';
-        message.value = 'This workspace does not exist.';
-      } else {
-        status.value = 'network-error';
-        message.value = 'Cannot reach the server. Check your connection and try again.';
-      }
-    }
-  }
+  const value = computed(() => (read.outcome.value?.ok ? read.outcome.value.value : null));
+  const workspaceName = computed(() => value.value?.workspace.name ?? '');
+  const recent = computed(() => value.value?.recent ?? []);
+  const mine = computed(() => value.value?.mine ?? []);
+  const threads = computed(() => value.value?.threads ?? []);
+  const message = computed(() => {
+    if (status.value === 'unauthenticated') return 'Your session has ended.';
+    if (status.value === 'not-found') return 'This workspace does not exist.';
+    if (status.value === 'network-error') return 'Cannot reach the server. Check your connection and try again.';
+    return '';
+  });
 
-  return { status, workspaceName, recent, mine, threads, message, load };
+  return { status, workspaceName, recent, mine, threads, message, load: read.load };
 }
