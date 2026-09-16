@@ -22,3 +22,6 @@ export { isInsideCodeBlock, matchTrigger } from './trigger';
 export type { TriggerMatch } from './trigger';
 
 export { buildInputRules } from './input-rules';
+
+export { buildEditorPlugins, DROP_CURSOR_CLASS } from './plugins';
+export type { BuildEditorPluginsOptions } from './plugins';

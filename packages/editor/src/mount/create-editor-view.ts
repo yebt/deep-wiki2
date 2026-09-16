@@ -17,15 +17,13 @@
  * slash-plugin.ts for the DOM-independent state-machine logic this
  * factory only wires together.
  */
-import { inputRules } from 'prosemirror-inputrules';
 import { Node } from 'prosemirror-model';
 import { EditorState } from 'prosemirror-state';
 import { EditorView } from 'prosemirror-view';
 import { schema } from '../schema';
-import { buildInputRules } from './input-rules';
-import { buildHistory, buildKeymap } from './keymap';
-import { createMentionPlugin, insertMention, type MentionPluginOptions } from './mention-plugin';
-import { createSlashPlugin, type SlashPluginOptions } from './slash-plugin';
+import { insertMention, type MentionPluginOptions } from './mention-plugin';
+import { buildEditorPlugins } from './plugins';
+import type { SlashPluginOptions } from './slash-plugin';
 
 export interface CreateEditorViewOptions {
   readonly dom: HTMLElement;
@@ -51,19 +49,21 @@ export interface CreateEditorViewOptions {
  * MUST reserve its height before this rule is satisfied for it too.
  */
 export function createEditorView(options: CreateEditorViewOptions): EditorView {
-  const mentionPlugin = createMentionPlugin({
-    ...options.mention,
-    onConfirm: (candidate, range, tr) => {
-      options.mention?.onConfirmed?.(candidate);
-      return insertMention(candidate, range, tr);
-    },
-  });
-  const slashPlugin = createSlashPlugin(options.slash);
-
   const state = EditorState.create({
     schema,
     doc: options.doc,
-    plugins: [buildKeymap(), buildHistory(), inputRules({ rules: buildInputRules(schema) }), mentionPlugin, slashPlugin],
+    // The list itself (order, gap cursor, drop cursor) lives in plugins.ts
+    // where `bun test` can reach it; this DOM-bound file only installs it.
+    plugins: buildEditorPlugins({
+      mention: {
+        ...options.mention,
+        onConfirm: (candidate, range, tr) => {
+          options.mention?.onConfirmed?.(candidate);
+          return insertMention(candidate, range, tr);
+        },
+      },
+      slash: options.slash,
+    }),
   });
 
   let transactionCount = 0;
