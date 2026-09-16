@@ -59,6 +59,21 @@ function presenceFrame(payload: {
 }
 
 /**
+ * The frame around the mocked page: the sidebar's tree. With a session
+ * token the real API does not know, `GET /workspaces/:id/tree` answers
+ * 401, and since 2026-09-16 the tree's own signed-out rule
+ * (`useSignInRedirect`) then leaves the whole screen for sign-in — the
+ * page under test unmounts, its stream with it, a second or two after it
+ * opened. An empty tree keeps the frame quiet; nothing here is about the
+ * tree.
+ */
+function mockFrame(page: Page): Promise<void> {
+  return page.route(`${apiOrigin()}/workspaces/${WORKSPACE_ID}/tree`, (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ rootId: 'root-presence-e2e', nodes: [] }) }),
+  );
+}
+
+/**
  * A presence stream whose content can change between reconnects: real
  * `EventSource` reconnects on its own once a response ends (the `retry:`
  * field below shortens that to 250ms so the test does not wait out the
@@ -94,6 +109,7 @@ test('a displaced editor is shown, by name and since when, who now holds the pag
   await signIn(pageA, 'e2e-presence-a-token');
 
   const bHolder: { current: { userId: string; userDisplayName: string; since: string } | null } = { current: null };
+  await mockFrame(pageA);
   await mockPresenceStream(pageA, bHolder);
   await pageA.route(`${apiOrigin()}/pages/${PAGE_ID}/edit-session`, (route) =>
     route.fulfill({
@@ -124,6 +140,7 @@ test('a displaced editor is shown, by name and since when, who now holds the pag
   const contextB = await browser.newContext();
   const pageB = await contextB.newPage();
   await signIn(pageB, 'e2e-presence-b-token');
+  await mockFrame(pageB);
   await pageB.route(`${apiOrigin()}/pages/${PAGE_ID}/edit-session`, (route) =>
     route.fulfill({
       status: 409,
@@ -200,6 +217,7 @@ test('stale presence expires visibly once its heartbeat window lapses, tied to t
   const holder: { current: { userId: string; userDisplayName: string; since: string } | null } = {
     current: { userId: 'user-b', userDisplayName: 'User B', since: new Date().toISOString() },
   };
+  await mockFrame(page);
   await mockPresenceStream(page, holder);
   await page.route(`${apiOrigin()}/pages/${PAGE_ID}/edit-session`, (route) =>
     route.fulfill({
@@ -237,6 +255,7 @@ test('a reader sees who is editing the page, and since when, without acquiring a
   await signIn(page, 'e2e-presence-reader-token');
 
   const since = new Date().toISOString();
+  await mockFrame(page);
   await mockPresenceStream(page, { current: { userId: 'user-b', userDisplayName: 'User B', since } });
   const lockRequests: string[] = [];
   page.on('request', (request) => {
