@@ -3,11 +3,20 @@
  * directory) is reachable, bringing it up via `podman|docker compose` if
  * neither is. Mirrors packages/db/testing/provision.ts's fixed-argument-
  * vector, bounded-timeout compose invocation (no shell, no user-supplied
- * token) — but there is nothing to provision per-suite or drop here, both
- * containers are stateless dev tooling.
+ * token) — and, since 2026-09-16, its one bounded retry: a container
+ * compose created and never started is started before the failure is
+ * raised (`@deep-wiki/db/testing/containers`). There is nothing to
+ * provision per-suite or drop here, both containers are stateless dev
+ * tooling.
  */
 import { createHash, createHmac } from 'node:crypto';
 import { connect } from 'node:net';
+import {
+  listProjectContainers,
+  restartStalledStack,
+  startContainers,
+  type ProjectContainer,
+} from '@deep-wiki/db/testing/containers';
 import {
   apiComposeEnv,
   composeEnvPrefix,
@@ -17,7 +26,7 @@ import {
 } from '@deep-wiki/db/testing/worktree';
 
 export const COMPOSE_DIR = import.meta.dir;
-const COMPOSE_TIMEOUT_MS = 90_000;
+export const COMPOSE_TIMEOUT_MS = 90_000;
 
 // Ports, the compose project name and the bucket are per-worktree so two
 // git worktrees can run their suites at the same time; the main checkout
@@ -77,18 +86,13 @@ async function servicesReachable(): Promise<boolean> {
 }
 
 /**
- * Brings up the Mailpit/MinIO test stack if it is not already reachable.
- * Never skips — throws with the exact manual command on total failure,
- * same idiom as packages/db/testing/provision.ts (design.md D15).
- */
-/**
  * Turns "compose timed out" into a sentence that names the container in
  * the way, so a slot collision between two worktrees does not masquerade
  * as a broken Mailpit.
  */
-function foreignOwnerMessage(binary: ContainerRuntime): string | undefined {
+function foreignOwnerMessage(binary: ContainerRuntime, psOutput: string): string | undefined {
   const foreign = findForeignPortOwner(
-    listPortOwners(binary),
+    psOutput,
     [HARNESS.ports.mailpitSmtp, HARNESS.ports.mailpitHttp, HARNESS.ports.minioApi, HARNESS.ports.minioConsole],
     HARNESS.apiProjectName,
   );
@@ -108,19 +112,28 @@ function manualCommand(binary: ContainerRuntime): string {
   return `(cd apps/api/testing && ${composeEnvPrefix(apiComposeEnv(HARNESS))} ${binary} compose up -d --wait)`;
 }
 
-export async function ensureTestServices(): Promise<void> {
-  if (await servicesReachable()) {
-    return;
-  }
+export interface SpawnResult {
+  readonly code: number | null;
+  readonly timedOut: boolean;
+}
 
-  const binary = detectContainerRuntime();
-  if (!binary) {
-    throw new Error(
-      'apps/api/testing: no container runtime found on PATH (podman or docker). ' +
-        `Run ${manualCommand('podman')} manually.`,
-    );
-  }
+/** Every touch of the host, injectable so the retry logic is testable without a container runtime. */
+export interface EnsureTestServicesDeps {
+  /** Whether Mailpit and MinIO both answer on this worktree's ports. */
+  reachable(): Promise<boolean>;
+  detectRuntime(): ContainerRuntime | undefined;
+  runCompose(binary: ContainerRuntime, timeoutMs: number): Promise<SpawnResult>;
+  /** This project's containers in any state, asked only once compose has already failed. */
+  projectContainers(binary: ContainerRuntime): ProjectContainer[];
+  /** `podman|docker start <names>`: true when the runtime accepted it. */
+  startContainers(binary: ContainerRuntime, names: readonly string[]): boolean;
+  /** `podman|docker ps` output, used only to name a port's real owner. */
+  portOwners(binary: ContainerRuntime): string;
+  /** Where the one retry announces itself. */
+  log(message: string): void;
+}
 
+async function defaultRunCompose(binary: ContainerRuntime, timeoutMs: number): Promise<SpawnResult> {
   const proc = Bun.spawn([binary, 'compose', 'up', '-d', '--wait'], {
     cwd: COMPOSE_DIR,
     // The compose project name travels in COMPOSE_PROJECT_NAME, not a -p
@@ -136,23 +149,74 @@ export async function ensureTestServices(): Promise<void> {
   const timer = setTimeout(() => {
     timedOut = true;
     proc.kill();
-  }, COMPOSE_TIMEOUT_MS);
-  // `podman-compose`'s reported exit code for `up -d --wait` is not a
-  // reliable success signal on this host (observed returning a nonzero
-  // code even once both containers report healthy) — the only trustworthy
-  // signal is whether the services actually answer, checked below.
-  await proc.exited;
+  }, timeoutMs);
+  const code = await proc.exited;
   clearTimeout(timer);
+  return { code, timedOut };
+}
 
-  if (timedOut || !(await servicesReachable())) {
-    const collision = foreignOwnerMessage(binary);
+export const defaultServiceDeps: EnsureTestServicesDeps = {
+  reachable: servicesReachable,
+  detectRuntime: () => detectContainerRuntime(),
+  runCompose: defaultRunCompose,
+  projectContainers: (binary) => listProjectContainers(binary, HARNESS.apiProjectName),
+  startContainers,
+  portOwners: (binary) => listPortOwners(binary),
+  log: (message) => console.warn(`apps/api/testing: ${message}`),
+};
+
+/**
+ * Brings up the Mailpit/MinIO test stack if it is not already reachable.
+ * Never skips — throws with the exact manual command on total failure,
+ * same idiom as packages/db/testing/provision.ts (design.md D15).
+ *
+ * `podman-compose`'s reported exit code for `up -d --wait` is not a
+ * reliable success signal on this host (observed returning a nonzero
+ * code even once both containers report healthy) — the only trustworthy
+ * signal is whether the services actually answer. And when they do not,
+ * what compose left behind is started once before giving up: seen
+ * 2026-09-16 under load, `up` exited 125 with both containers in
+ * `Created`, and every later `up` against the same project name failed
+ * the same way until a human ran the printed command.
+ */
+export async function ensureTestServices(
+  deps: EnsureTestServicesDeps = defaultServiceDeps,
+  timeoutMs: number = COMPOSE_TIMEOUT_MS,
+): Promise<void> {
+  if (await deps.reachable()) {
+    return;
+  }
+
+  const binary = deps.detectRuntime();
+  if (!binary) {
     throw new Error(
-      collision
-        ? `apps/api/testing: ${collision}`
-        : `apps/api/testing: ${binary} compose did not bring up a reachable Mailpit/MinIO within ` +
-          `${COMPOSE_TIMEOUT_MS}ms. Run ${manualCommand(binary)} manually to see the underlying error.`,
+      'apps/api/testing: no container runtime found on PATH (podman or docker). ' +
+        `Run ${manualCommand('podman')} manually.`,
     );
   }
+
+  const result = await deps.runCompose(binary, timeoutMs);
+  if (!result.timedOut && (await deps.reachable())) {
+    return;
+  }
+
+  const healed = await restartStalledStack(binary, HARNESS.apiProjectName, timeoutMs, {
+    projectContainers: deps.projectContainers,
+    startContainers: deps.startContainers,
+    reachable: deps.reachable,
+    log: deps.log,
+  });
+  if (healed) {
+    return;
+  }
+
+  const collision = foreignOwnerMessage(binary, deps.portOwners(binary));
+  throw new Error(
+    collision
+      ? `apps/api/testing: ${collision}`
+      : `apps/api/testing: ${binary} compose did not bring up a reachable Mailpit/MinIO within ` +
+        `${timeoutMs}ms. Run ${manualCommand(binary)} manually to see the underlying error.`,
+  );
 }
 
 const EMPTY_PAYLOAD_SHA256 = createHash('sha256').update('').digest('hex');
