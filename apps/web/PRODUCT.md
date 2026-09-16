@@ -62,16 +62,12 @@ orphan handling — started from read mode on any paragraph or heading, replied 
 last workspace), focus mode (`Ctrl`/`⌘`+`\`) and a per-browser comments toggle on the read
 screen.
 
-Not yet: deleting anything (three open questions), starting a thread from read mode,
-self-registration that leads anywhere (no default plan), clickable wiki-links, backlinks or
-tags in the UI, logout, diagram/image/SVG rendering (Phase 4), any AI or MCP surface
+Not yet: deleting anything (three open questions), commenting on a list, code block, table or
+raw-HTML block, self-registration that leads anywhere (no default plan), clickable wiki-links,
+backlinks or tags in the UI, logout, diagram/image/SVG rendering (Phase 4), any AI or MCP surface
 (Phases 5, 7), a `Ctrl`/`⌘`+`K` command palette, ZEN mode, user-contributed colour themes, and
 the workspace dashboard as bookshelves with user-chosen book colours and covers (owner
 decisions, 2026-09-16 — `docs/TODO.md` Phase 3.5).
-Not yet: deleting anything (three open questions), commenting on a list, code block, table or
-raw-HTML block, self-registration that leads anywhere (no default plan), clickable wiki-links,
-backlinks or tags in the UI, logout, diagram rendering (Phase 4), any AI or MCP surface
-(Phases 5, 7).
 
 Technical constraints that bind every screen: Nuxt 4 + Nuxt UI v4 on Bun; `packages/core`
 has zero framework imports; one markdown parser; the ProseMirror document is a view, never
