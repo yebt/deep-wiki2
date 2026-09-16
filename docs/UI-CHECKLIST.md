@@ -1487,4 +1487,50 @@ for a script focus that follows a pointer; a keyboard user gets the ring.
 
 ---
 
+### 2026-09-16 — The last three e2e failures: the smoke test's stale landmarks, the drag the focus handoff killed, the compose stack left `Created` — awaiting the owner's eye
+
+**Reviewer:** none yet — this entry is what was shipped for review, not a review.
+**Verdict:** Pending
+
+Three items on `fix/final-e2e-regressions`, one commit each, the failing e2e as the red and a
+unit test where the cause lives (`docs/TODO.md` Findings, 2026-09-16, "Three e2e failures left
+on `main`", has the measurements). One touches what a person sees; one touches only the test;
+one is the harness.
+
+1. **The smoke test asked the sign-in screen for an app bar.** `AuthShell` renders none, on
+   purpose (this log's 2026-09-15 entries; `docs/DESIGN-SYSTEM.md` §14): a person who has not
+   signed in is not inside the product. The screen was **not** changed to satisfy the test.
+   `e2e/smoke.spec.ts` now proves the boot as it is: `/` signed out lands on `/login?next=
+   /workspaces`, the sign-in `h1` in the one `main`, **no** `banner`/`contentinfo`/`navigation`
+   and no link named for the product (§5's landmarks, inverted for a screen that must not have
+   them), the theme toggle changing two painted properties — the app ground and the Filled
+   button — and, new, the same screen at 320 with `expectNoHorizontalOverflow` (§6).
+   `fb-fix2-front-door-{1280-light,1280-dark,320-light}.png`.
+2. **A page row could not be dragged with a mouse.** The previous entry's fix 2 handed focus
+   from the row's link to the `treeitem` on the link's `focus` event; Chromium cancels a link's
+   native drag when its mousedown moves focus, so `dragstart` never fired — every mouse
+   reorder of a page row was gone, while the keyboard's `Alt`+arrows (§5's stated equivalent)
+   and the context menu still worked. The handoff now happens on the **click, before the
+   link acts** (capture phase — in the bubbling phase the dirty-editor dialog had already
+   opened and trapped focus, `e2e/editor.spec.ts` caught it) and at the **end of a drag**: a
+   click on the title still leaves the tree's one tab stop where focus is (§4.1's
+   hand-rolled-primitive contract, §5) and `ConfirmDialog` still returns focus to the row; a
+   drag from the title now lands, and ends with the dragged row's `treeitem` focused
+   (asserted in `e2e/tree-writes.spec.ts`'s review material) — and therefore drawn as the
+   selected row, since the tree's focus is its selection (the row's `focus` emits `activate`):
+   after a drag the dragged row carries the `secondary-container` fill, where before the row
+   it was dragged from kept it. `fb-fix2-tree-after-drag-{1280-light,1280-dark,320-light}.png`
+   show the row after a refused drag, with the notice beside the tree.
+3. The e2e harness's own containers: `podman compose up -d --wait` left a container in
+   `Created` under load and every later run failed the same way; provisioning now starts what
+   compose left behind, once, before raising the failure with its manual command. Not a
+   screen.
+
+**Known before review, not fixed:** after a drag from a page row's link the `treeitem` holds
+focus but Chrome draws no `:focus-visible` ring for a script focus that follows a pointer (the
+previous entry's Cancel case, again); the stacking of the 320 drawer over "Leave without
+saving?" from the previous entry; the two-icon-pack requirement (§4.3) remains untested.
+
+---
+
 *The next entry goes below this one.*

@@ -534,6 +534,117 @@ makes conventions portable across projects.
 
 Discoveries and constraints. Newest first.
 
+### 2026-09-16 — Three e2e failures left on `main` after the regression batch: a stale smoke test, a drag the focus handoff killed, and a compose stack that stayed `Created`
+
+**What happened.** `main` at `d6dcb8a` still failed two e2e specs alone, and the harness that
+provisions the e2e's own containers failed a third way under load — three verifiers that day
+ran the printed manual command by hand. Fixed on `fix/final-e2e-regressions` (worktree
+`fb-fix2`), one commit each, the failing e2e as the red and a unit test where the cause lives.
+Screenshots `fb-fix2-front-door-{1280-light,1280-dark,320-light}.png` and
+`fb-fix2-tree-after-drag-{1280-light,1280-dark,320-light}.png` in the session scratchpad,
+`expectNoHorizontalOverflow` measured on each.
+
+1. **`e2e/smoke.spec.ts`: `getByRole('banner')` timed out.** The test was written for a `/`
+   that landed a stranger on the workspace list inside the app chrome. Since the owner's
+   2026-09-16 review (`feat/frame-review-shell`) a signed-out `/` goes `/workspaces` →
+   `/login?next=/workspaces`, and `AuthShell` deliberately renders no `banner`, no
+   `contentinfo`, no `navigation` — a person who has not signed in is not inside the product
+   (the shell's own comment; `docs/DESIGN-SYSTEM.md` §14, 2026-09-15). The test was stale, not
+   the screen, so the screen was not changed to satisfy it. Rewritten to prove what a boot is
+   now: the redirect chain lands on the sign-in `h1` in the one `main`, **with none of the app
+   chrome** (the old landmark assertions inverted to `toHaveCount(0)` — an app bar on the
+   sign-in screen would be the chrome leaking onto a stranger's screen), and the theme toggle
+   changes what is painted, measured on two real properties: the app ground (`body`,
+   `docs/DESIGN-SYSTEM.md` §8.3) and the one Filled button (`primary` is tone 40 light / 70
+   dark), so both tone tables are proven loaded rather than one plus a class flip. A second
+   test lands the same screen at 320 and measures no sideways overflow — the smoke never had a
+   phone-width check.
+
+2. **`e2e/tree-writes.spec.ts`: the dragged row never moved (order still `Page One, Page Two`
+   while the `PATCH` was held).** The spec was 6/6 on `fix/frame-followups`; on `main` it failed
+   on the first drag. Bisected by hand: the only tree change in the range is `ba82a37`, the
+   regression batch's own fix 2, which handed focus arriving on a page row's link to the
+   `treeitem` from the link's `focus` event (`onLinkFocus`). **Chromium cancels the native drag
+   of a link whose mousedown moves focus elsewhere.** Reproduced in isolation with Playwright on
+   a bare page (an `<a tabindex="-1">` inside a `draggable` row, a focus handler that calls
+   `li.focus()`): with the handoff no `dragstart` fires and no drop lands; without it the same
+   drag lands `drop-data:row2`; deferring the handoff to a microtask changes nothing; deferring
+   it to `setTimeout(0)` or `requestAnimationFrame` lets the drag start; `preventDefault()` on
+   the link's mousedown also kills the drag. So the move is fine — the *moment* was wrong: a
+   focus change inside the mousedown's own focus step is what Chromium reads as "this press is
+   not a drag". The drop path (`NavigationTree.onDrop`, the below-self normalisation, the drawn
+   slot) was never involved; the pointer's drag never started. Fixed in `NavigationTreeNode.vue`:
+   the handoff moved from the link's `focus` to the **click, in the capture phase** (a drag
+   never produces a click) and to **`dragend`** (so a drag from the link also leaves the tree's
+   tab stop where focus is). The `activate` emit on a link click now comes from the item's own
+   `focus` handler, once. Capture and not bubble, found by the second attempt: the row's
+   bubbling `click` ran with focus already inside "Leave without saving?" — a *native* click
+   runs the microtask queue between its listeners, so by the time the row's handler ran, the
+   link's `router.push` had run `onBeforeRouteLeave`, `confirm()` had set the pending question,
+   Vue had flushed, the dialog had recorded `document.activeElement` (the link) as the control
+   that asked, and its focus trap pulled the row's late `focus()` straight back (traced with
+   capture-phase `focusin`/`focusout` listeners and a console probe: `focusItem` saw the dialog's
+   button as the active element). A synthetic `.click()` runs no microtasks between listeners,
+   which is why the bubbling version's unit test passed while `e2e/editor.spec.ts`'s Cancel
+   test failed `toBeFocused()` with `inactive`. The unit test now records `document.activeElement`
+   from a listener on the link itself and expects the row. Unit tests on the node: focus
+   arriving on the link stays on the link; a click puts focus on the row before the link's own
+   handler runs; a drag's end hands it to the row. The e2e review material now asserts the
+   dragged row's `treeitem` is focused after a refused drag. The 2026-09-16 "Integration
+   regressions" entry's fix 2 above still holds — the dialog still finds the row — by a
+   different route.
+
+3. **`packages/db/testing/provision.ts` and `apps/api/testing/services.ts`: `podman compose up
+   -d --wait` exits 125 (or is killed at the 90 s bound) leaving the container in `Created`, and
+   every later attempt fails fast.** Reproduced on this worktree's first run: the api stack's
+   two containers `Created` after the 90 s timeout, then the db stack's postgres `Created` with
+   exit 125 in seconds; running the printed command by hand started each in 3–4 s and reported
+   it healthy, and a fresh project name on an idle host came up first try. `podman-compose`
+   1.6.0 creates the container and then starts it; under load the start step fails or is cut
+   off, and the deterministic per-worktree project name means the next `up` meets the same
+   created-but-not-running container and fails the same way. What the human does — start the
+   container that is already there — the harness now does itself, once, logged:
+   `packages/db/testing/containers.ts` (Node APIs only, exported as
+   `@deep-wiki/db/testing/containers`) lists the project's containers by the compose label
+   (`podman ps -a --filter label=com.docker.compose.project=<name>`), `start`s the ones in
+   `created`/`exited`/`stopped`, and polls the caller's own reachability probe up to the same
+   timeout; a running-but-not-yet-healthy container is waited for, not restarted; nothing left
+   behind, a refused `start`, or a container that never answers still throws the original
+   failure with the exact manual command. Both provisioning modules take the retry through
+   injected deps (`ResolveAdminUrlDeps` gains `projectContainers`/`startContainers`/`log`;
+   `ensureTestServices` gains an injectable `EnsureTestServicesDeps`, which it never had), so
+   `provision.test.ts`, the new `services.test.ts` and `containers.test.ts` cover healthy first
+   try (the runtime is never asked what it left behind), `Created` → started → healthy, running
+   → waited for, and genuine failure. The happy path is unchanged and never runs `podman ps`.
+   `scripts/checks/compose.ts` untouched and green.
+
+**Found on the way, not fixed.** The Chromium behaviour in 2 is undocumented as far as the
+tree's comments can cite: it is stated from measurement (the bare-page reproduction), not from
+a spec. The microtask-between-listeners behaviour, by contrast, is the HTML spec's ("clean up
+after running script" runs a microtask checkpoint whenever the script stack empties, which it
+does between the listeners of a browser-dispatched event and not between those of a synthetic
+one) — worth knowing for any handler that races a navigation guard: a unit test with
+`dispatchEvent` cannot see the race. After a drag from the link the `treeitem` is focused but Chrome draws no
+`:focus-visible` ring for a script focus that follows a pointer — the same as after Cancel in
+the previous entry. And the *cause* of the 125 under load is still unobserved: compose's
+stderr is discarded by the harness (`stderr: 'ignore'`), so what podman said when it refused to
+start the container is not recorded; the retry heals the symptom.
+
+**Stages** (each its own process, the host otherwise idle): `bun run check` 11/11 ok;
+`bun run typecheck` 0 errors in every member; `bun run lint` clean; `bun run -F @deep-wiki/db
+test` 444 pass / 0 fail across 50 files (the real provisioning path, against this worktree's
+own Postgres); `bun run -F @deep-wiki/web test` 105 files / 952 tests passed; `bun run e2e --
+e2e/smoke.spec.ts e2e/tree-writes.spec.ts e2e/tree.spec.ts e2e/navigation.spec.ts
+e2e/editor.spec.ts` 52 passed, 1 failed, 2 did not run — the failure
+`e2e/editor.spec.ts:1180` ("the drawer's toolbar row fills its width", 320): its poll saw
+`Rename…` end at the row's edge and the measurement taken right after read 9.7px short, so
+the drawer's row changed width once more after the poll settled (the previous batch's
+`a979038` polled for exactly this and the window is wider than one settle); the two that did
+not run are that serial group's last two (the confirm dialog at 1280 dark and 320 light).
+`bun run e2e -- e2e/editor.spec.ts` alone straight after: 26/26 passed, those three included.
+The drawer test is a pre-existing flake unrelated to these three items and is recorded here,
+not retried into passing inside the run.
+
 ### 2026-09-16 — Integration regressions after the eight merges
 
 **What happened.** `main` at `cc88265` (`v0.5.0-rc.8`) merged eight branches in one day. Each
