@@ -544,6 +544,117 @@ describe('edit-mode page', () => {
     });
   });
 
+  /**
+   * Undo and redo stand in the bar beside Save (docs/TODO.md Findings
+   * 2026-09-16, "the `/mount` API"): icon-only, so a name and a tooltip
+   * naming the keys (§4.3); `aria-disabled` with the reason while the
+   * history is empty on that side (§3, §5), from the depths the surface
+   * reports after every transaction; a click runs the surface's own
+   * command, the same one `Ctrl+Z` runs inside it.
+   */
+  describe('Undo and Redo in the contextual bar', () => {
+    const undo = vi.fn();
+    const redo = vi.fn();
+    const flush = vi.fn();
+    /** The surface with its exposed commands, so the bar's click has something real to call. */
+    const SurfaceStub = defineComponent({
+      name: 'EditorSurface',
+      emits: ['update', 'history'],
+      setup(_, { expose }) {
+        expose({ undo, redo, flush, focus: vi.fn() });
+        return () => h('div', { 'data-testid': 'editor-surface-stub' });
+      },
+    });
+
+    async function mountReady() {
+      undo.mockReset();
+      redo.mockReset();
+      flush.mockReset();
+      loadEditorMountMock.mockResolvedValue({});
+      mockDefaults();
+      mockSession({ status: 'ready', session: READY_SESSION });
+      return mountSuspended(PageInApp, { global: { stubs: { EditorSurface: SurfaceStub, WorkspaceSidebar: true } } });
+    }
+
+    function bar(component: Awaited<ReturnType<typeof mountReady>>) {
+      return component.get('#content-bar');
+    }
+
+    // Save reads what the surface last reported, 300ms after the last
+    // keystroke; flushing first closes that window (docs/TODO.md, "a
+    // dirty editor has a 300ms blind spot").
+    test('Save asks the surface to report its pending document before it reads the buffer', async () => {
+      const component = await mountReady();
+      const surface = component.findComponent({ name: 'EditorSurface' });
+      surface.vm.$emit('update', '# Hi\n\nedited\n');
+      await component.vm.$nextTick();
+
+      await bar(component).findAll('button').find((button) => /^Save/.test(button.text()))!.trigger('click');
+
+      expect(flush).toHaveBeenCalledTimes(1);
+    });
+
+    test('both stand in the bar before Save, named, with the keys stated for assistive technology', async () => {
+      const component = await mountReady();
+
+      const buttons = bar(component).findAll('button');
+      const names = buttons.map((button) => button.attributes('aria-label') ?? button.text());
+      const undoIndex = names.indexOf('Undo');
+      const redoIndex = names.indexOf('Redo');
+      const saveIndex = names.findIndex((name) => /^Save/.test(name));
+      expect(undoIndex).toBeGreaterThanOrEqual(0);
+      expect(redoIndex).toBe(undoIndex + 1);
+      expect(saveIndex).toBeGreaterThan(redoIndex);
+      expect(buttons[undoIndex]!.attributes('aria-keyshortcuts')).toMatch(/^(Control|Meta)\+Z$/);
+      expect(buttons[redoIndex]!.attributes('aria-keyshortcuts')).toMatch(/^(Control|Meta)\+Shift\+Z$/);
+    });
+
+    test('are aria-disabled with a reason while there is nothing on that side of the history, and never removed from the tab order', async () => {
+      const component = await mountReady();
+
+      const undoButton = bar(component).get('button[aria-label="Undo"]');
+      const redoButton = bar(component).get('button[aria-label="Redo"]');
+      expect(undoButton.attributes('aria-disabled')).toBe('true');
+      expect(redoButton.attributes('aria-disabled')).toBe('true');
+      expect(undoButton.attributes('disabled')).toBeUndefined();
+      expect(redoButton.attributes('disabled')).toBeUndefined();
+      // The reason is the tooltip's text — Reka opens it on focus as on
+      // hover and names it in `aria-describedby` while open (measured in
+      // `e2e/editor.spec.ts` for the sidebar toggle). Its trigger stamps
+      // `data-state` on the control it names.
+      expect(undoButton.attributes('data-state')).toBeDefined();
+      expect(redoButton.attributes('data-state')).toBeDefined();
+      const tooltipTexts = component.findAllComponents({ name: 'UTooltip' }).map((tooltip) => String(tooltip.props('text')));
+      expect(tooltipTexts.some((text) => /nothing to undo/i.test(text))).toBe(true);
+      expect(tooltipTexts.some((text) => /nothing to redo/i.test(text))).toBe(true);
+
+      await undoButton.trigger('click');
+      expect(undo).not.toHaveBeenCalled();
+    });
+
+    test('wake up from the depths the surface reports, and a click runs the surface\'s command', async () => {
+      const component = await mountReady();
+      const surface = component.findComponent({ name: 'EditorSurface' });
+
+      surface.vm.$emit('history', { undoDepth: 2, redoDepth: 0 });
+      await component.vm.$nextTick();
+
+      const undoButton = bar(component).get('button[aria-label="Undo"]');
+      const redoButton = bar(component).get('button[aria-label="Redo"]');
+      expect(undoButton.attributes('aria-disabled')).toBeUndefined();
+      expect(redoButton.attributes('aria-disabled')).toBe('true');
+
+      await undoButton.trigger('click');
+      expect(undo).toHaveBeenCalledTimes(1);
+
+      surface.vm.$emit('history', { undoDepth: 1, redoDepth: 1 });
+      await component.vm.$nextTick();
+      expect(redoButton.attributes('aria-disabled')).toBeUndefined();
+      await redoButton.trigger('click');
+      expect(redo).toHaveBeenCalledTimes(1);
+    });
+  });
+
   // docs/UI-CHECKLIST.md §4.1: the six save banners were six hand-rolled
   // `div.rounded-md.px-3.py-2.text-body-small` — the chip tier, copied.
   // Every one of them is now `InlineNotice tier="chip"`, so a shape change

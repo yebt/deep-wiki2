@@ -29,8 +29,19 @@
  */
 import type { MentionCandidate, MentionState, SlashState } from '@deep-wiki/editor';
 import type { EditorView } from 'prosemirror-view';
-import { loadEditorMount } from '~/utils/editor-mount';
-import { positionMenu } from '~/utils/menu-position';
+import {
+  blockTunesMenu,
+  caretBlock,
+  currentTurnIntoTarget,
+  placeCaretIn,
+  slashCommandIcon,
+  TURN_INTO_TARGET_IDS,
+  type BlockLike,
+  type TunesActions,
+  type TunesItem,
+} from '~/utils/block-tunes';
+import { loadEditorMount, type EditorMountModule } from '~/utils/editor-mount';
+import { positionMenu, positionToolbar } from '~/utils/menu-position';
 
 const props = defineProps<{
   markdown: string;
@@ -39,12 +50,20 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
+  /** The document as markdown, 300ms after the last transaction. */
   update: [markdown: string];
+  /**
+   * The history plugin's own depths after every transaction, undebounced
+   * — what the contextual bar's Undo and Redo disable from
+   * (`editor-commands.ts`, `EditorUpdate`). Read from the plugin's
+   * counters, never inferred from keystrokes, so grouping is seen.
+   */
+  history: [depths: { undoDepth: number; redoDepth: number }];
 }>();
 
 const rootEl = ref<HTMLElement | null>(null);
 /**
- * True once `createEditorView` has attached ProseMirror to `rootEl`.
+ * True once `mountEditor` has attached ProseMirror to `rootEl`.
  * Measured on 2026-09-16: this component's box was in the DOM 120–730 ms
  * before the view existed — an empty well where the page's skeleton had
  * just been. Until then the template keeps the skeleton's text lines up
@@ -80,11 +99,292 @@ const openMenuId = computed(() => {
 const MENTION_MENU_ID = 'dw-mention-menu';
 const SLASH_MENU_ID = 'dw-slash-menu';
 
+/**
+ * What `mountEditor` returns: the live view plus the command surface bound
+ * to it — undo/redo, the marks, the block tunes, the drag hooks. Every
+ * control this component renders acts through the handle, never through
+ * `view.dispatch` with a transaction built here, so a button and the
+ * keystroke it stands for can never disagree (`editor-commands.ts`).
+ */
+// The type is read off the loader's module type rather than imported from
+// `@deep-wiki/editor/mount`: `scripts/checks/bundle-isolation.ts` sweeps
+// every static specifier, `import type` included.
+type EditorHandle = ReturnType<EditorMountModule['mountEditor']>;
+type MountOptions = Parameters<EditorMountModule['mountEditor']>[0];
+/** What the selection plugin reports: the snapshot plus both ends' viewport coordinates (`selection-plugin.ts`). */
+type SelectionReport = Parameters<NonNullable<NonNullable<MountOptions['selection']>['onChange']>>[0];
+let handle: EditorHandle | undefined;
 let editorView: EditorView | undefined;
+let debounceTimer: ReturnType<typeof setTimeout> | undefined;
+/** The report the debounce is holding, so `flush()` can send it now. */
+let pendingReport: (() => void) | null = null;
+
+/**
+ * Reports the pending document at once, if any. The screen calls it
+ * before Save reads the buffer, closing the 300ms window in which a Save
+ * took the document before the edit (docs/TODO.md, "a dirty editor has a
+ * 300ms blind spot").
+ */
+function flush(): void {
+  if (debounceTimer) clearTimeout(debounceTimer);
+  debounceTimer = undefined;
+  const report = pendingReport;
+  pendingReport = null;
+  report?.();
+}
 /** The `"./mount"` module, kept from `loadEditorMount()` so the click paths below can build the same transactions the plugins build on Enter. */
 let editorModule: Awaited<ReturnType<typeof loadEditorMount>> | undefined;
 
 const { search: searchMentions, checkAccess } = useMentionCandidates(props.workspaceId, props.pageId);
+
+/* ─── The selection toolbar ────────────────────────────────────────────
+ * Shown over a non-empty text selection (never in a code block, never
+ * over a node or gap selection — the plugin says which) while focus is
+ * inside this component: the editor itself, or the toolbar the keyboard
+ * reached. The link popover is the one moment focus legitimately leaves
+ * both, so it keeps the toolbar up on its own. Typing collapses the
+ * selection, so the toolbar goes the moment a key lands (docs/TODO.md,
+ * "hidden while typing").
+ */
+const selection = ref<SelectionReport | null>(null);
+const focusWithin = ref(false);
+const linkPopoverOpen = ref(false);
+const hostEl = ref<HTMLElement | null>(null);
+const selectionToolbar = ref<{ focus: () => void } | null>(null);
+
+const toolbarVisible = computed(
+  () =>
+    selection.value !== null &&
+    selection.value.kind === 'text' &&
+    !selection.value.empty &&
+    selection.value.coords !== null &&
+    (focusWithin.value || linkPopoverOpen.value),
+);
+const toolbarPosition = computed(() => (selection.value?.coords ? positionToolbar(selection.value.coords) : { top: 0, left: 0 }));
+
+function onFocusIn(): void {
+  focusWithin.value = true;
+}
+
+function onFocusOut(event: FocusEvent): void {
+  const next = event.relatedTarget;
+  focusWithin.value = next instanceof Node && hostEl.value !== null && hostEl.value.contains(next);
+}
+
+/**
+ * The keyboard's ways to the two surfaces a pointer reaches by hovering
+ * (checklist §5): `Ctrl`/`⌘`+`Shift`+`.` moves focus from the editor into
+ * the selection toolbar — read by `code`, because `Shift`+`.` reports `>`
+ * on a US layout and something else on others — and `Ctrl`/`⌘`+`/` opens
+ * the tunes menu for the caret's block. Any other key hides the block
+ * handle: it is the pointer's, and typing is not the moment for it.
+ */
+function onHostKeydown(event: KeyboardEvent): void {
+  const modifier = (event.ctrlKey || event.metaKey) && !event.altKey;
+  if (modifier && event.shiftKey && (event.code === 'Period' || event.key === '.' || event.key === '>')) {
+    if (!toolbarVisible.value) return;
+    event.preventDefault();
+    selectionToolbar.value?.focus();
+    return;
+  }
+  if (modifier && !event.shiftKey && (event.code === 'Slash' || event.key === '/')) {
+    event.preventDefault();
+    void openTunesForCaret();
+    return;
+  }
+  if (!tunesOpen.value) hoveredBlock.value = null;
+}
+
+/* ─── The block handle ─────────────────────────────────────────────────
+ * One `EditorBlockHandle`, moved to whichever top-level block the pointer
+ * is over (`blockAt`, one lookup per frame), gone when the pointer leaves
+ * or a key lands, kept while its menu is open or a drag is under way. The
+ * drag is bridged to ProseMirror through `startBlockDrag`/`endBlockDrag`
+ * (`block-drag.ts`: from there its own `drop` handler moves the node and
+ * the drop cursor draws the target). The tunes act on the block the
+ * *selection* is in, so opening the menu first places the caret in the
+ * hovered block (`placeCaretIn`), then dry-runs every command on it so
+ * the menu can say what it withholds and why (`utils/block-tunes.ts`).
+ */
+interface HoveredBlock {
+  readonly pos: number;
+  readonly node: BlockLike;
+  /** Offset from this component's top edge, so the handle sits on the block's first line. */
+  readonly top: number;
+}
+
+const HANDLE_SIZE = 24;
+const hoveredBlock = ref<HoveredBlock | null>(null);
+const tunesOpen = ref(false);
+const tunesItems = ref<TunesItem[][]>([]);
+let handleFrame: number | null = null;
+let hideTimer: ReturnType<typeof setTimeout> | undefined;
+let dragging = false;
+
+/** The platform's modifier as text for `aria-keyshortcuts`, read on mount because the platform is the client's (the same reading `SidebarToggle` makes). */
+const modifierName = ref('Control');
+onMounted(() => {
+  modifierName.value = /Macintosh;/.test(navigator.userAgent) ? 'Meta' : 'Control';
+});
+
+function placeHandleAt(hit: { pos: number; node: BlockLike; rect: { top: number } | null }): void {
+  const host = hostEl.value;
+  if (!host || !hit.rect) return;
+  const dom = editorView?.nodeDOM(hit.pos);
+  const lineHeight = dom instanceof HTMLElement ? Number.parseFloat(getComputedStyle(dom).lineHeight) : Number.NaN;
+  const centred = Number.isFinite(lineHeight) ? Math.max(0, (lineHeight - HANDLE_SIZE) / 2) : 0;
+  hoveredBlock.value = { pos: hit.pos, node: hit.node, top: hit.rect.top - host.getBoundingClientRect().top + centred };
+}
+
+function onPointerMove(event: PointerEvent): void {
+  if (tunesOpen.value || dragging || !handle) return;
+  if (!(event.target instanceof Node) || !rootEl.value?.contains(event.target)) return;
+  if (handleFrame !== null) return;
+  const coords = { left: event.clientX, top: event.clientY };
+  handleFrame = requestAnimationFrame(() => {
+    handleFrame = null;
+    const hit = handle?.blockAt(coords);
+    if (hit?.rect) placeHandleAt(hit);
+  });
+}
+
+/** The pointer left the editor: the handle goes after a beat, unless it went to the handle itself (8px away, across nothing). */
+function scheduleHandleHide(): void {
+  cancelHandleHide();
+  hideTimer = setTimeout(() => {
+    if (!tunesOpen.value && !dragging) hoveredBlock.value = null;
+  }, 200);
+}
+
+function cancelHandleHide(): void {
+  if (hideTimer) clearTimeout(hideTimer);
+  hideTimer = undefined;
+}
+
+const tunesActions: TunesActions = {
+  moveUp: () => void handle?.moveBlockUp(),
+  moveDown: () => void handle?.moveBlockDown(),
+  duplicate: () => void handle?.duplicateBlock(),
+  remove: () => void handle?.deleteBlock(),
+  // `turnInto` runs the `/` command at the caret, exactly as typing `/`
+  // there would: inside a list item that yields `- # Title`, a heading
+  // inside the item. Text lifts the item out first, then the target
+  // applies to the paragraph it became — except task list, which marks
+  // the item in place (docs/TODO.md Findings 2026-09-16, "limits").
+  turnInto: (id) => {
+    if (hoveredBlock.value?.node.type.name === 'list' && id !== 'task-list') handle?.turnInto('text');
+    handle?.turnInto(id);
+  },
+};
+
+/** Builds the menu for the hovered block: the caret goes into it, then every command is dry-run there. */
+function prepareTunes(): void {
+  const block = hoveredBlock.value;
+  const mod = editorModule;
+  if (!block || !mod || !editorView) return;
+  placeCaretIn(editorView, block.pos);
+  const state = editorView.state;
+  const inList = block.node.type.name === 'list';
+  const turnInto = mod.SLASH_COMMANDS.filter((command) => TURN_INTO_TARGET_IDS.includes(command.id)).map((command) => ({
+    id: command.id,
+    label: command.label,
+    applicable: inList && command.id !== 'task-list' ? mod.turnInto('text')(state) : mod.turnInto(command.id)(state),
+  }));
+  tunesItems.value = blockTunesMenu(
+    {
+      blockType: block.node.type.name,
+      canMoveUp: mod.moveBlockUp(state),
+      canMoveDown: mod.moveBlockDown(state),
+      canDuplicate: mod.duplicateBlock(state),
+      canDelete: mod.deleteBlock(state),
+      turnInto,
+      currentTargetId: currentTurnIntoTarget(block.node),
+    },
+    tunesActions,
+  );
+}
+
+watch(tunesOpen, (open) => {
+  if (open) prepareTunes();
+});
+
+/** The menu closed: focus back to the editor, and the handle — stale after a move or a delete — goes. */
+function onTunesClosed(): void {
+  focusEditor();
+  hoveredBlock.value = null;
+}
+
+/** `Ctrl`/`⌘`+`/`: the handle at the caret's block, and its menu open. */
+async function openTunesForCaret(): Promise<void> {
+  if (!editorView || !handle) return;
+  const block = caretBlock(editorView.state);
+  if (!block) return;
+  const dom = editorView.nodeDOM(block.pos);
+  placeHandleAt({ pos: block.pos, node: block.node as BlockLike, rect: dom instanceof HTMLElement ? dom.getBoundingClientRect() : null });
+  await nextTick();
+  tunesOpen.value = true;
+}
+
+function onHandleDragStart(event: DragEvent): void {
+  const block = hoveredBlock.value;
+  if (!block || !handle) return;
+  dragging = true;
+  const dom = editorView?.nodeDOM(block.pos);
+  // The block itself as the drag image, not the 24px handle: what moves
+  // is what the person sees moving.
+  if (event.dataTransfer && dom instanceof HTMLElement && typeof event.dataTransfer.setDragImage === 'function') event.dataTransfer.setDragImage(dom, 0, 0);
+  handle.startBlockDrag(block.pos, event.dataTransfer ?? undefined);
+}
+
+function onHandleDragEnd(): void {
+  dragging = false;
+  handle?.endBlockDrag();
+  hoveredBlock.value = null;
+}
+
+function focusEditor(): void {
+  editorView?.focus();
+}
+
+/**
+ * Enter and Tab while a menu is open confirm the highlighted row — here,
+ * on the capture phase of this wrapper, before ProseMirror's own listener
+ * on the editor sees the key. Since `keymap.ts` bound `Enter`
+ * (2026-09-14) the keymap plugin, first in `buildEditorPlugins`' list,
+ * claims it before the mention and slash plugins can, so Enter in an
+ * open menu split the block and left `/query` in place (docs/TODO.md
+ * Findings, 2026-09-16). The package is another batch's; the host runs
+ * the same one-transaction confirm the click paths run, so undo removes
+ * the whole insertion as one step either way.
+ */
+function onHostKeydownCapture(event: KeyboardEvent): void {
+  if (event.key !== 'Enter' && event.key !== 'Tab') return;
+  if (event.ctrlKey || event.metaKey || event.altKey) return;
+  if (!(event.target instanceof Node) || !rootEl.value?.contains(event.target)) return;
+  if (mentionState.value?.active) {
+    event.preventDefault();
+    event.stopPropagation();
+    confirmMentionAt(mentionState.value.selectedIndex);
+    return;
+  }
+  if (slashState.value?.active) {
+    event.preventDefault();
+    event.stopPropagation();
+    confirmSlashAt(slashState.value.selectedIndex);
+  }
+}
+
+function onToolbarToggle(name: Parameters<EditorHandle['toggleMark']>[0]): void {
+  handle?.toggleMark(name);
+}
+
+function onToolbarSetLink(href: string): void {
+  handle?.setLink(href);
+}
+
+function onToolbarUnsetLink(): void {
+  handle?.unsetLink();
+}
 
 /** document-editor: "Mentioning A User Does Not Silently Grant Them Access" — the check a confirmed user mention runs, whichever way it was confirmed. */
 function onMentionConfirmed(candidate: MentionCandidate): void {
@@ -137,12 +437,14 @@ async function mount(): Promise<void> {
   editorModule = mod;
   if (!rootEl.value) return;
 
-  let debounceTimer: ReturnType<typeof setTimeout> | undefined;
   let lastMentionQuery: string | null = null;
+  const initialDoc = mod.fromMarkdown(props.markdown);
+  /** The document last handed to `update` — by identity: ProseMirror keeps the same `Node` through a transaction with no steps. */
+  let lastReportedDoc: unknown = initialDoc;
 
-  editorView = mod.createEditorView({
+  handle = mod.mountEditor({
     dom: rootEl.value,
-    doc: mod.fromMarkdown(props.markdown),
+    doc: initialDoc,
     mention: {
       onStateChange: (state) => {
         mentionState.value = state;
@@ -185,11 +487,28 @@ async function mount(): Promise<void> {
         }
       },
     },
-    onUpdate: (view) => {
+    selection: {
+      onChange: (report) => {
+        selection.value = report;
+      },
+    },
+    onUpdate: (view, update) => {
+      emit('history', { undoDepth: update.undoDepth, redoDepth: update.redoDepth });
+      // Only a transaction that changed the document is reported. A
+      // selection-only transaction — a click, an arrow key, the toolbar's
+      // own report — leaves `state.doc` the same instance, and reporting
+      // it marked the buffer dirty and enabled Save before anything had
+      // changed; `e2e/editor.spec.ts` then saved the pre-edit document
+      // when a click landed inside the 300ms window (docs/TODO.md
+      // Findings, 2026-09-16).
+      if (view.state.doc === lastReportedDoc) return;
+      lastReportedDoc = view.state.doc;
       if (debounceTimer) clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(() => emit('update', mod.toMarkdown(view.state.doc)), 300);
+      pendingReport = () => emit('update', mod.toMarkdown(view.state.doc));
+      debounceTimer = setTimeout(flush, 300);
     },
   });
+  editorView = handle.view;
   attached.value = true;
 }
 
@@ -198,16 +517,45 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
-  editorView?.destroy();
+  handle?.destroy();
 });
+
+/**
+ * The bar's Undo and Redo, run through the handle — the same commands
+ * `Mod-z` / `Shift-Mod-z` run inside the editor (`keymap.ts`) — and then
+ * focus back where the caret is, so the next keystroke lands in the
+ * document rather than on the button.
+ */
+function undo(): void {
+  handle?.undo();
+  editorView?.focus();
+}
+
+function redo(): void {
+  handle?.redo();
+  editorView?.focus();
+}
 
 defineExpose({
   focus: () => editorView?.focus(),
+  undo,
+  redo,
+  flush,
 });
 </script>
 
 <template>
-  <div class="relative">
+  <div
+    ref="hostEl"
+    class="relative"
+    @focusin="onFocusIn"
+    @focusout="onFocusOut"
+    @keydown="onHostKeydown"
+    @keydown.capture="onHostKeydownCapture"
+    @pointermove="onPointerMove"
+    @pointerenter="cancelHandleHide"
+    @pointerleave="scheduleHandleHide"
+  >
     <!-- No `focus-within:ring-*` here. `main.css` declares the focus
          indicator unlayered — 3px `secondary` at 2px offset — so it lands
          on the editor when it takes focus like it lands on every other
@@ -241,14 +589,13 @@ defineExpose({
          must exist before the view does; it is only hidden until then,
          behind the skeleton below (`attached`). -->
     <!-- The page's skeleton, continued: the same `doc-body` text lines
-         `pages/[id]/edit.vue` shows while the session is requested, kept
-         up for the last stretch — chunk evaluation, the first parse, the
-         view — so the box never stands empty between the two
-         (docs/UI-CHECKLIST.md §3, "no layout shift on load"). -->
-    <div v-if="!attached" data-testid="editor-skeleton" aria-hidden="true" class="doc-body text-doc-body">
-      <p><USkeleton as="span" class="inline-block h-4 w-full align-middle" /></p>
-      <p><USkeleton as="span" class="inline-block h-4 w-full align-middle" /></p>
-      <p><USkeleton as="span" class="inline-block h-4 w-5/6 align-middle" /></p>
+         `pages/[id]/edit.vue` shows while the session is requested — the
+         one `DocBodySkeleton` (§4.1) — kept up for the last stretch:
+         chunk evaluation, the first parse, the view, so the box never
+         stands empty between the two (docs/UI-CHECKLIST.md §3, "no layout
+         shift on load"). -->
+    <div v-if="!attached" data-testid="editor-skeleton" aria-hidden="true">
+      <DocBodySkeleton />
     </div>
     <div
       v-show="attached"
@@ -292,6 +639,37 @@ defineExpose({
       @select="confirmMentionAt"
     />
 
+    <!-- The block handle: one, beside the hovered block, gone otherwise —
+         the measure column carries no permanent chrome. -->
+    <EditorBlockHandle
+      v-if="hoveredBlock"
+      v-model:open="tunesOpen"
+      :top="hoveredBlock.top"
+      :items="tunesItems"
+      :modifier-name="modifierName"
+      @drag-start="onHandleDragStart"
+      @drag-end="onHandleDragEnd"
+      @closed="onTunesClosed"
+      @pointer-enter="cancelHandleHide"
+      @pointer-leave="scheduleHandleHide"
+    />
+
+    <!-- The selection toolbar: the one formatting chrome, and only while
+         there is a range to format — nothing permanent stands inside the
+         measure column (PRODUCT.md, principle 6). -->
+    <EditorSelectionToolbar
+      v-if="toolbarVisible && selection"
+      ref="selectionToolbar"
+      :marks="selection.marks"
+      :link="selection.link"
+      :position="toolbarPosition"
+      @toggle="onToolbarToggle"
+      @set-link="onToolbarSetLink"
+      @unset-link="onToolbarUnsetLink"
+      @link-open="linkPopoverOpen = $event"
+      @close="focusEditor"
+    />
+
     <!-- The chip tier (`InlineNotice`): one line about the editor above it. -->
     <InlineNotice v-if="mentionMismatch" tier="chip" tone="error" role="alert" class="mt-2">
       {{ mentionMismatch }}
@@ -314,13 +692,18 @@ defineExpose({
           :key="command.id"
           role="option"
           :aria-selected="index === slashState.selectedIndex"
-          class="dw-state-layer cursor-pointer rounded-md px-3 py-2"
+          class="dw-state-layer flex cursor-pointer items-start gap-2 rounded-md px-3 py-2"
           :class="index === slashState.selectedIndex ? 'bg-secondary-container text-on-secondary-container' : 'text-default'"
           @mousedown.prevent
           @click="confirmSlashAt(index)"
         >
-          <p class="text-body-medium">{{ command.label }}</p>
-          <p class="text-body-small text-muted">{{ command.description }}</p>
+          <!-- The icon beside the label, never instead of it (§4.3), from
+               the one map "Turn into" reads too (`utils/block-tunes.ts`). -->
+          <span class="flex h-5 shrink-0 items-center"><UIcon :name="slashCommandIcon(command.id)" class="size-4" aria-hidden="true" /></span>
+          <span>
+            <span class="block text-body-medium">{{ command.label }}</span>
+            <span class="block text-body-small text-muted">{{ command.description }}</span>
+          </span>
         </li>
       </ul>
     </div>

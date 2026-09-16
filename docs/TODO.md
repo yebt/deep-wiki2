@@ -357,7 +357,9 @@ product decisions that do not fit any existing phase. This phase holds the latte
       floating toolbar, and `/` to insert tables/headings/etc., replacing the crowded
       breadcrumb-plus-buttons contextual bar. Editor direction confirmed 2026-09-16: stay on
       ProseMirror rather than migrate — Tiptap is ProseMirror with a wrapper, and Editor.js
-      stores JSON blocks, which would break markdown-as-truth and GATE-2.
+      stores JSON blocks, which would break markdown-as-truth and GATE-2. Built 2026-09-16
+      (`feat/editor-block-commands` for the package, `feat/editor-block-ui` for the Vue side:
+      toolbar, handle, tunes, undo/redo, `/` icons); awaiting the owner's review.
 
 ### Phase 4 — Diagrams
 
@@ -654,6 +656,90 @@ uncompressed on the wire).
 - **Test sessions idle out at 30 minutes** (`SESSION_IDLE_TIMEOUT_MINUTES` in the harness):
   a seeded token unused for half an hour answers 401, which read like a broken cookie
   forward for a while. Re-seed or touch the session first when measuring by hand.
+### 2026-09-16 — The block UI on `EditorSurface`: toolbar, handle, tunes, undo/redo (branch `feat/editor-block-ui`)
+
+**What happened.** The Vue half of the Phase 3.5 block-editing item, on the `/mount` API the
+entry below describes, `apps/web` only, one commit per piece (`e2e/editor.spec.ts` holds every
+one against the real backend; `docs/UI-CHECKLIST.md`'s Review Log has the review entry):
+
+1. `EditorSurface` mounts through `mountEditor()` and holds the `EditorHandle`; the three
+   copies of the doc-body skeleton lines (read, edit, the surface) are one `DocBodySkeleton`.
+2. Undo and Redo in the contextual bar beside Save, from `update.undoDepth`/`redoDepth`,
+   `aria-disabled` with the reason at depth 0, running the handle's commands. At 320 the two
+   extra controls clipped the "Editing" crumb; "Read page" is icon-only below `sm` now (its
+   label stays for assistive technology), and the bar's own 320 measurement holds.
+3. `EditorSelectionToolbar` — Bold, Italic, Strikethrough, Code, Link — over a non-empty text
+   selection, placed by `positionToolbar` (above the first line, below the last near the top
+   edge, never past a viewport edge; whole at 320), `Ctrl`/`⌘`+`Shift`+`.` to focus it,
+   Escape back. Link is a `UPopover` with a labelled URL field.
+4. `EditorBlockHandle` — one `⋮⋮`, following the block under the pointer through `blockAt`
+   one lookup per frame, dragging through `startBlockDrag`/`endBlockDrag` with the block as
+   the drag image; a `UDropdownMenu` of tunes (Turn into…, Move up/down, Duplicate, Delete)
+   from dry runs, every refusal `aria-disabled` with its reason; `Ctrl`/`⌘`+`/` opens it for
+   the caret's block. `.editor-drop-cursor` is the `primary` role; `.ProseMirror-selectednode`
+   the `secondary-container` pair (`main.css` §13).
+5. The `/` menu's rows carry icons from one map (`utils/block-tunes.ts`, shared with Turn
+   into); `/table` and `/footnote` are driven end to end.
+
+**Found on the way, fixed here (in `apps/web`).**
+
+- **Enter in an open `/` or `@` menu split the block instead of confirming.** Since
+  `keymap.ts` bound `Enter` (`ee7fe3e`, 2026-09-14) the keymap plugin — first in
+  `buildEditorPlugins`' list, ahead of the menus by design — claims Enter before the mention
+  and slash plugins see it, so Enter left `/heading` in place and opened a new paragraph
+  under it (the click path, which the 2026-09-14 audit added, was the only one that worked;
+  the 2026-09-07 review's "Enter selects" predates the binding). The package is another
+  batch's, so the host confirms Enter and Tab on the **capture phase** of its wrapper,
+  before ProseMirror's listener on the editor sees the key, through the same one-transaction
+  confirm the click uses. The real fix belongs in `packages/editor`: install the menu plugins
+  before the keymap, or have the keymap's `Enter` refuse while a menu is active.
+- **A click marked the buffer dirty.** `onUpdate` fires for every transaction, a selection
+  move included, and the surface reported the (unchanged) document 300ms later, so a click
+  enabled Save before any edit. The surface reports only when `state.doc` is a new instance
+  — ProseMirror keeps the same `Node` through a transaction with no steps — which is what let
+  the e2e wait for Save to enable as the sign that an edit has been reported.
+- **The 300ms blind spot before Save is closed.** `EditorSurface.flush()` reports the pending
+  document at once and the screen calls it before Save reads the buffer; the two e2e tests
+  that raced the window (the real-backend Save test named below; the not-canonical one) wait
+  for Save to enable as well. The blind spot before *leaving* (the route guard,
+  `beforeunload`) is unchanged: `isDirty` is still set from the report.
+
+**Recorded, not fixed (the editor package is another batch's).**
+
+- `EditorHandle` exposes nothing that moves the selection, and every block command acts on
+  the block the *selection* is in while the handle tunes the block under the *pointer*.
+  `utils/block-tunes.ts` `placeCaretIn` reaches `Selection.near` through the state's own
+  selection instance (every state's selection is a `Selection` subclass; `near` is an
+  inherited static) — no `prosemirror-state` import in `apps/web`, which is not a dependency
+  of that package. A `selectBlock(pos)` on the handle would retire it.
+- The pinned strong spelling is `__x__`, not `**x**`: `selection-plugin.ts`'s doc comment
+  lists `**`; `packages/markdown/src/pipeline.ts` pins `strong: '_'`. The e2e asserts the
+  bytes the pipeline writes.
+- "Turn into" on a list tunes the first item: `turnInto` runs at the caret, `placeCaretIn`
+  puts it in the first item, and the chain is Text (lifts that item out) then the target —
+  so on a three-item list the first item becomes the heading and the other two stay a list.
+  Notion's semantics for a single item; a whole-list conversion needs a package command.
+  Task list is the one target that marks the item in place (no chain). Divider, Table and
+  Footnote are insertions, not retypes, and stay out of Turn into.
+- Below `md` the handle stands over the block's first glyphs (a floating chip on the menu
+  rung) while it shows: there is no margin at 320 (the comment gutter's own trade), and it
+  shows only on hover, on drag or with its menu open — none of which a touch device does, so
+  at phone widths the tunes are the keyboard's (`Ctrl`/`⌘`+`/`) or nobody's. If the owner
+  prefers no handle below `md`, that is one class.
+- The selection toolbar covers the previous line while shown (the Medium/Docs placement,
+  the same trade the comment batch recorded for its floating "Comment").
+- Undo/Redo keep keyboard focus on the button after activation (a pointer click cancels
+  `mousedown`, so the caret stays); `Ctrl`+`Z` in the editor is the keyboard's road.
+
+**Environment.** `bun run e2e` could not reuse this worktree's dev server within its 120s
+`webServer` timeout under the host's load (average 21–30 on four cores, another worktree's
+full Vitest run alongside), and the first navigation after a dev-server start compiled the
+edit route for longer than the 30s waits; the runs here went through `playwright test
+--config playwright.config.ts` against a `nuxt dev` started by hand on the worktree's port,
+warmed once. `apps/api/testing`'s compose stack and the test Postgres each failed their first
+`--wait` under the same load and came up on a manual retry. `setupNuxt` exceeded Vitest's 60s
+hook twice on files this batch did not change, while the other worktree's suite ran.
+
 ### 2026-09-16 — The `/mount` API now carries everything a Notion-like block UI needs; the Vue side is the next batch
 
 **What happened.** Branch `feat/editor-block-commands` (worktree `fb-editor`, `packages/editor`
@@ -1250,6 +1336,8 @@ Branch `feat/frame-review-shell`, one commit each; the Review Log entry of the s
   clicks Save; against a fast server the click landed inside the debounce once in four
   runs and the PUT carried the pre-edit document, so the reload read back the original.
   Pre-existing; it should wait for Save to enable the way the new dirty-editor test does.
+  **Closed 2026-09-16** (`feat/editor-block-ui`): the test waits for Save to enable, and
+  Save itself flushes the surface's pending report before it reads the buffer.
 - **This host under six worktrees.** Load average 25–38 on 4 cores while this batch ran
   (`fb-editor`, `fb-comments`, `fb-manage`, `fb-perf1`, `fb-perf2`, `fb-tree` each with a dev
   server, typecheck or vitest up). Consequences seen: Playwright's 120s `webServer` timeout

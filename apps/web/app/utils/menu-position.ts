@@ -47,3 +47,58 @@ export function positionMenu(
   const left = Math.min(coords.left, viewport.width - MENU_WIDTH_ESTIMATE - VIEWPORT_MARGIN);
   return { top, left: Math.max(VIEWPORT_MARGIN, left) };
 }
+
+/**
+ * The selection toolbar's box: five 32px controls at `p-1` with `gap-1`,
+ * rounded up — like the menu estimates, wrong in the safe direction, so
+ * a clamp fires a little early rather than a little late.
+ */
+export const TOOLBAR_WIDTH_ESTIMATE = 200;
+export const TOOLBAR_HEIGHT_ESTIMATE = 40;
+/** Between the toolbar's edge and the text it floats over. */
+const TOOLBAR_GAP = 8;
+
+export interface LineRect {
+  readonly top: number;
+  readonly bottom: number;
+  readonly left: number;
+  readonly right: number;
+}
+
+/** Both ends of the selection, as the selection plugin reports them (`coordsAtPos` of each). */
+export interface RangeCoords {
+  readonly from: LineRect;
+  readonly to: LineRect;
+}
+
+export interface ToolbarPlacement {
+  readonly top: number;
+  readonly left: number;
+  /** Above the range's first line, or — when the viewport's top edge is too close — below its last. */
+  readonly placement: 'above' | 'below';
+}
+
+/**
+ * Where the selection toolbar floats: above the first line of the range,
+ * centred on the range when it is one line and on its start when it
+ * spans several (the two ends then share no column to centre between);
+ * below the last line when there is no room above; and never past a
+ * viewport edge in either axis, so at 320px it stays whole
+ * (docs/UI-CHECKLIST.md §4.6, §6).
+ */
+export function positionToolbar(
+  coords: RangeCoords,
+  viewport: Viewport = { width: window.innerWidth, height: window.innerHeight },
+): ToolbarPlacement {
+  const above = coords.from.top - TOOLBAR_GAP - TOOLBAR_HEIGHT_ESTIMATE;
+  const fitsAbove = above >= VIEWPORT_MARGIN;
+  const below = Math.min(coords.to.bottom + TOOLBAR_GAP, viewport.height - VIEWPORT_MARGIN - TOOLBAR_HEIGHT_ESTIMATE);
+  const top = fitsAbove ? above : Math.max(VIEWPORT_MARGIN, below);
+
+  const singleLine = coords.from.top === coords.to.top;
+  const anchor = singleLine ? (coords.from.left + coords.to.right) / 2 : coords.from.left;
+  const rightmost = viewport.width - VIEWPORT_MARGIN - TOOLBAR_WIDTH_ESTIMATE;
+  const left = Math.max(VIEWPORT_MARGIN, Math.min(anchor - TOOLBAR_WIDTH_ESTIMATE / 2, rightmost));
+
+  return { top, left, placement: fitsAbove ? 'above' : 'below' };
+}

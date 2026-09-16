@@ -1334,7 +1334,72 @@ requirement (§4.3) remains untested.
 
 ---
 
-*The next entry goes below this one.*
+### 2026-09-16 — The block UI in edit mode: selection toolbar, block handle and tunes, undo/redo — awaiting the owner's eye
+
+**Reviewer:** none yet — this entry is what was shipped for review, not a review.
+**Verdict:** Pending
+
+The owner's fourth finding of 2026-09-16 ("clean, Notion-like editing — a block handle, inline
+floating tools, `/` to insert") on the API `feat/editor-block-commands` built. Branch
+`feat/editor-block-ui`, `apps/web` only, one commit per piece; `docs/TODO.md` Findings,
+2026-09-16, has the detail and what was found on the way.
+
+**Pre-build contract (§2).** *Who:* a member with `write`, already inside the editor, most
+often arrived from "Edit" on the read screen. *Goal:* "make this bold", "move this paragraph
+under that one", "turn this into a heading", "undo that" — without leaving the text. *Primary
+action:* still Save; every control here is in-place editing, and the tools appear only when
+there is something to act on. *Data:* the selection plugin's report (`kind`, `marks`, `link`,
+both ends' coordinates), the history depths after every transaction, `blockAt` under the
+pointer, and each block command's dry run. *Not:* a permanent toolbar, a sidebar of blocks,
+turning a whole list at once, an AI action. *Empty / too much:* an empty page shows nothing
+until a range or a hover exists; a 12,000-word page has one handle and one toolbar, never a
+decoration per block.
+
+**Walked (§3–§6), and what holds it:**
+
+- **Undo / Redo** — icon-only beside Save, named and tooltipped with their keys (§4.3),
+  `aria-keyshortcuts`, `aria-disabled` with "Nothing to undo yet." / "Nothing to redo." while
+  that side of the history is empty (§3, §5), running the handle's commands so a button and
+  `Ctrl`+`Z` agree on a step. At 320 "Read page" is icon-only (label kept for assistive
+  technology) so the bar holds; measured: the "Editing" crumb whole, no sideways scroll.
+- **Selection toolbar** — `role="toolbar"` "Text formatting", one tab stop with arrows, Home,
+  End, Escape back to the editor (§4.1's hand-rolled contract, §4.6), `Ctrl`/`⌘`+`Shift`+`.`
+  from the editor to reach it (§5); pressed as `aria-pressed` plus the opaque
+  `secondary-container` fill, never colour alone (§5); `mousedown` cancelled so a click keeps
+  the caret; Link a `UPopover` with a labelled `h-10` URL field (§9.5's 16px text kept). Placed
+  above the first line, below the last near the top edge, never past a viewport edge — measured
+  whole at 1280 and 320 (§4.6, §6). Shown only while the editor or the toolbar has focus, so a
+  Save click takes it down.
+- **Block handle** — one 24px named, tooltipped control (§5, §4.3) in the left margin from `md`
+  up, a floating chip inside the column below (the comment gutter's own trade); the tooltip
+  states the keys that open the menu and the keys that move a block, so the drag has a stated
+  keyboard twin (§5). Out of the tab order: `Ctrl`/`⌘`+`/` opens the same menu for the caret's
+  block. Drag through the package's hooks; the drop cursor is the `primary` role, the selected
+  block `secondary-container` (`DESIGN-SYSTEM.md` §14).
+- **Tunes menu** — `UDropdownMenu` (§4.1): Turn into… (a submenu, Text first; disabled with the
+  reason on a table, footnote or verbatim block; "Already a heading 2." on the block's own kind),
+  Move up / Move down with `Alt`+arrows shown, Duplicate, Delete — every refusal stays in the
+  menu `aria-disabled` with its reason on show (§3, §5); capped at the popper's free width so a
+  reason wraps at 320; closing returns focus to the editor.
+- **`/` menu** — icons beside the labels, never instead (§4.3); Enter and Tab confirm again
+  (a regression in the package since 2026-09-14, worked around on the host — `docs/TODO.md`).
+- **Measured** in `e2e/editor.spec.ts` against the real backend, reading the saved bytes back:
+  bold saves as `__word__` and a second toggle restores the original bytes; the link as
+  `[text](url)` and back; the drag reorders with anchors intact; Duplicate saves one `^id`;
+  Turn into on a list lifts to text first; `/table` and `/footnote` land the caret where the
+  package says; `expectNoHorizontalOverflow` at 1280 light/dark and 320 with the toolbar, the
+  menu and a drag up. Screenshots `fb-editor-ui-{surface,toolbar,tunes,drag}-{1280-light,
+  1280-dark,320-light}.png` in the session scratchpad.
+
+**Known before review, not fixed**
+
+- Below `md` the handle covers the block's first glyphs while it shows; touch devices never
+  show it (no hover), so at phone widths the tunes are the keyboard's or nobody's.
+- The toolbar covers the previous line while shown (the Medium/Docs placement).
+- "Turn into" on a list tunes its first item, not the whole list (a package command would).
+- Undo/Redo keep keyboard focus on the button; a pointer click keeps the caret.
+- The two-icon-pack requirement (§4.3) remains untested; the contextual (third) pane is still
+  an overlay; everything the 2026-09-16 entries above carried forward.
 
 ---
 

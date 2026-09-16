@@ -122,7 +122,12 @@ test('saving an already-saved page persists the edit and reads back for real, wi
   await page.keyboard.press('End');
   await page.keyboard.type(' Edited for real, through the real backend.');
 
-  await page.getByRole('button', { name: /Save/ }).click();
+  // The buffer reports 300ms after the last keystroke; Save enabling is
+  // the screen's word that it has (docs/TODO.md Findings, 2026-09-16: a
+  // click inside that window once saved the pre-edit document).
+  const save = page.getByRole('button', { name: /Save/ });
+  await expect(save).not.toHaveAttribute('aria-disabled');
+  await save.click();
   await expect(page.getByRole('status').filter({ hasText: /Saved/ })).toBeVisible({ timeout: 30000 });
 
   // The saved markdown came back: reload triggers a fresh, real
@@ -315,6 +320,7 @@ test('a save refused as "not canonical" offers the canonical document back, and 
   await page.keyboard.press('End');
   await page.keyboard.type(' edited');
 
+  await expect(page.getByRole('button', { name: /Save/ })).not.toHaveAttribute('aria-disabled');
   await page.getByRole('button', { name: /Save/ }).click();
 
   const banner = page.getByRole('alert').filter({ hasText: /canonical form/i });
@@ -384,6 +390,481 @@ test('clicking the second slash command runs it, closes the menu and leaves the 
   await expect(editor.locator('h2')).toHaveText('Second');
 });
 
+/** A mocked, editable session for the block-UI tests: the editor opens on `markdown` with nothing else on the wire. */
+async function openMockedEditor(page: Page, markdown: string, title = 'Block UI Test'): Promise<ReturnType<Page['getByTestId']>> {
+  await signIn(page);
+  await page.route(`${apiOrigin()}/pages/${PAGE_ID}/edit-session`, (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        markdown,
+        title,
+        workspaceId: 'ws-e2e',
+        lock: { holderUserId: 'me', acquiredAt: new Date().toISOString(), heartbeatAt: new Date().toISOString() },
+      }),
+    }),
+  );
+  await page.route(`${apiOrigin()}/pages/${PAGE_ID}/lock`, (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ status: 'ok' }) }),
+  );
+  await page.goto(`/pages/${PAGE_ID}/edit`);
+  const editor = page.getByTestId('editor-surface');
+  await expect(editor).toBeVisible({ timeout: 30000 });
+  return editor;
+}
+
+/**
+ * Undo and Redo in the contextual bar (docs/TODO.md Findings 2026-09-16,
+ * "the `/mount` API"): named, tooltipped with their keys, `aria-disabled`
+ * with a reason until there is history on that side, and acting through
+ * the same commands `Ctrl+Z` runs inside the editor — so a button press
+ * and the keystroke agree on what one step is.
+ */
+test('Undo and Redo stand beside Save: disabled with a reason until there is history, undo takes the edit back and redo restores it', async ({ page }) => {
+  test.setTimeout(60000);
+  const editor = await openMockedEditor(page, 'Start.\n');
+  await expect(editor).toContainText('Start.', { timeout: 30000 });
+  const bar = page.locator('#content-bar');
+  const undo = bar.getByRole('button', { name: 'Undo' });
+  const redo = bar.getByRole('button', { name: 'Redo' });
+  await expect(undo).toHaveAttribute('aria-disabled', 'true');
+  await expect(redo).toHaveAttribute('aria-disabled', 'true');
+  // The reason and the keys are in the tooltip, which opens on focus as
+  // on hover and names itself in `aria-describedby` (§3, §4.3, §5).
+  await undo.focus();
+  const describedBy = await undo.getAttribute('aria-describedby');
+  expect(describedBy, 'focus must open the tooltip').not.toBeNull();
+  await expect(page.locator(`#${describedBy}`)).toContainText(/nothing to undo/i);
+  await expect(page.locator(`#${describedBy}`)).toContainText('Z');
+  await expect(undo).toHaveAttribute('aria-keyshortcuts', /Z$/);
+
+  await editor.click();
+  await page.keyboard.press('End');
+  await page.keyboard.type(' Then more.');
+  await expect(editor).toContainText('Start. Then more.');
+  await expect(undo).not.toHaveAttribute('aria-disabled');
+
+  await undo.click();
+  await expect(editor).not.toContainText('Then more.');
+  await expect(redo).not.toHaveAttribute('aria-disabled');
+  // The caret stayed in the document: the next keys land there, not on the button.
+  await expect(editor).toBeFocused();
+
+  await redo.click();
+  await expect(editor).toContainText('Start. Then more.');
+  await expect(redo).toHaveAttribute('aria-disabled', 'true');
+});
+
+/* ─── The block UI against the real backend ─────────────────────────────
+ * The selection toolbar, the block handle and its tunes, and the `/`
+ * commands the editor package added on 2026-09-16 (docs/TODO.md Findings,
+ * "the `/mount` API"). Every test here drives a real edit session and a
+ * real Save, then reads the row back through a fresh edit-session
+ * request — the same holder, so the lock is simply renewed — because the
+ * claim under test is what the markdown *bytes* become, which a mocked
+ * PUT cannot answer. Each test mints its own writer and page
+ * (`e2e/editor-fixtures.bun.ts`) and writes the document it needs
+ * through the API first, so the tests share nothing and run in any order.
+ */
+const UI_SHOTS = process.env.DEEPWIKI_FRAME_SHOTS ?? '';
+
+/** The review material for this batch: `fb-editor-ui-<screen>-<size>-<theme>.png`. */
+async function shotUi(page: Page, name: string): Promise<void> {
+  if (!UI_SHOTS) return;
+  await page.screenshot({ path: `${UI_SHOTS}/fb-editor-ui-${name}.png`, fullPage: false });
+}
+
+interface BlockPage {
+  readonly pageId: string;
+  readonly title: string;
+}
+
+/** A fresh writer and page holding exactly `markdown`, signed in on `page`. */
+async function seedBlockPage(page: Page, markdown: string): Promise<BlockPage> {
+  const output = execFileSync('bun', ['run', 'e2e/editor-fixtures.bun.ts', seed.workspaceId], { cwd: REPO_ROOT, encoding: 'utf8' });
+  const minted: EditorFixtures = JSON.parse(output.trim().split('\n').pop()!);
+  await signInAs(page, minted.writerSessionToken);
+  const session = await page.request.get(`${apiOrigin()}/pages/${minted.editablePageId}/edit-session`);
+  expect(session.ok()).toBe(true);
+  const { contentHash } = (await session.json()) as { contentHash: string };
+  const saved = await page.request.put(`${apiOrigin()}/pages/${minted.editablePageId}`, { data: { markdown, expectedContentHash: contentHash } });
+  expect(saved.ok()).toBe(true);
+  return { pageId: minted.editablePageId, title: minted.editablePageTitle };
+}
+
+/** What the row holds now, as the editor would open it. */
+async function savedMarkdown(page: Page, pageId: string): Promise<string> {
+  const session = await page.request.get(`${apiOrigin()}/pages/${pageId}/edit-session`);
+  expect(session.ok()).toBe(true);
+  return ((await session.json()) as { markdown: string }).markdown;
+}
+
+async function openBlockPage(page: Page, block: BlockPage, firstWords: string): Promise<ReturnType<Page['getByTestId']>> {
+  await page.goto(`/pages/${block.pageId}/edit`);
+  const editor = page.getByTestId('editor-surface');
+  await expect(editor).toContainText(firstWords, { timeout: 30000 });
+  return editor;
+}
+
+/** Selects `word` inside the editor's `nth` paragraph through the DOM selection, which ProseMirror reads back into its state. */
+async function selectWord(editor: ReturnType<Page['getByTestId']>, nth: number, word: string): Promise<void> {
+  await editor.locator(':scope > p').nth(nth).evaluate((paragraph, needle) => {
+    const walker = document.createTreeWalker(paragraph, NodeFilter.SHOW_TEXT);
+    let node: Text | null;
+    while ((node = walker.nextNode() as Text | null)) {
+      const at = node.data.indexOf(needle);
+      if (at < 0) continue;
+      const range = document.createRange();
+      range.setStart(node, at);
+      range.setEnd(node, at + needle.length);
+      const selection = window.getSelection()!;
+      selection.removeAllRanges();
+      selection.addRange(range);
+      return;
+    }
+    throw new Error(`"${needle}" not found`);
+  }, word);
+}
+
+/** Save, and wait for the screen's own word that the row holds it — never inside the 300ms window the buffer reports in. */
+async function saveAndConfirm(page: Page): Promise<void> {
+  const save = page.locator('#content-bar').getByRole('button', { name: /^Save/ });
+  await expect(save).not.toHaveAttribute('aria-disabled');
+  await save.click();
+  await expect(page.getByRole('status').filter({ hasText: /Saved/ })).toBeVisible({ timeout: 30000 });
+}
+
+test.describe('the block UI against the real backend, 1280x900', () => {
+  test.use({ viewport: { width: 1280, height: 900 } });
+
+  test('selecting a word shows the toolbar above it; Bold marks it and saves as __word__; Bold again restores the original bytes', async ({ page }) => {
+    test.setTimeout(120000);
+    const original = 'A paragraph with one word to embolden.\n';
+    const block = await seedBlockPage(page, original);
+    const editor = await openBlockPage(page, block, 'A paragraph with one word');
+    const toolbar = page.getByRole('toolbar', { name: 'Text formatting' });
+    await expect(toolbar).toHaveCount(0);
+
+    await editor.click();
+    await selectWord(editor, 0, 'word');
+    await expect(toolbar).toBeVisible();
+    // Above the line it formats, whole, inside the viewport.
+    const lineBox = (await editor.locator(':scope > p').first().boundingBox())!;
+    const toolbarBox = (await toolbar.boundingBox())!;
+    expect(toolbarBox.y + toolbarBox.height, 'stands above the selected line').toBeLessThanOrEqual(lineBox.y);
+    expect(toolbarBox.x).toBeGreaterThanOrEqual(0);
+    expect(toolbarBox.x + toolbarBox.width).toBeLessThanOrEqual(1280);
+    const bold = toolbar.getByRole('button', { name: 'Bold' });
+    await expect(bold).toHaveAttribute('aria-pressed', 'false');
+    await shotUi(page, 'toolbar-1280-light');
+
+    await bold.click();
+    await expect(editor.locator('strong')).toHaveText('word');
+    await expect(bold).toHaveAttribute('aria-pressed', 'true');
+    await expect(editor, 'the click left focus in the editor').toBeFocused();
+    await saveAndConfirm(page);
+    // `__` is the pinned strong spelling (`packages/markdown/src/pipeline.ts`).
+    expect(await savedMarkdown(page, block.pageId)).toBe('A paragraph with one __word__ to embolden.\n');
+
+    // Save took focus, so the toolbar went with it (it is up only while
+    // the editor or the toolbar has focus). Back in the range it reads as
+    // pressed, and the same button now unbolds: the round trip is
+    // byte-identical to what the page held before.
+    await expect(toolbar).toHaveCount(0);
+    await editor.click();
+    await selectWord(editor, 0, 'word');
+    await expect(toolbar).toBeVisible();
+    await expect(bold).toHaveAttribute('aria-pressed', 'true');
+    await bold.click();
+    await expect(editor.locator('strong')).toHaveCount(0);
+    await saveAndConfirm(page);
+    expect(await savedMarkdown(page, block.pageId)).toBe(original);
+  });
+
+  test('the toolbar is keyboard-reachable: Ctrl+Shift+. focuses it, arrows move along it, Enter toggles, Escape returns to the editor', async ({ page }) => {
+    test.setTimeout(120000);
+    const block = await seedBlockPage(page, 'Keyboard reaches the toolbar too.\n');
+    const editor = await openBlockPage(page, block, 'Keyboard reaches');
+    const toolbar = page.getByRole('toolbar', { name: 'Text formatting' });
+
+    await editor.click();
+    await selectWord(editor, 0, 'reaches');
+    await expect(toolbar).toBeVisible();
+
+    await page.keyboard.press('Control+Shift+Period');
+    await expect(toolbar.getByRole('button', { name: 'Bold' })).toBeFocused();
+    await page.keyboard.press('ArrowRight');
+    await expect(toolbar.getByRole('button', { name: 'Italic' })).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(editor.locator('em')).toHaveText('reaches');
+    await expect(toolbar.getByRole('button', { name: 'Italic' })).toHaveAttribute('aria-pressed', 'true');
+
+    await page.keyboard.press('Escape');
+    await expect(editor).toBeFocused();
+    // Typing replaces the selection, and the toolbar goes with it.
+    await page.keyboard.type('finds');
+    await expect(editor).toContainText('Keyboard finds the toolbar too.');
+    await expect(toolbar).toHaveCount(0);
+  });
+
+  test('the link control: a URL applied from the popover saves as [text](url), and Remove link takes it off again', async ({ page }) => {
+    test.setTimeout(120000);
+    const block = await seedBlockPage(page, 'Read the spec before deciding.\n');
+    const editor = await openBlockPage(page, block, 'Read the spec');
+    const toolbar = page.getByRole('toolbar', { name: 'Text formatting' });
+
+    await editor.click();
+    await selectWord(editor, 0, 'spec');
+    await toolbar.getByRole('button', { name: 'Link' }).click();
+    const dialog = page.getByRole('dialog');
+    const field = dialog.getByLabel('Link URL');
+    await expect(field).toBeFocused();
+    await field.fill('https://example.com/spec');
+    await page.keyboard.press('Enter');
+    await expect(dialog).toBeHidden();
+    await expect(editor.locator('a')).toHaveAttribute('href', 'https://example.com/spec');
+    await expect(editor).toBeFocused();
+    await saveAndConfirm(page);
+    expect(await savedMarkdown(page, block.pageId)).toBe('Read the [spec](https://example.com/spec) before deciding.\n');
+
+    await selectWord(editor, 0, 'spec');
+    await expect(toolbar.getByRole('button', { name: 'Link' })).toHaveAttribute('aria-pressed', 'true');
+    await toolbar.getByRole('button', { name: 'Link' }).click();
+    await expect(dialog.getByLabel('Link URL')).toHaveValue('https://example.com/spec');
+    await dialog.getByRole('button', { name: 'Remove link' }).click();
+    await expect(editor.locator('a')).toHaveCount(0);
+    await saveAndConfirm(page);
+    expect(await savedMarkdown(page, block.pageId)).toBe('Read the spec before deciding.\n');
+  });
+});
+
+/** Hovers the editor's `nth` top-level block and returns the one block handle once it stands beside it. */
+async function hoverBlock(page: Page, editor: ReturnType<Page['getByTestId']>, nth: number) {
+  const block = editor.locator(':scope > *').nth(nth);
+  await block.hover({ position: { x: 20, y: 8 } });
+  const handle = page.getByRole('button', { name: 'Block options' });
+  await expect(handle).toBeVisible();
+  return handle;
+}
+
+test.describe('the block handle against the real backend, 1280x900', () => {
+  test.use({ viewport: { width: 1280, height: 900 } });
+
+  test('one handle follows the hovered block in the left margin; dragging it below the last block moves the block, anchor and all, in the saved markdown', async ({ page }) => {
+    test.setTimeout(120000);
+    const block = await seedBlockPage(page, 'First paragraph. ^blk0001\n\nSecond paragraph. ^blk0002\n\nThird paragraph. ^blk0003\n');
+    const editor = await openBlockPage(page, block, 'First paragraph.');
+    await expect(page.getByRole('button', { name: 'Block options' })).toHaveCount(0);
+
+    const first = editor.locator(':scope > p').nth(0);
+    const third = editor.locator(':scope > p').nth(2);
+    const handle = await hoverBlock(page, editor, 0);
+    const handleBox = (await handle.boundingBox())!;
+    const firstBox = (await first.boundingBox())!;
+    expect(handleBox.width, '24px target (§5)').toBeGreaterThanOrEqual(24);
+    expect(handleBox.height).toBeGreaterThanOrEqual(24);
+    expect(handleBox.x + handleBox.width, 'in the margin, left of the text').toBeLessThanOrEqual(firstBox.x);
+    expect(Math.abs(handleBox.y + handleBox.height / 2 - (firstBox.y + 13)), 'centred on the first line').toBeLessThanOrEqual(2);
+    // The same handle, moved: hovering the third block puts it there.
+    await hoverBlock(page, editor, 2);
+    const thirdBox = (await third.boundingBox())!;
+    const movedBox = (await handle.boundingBox())!;
+    expect(Math.abs(movedBox.y - thirdBox.y)).toBeLessThanOrEqual(4);
+    await expect(page.getByRole('button', { name: 'Block options' })).toHaveCount(1);
+
+    // Drag the first block to below the third.
+    await hoverBlock(page, editor, 0);
+    await handle.dragTo(third, { targetPosition: { x: (await third.boundingBox())!.width - 4, y: 12 } });
+    await expect(editor.locator(':scope > p').nth(0)).toHaveText('Second paragraph.');
+    await expect(editor.locator(':scope > p').nth(2)).toHaveText('First paragraph.');
+    await saveAndConfirm(page);
+    expect(await savedMarkdown(page, block.pageId)).toBe('Second paragraph. ^blk0002\n\nThird paragraph. ^blk0003\n\nFirst paragraph. ^blk0001\n');
+  });
+
+  test('the tunes menu: Duplicate inserts a copy without the anchor, so the saved markdown carries one ^id; Move up and the keys move it back', async ({ page }) => {
+    test.setTimeout(120000);
+    const block = await seedBlockPage(page, 'Only paragraph. ^dupl0001\n\nA second one.\n');
+    const editor = await openBlockPage(page, block, 'Only paragraph.');
+
+    const handle = await hoverBlock(page, editor, 0);
+    await handle.click();
+    const menu = page.getByRole('menu');
+    await expect(menu).toBeVisible();
+    const items = menu.getByRole('menuitem');
+    await expect(items.filter({ hasText: 'Turn into' })).toBeVisible();
+    // The first block: Move up stays in the menu, disabled, with its reason on show (§3, §5).
+    const moveUp = items.filter({ hasText: 'Move up' });
+    await expect(moveUp).toHaveAttribute('aria-disabled', 'true');
+    await expect(moveUp).toContainText('Already the first block.');
+    await shotUi(page, 'tunes-1280-light');
+
+    await items.filter({ hasText: 'Duplicate' }).click();
+    await expect(menu).toBeHidden();
+    await expect(editor.locator(':scope > p')).toHaveCount(3);
+    await expect(editor).toBeFocused();
+    await saveAndConfirm(page);
+    const afterDuplicate = await savedMarkdown(page, block.pageId);
+    expect(afterDuplicate).toBe('Only paragraph. ^dupl0001\n\nOnly paragraph.\n\nA second one.\n');
+    expect(afterDuplicate.match(/\^/g)).toHaveLength(1);
+
+    // Move the last block up through the menu, then back down with the keys the menu names.
+    await hoverBlock(page, editor, 2);
+    await handle.click();
+    await menu.getByRole('menuitem').filter({ hasText: 'Move up' }).click();
+    await expect(editor.locator(':scope > p').nth(1)).toHaveText('A second one.');
+    await editor.locator(':scope > p').nth(1).click();
+    await page.keyboard.press('Alt+ArrowDown');
+    await expect(editor.locator(':scope > p').nth(2)).toHaveText('A second one.');
+  });
+
+  test('Ctrl+/ opens the tunes for the caret\'s block; Turn into on a list item lifts it to text first, so the heading is not nested in the item', async ({ page }) => {
+    test.setTimeout(120000);
+    const block = await seedBlockPage(page, '- item one\n- item two\n');
+    const editor = await openBlockPage(page, block, 'item one');
+
+    await editor.locator('li').first().click();
+    await page.keyboard.press('Control+Slash');
+    const menu = page.getByRole('menu');
+    await expect(menu).toBeVisible();
+    const turnInto = menu.getByRole('menuitem').filter({ hasText: 'Turn into' });
+    await turnInto.hover();
+    const submenu = page.getByRole('menu').last();
+    await expect(submenu.getByRole('menuitem').first()).toHaveText(/^Text/);
+    await expect(submenu.getByRole('menuitem').filter({ hasText: 'Bulleted list' })).toHaveAttribute('aria-disabled', 'true');
+    await submenu.getByRole('menuitem').filter({ hasText: 'Heading 1' }).click();
+
+    await expect(editor.locator('h1')).toHaveText('item one');
+    await expect(editor.locator('li')).toHaveCount(1);
+    await saveAndConfirm(page);
+    expect(await savedMarkdown(page, block.pageId)).toBe('# item one\n\n- item two\n');
+  });
+});
+
+/**
+ * The `/` menu's newest commands, landed where the editor package says
+ * they land (docs/TODO.md Findings 2026-09-16): `/table` puts the caret
+ * in the first cell of an empty 2x2 table, `/footnote` puts `[^n]` at the
+ * caret and the caret in the empty definition at the end. Proved by what
+ * typing next does, and by the saved bytes.
+ */
+test.describe('the / menu against the real backend', () => {
+  test.use({ viewport: { width: 1280, height: 900 } });
+
+  test('/table inserts an empty 2x2 table with the caret in its first cell, and the saved markdown spells it canonically', async ({ page }) => {
+    test.setTimeout(120000);
+    const block = await seedBlockPage(page, 'Before the table.\n');
+    const editor = await openBlockPage(page, block, 'Before the table.');
+
+    await editor.click();
+    await page.keyboard.press('End');
+    await page.keyboard.press('Enter');
+    await page.keyboard.type('/tab');
+    const menu = page.getByRole('listbox', { name: 'Block commands' });
+    const table = menu.getByRole('option', { name: /Table/ });
+    await expect(table).toBeVisible();
+    // The icon is beside the label, never instead of it (§4.3).
+    await expect(table).toContainText('Table');
+    await expect(table.locator('svg, [class*="i-lucide"]').first()).toHaveAttribute('aria-hidden', 'true');
+    await page.keyboard.press('Enter');
+    await expect(editor.locator('table')).toHaveCount(1);
+    await expect(editor.locator('td, th')).toHaveCount(4);
+    await page.keyboard.type('cell');
+    await expect(editor.locator('td, th').first()).toHaveText('cell');
+
+    await saveAndConfirm(page);
+    expect(await savedMarkdown(page, block.pageId)).toBe('Before the table.\n\n| cell |   |\n| ---- | - |\n|      |   |\n');
+  });
+
+  test('/footnote puts the reference at the caret and the caret in the note at the end; the note typed next saves with it', async ({ page }) => {
+    test.setTimeout(120000);
+    const block = await seedBlockPage(page, 'A claim worth a note.\n');
+    const editor = await openBlockPage(page, block, 'A claim worth a note.');
+
+    await editor.click();
+    await page.keyboard.press('End');
+    // The trigger fires after whitespace or at a line's start, never mid-word.
+    await page.keyboard.type(' /foot');
+    const menu = page.getByRole('listbox', { name: 'Block commands' });
+    await expect(menu.getByRole('option', { name: /Footnote/ })).toBeVisible();
+    await page.keyboard.press('Enter');
+    await expect(menu).toHaveCount(0);
+    await page.keyboard.type('The note itself.');
+    await expect(editor).toContainText('The note itself.');
+    await expect(editor.locator(':scope > p').first()).not.toContainText('The note itself.');
+
+    await saveAndConfirm(page);
+    expect(await savedMarkdown(page, block.pageId)).toBe('A claim worth a note. [^1]\n\n[^1]: The note itself.\n');
+  });
+});
+
+/**
+ * The block UI at the sizes and themes the review asks for, measured
+ * where a screenshot cannot see: nothing scrolls sideways at 320 with
+ * the toolbar, the menu or a drag up; every floating surface stays inside
+ * the viewport. The screenshots are the review material
+ * (`fb-editor-ui-*.png`).
+ */
+for (const { theme, width } of [
+  { theme: 'light', width: 1280 },
+  { theme: 'dark', width: 1280 },
+  { theme: 'light', width: 320 },
+] as const) {
+  test.describe(`the block UI at ${width} ${theme}`, () => {
+    test.use({ viewport: { width, height: 900 } });
+
+    test('idle surface, selection toolbar, tunes menu and a drag in progress all stay inside the viewport', async ({ page }) => {
+      test.setTimeout(120000);
+      await useTheme(page, theme);
+      const block = await seedBlockPage(page, 'First paragraph of the page. ^shot0001\n\nSecond paragraph, a little longer than the first. ^shot0002\n\nThird and last. ^shot0003\n');
+      const editor = await openBlockPage(page, block, 'First paragraph');
+      await expect(page.locator('html')).toHaveClass(theme === 'dark' ? /dark/ : /light/);
+      const label = `block ui ${width} ${theme}`;
+      // Idle: no chrome inside the column at all.
+      await expect(page.getByRole('button', { name: 'Block options' })).toHaveCount(0);
+      await expect(page.getByRole('toolbar')).toHaveCount(0);
+      await expectNoHorizontalOverflow(page, `${label} idle`);
+      await shotUi(page, `surface-${width}-${theme}`);
+
+      await editor.click();
+      await selectWord(editor, 1, 'longer');
+      const toolbar = page.getByRole('toolbar', { name: 'Text formatting' });
+      await expect(toolbar).toBeVisible();
+      const toolbarBox = (await toolbar.boundingBox())!;
+      expect(toolbarBox.x).toBeGreaterThanOrEqual(0);
+      expect(toolbarBox.x + toolbarBox.width, 'the toolbar fits the viewport').toBeLessThanOrEqual(width);
+      await expectNoHorizontalOverflow(page, `${label} toolbar`);
+      await shotUi(page, `toolbar-${width}-${theme}`);
+
+      const handle = await hoverBlock(page, editor, 1);
+      await handle.click();
+      const menu = page.getByRole('menu');
+      await expect(menu).toBeVisible();
+      const menuBox = (await menu.boundingBox())!;
+      expect(menuBox.x).toBeGreaterThanOrEqual(0);
+      expect(menuBox.x + menuBox.width, 'the menu fits the viewport').toBeLessThanOrEqual(width);
+      await expectNoHorizontalOverflow(page, `${label} tunes`);
+      await shotUi(page, `tunes-${width}-${theme}`);
+      await page.keyboard.press('Escape');
+      await expect(menu).toBeHidden();
+      await expect(editor).toBeFocused();
+
+      // A drag in progress: pressed on the handle, moved over the third
+      // block, not yet released — the drop cursor is up.
+      await hoverBlock(page, editor, 0);
+      const handleBox = (await handle.boundingBox())!;
+      const third = (await editor.locator(':scope > p').nth(2).boundingBox())!;
+      await page.mouse.move(handleBox.x + handleBox.width / 2, handleBox.y + handleBox.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(third.x + third.width - 8, third.y + third.height - 4, { steps: 12 });
+      await expect(page.locator('.editor-drop-cursor')).toBeVisible();
+      await expectNoHorizontalOverflow(page, `${label} drag`);
+      await shotUi(page, `drag-${width}-${theme}`);
+      await page.mouse.up();
+      await expect(editor.locator(':scope > p').nth(2)).toHaveText('First paragraph of the page.');
+    });
+  });
+}
 
 /**
  * Inside the workspace frame (docs/UI-CHECKLIST.md Review Log, 2026-09-15:
@@ -707,6 +1188,16 @@ test.describe('inside the workspace frame, 320x900 light', () => {
     await page.getByRole('button', { name: 'Open sidebar' }).click();
     const drawer = page.getByRole('dialog');
     await expect(drawer.getByTestId('tree-create-open')).toBeVisible({ timeout: 30000 });
+    // The drawer slides in; measured mid-animation the row is still
+    // narrower than it will be (21.9px short under load, 2026-09-16), so
+    // the geometry is polled until the row has settled at its width.
+    await expect
+      .poll(async () => {
+        const rename = (await drawer.getByTestId('tree-rename-open').boundingBox())!;
+        const row = (await drawer.getByTestId('tree-create-open').locator('..').boundingBox())!;
+        return Math.abs(rename.x + rename.width - (row.x + row.width));
+      })
+      .toBeLessThanOrEqual(1);
     const createBox = (await drawer.getByTestId('tree-create-open').boundingBox())!;
     const renameBox = (await drawer.getByTestId('tree-rename-open').boundingBox())!;
     const rowBox = (await drawer.getByTestId('tree-create-open').locator('..').boundingBox())!;

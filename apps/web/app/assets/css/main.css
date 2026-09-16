@@ -731,3 +731,38 @@ body {
     border-radius: var(--radius-lg);
   }
 }
+
+/* ─────────────────────────────────────────────────────────────
+   13. THE EDITOR'S OWN MARKS  (block drag, 2026-09-16)
+   Two elements ProseMirror draws whose classes the host cannot put a
+   utility on: the drop cursor (`prosemirror-dropcursor`, installed
+   with `color: false` and the class `editor-drop-cursor` so this
+   stylesheet owns its colour — `packages/editor/src/mount/plugins.ts`)
+   and the block a drag has selected whole (`ProseMirror-selectednode`,
+   the view's own class for a node selection). The drop cursor is the
+   `primary` role — the one accent for the single most important thing
+   on the screen at that moment, where the block will land — and the
+   selected block is M3's selected-state pair, `secondary-container`,
+   opaque and the same in both themes (docs/DESIGN-SYSTEM.md §1.2,
+   §5.2: a container fill is for selected, never a state layer's job).
+   Both read the theme's variables, never a literal (checklist §4.2).
+   ───────────────────────────────────────────────────────────── */
+.editor-drop-cursor {
+  background-color: var(--ui-primary);
+  border-radius: var(--radius-full);
+  pointer-events: none;
+}
+
+.prosemirror-editor .ProseMirror-selectednode {
+  background-color: var(--ui-secondary-container);
+  border-radius: var(--radius-xs);
+  outline: none;
+}
+
+/* Text inside the selected block keeps its `on-` pair legible; a code
+   block's own `bg-emphasized` fill would otherwise hide the selection. */
+.prosemirror-editor .ProseMirror-selectednode,
+.prosemirror-editor .ProseMirror-selectednode :where(pre, code) {
+  color: var(--ui-on-secondary-container);
+  background-color: var(--ui-secondary-container);
+}

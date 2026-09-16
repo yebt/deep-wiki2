@@ -3,7 +3,8 @@ import type { MentionCandidate, MentionState, SlashState } from '@deep-wiki/edit
 import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { defineComponent, h } from 'vue';
-import { MENU_WIDTH_ESTIMATE } from '~/utils/menu-position';
+import { MENU_WIDTH_ESTIMATE, positionToolbar } from '~/utils/menu-position';
+import EditorSelectionToolbar from './EditorSelectionToolbar.vue';
 import EditorSurface from './EditorSurface.vue';
 import editorSurfaceSource from './EditorSurface.vue?raw';
 
@@ -14,17 +15,18 @@ import editorSurfaceSource from './EditorSurface.vue?raw';
  * (document-editor spec: "Mention And Slash Menus Are Keyboard-First",
  * "Empty And No-Results States", "Menus Reposition To Stay In The Viewport").
  *
- * The real `createEditorView` needs a browser: `EditorView` measures layout,
+ * The real `mountEditor` needs a browser: `EditorView` measures layout,
  * owns a contenteditable and reads `Range`/`Selection` — none of which
  * happy-dom provides faithfully, and `coordsAtPos()` in particular can only
  * ever return zeroes here, which would make every positioning assertion
- * vacuous. So `"./mount"` is mocked at exactly one seam — the view factory —
- * and everything else in that module stays real: the state the menus render
- * is produced by the shipped `reduceMentionState`/`reduceSlashState`, the
- * slash commands are the shipped `SLASH_COMMANDS`, and selection movement
- * wraps through the shipped `moveSelection`. What the fake supplies is only
- * what a real browser would: caret coordinates, and keydown events reaching
- * the plugin's key handling.
+ * vacuous. So `"./mount"` is mocked at exactly one seam — the mount factory,
+ * which returns the `EditorHandle` the component holds — and everything
+ * else in that module stays real: the state the menus render is produced by
+ * the shipped `reduceMentionState`/`reduceSlashState`, the slash commands
+ * are the shipped `SLASH_COMMANDS`, and selection movement wraps through
+ * the shipped `moveSelection`. What the fake supplies is only what a real
+ * browser would: caret coordinates, keydown events reaching the plugin's
+ * key handling, and a record of which handle command the host called.
  *
  * The import is deliberately inside `vi.mock`'s factory rather than at the
  * top of the file: `scripts/checks/bundle-isolation.ts` forbids ANY file
@@ -48,6 +50,39 @@ interface FakeViewOptions {
   readonly doc: { textContent: string };
   readonly mention?: { readonly onStateChange?: (state: MentionState, view: unknown) => void; readonly onConfirmed?: (candidate: MentionCandidate) => void };
   readonly slash?: { readonly onStateChange?: (state: SlashState) => void };
+  readonly onUpdate?: (view: unknown, update: EditorUpdate) => void;
+  readonly selection?: { readonly onChange?: (report: SelectionReport) => void };
+}
+
+/** What the shipped selection plugin reports (`selection-plugin.ts`): the snapshot plus both ends' coordinates. */
+interface SelectionReport {
+  readonly kind: 'text' | 'code' | 'node' | 'gap';
+  readonly from: number;
+  readonly to: number;
+  readonly empty: boolean;
+  readonly marks: { strong: boolean; emphasis: boolean; delete: boolean; inlineCode: boolean; link: boolean };
+  readonly link: { href: string; title: string | null } | null;
+  readonly coords: { from: LineRect; to: LineRect } | null;
+}
+interface LineRect {
+  readonly top: number;
+  readonly bottom: number;
+  readonly left: number;
+  readonly right: number;
+}
+
+/** What the shipped `describeUpdate` reports after a transaction (`editor-commands.ts`). */
+interface EditorUpdate {
+  readonly transactionCount: number;
+  readonly undoDepth: number;
+  readonly redoDepth: number;
+  readonly selection: { readonly kind: 'text'; readonly from: number; readonly to: number; readonly empty: boolean; readonly marks: Record<string, boolean>; readonly link: null };
+}
+
+/** A handle command the host called, by name and arguments. */
+interface HandleCall {
+  readonly command: string;
+  readonly args: readonly unknown[];
 }
 
 const { harness } = vi.hoisted(() => ({
@@ -66,10 +101,30 @@ const { harness } = vi.hoisted(() => ({
     dispatchSlash: (_action: SlashAction): void => {
       throw new Error('no editor mounted');
     },
+    /** Reports a selection change to the host the way the shipped selection plugin does. */
+    select: (_report: SelectionReport): void => {
+      throw new Error('no editor mounted');
+    },
+    /** Gives the fake view a new document instance, as a transaction with steps would. */
+    replaceDoc: (_markdown: string): void => {
+      throw new Error('no editor mounted');
+    },
+    /** Reports a transaction to the host the way the real `dispatchTransaction` does, with these history depths. */
+    update: (_depths: { undoDepth: number; redoDepth: number }): void => {
+      throw new Error('no editor mounted');
+    },
     /** What the host asked the editor to insert on a click — the fake `insertMention` / `confirmSlashCommand` record it here instead of touching a document. */
     confirmed: null as null | { readonly kind: 'mention'; readonly label: string } | { readonly kind: 'slash'; readonly id: string },
     /** How many times the host asked the (fake) view to take focus back. */
     focusCalls: 0,
+    /** Every `EditorHandle` command the host called, in order. */
+    handleCalls: [] as HandleCall[],
+    /** What the fake handle's `blockAt` answers — the block under the pointer, or none. */
+    blockHit: null as null | { pos: number; node: { type: { name: string }; attrs: Record<string, unknown>; firstChild: null }; rect: { left: number; top: number; right: number; bottom: number; width: number; height: number } },
+    /** What each block command's dry run answers (`moveBlockUp(state)` with no dispatch). */
+    dryRuns: { moveBlockUp: true, moveBlockDown: true, deleteBlock: true, duplicateBlock: true, turnInto: true },
+    /** The document a `dispatch` of a selection landed on: what `placeCaretIn` asked for. */
+    caretPlacedAt: null as null | number,
   },
 }));
 
@@ -91,19 +146,51 @@ vi.mock('@deep-wiki/editor/mount', async (importOriginal) => {
       harness.confirmed = { kind: 'slash', id: command.id };
       return state.tr.setMeta(actual.slashPluginKey, { type: 'dismiss' });
     },
-    createEditorView(options: FakeViewOptions) {
+    // The block commands' dry runs (`command(state)` with no dispatch): the
+    // real ones read a real `EditorState`, which the fake view has no room
+    // for; the answers are the harness's, and the host's handling of them
+    // is what is under test.
+    moveBlockUp: () => harness.dryRuns.moveBlockUp,
+    moveBlockDown: () => harness.dryRuns.moveBlockDown,
+    deleteBlock: () => harness.dryRuns.deleteBlock,
+    duplicateBlock: () => harness.dryRuns.duplicateBlock,
+    turnInto: () => () => harness.dryRuns.turnInto,
+    mountEditor(options: FakeViewOptions) {
       let mention = actual.INACTIVE_MENTION_STATE;
       let slash = actual.INACTIVE_SLASH_STATE;
 
+      // The selection's class is how `placeCaretIn` reaches `Selection.near`
+      // (`utils/block-tunes.ts`); this one answers with the position asked.
+      class FakeSelection {
+        from = 1;
+        static near(resolved: { pos: number }) {
+          return { placedAt: resolved.pos };
+        }
+      }
+      const blockDom = document.createElement('p');
       const view = {
         dom: options.dom,
         coordsAtPos: () => harness.caret,
+        nodeDOM: () => blockDom,
         state: {
+          // The real document the host parsed, so the debounced `toMarkdown`
+          // the host runs after an update has something to serialise; a
+          // test swaps it (`harness.replaceDoc`) to stand for a transaction
+          // with steps, which is the only kind that yields a new instance.
+          doc: options.doc,
+          selection: new FakeSelection(),
           get tr() {
-            return { setMeta: (key: unknown, action: unknown) => ({ key, action }) };
+            return {
+              setMeta: (key: unknown, action: unknown) => ({ key, action }),
+              setSelection: (selection: { placedAt: number }) => ({ selection }),
+            };
           },
         },
-        dispatch(tr: { key: unknown; action: MentionAction | SlashAction }) {
+        dispatch(tr: { key?: unknown; action?: MentionAction | SlashAction; selection?: { placedAt: number } }) {
+          if (tr.selection) {
+            harness.caretPlacedAt = tr.selection.placedAt;
+            return;
+          }
           if (tr.key === actual.mentionPluginKey) applyMention(tr.action as MentionAction);
           else applySlash(tr.action as SlashAction);
         },
@@ -134,11 +221,52 @@ vi.mock('@deep-wiki/editor/mount', async (importOriginal) => {
         else if (event.key === 'Escape') dispatchAction({ type: 'dismiss' });
       });
 
+      harness.select = (report) => options.selection?.onChange?.(report);
+      harness.replaceDoc = (markdown) => {
+        view.state.doc = actual.fromMarkdown(markdown);
+      };
+      let transactionCount = 0;
+      harness.update = ({ undoDepth, redoDepth }) => {
+        transactionCount += 1;
+        options.onUpdate?.(view, {
+          transactionCount,
+          undoDepth,
+          redoDepth,
+          selection: { kind: 'text', from: 1, to: 1, empty: true, marks: { strong: false, emphasis: false, delete: false, inlineCode: false, link: false }, link: null },
+        });
+      };
       harness.dispatchMention = applyMention;
       harness.dispatchSlash = applySlash;
       harness.doc = options.doc;
       harness.mounted = true;
-      return view;
+      // The `EditorHandle`: the view plus the command surface bound to it.
+      // Every command records the call and answers `true`, as the real one
+      // does where it applies.
+      const record = (command: string) => (...args: unknown[]) => {
+        harness.handleCalls.push({ command, args });
+        return true;
+      };
+      return {
+        view,
+        undo: record('undo'),
+        redo: record('redo'),
+        toggleMark: record('toggleMark'),
+        setLink: record('setLink'),
+        unsetLink: record('unsetLink'),
+        moveBlockUp: record('moveBlockUp'),
+        moveBlockDown: record('moveBlockDown'),
+        deleteBlock: record('deleteBlock'),
+        duplicateBlock: record('duplicateBlock'),
+        turnInto: record('turnInto'),
+        blockAt: () => harness.blockHit,
+        startBlockDrag: record('startBlockDrag'),
+        endBlockDrag: () => {
+          harness.handleCalls.push({ command: 'endBlockDrag', args: [] });
+        },
+        destroy: () => {
+          harness.handleCalls.push({ command: 'destroy', args: [] });
+        },
+      };
     },
   };
 });
@@ -174,9 +302,9 @@ const SurfaceInApp = defineComponent({
   setup: () => () => h(UApp, null, { default: () => h(EditorSurface, { markdown: '# Hi\n', workspaceId: 'ws-1', pageId: 'page-1' }) }),
 });
 
-async function mountSurface() {
+async function mountSurface(options: { attachTo?: Element } = {}) {
   harness.mounted = false;
-  const component = await mountSuspended(SurfaceInApp);
+  const component = await mountSuspended(SurfaceInApp, options);
   // The component only builds its view after `await import(…)` resolves, and
   // the first such import in a run pays for transforming the whole editor
   // module graph — seconds, not a microtask.
@@ -209,6 +337,10 @@ describe('EditorSurface', () => {
     harness.caret = { top: 100, bottom: 120, left: 40 };
     harness.confirmed = null;
     harness.focusCalls = 0;
+    harness.handleCalls = [];
+    harness.blockHit = null;
+    harness.dryRuns = { moveBlockUp: true, moveBlockDown: true, deleteBlock: true, duplicateBlock: true, turnInto: true };
+    harness.caretPlacedAt = null;
     harness.doc = null;
     harness.gate = Promise.resolve();
   });
@@ -229,10 +361,385 @@ describe('EditorSurface', () => {
       expect(harness.doc?.textContent).toBe('Hi');
     });
 
+    // The handle, not the bare view: `mountEditor` returns the view plus
+    // the command surface bound to it (undo/redo, the marks, the block
+    // tunes, the drag hooks), which is what every control this component
+    // renders acts through. It is torn down with the component.
+    test('mounts through mountEditor and destroys the handle when it unmounts', async () => {
+      const component = await mountSurface();
+      expect(harness.handleCalls.map((call) => call.command)).not.toContain('destroy');
+
+      component.unmount();
+
+      expect(harness.handleCalls.map((call) => call.command)).toContain('destroy');
+    });
+
     test('carries no static value import of @deep-wiki/editor — only the type import survives', () => {
       const valueImports = [...editorSurfaceSource.matchAll(/^import\s+(?!type\b)[^;]*from\s+'@deep-wiki\/editor'/gm)];
 
       expect(valueImports.map((match) => match[0])).toEqual([]);
+    });
+  });
+
+  /**
+   * Undo and redo live in the contextual bar (`pages/[id]/edit.vue`),
+   * outside this component, so the bar needs two things from it: the
+   * history depths after every transaction — read from the history
+   * plugin's own counters by the shipped `describeUpdate`, never inferred
+   * from keystrokes — and the two commands, which run through the handle
+   * so the button and `Ctrl+Z` can never disagree.
+   */
+  describe('what a transaction reports', () => {
+    /**
+     * A selection-only transaction — a click, an arrow key — keeps
+     * `state.doc` the same instance and must not report the document:
+     * doing so marked the buffer dirty and enabled Save before anything
+     * had changed, and `e2e/editor.spec.ts` saved the pre-edit document
+     * when a click landed inside the 300ms window (docs/TODO.md,
+     * 2026-09-16).
+     */
+    test('a transaction that left the document alone reports no update; one that changed it reports the new markdown once', async () => {
+      vi.useFakeTimers();
+      try {
+        const component = await mountSurface();
+        const surface = component.findComponent(EditorSurface);
+
+        harness.update({ undoDepth: 0, redoDepth: 0 });
+        harness.update({ undoDepth: 0, redoDepth: 0 });
+        await vi.advanceTimersByTimeAsync(400);
+        expect(surface.emitted('update')).toBeUndefined();
+
+        harness.replaceDoc('# Hi\n\nChanged.\n');
+        harness.update({ undoDepth: 1, redoDepth: 0 });
+        harness.update({ undoDepth: 1, redoDepth: 0 });
+        await vi.advanceTimersByTimeAsync(400);
+        expect(surface.emitted('update')).toEqual([['# Hi\n\nChanged.\n']]);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
+  describe('flush', () => {
+    /**
+     * Save reads the buffer the surface last reported, and the surface
+     * reports 300ms after the last transaction — so a Save inside that
+     * window saved the document before the edit (docs/TODO.md, "a dirty
+     * editor has a 300ms blind spot"). `flush()` reports what is pending
+     * now; the screen calls it before it saves.
+     */
+    test('reports a pending document at once, and reports nothing when nothing is pending', async () => {
+      vi.useFakeTimers();
+      try {
+        const component = await mountSurface();
+        const surface = component.findComponent(EditorSurface);
+        const flush = (surface.vm as unknown as { flush: () => void }).flush;
+
+        flush();
+        expect(surface.emitted('update')).toBeUndefined();
+
+        harness.replaceDoc('# Hi\n\nPending.\n');
+        harness.update({ undoDepth: 1, redoDepth: 0 });
+        flush();
+        expect(surface.emitted('update')).toEqual([['# Hi\n\nPending.\n']]);
+
+        // The timer was cleared with it: nothing reports twice.
+        await vi.advanceTimersByTimeAsync(400);
+        expect(surface.emitted('update')).toHaveLength(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
+  describe('undo and redo for the contextual bar', () => {
+    test('reports the history depths of every transaction, undebounced, as a `history` event', async () => {
+      const component = await mountSurface();
+      const surface = component.findComponent(EditorSurface);
+
+      harness.update({ undoDepth: 1, redoDepth: 0 });
+      harness.update({ undoDepth: 2, redoDepth: 0 });
+      harness.update({ undoDepth: 1, redoDepth: 1 });
+
+      expect(surface.emitted('history')).toEqual([[{ undoDepth: 1, redoDepth: 0 }], [{ undoDepth: 2, redoDepth: 0 }], [{ undoDepth: 1, redoDepth: 1 }]]);
+    });
+
+    test('exposes undo and redo that run the handle\'s commands and hand focus back to the editor', async () => {
+      const component = await mountSurface();
+      const surface = component.findComponent(EditorSurface).vm as unknown as { undo: () => void; redo: () => void };
+      const focusBefore = harness.focusCalls;
+
+      surface.undo();
+      surface.redo();
+
+      expect(harness.handleCalls.map((call) => call.command)).toEqual(['undo', 'redo']);
+      expect(harness.focusCalls).toBe(focusBefore + 2);
+    });
+  });
+
+  /**
+   * The selection toolbar (`EditorSelectionToolbar`) over a non-empty text
+   * selection: shown from the selection plugin's report while the editor
+   * — or the toolbar itself — has focus, placed by `positionToolbar`,
+   * acting through the handle. Its own contract (the roving keyboard, the
+   * link popover) is `EditorSelectionToolbar.test.ts`; this holds the
+   * wiring.
+   */
+  describe('the selection toolbar', () => {
+    const NO_MARKS = { strong: false, emphasis: false, delete: false, inlineCode: false, link: false };
+    const RANGE: SelectionReport = {
+      kind: 'text',
+      from: 1,
+      to: 5,
+      empty: false,
+      marks: NO_MARKS,
+      link: null,
+      coords: { from: { top: 300, bottom: 326, left: 400, right: 400 }, to: { top: 300, bottom: 326, left: 480, right: 480 } },
+    };
+
+    function toolbar(component: { find: (selector: string) => { exists: () => boolean } }) {
+      return component.find('[role="toolbar"][aria-label="Text formatting"]');
+    }
+
+    async function focusEditor(component: Awaited<ReturnType<typeof mountSurface>>): Promise<void> {
+      component.get('[data-testid="editor-surface"]').element.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+      await component.vm.$nextTick();
+    }
+
+    test('appears over a non-empty text selection while the editor has focus, where positionToolbar puts it, and goes when the selection collapses', async () => {
+      const component = await mountSurface();
+      await focusEditor(component);
+      expect(toolbar(component).exists()).toBe(false);
+
+      harness.select(RANGE);
+      await component.vm.$nextTick();
+
+      expect(toolbar(component).exists()).toBe(true);
+      const expected = positionToolbar(RANGE.coords!);
+      const style = (component.get('[role="toolbar"]').element as HTMLElement).style;
+      expect(Number.parseFloat(style.top)).toBe(expected.top);
+      expect(Number.parseFloat(style.left)).toBe(expected.left);
+
+      harness.select({ ...RANGE, to: 1, empty: true });
+      await component.vm.$nextTick();
+      expect(toolbar(component).exists()).toBe(false);
+    });
+
+    test('stays away inside a code block, over a node selection, and while the editor is not focused', async () => {
+      const component = await mountSurface();
+
+      harness.select(RANGE);
+      await component.vm.$nextTick();
+      expect(toolbar(component).exists(), 'no focus yet').toBe(false);
+
+      await focusEditor(component);
+      expect(toolbar(component).exists()).toBe(true);
+      harness.select({ ...RANGE, kind: 'code' });
+      await component.vm.$nextTick();
+      expect(toolbar(component).exists(), 'code block').toBe(false);
+      harness.select({ ...RANGE, kind: 'node' });
+      await component.vm.$nextTick();
+      expect(toolbar(component).exists(), 'node selection').toBe(false);
+
+      harness.select(RANGE);
+      await component.vm.$nextTick();
+      expect(toolbar(component).exists()).toBe(true);
+      const outside = document.createElement('button');
+      document.body.append(outside);
+      component.get('[data-testid="editor-surface"]').element.dispatchEvent(new FocusEvent('focusout', { bubbles: true, relatedTarget: outside }));
+      await component.vm.$nextTick();
+      expect(toolbar(component).exists(), 'focus left the editor').toBe(false);
+      outside.remove();
+    });
+
+    test('reflects the marks the plugin reports, and a button runs the handle\'s toggleMark, setLink or unsetLink', async () => {
+      const component = await mountSurface();
+      await focusEditor(component);
+      harness.select({ ...RANGE, marks: { ...NO_MARKS, emphasis: true } });
+      await component.vm.$nextTick();
+
+      expect(component.get('[role="toolbar"] button[aria-label="Italic"]').attributes('aria-pressed')).toBe('true');
+      await component.get('[role="toolbar"] button[aria-label="Bold"]').trigger('click');
+      const bubble = component.findComponent(EditorSelectionToolbar);
+      bubble.vm.$emit('setLink', 'https://example.com');
+      bubble.vm.$emit('unsetLink');
+      await component.vm.$nextTick();
+
+      expect(harness.handleCalls).toEqual([
+        { command: 'toggleMark', args: ['strong'] },
+        { command: 'setLink', args: ['https://example.com'] },
+        { command: 'unsetLink', args: [] },
+      ]);
+    });
+
+    test('Ctrl+Shift+. from the editor moves focus into the toolbar, and Escape there hands it back', async () => {
+      const component = await mountSurface({ attachTo: document.body });
+      await focusEditor(component);
+      harness.select(RANGE);
+      await component.vm.$nextTick();
+      const focusBefore = harness.focusCalls;
+
+      // `Shift`+`.` reports `>` on a US layout; the code names the key.
+      await component.get('[data-testid="editor-surface"]').trigger('keydown', { key: '>', code: 'Period', ctrlKey: true, shiftKey: true });
+
+      const bold = component.get('[role="toolbar"] button[aria-label="Bold"]');
+      expect(document.activeElement).toBe(bold.element);
+
+      await bold.trigger('keydown', { key: 'Escape' });
+      expect(harness.focusCalls).toBe(focusBefore + 1);
+      component.unmount();
+    });
+  });
+
+  /**
+   * The block handle (`EditorBlockHandle`) and its tunes: one handle that
+   * follows the block under the pointer through the handle's `blockAt`,
+   * drags it through `startBlockDrag`/`endBlockDrag`, and opens a menu
+   * whose items come from dry-running the block commands on the block
+   * (`utils/block-tunes.ts`) after the caret has been placed in it. The
+   * keyboard reaches the same menu for the caret's block.
+   */
+  describe('the block handle and its tunes', () => {
+    const HIT = {
+      pos: 0,
+      node: { type: { name: 'paragraph' }, attrs: {}, firstChild: null },
+      rect: { left: 300, top: 140, right: 900, bottom: 166, width: 600, height: 26 },
+    };
+
+    async function hover(component: Awaited<ReturnType<typeof mountSurface>>): Promise<void> {
+      const editor = component.get('[data-testid="editor-surface"]');
+      editor.element.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: 400, clientY: 150 }));
+      // Throttled to one lookup per frame.
+      await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+      await component.vm.$nextTick();
+    }
+
+    function handle(component: Awaited<ReturnType<typeof mountSurface>>) {
+      return component.find('[data-testid="block-handle"]');
+    }
+
+    function menuItems(): HTMLElement[] {
+      return Array.from(document.body.querySelectorAll<HTMLElement>('[role="menuitem"]'));
+    }
+
+    async function settle(): Promise<void> {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+
+    test('appears beside the block under the pointer, at its top, and not while no block is under it', async () => {
+      const component = await mountSurface({ attachTo: document.body });
+      expect(handle(component).exists()).toBe(false);
+
+      await hover(component);
+      expect(handle(component).exists(), 'nothing under the pointer').toBe(false);
+
+      harness.blockHit = HIT;
+      await hover(component);
+      expect(handle(component).exists()).toBe(true);
+      // happy-dom lays nothing out: the host's box is at 0, so the block's
+      // viewport top is the handle's offset.
+      expect((handle(component).element as HTMLElement).style.top).toBe(`${HIT.rect.top}px`);
+      component.unmount();
+    });
+
+    test('opening the menu places the caret in the block first, then offers the tunes from dry runs — a refused move disabled with its reason', async () => {
+      harness.blockHit = HIT;
+      harness.dryRuns.moveBlockUp = false;
+      const component = await mountSurface({ attachTo: document.body });
+      await hover(component);
+      expect(harness.caretPlacedAt).toBeNull();
+
+      await handle(component).get('button').trigger('click');
+      await settle();
+
+      expect(harness.caretPlacedAt).toBe(HIT.pos);
+      const items = menuItems();
+      const labels = items.map((item) => item.textContent?.replace(/\s+/g, ' ').trim());
+      expect(labels.some((label) => label?.startsWith('Turn into'))).toBe(true);
+      const up = items.find((item) => item.textContent?.includes('Move up'))!;
+      expect(up.getAttribute('aria-disabled')).toBe('true');
+      expect(up.textContent).toContain('Already the first block.');
+      const down = items.find((item) => item.textContent?.includes('Move down'))!;
+      expect(down.getAttribute('aria-disabled')).toBeNull();
+
+      const focusBefore = harness.focusCalls;
+      down.click();
+      await settle();
+      expect(harness.handleCalls.map((call) => call.command)).toContain('moveBlockDown');
+      expect(harness.focusCalls, 'focus goes back to the editor').toBeGreaterThan(focusBefore);
+      component.unmount();
+    });
+
+    test('Duplicate and Delete run the handle\'s commands', async () => {
+      harness.blockHit = HIT;
+      const component = await mountSurface({ attachTo: document.body });
+      await hover(component);
+
+      await handle(component).get('button').trigger('click');
+      await settle();
+      menuItems().find((item) => item.textContent?.includes('Duplicate'))!.click();
+      await settle();
+      // The menu closed and the handle went with it (the block it stood
+      // beside may have moved); the pointer brings it back.
+      expect(handle(component).exists()).toBe(false);
+      await hover(component);
+      await handle(component).get('button').trigger('click');
+      await settle();
+      menuItems().find((item) => item.textContent?.includes('Delete'))!.click();
+      await settle();
+
+      expect(harness.handleCalls.map((call) => call.command)).toEqual(['duplicateBlock', 'deleteBlock']);
+      component.unmount();
+    });
+
+    test('Turn into on a list item chains Text first, so a heading does not land inside the item', async () => {
+      harness.blockHit = { ...HIT, node: { type: { name: 'list' }, attrs: { ordered: false }, firstChild: null } };
+      const component = await mountSurface({ attachTo: document.body });
+      await hover(component);
+      await handle(component).get('button').trigger('click');
+      await settle();
+
+      const turnInto = menuItems().find((item) => item.textContent?.includes('Turn into'))!;
+      turnInto.dispatchEvent(new PointerEvent('pointermove', { bubbles: true }));
+      turnInto.click();
+      await settle();
+      const heading = menuItems().find((item) => item.textContent?.includes('Heading 1'))!;
+      heading.click();
+      await settle();
+
+      expect(harness.handleCalls).toEqual([
+        { command: 'turnInto', args: ['text'] },
+        { command: 'turnInto', args: ['heading-1'] },
+      ]);
+      component.unmount();
+    });
+
+    test('a drag from the handle starts the block drag with the event\'s dataTransfer, and its end clears it', async () => {
+      harness.blockHit = { ...HIT, pos: 4 };
+      const component = await mountSurface({ attachTo: document.body });
+      await hover(component);
+      const button = handle(component).get('button');
+
+      const dragstart = new DragEvent('dragstart', { bubbles: true, cancelable: true, dataTransfer: new DataTransfer() });
+      button.element.dispatchEvent(dragstart);
+      button.element.dispatchEvent(new DragEvent('dragend', { bubbles: true }));
+
+      expect(harness.handleCalls[0]).toEqual({ command: 'startBlockDrag', args: [4, dragstart.dataTransfer] });
+      expect(harness.handleCalls[1]?.command).toBe('endBlockDrag');
+      component.unmount();
+    });
+
+    test('Ctrl+/ from the editor opens the menu for the caret\'s block, without a pointer', async () => {
+      const component = await mountSurface({ attachTo: document.body });
+      expect(handle(component).exists()).toBe(false);
+
+      await component.get('[data-testid="editor-surface"]').trigger('keydown', { key: '/', code: 'Slash', ctrlKey: true });
+      await settle();
+
+      expect(handle(component).exists()).toBe(true);
+      expect(harness.caretPlacedAt, 'the caret\'s own block: no move needed').toBe(0);
+      expect(menuItems().length).toBeGreaterThan(0);
+      component.unmount();
     });
   });
 
@@ -323,6 +830,62 @@ describe('EditorSurface', () => {
       expect(harness.confirmed).toEqual({ kind: 'slash', id: shipped!.id });
       expect(component.find('[role="listbox"]').exists()).toBe(false);
       expect(harness.focusCalls).toBeGreaterThan(0);
+    });
+  });
+
+  /**
+   * Since `keymap.ts` bound `Enter` (2026-09-14) the keymap plugin — first
+   * in `buildEditorPlugins`' list — claims Enter before the menus, so
+   * Enter in an open `/` or `@` menu split the block instead of confirming
+   * (docs/TODO.md Findings, 2026-09-16). The package is another batch's;
+   * the host confirms on the capture phase of its own wrapper, where the
+   * key can be taken before ProseMirror's listener on the editor sees it,
+   * through the same one-transaction confirm the click uses.
+   */
+  describe('Enter and Tab in an open menu confirm, before the keymap can split the block', () => {
+    test('Enter with the slash menu open runs the highlighted command and never reaches the editor', async () => {
+      const component = await mountSurface();
+      openSlashMenu('');
+      await component.vm.$nextTick();
+      const editor = component.get('[data-testid="editor-surface"]');
+      let reachedEditor = false;
+      editor.element.addEventListener('keydown', () => {
+        reachedEditor = true;
+      });
+
+      const enter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+      editor.element.dispatchEvent(enter);
+      await component.vm.$nextTick();
+
+      expect(enter.defaultPrevented).toBe(true);
+      expect(reachedEditor, 'stopped on the capture phase').toBe(false);
+      const first = (await import('@deep-wiki/editor/mount')).SLASH_COMMANDS[0]!;
+      expect(harness.confirmed).toEqual({ kind: 'slash', id: first.id });
+      expect(component.find('[role="listbox"]').exists()).toBe(false);
+    });
+
+    test('Tab with the mention menu open inserts the highlighted candidate', async () => {
+      const component = await mountSurface();
+      await openMentionMenu('a');
+      const editor = component.get('[data-testid="editor-surface"]');
+
+      const tab = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true });
+      editor.element.dispatchEvent(tab);
+      await component.vm.$nextTick();
+
+      expect(tab.defaultPrevented).toBe(true);
+      expect(harness.confirmed).toEqual({ kind: 'mention', label: PEOPLE[0]!.label });
+    });
+
+    test('Enter with no menu open is the editor\'s own', async () => {
+      const component = await mountSurface();
+      const editor = component.get('[data-testid="editor-surface"]');
+
+      const enter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+      editor.element.dispatchEvent(enter);
+
+      expect(enter.defaultPrevented).toBe(false);
+      expect(harness.confirmed).toBeNull();
     });
   });
 
@@ -428,6 +991,31 @@ describe('EditorSurface', () => {
       expect(menu.findAll('[role="option"]').length).toBeGreaterThan(0);
       expect(menu.text()).toContain('Heading 1');
       expect(menu.text()).not.toMatch(/no matching commands/i);
+    });
+
+    /**
+     * The `/` menu is data-driven from the shipped `SLASH_COMMANDS`, which
+     * gained Text, Task list, Table and Footnote on 2026-09-16; each row
+     * carries an icon *beside* its label, never instead of it (§4.3), from
+     * the one map the tunes menu's "Turn into" reads too.
+     */
+    test('the slash menu lists the block commands the package ships, each with an icon beside its label', async () => {
+      const component = await mountSurface();
+
+      openSlashMenu('');
+      await component.vm.$nextTick();
+
+      const menu = component.get('[role="listbox"][aria-label="Block commands"]');
+      const options = menu.findAll('[role="option"]');
+      const labels = options.map((option) => option.text());
+      for (const expected of ['Text', 'Task list', 'Table', 'Footnote']) {
+        expect(labels.some((label) => label.startsWith(expected)), expected).toBe(true);
+      }
+      for (const option of options) {
+        const icon = option.find('[class*="i-lucide-"], .iconify, svg');
+        expect(icon.exists(), `${option.text()} has an icon`).toBe(true);
+        expect(icon.attributes('aria-hidden')).toBe('true');
+      }
     });
 
     test('a slash query that matches no command shows the no-results state', async () => {
