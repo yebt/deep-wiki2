@@ -55,8 +55,17 @@ async function useTheme(page: Page, theme: 'light' | 'dark'): Promise<void> {
   await page.addInitScript((value) => localStorage.setItem('nuxt-color-mode', value), theme);
 }
 
-/** Below `lg` the sidebar is a drawer; this opens it so the tree is on screen. */
+/**
+ * Below `lg` the sidebar is a drawer; this opens it so the tree is on
+ * screen. The toggle is server-rendered and visible before Vue has
+ * attached its listener, and a click in that window reaches nothing
+ * (e2e/navigation.spec.ts's note), so hydration is waited for first.
+ */
 async function openDrawerIfNarrow(page: Page): Promise<void> {
+  await page.waitForFunction(() => {
+    const nuxt = (globalThis as { useNuxtApp?: () => { isHydrating?: boolean } }).useNuxtApp;
+    return typeof nuxt === 'function' && nuxt().isHydrating === false;
+  });
   const toggle = page.getByRole('button', { name: 'Open sidebar' });
   if (await toggle.isVisible().catch(() => false)) await toggle.click();
 }
@@ -76,6 +85,9 @@ async function signInAs(page: Page, token: string): Promise<void> {
 // reload in the middle of a held request is not the behaviour under test
 // (e2e/perf.spec.ts warms its route for the same reason).
 test.beforeAll(async ({ browser }) => {
+  // A hook's own budget: the first compile of the dashboard route on a
+  // loaded host is what this wait is for.
+  test.setTimeout(240_000);
   const fixtures = mintFixtures();
   const page = await browser.newPage();
   await signInAs(page, fixtures.writerSessionToken);

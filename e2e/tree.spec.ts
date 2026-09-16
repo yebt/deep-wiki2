@@ -71,8 +71,19 @@ async function shot(page: Page, name: string): Promise<void> {
   await page.screenshot({ path: `${SHOTS}/fb-tree-${name}.png`, fullPage: false });
 }
 
-/** Below `lg` the sidebar is a drawer; this opens it so the tree is on screen. */
+/**
+ * Below `lg` the sidebar is a drawer; this opens it so the tree is on
+ * screen. The toggle is server-rendered and visible before Vue has
+ * attached its listener, and a click in that window reaches nothing
+ * (e2e/navigation.spec.ts's note) — seen at 320 on 2026-09-16 once the
+ * tree became client-only and the window grew — so hydration is waited
+ * for first.
+ */
 async function openDrawerIfNarrow(page: Page): Promise<void> {
+  await page.waitForFunction(() => {
+    const nuxt = (globalThis as { useNuxtApp?: () => { isHydrating?: boolean } }).useNuxtApp;
+    return typeof nuxt === 'function' && nuxt().isHydrating === false;
+  });
   const toggle = page.getByRole('button', { name: 'Open sidebar' });
   if (await toggle.isVisible().catch(() => false)) await toggle.click();
 }

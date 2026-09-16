@@ -54,12 +54,22 @@ async function signInAs(page: Page, token: string): Promise<void> {
  * Opens the read screen and waits until it is *hydrated*: "Edit" is
  * server-rendered and visible long before Vue has attached a listener to
  * it (tens of seconds, under load), and a hover in that window reaches
- * nothing. The article's title is fetched from `onMounted`, so its
- * presence means hydration is done.
+ * nothing. The article's title used to be fetched from `onMounted`, so
+ * its presence meant hydration was done; since the read layer landed
+ * (2026-09-16) the title is server-rendered too, so Nuxt's own
+ * `isHydrating` is what says the listeners are attached.
  */
 async function openReadScreenHydrated(page: Page): Promise<void> {
   await page.goto(`/pages/${fixtures.editablePageId}`);
   await expect(page.getByRole('main').getByRole('heading', { level: 1, name: fixtures.editablePageTitle })).toBeVisible({ timeout: 120_000 });
+  await page.waitForFunction(
+    () => {
+      const nuxt = (globalThis as { useNuxtApp?: () => { isHydrating?: boolean } }).useNuxtApp;
+      return typeof nuxt === 'function' && nuxt().isHydrating === false;
+    },
+    undefined,
+    { timeout: 120_000 },
+  );
 }
 
 /** The editor is live: ProseMirror has attached and the seeded text is in the document. */
