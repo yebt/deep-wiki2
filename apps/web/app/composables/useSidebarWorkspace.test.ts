@@ -1,7 +1,7 @@
 import { mountSuspended } from '@nuxt/test-utils/runtime';
 import { beforeEach, describe, expect, test } from 'vitest';
 import { defineComponent, effectScope, h, nextTick, ref } from 'vue';
-import { useNuxtApp, useState } from '#imports';
+import { clearNuxtState, useState } from '#imports';
 import { useSidebarWorkspace } from './useSidebarWorkspace';
 
 const KEY = 'dw-frame-sidebar-workspace-rendered';
@@ -14,7 +14,8 @@ const KEY = 'dw-frame-sidebar-workspace-rendered';
  */
 describe('useSidebarWorkspace', () => {
   beforeEach(() => {
-    delete (useNuxtApp().payload.state as Record<string, unknown>)[`$s${KEY}`];
+    // Each test decides what "the server serialised" — including nothing.
+    clearNuxtState(KEY);
   });
 
   test('before mount, renders the workspace the server rendered with, not the live one', () => {
