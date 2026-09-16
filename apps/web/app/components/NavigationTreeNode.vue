@@ -50,7 +50,9 @@
  * (`tabindex="-1"`) so the tree stays one tab stop on the `treeitem`. A
  * click on the link records the selection and leaves the navigation to
  * the link; a click elsewhere on the row, and Enter, open the page through
- * the tree as before. And the row warms the route on intent — pointer
+ * the tree as before; focus a click puts on the link is handed straight
+ * to the `treeitem`, so the tree's tab stop is always where focus is
+ * (`onLinkFocus`). And the row warms the route on intent — pointer
  * enter or focus, once — with `preloadRouteComponents`, because
  * `NuxtLink`'s own prefetch skips it in dev, the environment the owner
  * runs, and nothing had prefetched the read route's chunk before a click
@@ -125,7 +127,27 @@ const href = computed(() => `/pages/${props.node.id}`);
 /** The title's element: the link, for a page; a plain span for a container. */
 const NuxtLink = resolveComponent('NuxtLink');
 const titleTag = computed(() => (isNavigable.value ? NuxtLink : 'span'));
-const titleAttrs = computed(() => (isNavigable.value ? { to: href.value, tabindex: -1, prefetch: false } : {}));
+const titleAttrs = computed(() => (isNavigable.value ? { to: href.value, tabindex: -1, prefetch: false, onFocus: onLinkFocus } : {}));
+
+/** The item element — where the tree's focus lives; the row and the link inside it never hold it. */
+const itemEl = ref<HTMLElement | null>(null);
+
+/**
+ * A mouse click focuses the element under the pointer, and the link
+ * carries a `tabindex`, so a click on a page's title would leave focus on
+ * the `<a>` — inside the `treeitem`, but not on it. The tree's one tab
+ * stop is the item (the ARIA tree pattern), and whatever asks "where was
+ * focus?" afterwards — the confirm dialog that guards a dirty editor,
+ * which returns focus to the control that asked — must find the row, not
+ * a link the keyboard cannot reach (seen 2026-09-16, docs/TODO.md
+ * Findings). So focus arriving on the link is handed to the item at
+ * once; the click that follows still runs on the link, which is what
+ * navigates. The `⋯` actions button is not a link and keeps its own
+ * focus: its menu returns focus to it.
+ */
+function onLinkFocus(): void {
+  itemEl.value?.focus();
+}
 
 /** The route's components, requested on the first sign of intent so the click finds them warm. Once per row. */
 let warmed = false;
@@ -221,6 +243,7 @@ function onKeydown(event: KeyboardEvent): void {
 
 <template>
   <li
+    ref="itemEl"
     role="treeitem"
     :data-node-id="node.id"
     :aria-level="depth + 1"
