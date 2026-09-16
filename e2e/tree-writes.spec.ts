@@ -45,10 +45,17 @@ const REPO_ROOT = join(import.meta.dirname, '..');
 
 /** Review material, written only when asked for (the frame batch's `DEEPWIKI_FRAME_SHOTS` convention). */
 const SHOTS = process.env.DEEPWIKI_FRAME2_SHOTS ?? '';
+/** The 2026-09-16 regression batch's own set: the row after a drag, with the tree's focus on it. */
+const FIX2_SHOTS = process.env.DEEPWIKI_FIX2_SHOTS ?? '';
 
 async function shot(page: Page, name: string): Promise<void> {
   if (!SHOTS) return;
   await page.screenshot({ path: `${SHOTS}/fb-frame2-${name}.png`, fullPage: false });
+}
+
+async function fix2Shot(page: Page, name: string): Promise<void> {
+  if (!FIX2_SHOTS) return;
+  await page.screenshot({ path: `${FIX2_SHOTS}/fb-fix2-${name}.png`, fullPage: false });
 }
 
 async function useTheme(page: Page, theme: 'light' | 'dark'): Promise<void> {
@@ -240,7 +247,13 @@ for (const [width, theme] of [
       await dragBefore(page, fixtures.secondPageTitle, fixtures.firstPageTitle);
       await expect(page.getByRole('alert').filter({ hasText: "That move isn't allowed" })).toBeVisible();
       expect(await pageOrder(page, fixtures)).toEqual([fixtures.firstPageTitle, fixtures.secondPageTitle]);
+      // The pointer's mousedown put focus on the dragged row's link; the
+      // drag's end hands it to the `treeitem`, the tree's one tab stop
+      // (2026-09-16: the first handoff, on the link's focus, cancelled the
+      // native drag itself — docs/TODO.md Findings).
+      await expect(page.getByRole('treeitem', { name: new RegExp(fixtures.secondPageTitle) })).toBeFocused();
       await shot(page, `tree-drag-refused-${width}-${theme}`);
+      await fix2Shot(page, `tree-after-drag-${width}-${theme}`);
       await expectNoHorizontalOverflow(page, `tree drag refused ${width} ${theme}`);
     });
   });

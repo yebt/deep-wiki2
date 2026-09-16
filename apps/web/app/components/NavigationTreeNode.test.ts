@@ -323,14 +323,17 @@ describe('NavigationTreeNode', () => {
     });
 
     test('a click on the link records the selection and leaves the navigation to the link', async () => {
-      const component = await mountNode();
+      const component = await mountNode({}, {}, { attachTo: document.body });
+      try {
+        const link = itemOf(component.dom, 'page-1').querySelector<HTMLAnchorElement>('a[href]')!;
+        link.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+        await nextTick();
 
-      const link = itemOf(component.dom, 'page-1').querySelector<HTMLAnchorElement>('a[href]')!;
-      link.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-      await nextTick();
-
-      expect(component.row.emitted('activate')).toEqual([['page-1']]);
-      expect(component.row.emitted('open')).toBeUndefined();
+        expect(component.row.emitted('activate')).toEqual([['page-1']]);
+        expect(component.row.emitted('open')).toBeUndefined();
+      } finally {
+        component.unmount();
+      }
     });
 
     /**
@@ -340,10 +343,19 @@ describe('NavigationTreeNode', () => {
      * (docs/TODO.md Findings): the confirm dialog that guards a dirty
      * editor read that `<a>` as the control that asked and returned focus
      * to it, and the tree's one tab stop was no longer where focus was.
-     * Focus on the link is the row's: it lands on the `treeitem`, the
-     * element the ARIA tree pattern gives the keyboard to.
+     *
+     * The first repair handed focus over the moment it arrived on the
+     * link — and killed every mouse drag from a page row (docs/TODO.md
+     * Findings, 2026-09-16): Chromium cancels the native drag of a link
+     * whose mousedown moves focus elsewhere (measured: `dragstart` never
+     * fires, the drop never lands). So focus arriving on the link is left
+     * where the browser put it, and the *click* — which a drag never
+     * produces — hands it to the row before the link's own handler runs,
+     * since a native click runs microtasks between listeners and the
+     * link's navigation asks the guard inside them (the second finding,
+     * same entry).
      */
-    test('focus arriving on the link lands on the row itself, so the tree’s one tab stop is where focus is', async () => {
+    test('focus arriving on the link stays on the link: a focus move during its mousedown cancels the native drag', async () => {
       const component = await mountNode({ activeId: 'page-1' }, {}, { attachTo: document.body });
       try {
         const item = itemOf(component.dom, 'page-1');
@@ -352,8 +364,51 @@ describe('NavigationTreeNode', () => {
         link.focus();
         await nextTick();
 
+        expect(document.activeElement).toBe(link);
+      } finally {
+        component.unmount();
+      }
+    });
+
+    test('a click on the link hands focus to the row before the link’s own handler runs, so the tree’s one tab stop is where focus is', async () => {
+      const component = await mountNode({ activeId: 'page-1' }, {}, { attachTo: document.body });
+      try {
+        const item = itemOf(component.dom, 'page-1');
+        const link = item.querySelector<HTMLAnchorElement>('a[href]')!;
+        // What the link's navigation sees: the guard a dirty editor runs
+        // reads the focused element to return focus to it afterwards, and
+        // a native click runs microtasks between listeners — so the row
+        // must hold focus by the time the link's own listener runs, not
+        // once the click has bubbled up to the row.
+        let focusedWhenTheLinkActed: Element | null = null;
+        link.addEventListener('click', () => {
+          focusedWhenTheLinkActed = document.activeElement;
+        });
+
+        // What a mouse does: focus on mousedown, then the click.
+        link.focus();
+        link.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+        await nextTick();
+
+        expect(focusedWhenTheLinkActed).toBe(item);
         expect(document.activeElement).toBe(item);
         expect(component.row.emitted('activate')).toEqual([['page-1']]);
+      } finally {
+        component.unmount();
+      }
+    });
+
+    test('a drag from the link ends with focus on the row, not on a link the keyboard cannot reach', async () => {
+      const component = await mountNode({ activeId: 'page-1' }, {}, { attachTo: document.body });
+      try {
+        const item = itemOf(component.dom, 'page-1');
+        const link = item.querySelector<HTMLAnchorElement>('a[href]')!;
+
+        link.focus();
+        link.dispatchEvent(new Event('dragend', { bubbles: true }));
+        await nextTick();
+
+        expect(document.activeElement).toBe(item);
       } finally {
         component.unmount();
       }
