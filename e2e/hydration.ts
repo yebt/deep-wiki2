@@ -13,13 +13,24 @@ import type { Page } from '@playwright/test';
  * Until the read layer, the content itself was fetched after hydration,
  * so its appearance was the signal; this is that signal made explicit.
  *
- * Vue sets `__vue_app__` on the root container when the app mounts, and
- * Nuxt mounts after every client plugin has run — the point from which
- * the page's components answer events.
+ * Two conditions, because the first alone is not enough. Vue sets
+ * `__vue_app__` on the root container when the app mounts — but Nuxt
+ * mounts its tree inside `<Suspense>`, and a screen whose setup is
+ * asynchronous (every screen on the read layer) is hydrated only once
+ * that suspense resolves, a frame to a second later. In between, the
+ * app is "mounted" and the frame's drawer toggle still has no listener:
+ * `e2e/management.spec.ts` clicked "Open sidebar" in that window on
+ * 2026-09-16 and nothing opened. Nuxt marks the resolution itself —
+ * `isHydrating` turns `false` as `app:suspense:resolve` fires — so that
+ * is the second condition.
  */
 export async function waitForHydration(page: Page, timeout = 120_000): Promise<void> {
   await page.waitForFunction(
-    () => Boolean((document.querySelector('#__nuxt') as (Element & { __vue_app__?: unknown }) | null)?.__vue_app__),
+    () => {
+      const root = document.querySelector('#__nuxt') as (Element & { __vue_app__?: { config: { globalProperties: { $nuxt?: { isHydrating: boolean } } } } }) | null;
+      const nuxt = root?.__vue_app__?.config.globalProperties.$nuxt;
+      return Boolean(nuxt) && nuxt!.isHydrating === false;
+    },
     undefined,
     { timeout },
   );

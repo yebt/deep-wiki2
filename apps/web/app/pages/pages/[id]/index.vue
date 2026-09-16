@@ -284,6 +284,16 @@ function startThreadOnSelection(): void {
  * whenever it changes, and only while it is one block's worth of text.
  * Measured against the same wrapper the marks are placed in, above the
  * selection's first line — or below it when there is no room above.
+ *
+ * Read on `selectionchange` (on `document`: the event does not bubble
+ * from the article, and the selection may start outside it), and again
+ * whenever this screen *becomes able* to act on one. The article is
+ * server-rendered and readable long before the client has hydrated it
+ * or the threads response has said the caller may comment; a person who
+ * selects words in that window gets no `selectionchange` afterwards —
+ * the browser fires it when the selection changes, not when a listener
+ * arrives — so the selection they already hold is read on mount and when
+ * `canStart` turns true (e2e/comments.spec.ts found the gap, 2026-09-16).
  */
 function onSelectionChange(): void {
   const root = articleEl.value;
@@ -315,8 +325,14 @@ function onSelectionChange(): void {
   };
 }
 
-onMounted(() => document.addEventListener('selectionchange', onSelectionChange));
+onMounted(() => {
+  document.addEventListener('selectionchange', onSelectionChange);
+  onSelectionChange();
+});
 onBeforeUnmount(() => document.removeEventListener('selectionchange', onSelectionChange));
+watch(canStart, (able) => {
+  if (able) onSelectionChange();
+});
 
 async function onPost(): Promise<void> {
   announcement.value = '';

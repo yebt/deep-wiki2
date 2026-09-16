@@ -561,7 +561,7 @@ describe('NavigationTree', () => {
       expect(labels.some((label) => label?.startsWith('New '))).toBe(false);
       expect(labels.some((label) => label?.startsWith('Rename…'))).toBe(true);
       expect(labels.some((label) => label?.startsWith('Open'))).toBe(true);
-      expect(labels.some((label) => label?.startsWith('History'))).toBe(true);
+      expect(labels.some((label) => label?.startsWith('Page history'))).toBe(true);
       expect(labels.some((label) => label?.startsWith('Copy link'))).toBe(true);
       expect(labels.some((label) => /delete/i.test(label ?? ''))).toBe(false);
 

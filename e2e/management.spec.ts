@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
+import { waitForHydration } from './hydration';
 import { expectNoHorizontalOverflow } from './overflow';
 
 /**
@@ -121,9 +122,11 @@ test.describe('the management doors by keyboard', () => {
 
     await page.goto(`/workspaces/${fixtures.workspaceId}/members`);
     await expect(page.getByRole('heading', { level: 1, name: 'Members' })).toBeVisible({ timeout: 30000 });
-    // The heading is server-rendered; the reader's denied state is the
-    // client's answer, so its arrival is what says the page is hydrated.
+    // The heading and, since the read layer, the reader's denied state are
+    // both server-rendered — neither says the page is hydrated. The keys
+    // below need the hydrated app.
     await expect(page.getByRole('main').getByRole('status')).toContainText(/does not exist, or you do not manage it/i, { timeout: 60000 });
+    await waitForHydration(page);
     const management = page.getByRole('navigation', { name: 'Management' });
     await expect(management).toBeVisible({ timeout: 30000 });
 
@@ -152,10 +155,13 @@ test.describe('320x900 light', () => {
 
     await page.goto(`/workspaces/${fixtures.workspaceId}/members`);
     await expect(page.getByRole('heading', { level: 1, name: 'Members' })).toBeVisible({ timeout: 30000 });
-    // The heading is server-rendered; the reader's denied state is the
-    // client's answer, so its arrival is what says the page is hydrated
-    // and the drawer toggle is live.
+    // The heading and, since the read layer, the reader's denied state are
+    // both server-rendered: until 2026-09-16 the denied state was the
+    // client's answer and its arrival said the page was hydrated; now it
+    // says nothing about the drawer toggle, which listens only once the
+    // app has hydrated (docs/TODO.md Findings, 2026-09-16).
     await expect(page.getByRole('main').getByRole('status')).toContainText(/does not exist, or you do not manage it/i, { timeout: 60000 });
+    await waitForHydration(page);
     await expectNoHorizontalOverflow(page, 'members 320');
     await shot(page, 'members-320-light');
 

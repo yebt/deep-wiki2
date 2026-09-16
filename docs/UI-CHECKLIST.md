@@ -1449,4 +1449,42 @@ untested.
 
 ---
 
+### 2026-09-16 — Integration regressions after the eight merges — awaiting the owner's eye
+
+**Reviewer:** none yet — this entry is what was shipped for review, not a review.
+**Verdict:** Pending
+
+Four e2e failures on `main` after the day's eight merges, each two branches right alone and
+wrong together; fixed on `fix/integration-regressions`, one commit each, the failing e2e as
+the red and a unit test where the cause lives (`docs/TODO.md` Findings, 2026-09-16,
+"Integration regressions after the eight merges", has the measurements). What a person sees
+changed in two places, and what a keyboard user gets in a third:
+
+1. **The tree's history item is "Page history" / "Book history", never "History".** The
+   context-menu branch had labelled both "History". Decided with §5: a screen-reader user
+   hears the menu item, not the row it hangs off, so the name says what it is the history of
+   on its own; visible label and accessible name are the same words (§4.3). Screenshots
+   `fb-fix1-tree-menu-*` (a page row) and `fb-fix1-tree-book-menu-*` (a book row).
+2. **Cancel on "Leave without saving?" lands focus on the tree row again** (§5, "returned on
+   close to the element that opened them"). A page row's title had become a `tabindex="-1"`
+   link, a mouse click focuses the element under the pointer, and the dialog dutifully
+   returned focus to that link — inside the `treeitem`, not on it, and off the tree's one tab
+   stop (§4.1's hand-rolled-primitive contract). Focus arriving on the link is now the row's.
+   `fb-fix1-edit-confirm-*` and `fb-fix1-edit-confirm-returned-1280-*`.
+3. **The floating "Comment" appears for a selection made before the caller was known to be
+   allowed to comment** (§4.7's affordance, §3's honesty: the article is readable before the
+   threads response arrives). `fb-fix1-selection-*`, by a real pointer drag.
+4. The management drawer at 320 was never broken; its e2e clicked before hydration.
+   `fb-fix1-management-*` for the record.
+
+`expectNoHorizontalOverflow` measured on every screenshot at 1280 light, 1280 dark and 320.
+
+**Known before review, not fixed:** at 320 the sidebar drawer stacks *above* "Leave without
+saving?" when a row in the drawer is clicked with a dirty editor — Escape answers the dialog,
+a pointer cannot reach it (`docs/TODO.md`, same entry; a stacking ruling between two overlays,
+for the owner). After Cancel the row holds focus but Chrome draws no `:focus-visible` ring
+for a script focus that follows a pointer; a keyboard user gets the ring.
+
+---
+
 *The next entry goes below this one.*

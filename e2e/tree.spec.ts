@@ -111,7 +111,7 @@ test.describe('the row context menu', () => {
     // disabled, and say why.
     await expect(menu.getByRole('menuitem', { name: /^New / })).toHaveCount(0);
     await expect(menu.getByRole('menuitem', { name: /^Open/ })).toBeVisible();
-    await expect(menu.getByRole('menuitem', { name: /^History/ })).toBeVisible();
+    await expect(menu.getByRole('menuitem', { name: /^Page history/ })).toBeVisible();
     const moveUp = menu.getByRole('menuitem', { name: /^Move up/ });
     await expect(moveUp).toHaveAttribute('aria-disabled', 'true');
     await expect(moveUp).toContainText('Already first');
@@ -147,7 +147,7 @@ test.describe('the row context menu', () => {
     await expect(menu).toBeVisible();
     await expect(menu.getByRole('menuitem', { name: /^New chapter…/ })).toBeVisible();
     await expect(menu.getByRole('menuitem', { name: /^New page…/ })).toBeVisible();
-    await expect(menu.getByRole('menuitem', { name: /^History/ })).toBeVisible();
+    await expect(menu.getByRole('menuitem', { name: /^Book history/ })).toBeVisible();
     // Only a page has an address: the item stays, disabled, with its reason.
     const copy = menu.getByRole('menuitem', { name: /^Copy link/ });
     await expect(copy).toHaveAttribute('aria-disabled', 'true');

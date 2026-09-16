@@ -1,6 +1,7 @@
 import { UApp, UDashboardGroup } from '#components';
 import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime';
-import { describe, expect, test, vi } from 'vitest';
+import { afterEach, describe, expect, test, vi } from 'vitest';
+import type { VueWrapper } from '@vue/test-utils';
 import { computed, defineComponent, h, nextTick, ref } from 'vue';
 import ManagementSidebar from './ManagementSidebar.vue';
 import NavigationTree from './NavigationTree.vue';
@@ -43,11 +44,22 @@ function mockCollaborators() {
   });
 }
 
+/**
+ * Every pane mounted by a test, torn down after it: `UDashboardSidebar`
+ * answers the group's `dashboard:sidebar:toggle` hook for as long as it
+ * is mounted, so a pane left over from an earlier test would open its own
+ * drawer beside the one under test.
+ */
+const mounted: VueWrapper[] = [];
+afterEach(() => {
+  for (const wrapper of mounted.splice(0)) wrapper.unmount();
+});
+
 /** `UDashboardSidebar` reads its context from `UDashboardGroup`, so the pane is mounted inside one, as it ships — with the frame's own storage key, so the cookie asserted below is the one the product writes. */
-function mount(props: { workspaceId: string | null; currentNodeId?: string | null; mode?: 'tree' | 'management' }) {
+async function mount(props: { workspaceId: string | null; currentNodeId?: string | null; mode?: 'tree' | 'management' }) {
   mockCollaborators();
   useFocusMode().collapsed.value = false;
-  return mountSuspended(
+  const wrapper = await mountSuspended(
     defineComponent({
       name: 'SidebarInApp',
       setup: () => () =>
@@ -56,6 +68,8 @@ function mount(props: { workspaceId: string | null; currentNodeId?: string | nul
         }),
     }),
   );
+  mounted.push(wrapper);
+  return wrapper;
 }
 
 describe('WorkspaceSidebar', () => {
@@ -101,6 +115,40 @@ describe('WorkspaceSidebar', () => {
     expect(component.findAll('a[href="/admin/registration"]')).toHaveLength(1);
     expect(component.find('a[aria-label="Registration settings"]').exists()).toBe(false);
     expect(component.get('button[aria-label="Toggle color theme"]').attributes('type')).toBe('button');
+  });
+
+  /*
+   * Below `lg` the pane is a drawer (`USlideover`), opened from the
+   * content bar's toggle through the group's `dashboard:sidebar:toggle`
+   * hook. The drawer draws the same region the pane would: on a
+   * management screen, the management doors and no tree. The e2e at 320
+   * (`e2e/management.spec.ts`) failed here on 2026-09-16 for a reason that
+   * was the test's own — it clicked the toggle before the app had hydrated
+   * — and this pins the product's half so the next such failure has one
+   * suspect fewer.
+   */
+  test('in management mode the drawer holds the management doors and no tree, and closes on the same toggle', async () => {
+    await mount({ workspaceId: 'ws-1', mode: 'management' });
+    const nuxtApp = useNuxtApp();
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+
+    await nuxtApp.hooks.callHook('dashboard:sidebar:toggle');
+    await nextTick();
+    await nextTick();
+
+    const drawers = document.querySelectorAll<HTMLElement>('[role="dialog"]');
+    expect(drawers, 'one drawer, this pane’s').toHaveLength(1);
+    const drawer = drawers[0]!;
+    expect(drawer.querySelector('[data-testid="management-sidebar"]'), 'the management region is in the drawer').not.toBeNull();
+    expect(drawer.querySelector('[role="tree"]')).toBeNull();
+    expect(drawer.querySelector('[data-testid="tree-create-open"]')).toBeNull();
+    expect(drawer.querySelector('a[href="/workspaces/ws-1/members"]')).not.toBeNull();
+
+    await nuxtApp.hooks.callHook('dashboard:sidebar:toggle');
+    await nextTick();
+    await nextTick();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(document.querySelector('[role="dialog"][data-state="open"]')).toBeNull();
   });
 
   test('with no workspace yet: no tree and no Members door, but a way to the workspace list', async () => {

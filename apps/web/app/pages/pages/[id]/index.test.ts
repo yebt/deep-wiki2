@@ -1,7 +1,7 @@
 import { UApp } from '#components';
 import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime';
 import { afterEach, describe, expect, test, vi } from 'vitest';
-import { computed, defineComponent, h, nextTick, ref } from 'vue';
+import { computed, defineComponent, h, nextTick, ref, type Ref } from 'vue';
 import type { CommentThread } from '@deep-wiki/contracts';
 import ReadPage from './index.vue';
 
@@ -586,6 +586,43 @@ describe('read-mode page', () => {
         expect(composer.textContent).toContain('On the selected text:');
         expect(composer.querySelector('[data-testid="comment-composer-excerpt"]')!.textContent).toContain('First');
         expect(component.find('[data-testid="comment-selection-action"]').exists()).toBe(false);
+      });
+
+      /*
+       * The article is server-rendered and readable long before the
+       * screen can act on it: a person can select words while the page is
+       * still hydrating, or before the threads response has said they may
+       * comment. `selectionchange` fired then and nobody was listening, or
+       * the listener answered "not yet" — and the browser fires it again
+       * only when the selection changes, so the affordance never came
+       * (e2e/comments.spec.ts, 2026-09-16). The screen reads the selection
+       * that already exists whenever it becomes able to act on one.
+       */
+      test('a selection made before the screen could act on it gets its "Comment" once it can, with no further selectionchange', async () => {
+        mockRead({ status: 'success', title: 'A Page', html: MIXED_HTML, workspaceId: 'ws-1' });
+        mockComments([], 'success', false);
+        const component = await mount();
+        await settle();
+        const canComment = usePageCommentsMock.mock.results.at(-1)!.value.canComment as Ref<boolean>;
+
+        const paragraph = component.get('article').element.querySelector('p')!;
+        const range = document.createRange();
+        range.setStart(paragraph.firstChild!, 0);
+        range.setEnd(paragraph.firstChild!, 5);
+        const selection = window.getSelection()!;
+        selection.removeAllRanges();
+        selection.addRange(range);
+        document.dispatchEvent(new Event('selectionchange'));
+        await settle();
+        // Not yet: the threads response has not said the caller may comment.
+        expect(component.find('[data-testid="comment-selection-action"]').exists()).toBe(false);
+
+        canComment.value = true;
+        await settle();
+
+        // Now it may — and the selection it already holds is offered, with
+        // no second `selectionchange`, which the browser would not send.
+        expect(component.get('[data-testid="comment-selection-action"]').text()).toContain('Comment');
       });
     });
 

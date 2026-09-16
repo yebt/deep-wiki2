@@ -29,6 +29,15 @@ import type { TreeNode } from './useTree';
  * reaches for it before knowing which rows have an address — and says
  * plainly that only a page has one today.
  *
+ * ── Names that survive leaving the row ──────────────────────────────────
+ *
+ * The history item is "Page history" on a page and "Book history" on a
+ * book, never a bare "History": a screen-reader user hears the menu
+ * item, not the row it hangs off, so the name has to say what it is the
+ * history of on its own (docs/UI-CHECKLIST.md §5). The visible label is
+ * the accessible name — one set of words, not a label and a hidden
+ * longer one (§4.3).
+ *
  * ── What is not here ────────────────────────────────────────────────────
  *
  * No permission is consulted, because none reaches the client: the tree
@@ -103,9 +112,9 @@ export function treeRowActions(node: TreeNode, ctx: TreeRowActionContext): reado
   const destinations: TreeRowAction[] = [];
   if (type === 'page') {
     destinations.push({ kind: 'open', label: 'Open', icon: 'i-lucide-arrow-right', disabled: false, to: `/pages/${node.id}` });
-    destinations.push({ kind: 'history', label: 'History', icon: 'i-lucide-history', disabled: false, to: `/pages/${node.id}/history` });
+    destinations.push({ kind: 'history', label: 'Page history', icon: 'i-lucide-history', disabled: false, to: `/pages/${node.id}/history` });
   } else if (type === 'book') {
-    destinations.push({ kind: 'history', label: 'History', icon: 'i-lucide-history', disabled: false, to: `/books/${node.id}/history` });
+    destinations.push({ kind: 'history', label: 'Book history', icon: 'i-lucide-history', disabled: false, to: `/books/${node.id}/history` });
   }
 
   const copy: TreeRowAction =

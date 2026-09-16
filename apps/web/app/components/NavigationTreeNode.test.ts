@@ -75,7 +75,11 @@ interface NodeProps {
  * inside the `<ul role="tree">` it actually ships in — which also makes
  * the root row reachable by the same query as its children.
  */
-async function mountNode(overrides: Partial<NodeProps> = {}, slots: Record<string, (scope: { node: TreeNode; active: boolean }) => ReturnType<typeof h>> = {}) {
+async function mountNode(
+  overrides: Partial<NodeProps> = {},
+  slots: Record<string, (scope: { node: TreeNode; active: boolean }) => ReturnType<typeof h>> = {},
+  mountOptions: { attachTo?: Element } = {},
+) {
   const props: NodeProps = {
     node: SHELF,
     depth: 0,
@@ -92,8 +96,9 @@ async function mountNode(overrides: Partial<NodeProps> = {}, slots: Record<strin
       name: 'TreeHarness',
       setup: () => () => h('ul', { role: 'tree' }, [h(NavigationTreeNode, props, slots)]),
     }),
+    mountOptions,
   );
-  return { dom: wrapper.element as HTMLElement, row: wrapper.findComponent(NavigationTreeNode) };
+  return { dom: wrapper.element as HTMLElement, row: wrapper.findComponent(NavigationTreeNode), unmount: () => wrapper.unmount() };
 }
 
 const ROW_TOP = 100;
@@ -326,6 +331,32 @@ describe('NavigationTreeNode', () => {
 
       expect(component.row.emitted('activate')).toEqual([['page-1']]);
       expect(component.row.emitted('open')).toBeUndefined();
+    });
+
+    /**
+     * A mouse click focuses the element under the pointer, and the link
+     * carries a `tabindex` — so a click on the title used to leave focus
+     * on the `<a>` inside the row, not on the `treeitem`. Seen 2026-09-16
+     * (docs/TODO.md Findings): the confirm dialog that guards a dirty
+     * editor read that `<a>` as the control that asked and returned focus
+     * to it, and the tree's one tab stop was no longer where focus was.
+     * Focus on the link is the row's: it lands on the `treeitem`, the
+     * element the ARIA tree pattern gives the keyboard to.
+     */
+    test('focus arriving on the link lands on the row itself, so the tree’s one tab stop is where focus is', async () => {
+      const component = await mountNode({ activeId: 'page-1' }, {}, { attachTo: document.body });
+      try {
+        const item = itemOf(component.dom, 'page-1');
+        const link = item.querySelector<HTMLAnchorElement>('a[href]')!;
+
+        link.focus();
+        await nextTick();
+
+        expect(document.activeElement).toBe(item);
+        expect(component.row.emitted('activate')).toEqual([['page-1']]);
+      } finally {
+        component.unmount();
+      }
     });
 
     /**

@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
+import { waitForHydration } from './hydration';
 import { expectNoHorizontalOverflow } from './overflow';
 
 /**
@@ -253,9 +254,22 @@ test('a commenter selects words inside a block and starts a thread on them — t
   await expect(page.getByRole('heading', { level: 1, name: fixtures.freshPageTitle })).toBeVisible({ timeout: 30000 });
   const paragraph = page.locator('article > p', { hasText: fixtures.freshSecondParagraph });
   await expect(paragraph).toBeVisible();
+  // The article is server-rendered, and hydration re-sets its `v-html`
+  // (Vue patches a dynamic `innerHTML` while hydrating), which replaces
+  // the text nodes a selection made before it was anchored in — the
+  // browser collapses that selection, and no listener can bring it back.
+  // So the selection below waits for the hydrated app, and for the "+"
+  // that says the threads response has arrived and the caller may comment
+  // (a selection made in *that* window is read once it may; the read
+  // screen's unit suite holds it).
+  await waitForHydration(page);
+  await expect(page.getByRole('button', { name: 'Comment on this block' })).toHaveCount(2, { timeout: 30000 });
 
   // Select "a few words" inside the second paragraph, by character offsets
-  // of the real text node — the way a person drags across it.
+  // of the real text node. A programmatic range fires `selectionchange` on
+  // `document` exactly as a pointer drag does (both measured on
+  // 2026-09-16, and the unit suite pins that `document` is what the screen
+  // listens to); the range is used because it names the phrase.
   await paragraph.evaluate((element, phrase) => {
     const text = element.firstChild as Text;
     const start = text.data.indexOf(phrase);
