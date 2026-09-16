@@ -594,19 +594,32 @@ uncompressed on the wire).
   asset now leaves with `content-encoding` (gzip 59.6 KB / brotli 51.9 KB for that chunk
   instead of 197.8 KB).
 
+**Found along the way, and fixed here.**
+
+- **The frame's sidebar server-rendered "Choose a workspace" on a first visit.** The layout
+  renders `WorkspaceSidebar` from `useCurrentWorkspace()` *before* the page's `AppShell`
+  enters the workspace, so on a request with no `dw-workspace` cookie the server sent the
+  no-workspace branch and the client hydrated the tree — a hydration mismatch, and after it
+  every generated id below the sidebar off by one: the dashboard's panels lost their
+  `aria-labelledby` names on a first visit (server `v-0-5-1`, client `v-0-6-1`;
+  `e2e/frame.spec.ts` caught the unnamed region). It was already there on the dashboard on
+  `main` (verified on a build of `4987cd9`, "Hydration completed but contains
+  mismatches"); with the read layer, every screen that knows its workspace on the server
+  showed it. `useSidebarWorkspace` now keeps the workspace the frame saw at its own setup
+  in payload state, hydrates the sidebar from it, and hands over to the live workspace once
+  mounted. Verified in dev on first visits of the dashboard, a page and its history: no
+  warning, ids in step.
+- **Timestamps in the viewer's timezone were only safe while nothing rendered them on the
+  server.** `formatRevisionDate`'s own note said so. Server-rendered, they formatted in
+  the server's zone and a viewer elsewhere hydrated every one into a text mismatch
+  (`e2e/history.spec.ts`: "7:38 AM GMT-5" in the document, "8:38 AM EDT" expected).
+  `viewerTimeZone()` answers UTC on the server and during hydration, and the runtime's
+  zone once hydration resolves (`plugins/viewer-time-zone.ts`), re-rendering every
+  timestamp on screen; the switch lives in the formatter, so it covers the members screen
+  this branch does not edit.
+
 **Found, not fixed.**
 
-- **The frame's sidebar server-renders "Choose a workspace" on a first visit.** The layout
-  renders `WorkspaceSidebar` from `useCurrentWorkspace()` *before* the page's `AppShell`
-  enters the workspace, so on a request with no `dw-workspace` cookie the server sends the
-  no-workspace branch and the client hydrates the tree — a hydration mismatch (in
-  production: "Hydration completed but contains mismatches", the sidebar re-rendered). It
-  was already there on the dashboard on `main` (verified on a build of `4987cd9`); since
-  the read, history and members screens know their workspace on the server now, they show
-  it on a first visit too. With the cookie set — every visit after the first — there is
-  no mismatch on any screen (verified in dev and on the production build). The fix belongs
-  to the frame: learn the workspace before the sidebar renders (the route names it for
-  `/workspaces/:id/*`; a page names it only in its response).
 - **Template comments between `v-if` branches were a dev-only hydration mismatch** the
   moment a branch was server-rendered (the dev client keeps them as the branch's first
   node, the server renderer does not). Fixed globally with `vue.compilerOptions.comments:
@@ -615,13 +628,18 @@ uncompressed on the wire).
 - **A server-prefetching component is an async boundary for `useId()`**, on both sides only
   if the client mirrors the server's choice; `useApiRead` reads whether the server answered
   a key from the payload and sets `server` on the client accordingly. Without that, every
-  generated id after the dashboard's setup hydrated against a different one.
+  generated id after the dashboard's setup hydrated against a different one. (Fixed inside
+  `useApiRead`; recorded because the rule is not written anywhere in Nuxt's docs.)
 - **e2e tests now race hydration.** Content is in the HTML long before the dev client has
   hydrated (51 s on `/login` under load 42), so a test that asserts content and then
   presses a key or expects a client-side hop must wait for `waitForHydration`
-  (`e2e/hydration.ts`); the three skeleton tests, the history keyboard test and the new
-  specs do. Other specs may hit the same race under load and should adopt the helper when
-  they do.
+  (`e2e/hydration.ts`); the three skeleton tests, the history keyboard and timezone tests,
+  the frame's focus-mode and drawer tests and the new specs do. Other specs may hit the
+  same race under load and should adopt the helper when they do. Separately,
+  `e2e/editor.spec.ts` (untouched here) failed a different test on each serial run under
+  this load — 30 s waits for an editor that needs a hydrated dev client plus the edit
+  session — and passed each of them alone; fix A of the report (prebundling reka-ui) is
+  what shortens that wait.
 - **Test sessions idle out at 30 minutes** (`SESSION_IDLE_TIMEOUT_MINUTES` in the harness):
   a seeded token unused for half an hour answers 401, which read like a broken cookie
   forward for a while. Re-seed or touch the session first when measuring by hand.
