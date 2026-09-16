@@ -14,17 +14,18 @@ import editorSurfaceSource from './EditorSurface.vue?raw';
  * (document-editor spec: "Mention And Slash Menus Are Keyboard-First",
  * "Empty And No-Results States", "Menus Reposition To Stay In The Viewport").
  *
- * The real `createEditorView` needs a browser: `EditorView` measures layout,
+ * The real `mountEditor` needs a browser: `EditorView` measures layout,
  * owns a contenteditable and reads `Range`/`Selection` — none of which
  * happy-dom provides faithfully, and `coordsAtPos()` in particular can only
  * ever return zeroes here, which would make every positioning assertion
- * vacuous. So `"./mount"` is mocked at exactly one seam — the view factory —
- * and everything else in that module stays real: the state the menus render
- * is produced by the shipped `reduceMentionState`/`reduceSlashState`, the
- * slash commands are the shipped `SLASH_COMMANDS`, and selection movement
- * wraps through the shipped `moveSelection`. What the fake supplies is only
- * what a real browser would: caret coordinates, and keydown events reaching
- * the plugin's key handling.
+ * vacuous. So `"./mount"` is mocked at exactly one seam — the mount factory,
+ * which returns the `EditorHandle` the component holds — and everything
+ * else in that module stays real: the state the menus render is produced by
+ * the shipped `reduceMentionState`/`reduceSlashState`, the slash commands
+ * are the shipped `SLASH_COMMANDS`, and selection movement wraps through
+ * the shipped `moveSelection`. What the fake supplies is only what a real
+ * browser would: caret coordinates, keydown events reaching the plugin's
+ * key handling, and a record of which handle command the host called.
  *
  * The import is deliberately inside `vi.mock`'s factory rather than at the
  * top of the file: `scripts/checks/bundle-isolation.ts` forbids ANY file
@@ -50,6 +51,12 @@ interface FakeViewOptions {
   readonly slash?: { readonly onStateChange?: (state: SlashState) => void };
 }
 
+/** A handle command the host called, by name and arguments. */
+interface HandleCall {
+  readonly command: string;
+  readonly args: readonly unknown[];
+}
+
 const { harness } = vi.hoisted(() => ({
   harness: {
     /** What the fake view's `coordsAtPos()` reports — set by a test before it opens a menu. */
@@ -70,6 +77,8 @@ const { harness } = vi.hoisted(() => ({
     confirmed: null as null | { readonly kind: 'mention'; readonly label: string } | { readonly kind: 'slash'; readonly id: string },
     /** How many times the host asked the (fake) view to take focus back. */
     focusCalls: 0,
+    /** Every `EditorHandle` command the host called, in order. */
+    handleCalls: [] as HandleCall[],
   },
 }));
 
@@ -91,7 +100,7 @@ vi.mock('@deep-wiki/editor/mount', async (importOriginal) => {
       harness.confirmed = { kind: 'slash', id: command.id };
       return state.tr.setMeta(actual.slashPluginKey, { type: 'dismiss' });
     },
-    createEditorView(options: FakeViewOptions) {
+    mountEditor(options: FakeViewOptions) {
       let mention = actual.INACTIVE_MENTION_STATE;
       let slash = actual.INACTIVE_SLASH_STATE;
 
@@ -138,7 +147,34 @@ vi.mock('@deep-wiki/editor/mount', async (importOriginal) => {
       harness.dispatchSlash = applySlash;
       harness.doc = options.doc;
       harness.mounted = true;
-      return view;
+      // The `EditorHandle`: the view plus the command surface bound to it.
+      // Every command records the call and answers `true`, as the real one
+      // does where it applies.
+      const record = (command: string) => (...args: unknown[]) => {
+        harness.handleCalls.push({ command, args });
+        return true;
+      };
+      return {
+        view,
+        undo: record('undo'),
+        redo: record('redo'),
+        toggleMark: record('toggleMark'),
+        setLink: record('setLink'),
+        unsetLink: record('unsetLink'),
+        moveBlockUp: record('moveBlockUp'),
+        moveBlockDown: record('moveBlockDown'),
+        deleteBlock: record('deleteBlock'),
+        duplicateBlock: record('duplicateBlock'),
+        turnInto: record('turnInto'),
+        blockAt: () => null,
+        startBlockDrag: record('startBlockDrag'),
+        endBlockDrag: () => {
+          harness.handleCalls.push({ command: 'endBlockDrag', args: [] });
+        },
+        destroy: () => {
+          harness.handleCalls.push({ command: 'destroy', args: [] });
+        },
+      };
     },
   };
 });
@@ -209,6 +245,7 @@ describe('EditorSurface', () => {
     harness.caret = { top: 100, bottom: 120, left: 40 };
     harness.confirmed = null;
     harness.focusCalls = 0;
+    harness.handleCalls = [];
     harness.doc = null;
     harness.gate = Promise.resolve();
   });
@@ -227,6 +264,19 @@ describe('EditorSurface', () => {
       await mountSurface();
 
       expect(harness.doc?.textContent).toBe('Hi');
+    });
+
+    // The handle, not the bare view: `mountEditor` returns the view plus
+    // the command surface bound to it (undo/redo, the marks, the block
+    // tunes, the drag hooks), which is what every control this component
+    // renders acts through. It is torn down with the component.
+    test('mounts through mountEditor and destroys the handle when it unmounts', async () => {
+      const component = await mountSurface();
+      expect(harness.handleCalls.map((call) => call.command)).not.toContain('destroy');
+
+      component.unmount();
+
+      expect(harness.handleCalls.map((call) => call.command)).toContain('destroy');
     });
 
     test('carries no static value import of @deep-wiki/editor — only the type import survives', () => {

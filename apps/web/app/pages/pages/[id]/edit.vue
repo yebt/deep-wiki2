@@ -325,14 +325,9 @@ useSeoMeta({ title: () => (session.value?.title ? `Editing ${session.value.title
       <div class="mb-8 max-w-measure">
         <USkeleton class="h-9 w-2/3" data-testid="edit-skeleton-title" />
       </div>
-      <!-- `as="span"`: a `<div>` inside a `<p>` is invalid HTML and the
-           server-rendered skeleton would be re-parsed with the paragraph
-           closed early, losing the 26px line box this exists for. -->
-      <div class="doc-body text-doc-body">
-        <p data-testid="edit-skeleton-line"><USkeleton as="span" class="inline-block h-4 w-full align-middle" /></p>
-        <p><USkeleton as="span" class="inline-block h-4 w-full align-middle" /></p>
-        <p><USkeleton as="span" class="inline-block h-4 w-5/6 align-middle" /></p>
-      </div>
+      <!-- The prose lines are `DocBodySkeleton` — the one copy the read
+           screen, this screen and `EditorSurface` share (§4.1). -->
+      <DocBodySkeleton line-test-id="edit-skeleton-line" />
     </div>
 
     <!-- Never a dead end (§3): read-only is the nearest door, and the two

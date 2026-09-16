@@ -29,7 +29,7 @@
  */
 import type { MentionCandidate, MentionState, SlashState } from '@deep-wiki/editor';
 import type { EditorView } from 'prosemirror-view';
-import { loadEditorMount } from '~/utils/editor-mount';
+import { loadEditorMount, type EditorMountModule } from '~/utils/editor-mount';
 import { positionMenu } from '~/utils/menu-position';
 
 const props = defineProps<{
@@ -44,7 +44,7 @@ const emit = defineEmits<{
 
 const rootEl = ref<HTMLElement | null>(null);
 /**
- * True once `createEditorView` has attached ProseMirror to `rootEl`.
+ * True once `mountEditor` has attached ProseMirror to `rootEl`.
  * Measured on 2026-09-16: this component's box was in the DOM 120–730 ms
  * before the view existed — an empty well where the page's skeleton had
  * just been. Until then the template keeps the skeleton's text lines up
@@ -80,6 +80,18 @@ const openMenuId = computed(() => {
 const MENTION_MENU_ID = 'dw-mention-menu';
 const SLASH_MENU_ID = 'dw-slash-menu';
 
+/**
+ * What `mountEditor` returns: the live view plus the command surface bound
+ * to it — undo/redo, the marks, the block tunes, the drag hooks. Every
+ * control this component renders acts through the handle, never through
+ * `view.dispatch` with a transaction built here, so a button and the
+ * keystroke it stands for can never disagree (`editor-commands.ts`).
+ */
+// The type is read off the loader's module type rather than imported from
+// `@deep-wiki/editor/mount`: `scripts/checks/bundle-isolation.ts` sweeps
+// every static specifier, `import type` included.
+type EditorHandle = ReturnType<EditorMountModule['mountEditor']>;
+let handle: EditorHandle | undefined;
 let editorView: EditorView | undefined;
 /** The `"./mount"` module, kept from `loadEditorMount()` so the click paths below can build the same transactions the plugins build on Enter. */
 let editorModule: Awaited<ReturnType<typeof loadEditorMount>> | undefined;
@@ -140,7 +152,7 @@ async function mount(): Promise<void> {
   let debounceTimer: ReturnType<typeof setTimeout> | undefined;
   let lastMentionQuery: string | null = null;
 
-  editorView = mod.createEditorView({
+  handle = mod.mountEditor({
     dom: rootEl.value,
     doc: mod.fromMarkdown(props.markdown),
     mention: {
@@ -190,6 +202,7 @@ async function mount(): Promise<void> {
       debounceTimer = setTimeout(() => emit('update', mod.toMarkdown(view.state.doc)), 300);
     },
   });
+  editorView = handle.view;
   attached.value = true;
 }
 
@@ -198,7 +211,7 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
-  editorView?.destroy();
+  handle?.destroy();
 });
 
 defineExpose({
@@ -241,14 +254,13 @@ defineExpose({
          must exist before the view does; it is only hidden until then,
          behind the skeleton below (`attached`). -->
     <!-- The page's skeleton, continued: the same `doc-body` text lines
-         `pages/[id]/edit.vue` shows while the session is requested, kept
-         up for the last stretch — chunk evaluation, the first parse, the
-         view — so the box never stands empty between the two
-         (docs/UI-CHECKLIST.md §3, "no layout shift on load"). -->
-    <div v-if="!attached" data-testid="editor-skeleton" aria-hidden="true" class="doc-body text-doc-body">
-      <p><USkeleton as="span" class="inline-block h-4 w-full align-middle" /></p>
-      <p><USkeleton as="span" class="inline-block h-4 w-full align-middle" /></p>
-      <p><USkeleton as="span" class="inline-block h-4 w-5/6 align-middle" /></p>
+         `pages/[id]/edit.vue` shows while the session is requested — the
+         one `DocBodySkeleton` (§4.1) — kept up for the last stretch:
+         chunk evaluation, the first parse, the view, so the box never
+         stands empty between the two (docs/UI-CHECKLIST.md §3, "no layout
+         shift on load"). -->
+    <div v-if="!attached" data-testid="editor-skeleton" aria-hidden="true">
+      <DocBodySkeleton />
     </div>
     <div
       v-show="attached"
