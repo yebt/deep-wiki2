@@ -202,6 +202,24 @@ class FromMarkdownConverter {
     }
   }
 
+  /**
+   * The children of a `block+` container — `blockquote`, `listItem`,
+   * `footnoteDefinition`. An EMPTY container (`>` alone, `-` alone,
+   * `[^1]:` alone — all three are canonical Markdown, and all three are
+   * what the editor's own `/quote`, `/bullet` and `/footnote` leave
+   * behind on an empty line) parses to zero mdast children, and
+   * `schema.node()` on a `block+` type with no children throws a
+   * `RangeError` the probe reported as an "unsupported construct" named
+   * `RangeError` at line 1. The same reasoning as `convertRoot`'s empty
+   * document: one empty paragraph is what an empty container IS in this
+   * schema, and `to-markdown.ts` emits it as zero children again
+   * (`containerChildren` there), so the bytes come back unchanged.
+   */
+  private convertContainerChildren(children: readonly RootContent[]): PMNode[] {
+    const converted = children.map((child) => this.convertBlock(child));
+    return converted.length > 0 ? converted : [this.schema.node('paragraph')];
+  }
+
   private convertBlock(node: RootContent): PMNode {
     const s = this.schema;
 
@@ -217,11 +235,7 @@ class FromMarkdownConverter {
       }
       case 'blockquote': {
         const { content, blockAnchor } = splitOffBlockAnchor(node.children);
-        return s.node(
-          'blockquote',
-          { blockAnchor },
-          content.map((child) => this.convertBlock(child)),
-        );
+        return s.node('blockquote', { blockAnchor }, this.convertContainerChildren(content));
       }
       case 'list': {
         const list = node as List;
@@ -242,7 +256,7 @@ class FromMarkdownConverter {
         return s.node(
           'listItem',
           { checked: node.checked ?? null, spread: node.spread ?? false, blockAnchor },
-          content.map((child) => this.convertBlock(child)),
+          this.convertContainerChildren(content),
         );
       }
       case 'code': {
@@ -277,7 +291,7 @@ class FromMarkdownConverter {
         return s.node(
           'footnoteDefinition',
           { identifier: node.identifier, blockAnchor },
-          content.map((child) => this.convertBlock(child)),
+          this.convertContainerChildren(content),
         );
       }
       default:
