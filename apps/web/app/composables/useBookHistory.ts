@@ -1,3 +1,5 @@
+import { bookHistoryKey } from '~/utils/api-keys';
+
 export type BookHistoryStatus = 'idle' | 'loading' | 'success' | 'not-found' | 'unauthenticated' | 'network-error';
 
 export interface ChangesetRevisionSummary {
@@ -27,11 +29,12 @@ export type BookHistoryFetcher = (bookId: string) => Promise<BookHistoryResponse
 
 export interface UseBookHistoryResult {
   readonly status: Ref<BookHistoryStatus>;
-  readonly title: Ref<string>;
+  readonly title: ComputedRef<string>;
   /** `null` until a successful response names it. */
-  readonly workspaceId: Ref<string | null>;
-  readonly changesets: Ref<readonly BookChangesetSummary[]>;
-  readonly message: Ref<string>;
+  readonly workspaceId: ComputedRef<string | null>;
+  readonly changesets: ComputedRef<readonly BookChangesetSummary[]>;
+  readonly message: ComputedRef<string>;
+  /** Fetch, or — with the list already on screen — refresh behind it. */
   readonly load: () => Promise<void>;
 }
 
@@ -43,50 +46,42 @@ export interface UseBookHistoryResult {
  * already returns a byte-identical 404 for both — a distinct `forbidden`
  * branch here would defeat that on the one client that happens to see a 403
  * rather than a 404.
+ *
+ * The answer lives in the read layer (`useApiRead`, keyed by
+ * `bookHistoryKey`): server-rendered when the request can be
+ * authenticated, kept across screens, and cleared by `useSavePage` on any
+ * save — the save does not say which book it lands in.
  */
 export function useBookHistory(bookId: string, fetcher?: BookHistoryFetcher): UseBookHistoryResult {
   const get =
     fetcher ??
     ((id: string) => {
-      const config = useRuntimeConfig();
-      return $fetch<BookHistoryResponse>(`${config.public.apiBaseUrl}/books/${id}/history`, { credentials: 'include' });
+      const api = useApiClient();
+      return api<BookHistoryResponse>(`/books/${id}/history`);
     });
 
-  const status = ref<BookHistoryStatus>('idle');
-  const title = ref('');
-  const workspaceId = ref<string | null>(null);
-  const changesets = ref<readonly BookChangesetSummary[]>([]);
-  const message = ref('');
+  const read = useApiRead<BookHistoryResponse>(bookHistoryKey(bookId), () => get(bookId));
+  const status = useReadStatus(read, (code) => {
+    // Signed out: the screen's next move is sign-in, not a retry
+    // (`useSignInRedirect`). Only the browser ever sees it — a 401 during
+    // the server's render is "nothing known" (useApiRead).
+    if (code === 401) return 'unauthenticated';
+    return code === 403 || code === 404 ? 'not-found' : 'network-error';
+  });
 
-  async function load(): Promise<void> {
-    status.value = 'loading';
-    message.value = 'Loading changeset history…';
+  const value = computed(() => (read.outcome.value?.ok ? read.outcome.value.value : null));
+  const title = computed(() => value.value?.title ?? '');
+  const workspaceId = computed(() => value.value?.workspaceId ?? null);
+  const changesets = computed(() => value.value?.changesets ?? []);
+  const MESSAGES: Record<BookHistoryStatus, string> = {
+    'idle': '',
+    'loading': 'Loading changeset history…',
+    'success': '',
+    'unauthenticated': 'Your session has ended.',
+    'not-found': 'This book does not exist.',
+    'network-error': 'Cannot reach the server. Check your connection and try again.',
+  };
+  const message = computed(() => MESSAGES[status.value]);
 
-    try {
-      const response = await get(bookId);
-      title.value = response.title;
-      workspaceId.value = response.workspaceId;
-      changesets.value = response.changesets;
-      status.value = 'success';
-      message.value = '';
-    } catch (error) {
-      const code = httpStatusOf(error);
-      // Signed out: the screen's next move is sign-in, not a retry
-      // (`useSignInRedirect`), so this is never the network branch.
-      if (code === 401) {
-        status.value = 'unauthenticated';
-        message.value = 'Your session has ended.';
-        return;
-      }
-      if (code === 403 || code === 404) {
-        status.value = 'not-found';
-        message.value = 'This book does not exist.';
-      } else {
-        status.value = 'network-error';
-        message.value = 'Cannot reach the server. Check your connection and try again.';
-      }
-    }
-  }
-
-  return { status, title, workspaceId, changesets, message, load };
+  return { status, title, workspaceId, changesets, message, load: read.load };
 }

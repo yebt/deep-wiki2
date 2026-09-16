@@ -1,4 +1,5 @@
-import { describe, expect, test, vi } from 'vitest';
+import { beforeAll, describe, expect, test, vi } from 'vitest';
+import { useNuxtApp } from '#imports';
 import { useBookHistory } from './useBookHistory';
 
 /**
@@ -8,6 +9,23 @@ import { useBookHistory } from './useBookHistory';
  * route itself (`apps/api/src/routes/revisions.ts`) returns a
  * byte-identical 404 for both.
  */
+/**
+ * Every test reads its own id: the read layer (`useApiRead`) keeps one
+ * answer per key across screens — that is the cache — so two tests sharing
+ * an id would share an answer. And the test app never leaves hydration on
+ * its own (there is no server render to resolve), so each file says it is
+ * on the client, where `load()` fetches.
+ */
+let ids = 0;
+function nextId(prefix: string): string {
+  ids += 1;
+  return `${prefix}-${ids}`;
+}
+
+beforeAll(() => {
+  useNuxtApp().isHydrating = false;
+});
+
 describe('useBookHistory', () => {
   test('starts idle and moves through loading to success with the changesets as the server sent them', async () => {
     const changesets = [
@@ -34,7 +52,7 @@ describe('useBookHistory', () => {
       },
     ];
     const fetcher = vi.fn(async () => ({ title: 'Handbook', workspaceId: 'ws-1', changesets }));
-    const { status, title, workspaceId, changesets: result, load } = useBookHistory('book-1', fetcher);
+    const { status, title, workspaceId, changesets: result, load } = useBookHistory(nextId('book'), fetcher);
 
     expect(status.value).toBe('idle');
     expect(workspaceId.value).toBeNull();
@@ -47,12 +65,12 @@ describe('useBookHistory', () => {
     expect(title.value).toBe('Handbook');
     expect(workspaceId.value).toBe('ws-1');
     expect(result.value).toEqual(changesets);
-    expect(fetcher).toHaveBeenCalledWith('book-1');
+    expect(fetcher).toHaveBeenCalledWith(expect.stringMatching(/^book-\d+$/));
   });
 
   test('a book that exists but has no changesets yet resolves to success with an empty list, not an error', async () => {
     const fetcher = vi.fn(async () => ({ title: 'Handbook', workspaceId: 'ws-1', changesets: [] }));
-    const { status, changesets: result, load } = useBookHistory('book-1', fetcher);
+    const { status, changesets: result, load } = useBookHistory(nextId('book'), fetcher);
 
     await load();
 
@@ -64,7 +82,7 @@ describe('useBookHistory', () => {
     const fetcher = vi.fn(async () => {
       throw { response: { status: 404 } };
     });
-    const { status, load } = useBookHistory('book-1', fetcher);
+    const { status, load } = useBookHistory(nextId('book'), fetcher);
 
     await load();
 
@@ -76,7 +94,7 @@ describe('useBookHistory', () => {
   // a retry that would 401 again. Before 2026-09-16 it fell through to
   // network-error and the screen said "Cannot reach the server".
   test('a 401 resolves to unauthenticated, not to a network error', async () => {
-    const { status, load } = useBookHistory('book-1', vi.fn(async () => { throw { response: { status: 401 } }; }));
+    const { status, load } = useBookHistory(nextId('book'), vi.fn(async () => { throw { response: { status: 401 } }; }));
     await load();
     expect(status.value).toBe('unauthenticated');
   });
@@ -85,7 +103,7 @@ describe('useBookHistory', () => {
     const fetcher = vi.fn(async () => {
       throw { response: { status: 403 } };
     });
-    const { status, load } = useBookHistory('book-1', fetcher);
+    const { status, load } = useBookHistory(nextId('book'), fetcher);
 
     await load();
 
@@ -96,7 +114,7 @@ describe('useBookHistory', () => {
     const fetcher = vi.fn(async () => {
       throw new Error('fetch failed');
     });
-    const { status, message, load } = useBookHistory('book-1', fetcher);
+    const { status, message, load } = useBookHistory(nextId('book'), fetcher);
 
     await load();
 
@@ -111,7 +129,7 @@ describe('useBookHistory', () => {
       if (attempt === 1) throw new Error('fetch failed');
       return { title: 'Handbook', workspaceId: 'ws-1', changesets: [] };
     });
-    const { status, load } = useBookHistory('book-1', fetcher);
+    const { status, load } = useBookHistory(nextId('book'), fetcher);
 
     await load();
     expect(status.value).toBe('network-error');
