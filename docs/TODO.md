@@ -502,6 +502,100 @@ makes conventions portable across projects.
 
 Discoveries and constraints. Newest first.
 
+### 2026-09-16 — The tree's context menu and its filter (branch `feat/tree-context-menu-filter`)
+
+**What shipped.** Two owner-review items on the navigation tree, one commit each,
+in the sidebar's tree region only — the toolbar row (`NavigationTreeActions.vue`'s
+template) is untouched because a parallel branch restyles it.
+
+1. **A context menu on every row** (`NavigationTree.vue`, `useTreeRowActions.ts`).
+   Right-click, a `⋯` button at the row's end (visible on hover and focus within the
+   row, always in the tab order on the row that holds the tree's tab stop), `Shift+F10`
+   and the `ContextMenu` key all open **one** `UContextMenu` wrapped around the tree
+   (`bg-accented`, §9.6, `rounded-md`, §3.4). The `⋯` and the keyboard both dispatch the
+   same `contextmenu` event right-click sends, anchored under the control, so there is
+   exactly one way a menu opens. Items are `treeRowActions()`: "New <child>…" from
+   `legalChildTypes()` over the row's type — the one `LEGAL_PARENT_TYPES` table read
+   backwards, never a second list; "Rename…"; "Move up"/"Move down"; "Open" (pages);
+   "History" (books and pages); "Copy link" (live on a page, disabled elsewhere with
+   "Only a page has an address to copy yet."). An action the row cannot take *right now*
+   stays in the menu, `aria-disabled`, with the reason as its visible description —
+   "Already first among its siblings." — never behind a hover (§3, §5). No delete: the
+   three open questions (Findings 2026-09-09) come first. **One path for the writes:**
+   `NavigationTreeActions` now `defineExpose`s the two functions its buttons call
+   (`openCreate(type?)`, `openRename()`); the menu selects the row and calls those, so
+   "Rename…" from the menu and from the toolbar is the same dialog, fetcher and failure
+   classification. Moves are the same `reorder` the `Alt`-arrows make. Focus: Reka's
+   `FocusScope` dispatches `closeAutoFocus` while its trap is still listening, so the
+   return to the row is queued behind the unmount (`setTimeout(0)`, as Reka queues its
+   own default); a dialog the menu asked for is opened *after* that return, so the
+   dialog's own focus return lands on the row too.
+2. **A toggleable filter** (`useTreeFilter.ts`). Hidden by default; the header's
+   "Filter tree" button (`aria-expanded`, `aria-controls`) and `Ctrl`/`⌘`+`Shift`+`F`
+   while the sidebar has focus show it. The chord is *registered* only while focus is
+   inside `#dw-frame-sidebar-workspace` (a `computed` config to `defineShortcuts`), so
+   elsewhere it is neither swallowed nor answered; `Ctrl`+`F` stays the browser's and
+   `Ctrl`+`K` is untouched. Typing prunes the tree to title matches (case-insensitive)
+   **and every ancestor of a match**, ancestors open; the matched text is a `<mark>` in
+   the secondary family (`secondary-container`/`on-secondary-container`, and the accent
+   pair on the selected row, whose fill is already `secondary-container`); the count is
+   announced from a live region always in the DOM ("2 matches for “auth”."); "no
+   matches" is its own state with "Clear filter" beside it, distinct from first-run
+   empty (§3). **Folds are never written to by the filter:** while a query is active
+   the tree reads a per-query fold set that starts empty, so clearing the query gives
+   the person's folds back by construction, not by a snapshot restored at the right
+   moment. Escape in the box clears, hides and hands focus back to the tree's row. The
+   field is `h-10` (the tree row's height, §7.2) at 16px text (§9.5) — a design-system
+   ruling for a text field in chrome, recorded in `docs/DESIGN-SYSTEM.md` §14.
+
+**Found while building, fixed.**
+
+- **`group` on the `<li>` lit every ancestor's `⋯`.** The tree item element holds the
+  whole subtree, so `group-hover`/`group-focus-within` there matched when any descendant
+  was hovered or focused: hovering a page three levels down showed three `⋯` buttons.
+  Seen in the first 1280 screenshot. `group` moved to the row `div`, which is what the
+  button sits in. Pre-existing structure; it only had one book row's button to show
+  before.
+- **At 320 the menu ran off the screen.** Measured x+width = 474 in a 320 viewport: the
+  reasons under the items are longer than the pane and the content had no cap, so
+  `avoidCollisions` had nothing it could do. Capped at the popper's own
+  `--reka-context-menu-content-available-width` (the twin of the `max-h` Nuxt UI's theme
+  already carries) with `collisionPadding: 8`, and the descriptions wrap rather than
+  truncate — "Already first …" is not a reason. Asserted at every width in
+  `e2e/tree.spec.ts`.
+- **Playwright's role queries go blind while a modal menu is open.** Reka's modal menu
+  sets `aria-hidden` on the rest of the page, so `getByRole('treeitem')` finds nothing
+  — correctly. Assertions about the page under an open menu use CSS locators, with a
+  comment saying why.
+- **A `treeitem`'s centre is a child.** `getByRole('treeitem', …).click()` on an
+  expanded book lands on the page inside it, because the item element holds the
+  subtree. Clicks go to the row `div` (`[draggable="true"]`), as `e2e/navigation.spec.ts`
+  already did.
+
+**Found, not fixed (outside this branch's files).**
+
+- **SSR of the dashboard renders the sidebar's "Choose a workspace" state and the client
+  hydrates the tree over it.** With no `dw-workspace` cookie yet, the server renders
+  `WorkspaceSidebar` with a null workspace while `AppShell` sets it during the same
+  render; the console shows `[NUXT_E7006] Cookie dw-workspace was previously set to null
+  and is being overridden` plus Vue hydration mismatches at `<NavigationTree>` and the
+  Members link. Reproduced with the writer fixture on `/workspaces/:id`; visible only in
+  the console. `AppShell.vue`/`useCurrentWorkspace.ts` are not this branch's files.
+- **No per-node permission reaches the client** (Open Questions, amended below), so the
+  menu cannot grey out "Rename…" or the moves for a `read`-only member; the server refuses
+  and the same dialog shows the same sentence the toolbar shows.
+- **Unit and e2e timings on a shared host.** With five other worktrees' suites running
+  (load average 27–35, 13 of 15 GB used), `@nuxt/test-utils`'s environment boot
+  regularly exceeded the 60s hook timeout (`--hookTimeout 240000` was needed to run the
+  composable suites at all), the dev server took over 120s to answer Playwright's
+  `webServer` probe, and the first hydration of `/workspaces/:id` was measured past 30s.
+  `e2e/tree.spec.ts` waits up to 90s for the first row for that reason and says so; a
+  quiet host pays nothing.
+
+**Verified.** See the branch report; every stage run as its own process.
+
+---
+
 ### 2026-09-15 — `ai-provider-foundation` integrated into `main`, 204 commits after its base
 
 **What happened.** The branch (24 commits, base `ef94aab`, dated 2026-09-06) was merged onto
@@ -3364,7 +3458,12 @@ in Findings.
   links render for everyone and the destinations refuse. Either a `capabilities` object on
   the responses screens already fetch, or a `/me` for the global flag — or both. Whichever
   is chosen must not become an existence oracle: a capability the server names on a
-  resource the caller cannot read is a disclosure. (Findings 2026-09-14.)
+  resource the caller cannot read is a disclosure. (Findings 2026-09-14.) **Amended
+  2026-09-16:** the tree's row context menu is the third surface waiting on this — with
+  no `write` signal per node it offers "Rename…" and "Move up/down" to every caller and
+  lets the server refuse, where a `read`-only member should see the item disabled with
+  the reason. The same `capabilities` answer, per node on `GET /workspaces/:id/tree`,
+  would close it.
 - **`page_revision` retention.** Every save inserts an immutable revision row carrying the
   full markdown; nothing prunes, compacts or caps them. The table grows with every
   keystroke-and-save on every page forever. Owed: a retention rule (keep all, keep N per
