@@ -60,6 +60,17 @@ export interface SavePageResult {
   readonly contentHash: string;
   readonly renderedHtml: string;
   readonly blockIndex: BlockIndex;
+  /**
+   * `true` when the submitted markdown was byte-identical to the row
+   * already stored, so nothing was written: no `page_content` update, no
+   * `page_revision`, no changeset activity, no derived rebuild. The
+   * revision-history spec pairs a revision with "the corresponding
+   * `page_content` change"; a save that changes nothing has no
+   * corresponding change and therefore earns no revision. Before this
+   * flag existed every such save minted a revision whose diff against
+   * its predecessor was empty (docs/TODO.md Findings, 2026-09-16).
+   */
+  readonly unchanged: boolean;
 }
 
 function contentHashOf(markdown: string): string {
@@ -98,6 +109,18 @@ export async function savePage(sql: postgres.Sql, input: SavePageInput): Promise
          FOR UPDATE
       `;
       previousMarkdown = existing?.markdown ?? null;
+
+      // A no-op save: the caller holds the current hash and sends back the
+      // very bytes that are stored. Nothing to write — and, deliberately,
+      // nothing to record: `updated_by`/`updated_at` keep naming the last
+      // real edit, and the author's open changeset is not touched. The
+      // stale check still runs first (the `FOR UPDATE` row above is the
+      // live one): a byte-identical save against an outdated hash is a
+      // stale save, not a no-op, and is refused exactly as before.
+      if (previousMarkdown === canonical) {
+        if (input.expectedContentHash !== contentHash) throw new StaleContentError(input.nodeId);
+        return { contentHash, renderedHtml, blockIndex, unchanged: true };
+      }
 
       const rows = await tx`
         UPDATE page_content
@@ -139,6 +162,6 @@ export async function savePage(sql: postgres.Sql, input: SavePageInput): Promise
       previousMarkdown,
     });
 
-    return { contentHash, renderedHtml, blockIndex };
+    return { contentHash, renderedHtml, blockIndex, unchanged: false };
   });
 }

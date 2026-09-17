@@ -53,6 +53,15 @@ const otherEditors = computed(() => presence.editors.value.filter((editor) => ed
 
 const currentMarkdown = ref('');
 const savedContentHash = ref<string | null>(null);
+// The text the server holds — the session's on open, the buffer's after
+// each successful Save. "Dirty" means the buffer differs from it, byte
+// for byte: a character typed and deleted, or an Undo back to the start,
+// leaves nothing to save. Until 2026-09-16 every editor transaction set
+// the flag, so Save stayed live on an unchanged document and sent the
+// stored bytes back — the client half of "sometimes an empty history
+// entry is saved" (docs/TODO.md Findings; the server half is
+// `savePage()`'s `unchanged`).
+const savedMarkdown = ref('');
 const isDirty = ref(false);
 
 // Every "are you sure" on this screen is the product's one confirm
@@ -123,6 +132,7 @@ watch(
   (value) => {
     if (value === 'ready' && session.value) {
       currentMarkdown.value = session.value.markdown;
+      savedMarkdown.value = session.value.markdown;
       // page-content spec, D16: `useSavePage`'s `contentHash` genuinely
       // starts `null`, and stays `null` until this session's own first
       // Save resolves. Without seeding it from the edit-session response
@@ -148,7 +158,7 @@ onBeforeUnmount(() => {
 
 function onEditorUpdate(markdown: string): void {
   currentMarkdown.value = markdown;
-  isDirty.value = true;
+  isDirty.value = markdown !== savedMarkdown.value;
 }
 
 // Undo and Redo in the bar, beside Save. The depths are the history
@@ -213,6 +223,7 @@ async function onSave(): Promise<void> {
   await save(currentMarkdown.value, contentHash.value ?? null);
   if (saveStatus.value === 'success') {
     savedContentHash.value = contentHash.value;
+    savedMarkdown.value = currentMarkdown.value;
     isDirty.value = false;
   }
 }

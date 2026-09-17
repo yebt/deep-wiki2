@@ -307,6 +307,38 @@ describe('edit-mode page', () => {
     expect(save).toHaveBeenCalledWith('# Hi\n\nedited\n', 'server-hash');
   });
 
+  // The cause of "sometimes an empty history entry is saved" on the
+  // client side (docs/TODO.md Findings, 2026-09-16): every editor
+  // transaction marked the buffer dirty, including one that left the
+  // document byte-identical to what is saved — a character typed and
+  // deleted, an Undo back to the start — so Save was live and sent the
+  // stored bytes back. Dirty is now "differs from the saved text", which
+  // is what the word means (docs/UI-CHECKLIST.md §3, "Disabled: explains
+  // why" — and the explanation must be true).
+  test('an edit that returns the document to its saved text leaves Save unavailable with "Nothing to save yet."', async () => {
+    loadEditorMountMock.mockResolvedValue({});
+    const { save } = mockDefaults();
+    mockSession({
+      status: 'ready',
+      session: { markdown: '# Hi\n', title: 'Hi', workspaceId: 'ws-1', contentHash: 'server-hash', lock: { holderUserId: 'me', acquiredAt: 'x', heartbeatAt: 'x' } },
+    });
+    const component = await mountSuspended(PageInApp, { global: { stubs: { EditorSurface: true, WorkspaceSidebar: true } } });
+    const editorStub = component.findComponent({ name: 'EditorSurface' });
+    const saveButton = () => component.findAll('button').find((button) => /Save/.test(button.text()))!;
+
+    editorStub.vm.$emit('update', '# Hi\n\nedited\n');
+    await component.vm.$nextTick();
+    expect(saveButton().attributes('aria-disabled')).toBeUndefined();
+
+    editorStub.vm.$emit('update', '# Hi\n');
+    await component.vm.$nextTick();
+    expect(saveButton().attributes('aria-disabled')).toBe('true');
+    await saveButton().trigger('click');
+    expect(save).not.toHaveBeenCalled();
+    const tooltipTexts = component.findAllComponents({ name: 'UTooltip' }).map((tooltip) => String(tooltip.props('text')));
+    expect(tooltipTexts).toContain('Nothing to save yet.');
+  });
+
   test('renders both "Open read-only" and "Take over editing" simultaneously when locked', async () => {
     mockDefaults();
     mockSession({

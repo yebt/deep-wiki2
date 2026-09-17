@@ -20,6 +20,32 @@ describe('useSavePage', () => {
     expect(fetcher).toHaveBeenCalledWith('page-1', '# Hi\n', 'hash-1');
   });
 
+  // `PUT /pages/:id` answers `unchanged: true` when the bytes sent were the
+  // bytes stored — nothing written, no revision (revision-history spec via
+  // `savePage()`). "Saved." would claim a revision that does not exist
+  // (docs/UI-CHECKLIST.md §3, "Success — confirmed specifically").
+  test('an unchanged answer is a success that says nothing changed, and clears nothing from the read cache', async () => {
+    const payload = useNuxtApp().payload.data;
+    payload[pageHistoryKey('page-1')] = { ok: true, value: { revisions: [] } };
+    const fetcher = vi.fn(async () => ({ contentHash: 'hash-1', unchanged: true }));
+    const { status, message, save } = useSavePage('page-1', fetcher);
+
+    await save('# Hi\n', 'hash-1');
+
+    expect(status.value).toBe('success');
+    expect(message.value).toBe('Nothing changed since the last save.');
+    expect(payload[pageHistoryKey('page-1')]).toEqual({ ok: true, value: { revisions: [] } });
+  });
+
+  test('a changed answer is confirmed as saved', async () => {
+    const fetcher = vi.fn(async () => ({ contentHash: 'hash-2', unchanged: false }));
+    const { message, save } = useSavePage('page-1', fetcher);
+
+    await save('# Hi\n', 'hash-1');
+
+    expect(message.value).toBe('Saved.');
+  });
+
   test('a 409 stale response preserves the buffer and reports the stale state', async () => {
     const fetcher = vi.fn(async () => {
       throw responseError(409, { error: 'stale content: reload before saving again' });
