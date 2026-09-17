@@ -11,6 +11,11 @@
 import { describe, expect, test } from 'bun:test';
 import { ok, Secret, type ChatModelPort, type ChatResult, type ProviderError, type Result } from '@deep-wiki/core';
 import { runConformanceCase } from './conformance';
+import { OpenRouterChatModel } from './gateway/providers/openrouter';
+import { jsonFetch } from './gateway/providers/test-support';
+import nemoStructured from './gateway/providers/__fixtures__/openrouter-mistral-nemo-structured.json';
+import llama8bStructured from './gateway/providers/__fixtures__/openrouter-llama-3.1-8b-structured.json';
+import qwen30bStructured from './gateway/providers/__fixtures__/openrouter-qwen3-30b-a3b-structured.json';
 
 class ScriptedChatModel implements ChatModelPort {
   constructor(private readonly responses: readonly string[]) {}
@@ -55,5 +60,30 @@ describe('runConformanceCase', () => {
     const result = await runConformanceCase(chatModel, new Secret('sk-fake'), 'anthropic:no-such-model');
 
     expect(result.matched).toBe(false);
+  });
+});
+
+/**
+ * The structured-output samples recorded from the real routes on
+ * 2026-09-17 (docs/TODO.md Finding — "Cheap models first"), replayed
+ * through the real adapter and the real ladder at the level the registry
+ * declares. This is the offline half of `ai:conformance`: a registry entry
+ * that claims `prompted` is backed by a recorded response that validates
+ * at `prompted`, and a future edit to either side fails here first.
+ */
+const RECORDED_SAMPLES: { readonly modelId: string; readonly fixture: typeof nemoStructured }[] = [
+  { modelId: 'openrouter:mistralai/mistral-nemo', fixture: nemoStructured },
+  { modelId: 'openrouter:meta-llama/llama-3.1-8b-instruct', fixture: llama8bStructured },
+  { modelId: 'openrouter:qwen/qwen3-30b-a3b-instruct-2507', fixture: qwen30bStructured },
+];
+
+describe.each(RECORDED_SAMPLES)('runConformanceCase over the recorded $modelId sample', ({ modelId, fixture }) => {
+  test('the recorded sample honours the declared "prompted" level through the real adapter, offline', async () => {
+    const chatModel = new OpenRouterChatModel(jsonFetch(200, fixture));
+
+    const result = await runConformanceCase(chatModel, new Secret('sk-fake'), modelId);
+
+    expect(result.declaredLevel).toBe('prompted');
+    expect(result.matched).toBe(true);
   });
 });

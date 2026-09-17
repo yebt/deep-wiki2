@@ -28,6 +28,9 @@ describe('ai:conformance with no provider key available', () => {
       ['openai:gpt-4o', 'AI_CONFORMANCE_OPENAI_KEY'],
       ['google:gemini-1.5-pro', 'AI_CONFORMANCE_GOOGLE_KEY'],
       ['deepseek:deepseek-chat', 'AI_CONFORMANCE_DEEPSEEK_KEY'],
+      ['openrouter:mistralai/mistral-nemo', 'AI_CONFORMANCE_OPENROUTER_KEY'],
+      ['openrouter:meta-llama/llama-3.1-8b-instruct', 'AI_CONFORMANCE_OPENROUTER_KEY'],
+      ['openrouter:qwen/qwen3-30b-a3b-instruct-2507', 'AI_CONFORMANCE_OPENROUTER_KEY'],
       ['openrouter:meta-llama/llama-3.1-70b-instruct', 'AI_CONFORMANCE_OPENROUTER_KEY'],
     ]) {
       expect(stdout).toContain(`ai:conformance: ${modelId} — skipped (set ${envVar})`);
