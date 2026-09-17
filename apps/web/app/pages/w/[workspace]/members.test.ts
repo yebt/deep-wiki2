@@ -8,7 +8,7 @@ import MembersPage from './members.vue';
 const { useWorkspaceMembersMock, useRouteMock, navigateToMock } = vi.hoisted(() => ({
   navigateToMock: vi.fn(async () => {}),
   useWorkspaceMembersMock: vi.fn(),
-  useRouteMock: vi.fn(() => ({ params: { workspaceId: 'ws-1' } })),
+  useRouteMock: vi.fn(() => ({ params: { workspace: 'acme' } })),
 }));
 
 mockNuxtImport('useWorkspaceMembers', () => useWorkspaceMembersMock);
@@ -299,6 +299,6 @@ describe('workspace members screen', () => {
     mockMembers({ status: 'success', listing });
     const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
-    expect(component.findAll('a').map((a) => a.attributes('href'))).toContain('/workspaces/ws-1');
+    expect(component.findAll('a').map((a) => a.attributes('href'))).toContain('/w/acme');
   });
 });

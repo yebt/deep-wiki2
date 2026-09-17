@@ -40,6 +40,7 @@
  */
 import { CreateWorkspaceRequestSchema, slugifyTitle, WORKSPACE_NAME_MAX_LENGTH } from '@deep-wiki/contracts';
 import type { FormSubmitEvent } from '@nuxt/ui';
+import { membersUrl, workspaceUrl, workspacesUrl } from '~/utils/routes';
 
 const { status, message, limit, workspace, create } = useCreateWorkspace();
 // A signed-out visit leaves for sign-in and comes back (`useSignInRedirect`).
@@ -70,6 +71,11 @@ async function onSubmit(event: FormSubmitEvent<{ name: string; slug: string }>):
   await create({ name: event.data.name, slug: event.data.slug });
 }
 
+/** The slug the created workspace answers to — what every address to it now carries; empty until one exists. */
+const createdSlug = computed(() => workspace.value?.slug ?? '');
+
+const allWorkspacesUrl = workspacesUrl();
+
 useSeoMeta({ title: 'New workspace — deep-wiki' });
 </script>
 
@@ -92,7 +98,7 @@ useSeoMeta({ title: 'New workspace — deep-wiki' });
       {{ limit?.maxWorkspaces }} {{ limit?.maxWorkspaces === 1 ? 'workspace' : 'workspaces' }}, and you already own that many.
       A larger plan is assigned by the instance operator.
       <template #actions>
-        <UButton to="/workspaces" variant="outline" color="neutral" icon="i-lucide-library-big">Your workspaces</UButton>
+        <UButton :to="allWorkspacesUrl" variant="outline" color="neutral" icon="i-lucide-library-big">Your workspaces</UButton>
       </template>
     </PageNotice>
 
@@ -100,17 +106,17 @@ useSeoMeta({ title: 'New workspace — deep-wiki' });
       Every workspace is bounded by a plan, and none has been assigned to your account. Ask the instance operator
       to assign one; nothing else on this screen can change that.
       <template #actions>
-        <UButton to="/workspaces" variant="outline" color="neutral" icon="i-lucide-library-big">Your workspaces</UButton>
+        <UButton :to="allWorkspacesUrl" variant="outline" color="neutral" icon="i-lucide-library-big">Your workspaces</UButton>
       </template>
     </PageNotice>
 
     <PageNotice v-else-if="status === 'success'" icon="i-lucide-circle-check" heading="Workspace created" :level="2">
       {{ message }} Invite the people who will work in it, or open its navigation tree and start writing.
       <template #actions>
-        <UButton :to="`/workspaces/${workspace?.workspaceId}/members`" color="primary" variant="solid" size="lg" icon="i-lucide-user-plus">
+        <UButton :to="membersUrl(createdSlug)" color="primary" variant="solid" size="lg" icon="i-lucide-user-plus">
           Invite your team
         </UButton>
-        <UButton :to="`/workspaces/${workspace?.workspaceId}`" variant="outline" color="neutral" icon="i-lucide-house">
+        <UButton :to="workspaceUrl(createdSlug)" variant="outline" color="neutral" icon="i-lucide-house">
           Open the workspace
         </UButton>
       </template>

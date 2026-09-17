@@ -19,14 +19,14 @@
  */
 definePageMeta({ middleware: ['management-frame'], sidebar: 'management' });
 
-/** The workspace the frame stands on, or `undefined` for the document frame — the same fact the middleware read. */
-const remembered = rememberedWorkspaceId() ?? undefined;
+/** The workspace the frame stands on — both its names — or `null` for the document frame; the same fact the middleware read. */
+const remembered = rememberedWorkspace();
 
 useSeoMeta({ title: 'Profile — deep-wiki' });
 </script>
 
 <template>
-  <AppShell :workspace-id="remembered" title="Profile">
+  <AppShell :workspace-id="remembered?.id" :workspace-slug="remembered?.slug ?? null" title="Profile">
     <!-- The eyebrow adds what the h1 lacks: this is the person's, not a
          workspace's (docs/UI-CHECKLIST.md §4.4). -->
     <PageHeading eyebrow="You" heading="Profile" />

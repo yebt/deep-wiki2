@@ -57,7 +57,10 @@
  * taken for the person: the screen leaves for sign-in and comes back
  * (`useSignInRedirect`), where it used to show a card with a button.
  */
+import { newWorkspaceUrl, workspaceUrl } from '~/utils/routes';
+
 const { status, workspaces, message, load } = useWorkspaces();
+const createUrl = newWorkspaceUrl();
 // A signed-out visit leaves for sign-in and comes back (`useSignInRedirect`).
 useSignInRedirect().redirectWhenSignedOut(status);
 
@@ -95,7 +98,7 @@ useSeoMeta({ title: 'Workspaces — deep-wiki' });
          request returns. -->
     <template v-if="status === 'idle' || status === 'loading'">
       <div class="mb-4 flex flex-wrap items-center justify-end gap-3">
-        <UButton to="/workspaces/new" variant="solid" color="primary" icon="i-lucide-plus">New workspace</UButton>
+        <UButton :to="createUrl" variant="solid" color="primary" icon="i-lucide-plus">New workspace</UButton>
       </div>
       <UCard variant="soft" :ui="{ body: 'p-2 sm:p-2' }">
         <div data-testid="workspace-list-skeleton" class="space-y-1" aria-hidden="true">
@@ -126,7 +129,7 @@ useSeoMeta({ title: 'Workspaces — deep-wiki' });
            — a row is navigation, not a competing filled action. 16px below
            it: the 4dp grid (docs/DESIGN-SYSTEM.md §7.3). -->
       <div class="mb-4 flex flex-wrap items-center justify-end gap-3">
-        <UButton to="/workspaces/new" variant="solid" color="primary" icon="i-lucide-plus">New workspace</UButton>
+        <UButton :to="createUrl" variant="solid" color="primary" icon="i-lucide-plus">New workspace</UButton>
       </div>
 
       <PageNotice
@@ -156,7 +159,7 @@ useSeoMeta({ title: 'Workspaces — deep-wiki' });
                  whatever ground it is drawn on, never a step to another
                  surface rung (§5.2). -->
             <ULink
-              :to="`/workspaces/${workspace.id}`"
+              :to="workspaceUrl(workspace.slug)"
               class="dw-state-layer flex min-h-10 w-full items-center gap-2 rounded-md px-2 py-1 text-body-large text-default"
             >
               <UIcon name="i-lucide-library-big" class="size-5 shrink-0 text-muted" aria-hidden="true" />

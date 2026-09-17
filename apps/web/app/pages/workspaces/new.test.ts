@@ -126,13 +126,13 @@ describe('new workspace screen', () => {
   });
 
   test('success names the workspace and offers inviting the team as the next step, plus the tree', async () => {
-    mockCreate({ status: 'success', message: 'Created Acme Handbook.', workspace: { workspaceId: 'ws-9', rootNodeId: 'root-9' } });
+    mockCreate({ status: 'success', message: 'Created Acme Handbook.', workspace: { workspaceId: 'ws-9', rootNodeId: 'root-9', slug: 'acme-handbook' } });
     const component = await mountSuspended(PageInApp);
 
     expect(component.get('[role="status"]').text()).toMatch(/Acme Handbook/);
     const hrefs = component.findAll('a').map((a) => a.attributes('href'));
-    expect(hrefs).toContain('/workspaces/ws-9/members');
-    expect(hrefs).toContain('/workspaces/ws-9');
+    expect(hrefs).toContain('/w/acme-handbook/members');
+    expect(hrefs).toContain('/w/acme-handbook');
     expect(component.find('form').exists()).toBe(false);
   });
 

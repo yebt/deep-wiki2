@@ -3,7 +3,7 @@ import { useNuxtApp } from '#imports';
 import { useWorkspaceActivity, type WorkspaceActivityResponse } from './useWorkspaceActivity';
 
 function response(overrides: Partial<WorkspaceActivityResponse> = {}): WorkspaceActivityResponse {
-  return { workspace: { id: 'ws-1', name: 'Acme' }, recent: [], mine: [], threads: [], ...overrides };
+  return { workspace: { id: 'ws-1', name: 'Acme', slug: 'acme' }, recent: [], mine: [], threads: [], ...overrides };
 }
 
 function responseError(status: number) {

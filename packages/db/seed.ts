@@ -2,8 +2,8 @@
  * Seeds enough for a person to sign in AND actually look at something:
  * one plan, one Super Root account, one workspace, a `manage` grant at
  * the workspace root, and — new in this batch — a small, realistic
- * content tree so the Phase 2 screens (`/pages/:id`, `/pages/:id/edit`,
- * `/workspaces/:id` with its sidebar tree) have shelves, books, chapters and pages to
+ * content tree so the Phase 2 screens (`/w/<slug>/p/<id>`, `/w/<slug>/p/<id>/edit`,
+ * `/w/<slug>` with its sidebar tree) have shelves, books, chapters and pages to
  * render instead of their empty states.
  *
  * Idempotent — safe to re-run. It never overwrites an existing account's
@@ -35,6 +35,8 @@ import postgres from 'postgres';
 
 const SEED_EMAIL = process.env.SEED_EMAIL ?? 'owner@deep-wiki.local';
 const SEED_PASSWORD = process.env.SEED_PASSWORD ?? 'deep-wiki-dev';
+/** The demo workspace's slug — what every address into it carries (`/w/<slug>/…`). */
+const DEMO_SLUG = 'demo';
 const SEED_NAME = 'Seed Owner';
 
 type ContainerType = 'shelf' | 'book' | 'chapter';
@@ -411,12 +413,12 @@ async function main(): Promise<void> {
       SELECT w.id, n.id AS root
         FROM workspaces w
         JOIN nodes n ON n.workspace_id = w.id AND n.type = 'workspace'
-       WHERE w.slug = 'demo'
+       WHERE w.slug = ${DEMO_SLUG}
     `;
 
     const workspace = existing
       ? { workspaceId: existing.id, rootNodeId: existing.root }
-      : await createWorkspace(sql, { ownerId: user!.id, name: 'Demo workspace', slug: 'demo' });
+      : await createWorkspace(sql, { ownerId: user!.id, name: 'Demo workspace', slug: DEMO_SLUG });
 
     await insertGrants(sql, workspace.workspaceId, 'user', user!.id, [
       { resourceId: workspace.rootNodeId, action: 'manage', effect: 'allow' },
@@ -435,11 +437,14 @@ async function main(): Promise<void> {
 
     console.log('seed: ready');
     console.log(`  sign in at /login with  ${SEED_EMAIL}  /  ${SEED_PASSWORD}`);
-    console.log(`  workspace "Demo workspace" (${workspace.workspaceId}), manage granted at its root`);
-    console.log(`  open:  /workspaces/${workspace.workspaceId}`);
+    // The addresses carry the workspace's slug and the node's id
+    // (apps/web/app/utils/routes.ts — one helper the web app builds every
+    // link from; spelled here because packages/db does not depend on it).
+    console.log(`  workspace "Demo workspace" (${workspace.workspaceId}, slug "${DEMO_SLUG}"), manage granted at its root`);
+    console.log(`  open:  /w/${DEMO_SLUG}`);
     console.log(`  page "${featured.title}" (${featured.nodeId}):`);
-    console.log(`    read:  /pages/${featured.nodeId}`);
-    console.log(`    edit:  /pages/${featured.nodeId}/edit`);
+    console.log(`    read:  /w/${DEMO_SLUG}/p/${featured.nodeId}`);
+    console.log(`    edit:  /w/${DEMO_SLUG}/p/${featured.nodeId}/edit`);
   } finally {
     await sql.end();
   }

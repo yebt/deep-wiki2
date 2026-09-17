@@ -94,8 +94,9 @@ describe('useWorkspaceMembers — invite', () => {
   test('a valid invitation is posted against the workspace root and the listing is reloaded so it appears as pending', async () => {
     const fetchMembers = vi.fn(async () => listing);
     const postInvitation = vi.fn(async () => ({ ok: true as const }));
-    const workspaceId = nextId('ws');
-    const { inviteStatus, inviteMessage, load, invite } = useWorkspaceMembers(workspaceId, { fetchMembers, postInvitation });
+    // The screen asks by the slug its address carries; the invitation names
+    // the workspace by the id the listing answered with.
+    const { inviteStatus, inviteMessage, load, invite } = useWorkspaceMembers(nextId('acme'), { fetchMembers, postInvitation });
     await load();
     fetchMembers.mockClear();
 
@@ -104,7 +105,7 @@ describe('useWorkspaceMembers — invite', () => {
     expect(inviteStatus.value).toBe('sent');
     expect(inviteMessage.value).toMatch(/newbie@example\.com/i);
     expect(postInvitation).toHaveBeenCalledWith({
-      workspaceId,
+      workspaceId: listing.workspace.id,
       email: 'newbie@example.com',
       startingGrants: [{ resourceId: 'root-1', action: 'write' }],
     });

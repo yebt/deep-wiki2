@@ -23,6 +23,8 @@ function mockDirectory(workspaces: { id: string; name: string; slug: string }[],
     ensure,
     refresh: vi.fn(async () => {}),
     nameOf: (id: string) => list.value.find((w) => w.id === id)?.name ?? null,
+    slugOf: (id: string) => list.value.find((w) => w.id === id)?.slug ?? null,
+    idOf: (slug: string) => list.value.find((w) => w.slug === slug)?.id ?? null,
   });
   return { ensure };
 }

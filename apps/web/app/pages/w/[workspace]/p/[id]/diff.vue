@@ -30,6 +30,7 @@
  *   widening the page (docs/UI-CHECKLIST.md §6).
  */
 import { formatRevisionDate } from '~/utils/format-revision-date';
+import { pageHistoryUrl, workspacesUrl } from '~/utils/routes';
 
 // Inside the workspace layout: the frame is mounted once and this screen
 // renders only its pane, so the sidebar's tree keeps its scroll and its
@@ -38,6 +39,10 @@ definePageMeta({ layout: 'workspace' });
 
 const route = useRoute();
 const nodeId = route.params.id as string;
+/** The workspace slug the address carries (`/w/<slug>/p/<id>/diff`): what every link this screen emits is built from. */
+const workspaceSlug = route.params.workspace as string;
+const historyUrl = pageHistoryUrl(workspaceSlug, nodeId);
+const allWorkspacesUrl = workspacesUrl();
 const fromId = (route.query.from as string | undefined) ?? '';
 const toId = (route.query.to as string | undefined) ?? '';
 
@@ -178,7 +183,7 @@ useSeoMeta({ title: 'Page diff — deep-wiki' });
 </script>
 
 <template>
-  <AppShell :workspace-id="null" :node-id="nodeId" :trail="[{ label: 'History', to: `/pages/${nodeId}/history` }, { label: 'Compare' }]">
+  <AppShell :workspace-id="null" :node-id="nodeId" :trail="[{ label: 'History', to: historyUrl }, { label: 'Compare' }]">
     <template #header-end>
       <!-- The bar's one action. The pair being compared is NOT here:
            measured at 1280×900 with the 280px sidebar, two timestamps with
@@ -186,7 +191,7 @@ useSeoMeta({ title: 'Page diff — deep-wiki' });
            400px short and it truncated to "E2E Wor… › His… › Com…" — the
            identity the bar exists to show. The pair is the list's caption
            below instead, where the reading measure holds it on one line. -->
-      <UButton icon="i-lucide-arrow-left" variant="ghost" color="neutral" size="sm" :to="`/pages/${nodeId}/history`">
+      <UButton icon="i-lucide-arrow-left" variant="ghost" color="neutral" size="sm" :to="historyUrl">
         Back to history
       </UButton>
     </template>
@@ -239,7 +244,7 @@ useSeoMeta({ title: 'Page diff — deep-wiki' });
     >
       It may have been moved or deleted, or it may be somewhere you don't have access to — deep-wiki deliberately doesn't say which, so that a page you can't see is indistinguishable from one that was never there.
       <template #actions>
-        <UButton icon="i-lucide-library-big" variant="solid" color="primary" to="/workspaces">Your workspaces</UButton>
+        <UButton icon="i-lucide-library-big" variant="solid" color="primary" :to="allWorkspacesUrl">Your workspaces</UButton>
         <UButton icon="i-lucide-log-in" variant="ghost" color="neutral" to="/login">Sign in</UButton>
       </template>
     </PageNotice>

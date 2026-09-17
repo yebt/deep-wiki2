@@ -17,10 +17,13 @@
  * door is worse than no name.
  */
 import type { DropdownMenuItem } from '@nuxt/ui';
+import { newWorkspaceUrl, workspaceUrl, workspacesUrl } from '~/utils/routes';
 
 const props = defineProps<{
   /** The workspace the person is in; `null` before one is known. */
   workspaceId: string | null;
+  /** Its slug, when known — unused here beyond typing the pair the sidebar carries; the rooms link through the directory's own slugs. */
+  workspaceSlug?: string | null;
 }>();
 
 const directory = useWorkspaceDirectory();
@@ -42,12 +45,12 @@ const items = computed<DropdownMenuItem[][]>(() => {
     // The one the person is in is marked in words as well as by the check,
     // so the mark survives an icon pack that draws it differently (§4.3).
     icon: workspace.id === props.workspaceId ? 'i-lucide-check' : 'i-lucide-library-big',
-    to: `/workspaces/${workspace.id}`,
+    to: workspaceUrl(workspace.slug),
     disabled: workspace.id === props.workspaceId,
   }));
   const doors: DropdownMenuItem[] = [
-    { label: 'All workspaces', icon: 'i-lucide-list', to: '/workspaces' },
-    { label: 'New workspace', icon: 'i-lucide-plus', to: '/workspaces/new' },
+    { label: 'All workspaces', icon: 'i-lucide-list', to: workspacesUrl() },
+    { label: 'New workspace', icon: 'i-lucide-plus', to: newWorkspaceUrl() },
   ];
   return rooms.length > 0 ? [rooms, doors] : [doors];
 });

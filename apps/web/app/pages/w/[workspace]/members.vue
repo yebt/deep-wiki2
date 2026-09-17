@@ -77,6 +77,7 @@ import type { ActionValue } from '@deep-wiki/contracts';
 import type { FormSubmitEvent } from '@nuxt/ui';
 import { z } from 'zod';
 import { formatRevisionDate } from '~/utils/format-revision-date';
+import { workspacesUrl } from '~/utils/routes';
 
 // Inside the workspace layout: the frame is mounted once and this screen
 // renders only its pane (`layouts/workspace.vue`). A management screen:
@@ -86,9 +87,14 @@ import { formatRevisionDate } from '~/utils/format-revision-date';
 definePageMeta({ layout: 'workspace', sidebar: 'management' });
 
 const route = useRoute();
-const workspaceId = route.params.workspaceId as string;
+// The address names the workspace by its slug (`/w/<slug>/members`,
+// utils/routes.ts); the API takes it as it takes the id, and the listing
+// names the id, which the frame and the invitation both need.
+const workspaceSlug = route.params.workspace as string;
 
-const { status, message, listing, inviteStatus, inviteMessage, load, invite } = useWorkspaceMembers(workspaceId);
+const { status, message, listing, inviteStatus, inviteMessage, load, invite } = useWorkspaceMembers(workspaceSlug);
+const workspaceId = computed(() => listing.value?.workspace.id ?? null);
+const allWorkspacesUrl = workspacesUrl();
 // A signed-out visit leaves for sign-in and comes back (`useSignInRedirect`).
 useSignInRedirect().redirectWhenSignedOut(status);
 
@@ -190,7 +196,7 @@ useSeoMeta({ title: 'Members — deep-wiki' });
 </script>
 
 <template>
-  <AppShell :workspace-id="workspaceId" title="Members">
+  <AppShell :workspace-id="workspaceId" :workspace-slug="workspaceSlug" title="Members">
     <template #header-end>
       <!-- The screen's one primary action, Filled, at the bar's size
            (§7.2) — beside the breadcrumb, where a screen's actions stand.
@@ -200,7 +206,7 @@ useSeoMeta({ title: 'Members — deep-wiki' });
     </template>
 
     <!-- The breadcrumb already names the workspace and links back to it
-         (the top crumb, `/workspaces/${workspaceId}`), so a bare `<h1>`
+         (the top crumb, `/w/<slug>`), so a bare `<h1>`
          is the whole heading block here — the same contract read mode's
          `PageHeading :heading="title"` keeps once a screen stands inside
          the frame (§4.4: a screen's `<h1>` keeps one type role across
@@ -229,7 +235,7 @@ useSeoMeta({ title: 'Members — deep-wiki' });
       This workspace does not exist, or you do not manage it — the two are deliberately indistinguishable. A workspace's
       admin can make you one.
       <template #actions>
-        <UButton to="/workspaces" variant="outline" color="neutral" icon="i-lucide-library-big">Your workspaces</UButton>
+        <UButton :to="allWorkspacesUrl" variant="outline" color="neutral" icon="i-lucide-library-big">Your workspaces</UButton>
       </template>
     </PageNotice>
 

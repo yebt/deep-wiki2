@@ -25,11 +25,11 @@ describe('last-workspace middleware', () => {
   beforeEach(() => navigateToMock.mockClear());
 
   test('with a remembered workspace, `/` opens onto its dashboard', () => {
-    document.cookie = `${LAST_WORKSPACE_COOKIE}=ws-remembered; path=/`;
+    document.cookie = `${LAST_WORKSPACE_COOKIE}=${encodeURIComponent('ws-remembered:remembered')}; path=/`;
 
     lastWorkspace(to, to);
 
-    expect(navigateToMock).toHaveBeenCalledWith('/workspaces/ws-remembered', { replace: true });
+    expect(navigateToMock).toHaveBeenCalledWith('/w/remembered', { replace: true });
   });
 
   test('with nothing remembered — a first visit, a cleared browser — `/` opens onto the list', () => {
@@ -40,8 +40,12 @@ describe('last-workspace middleware', () => {
     expect(navigateToMock).toHaveBeenCalledWith('/workspaces', { replace: true });
   });
 
-  test('a cookie that is not a workspace id is ignored, never routed to', () => {
-    document.cookie = `${LAST_WORKSPACE_COOKIE}=${encodeURIComponent('../admin')}; path=/`;
+  test('a cookie that is not an id and a slug — including the id-only cookie from before 2026-09-17 — is ignored, never routed to', () => {
+    document.cookie = `${LAST_WORKSPACE_COOKIE}=${encodeURIComponent('../admin:slug')}; path=/`;
+    lastWorkspace(to, to);
+    expect(navigateToMock).toHaveBeenLastCalledWith('/workspaces', { replace: true });
+
+    document.cookie = `${LAST_WORKSPACE_COOKIE}=ws-only; path=/`;
 
     lastWorkspace(to, to);
 
@@ -52,7 +56,7 @@ describe('last-workspace middleware', () => {
     const { useRouter } = await import('#imports');
     const paths = useRouter().getRoutes().map((route) => route.path);
 
-    expect(paths).toContain('/workspaces/:workspaceId()');
+    expect(paths).toContain('/w/:workspace()');
     expect(paths).toContain('/workspaces');
   });
 });

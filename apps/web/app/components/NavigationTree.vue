@@ -52,9 +52,12 @@ import NavigationTreeActions from '~/components/NavigationTreeActions.vue';
 import type { TreeNode } from '~/composables/useTree';
 import { useTreeFilter } from '~/composables/useTreeFilter';
 import { treeRowActions, type TreeRowAction } from '~/composables/useTreeRowActions';
+import { pageUrl } from '~/utils/routes';
 
 const props = defineProps<{
   workspaceId: string | null;
+  /** The same workspace's slug: what every row's address is built from (`utils/routes.ts`). */
+  workspaceSlug: string | null;
   /** The page open on screen, if any: marked current and revealed. */
   currentNodeId?: string | null;
 }>();
@@ -250,7 +253,7 @@ function onKeydown({ event, node, parentId, index }: { event: KeyboardEvent; nod
     case 'Enter':
     case ' ':
       event.preventDefault();
-      if (node.type === 'page') void navigateTo(`/pages/${node.id}`);
+      if (node.type === 'page') void navigateTo(pageUrl(props.workspaceSlug ?? '', node.id));
       else if (node.children.length > 0) toggleCollapsed(node.id);
       break;
     default:
@@ -268,7 +271,7 @@ function onActivate(nodeId: string): void {
 function onOpen(nodeId: string): void {
   activeId.value = nodeId;
   selectedId.value = nodeId;
-  void navigateTo(`/pages/${nodeId}`);
+  void navigateTo(pageUrl(props.workspaceSlug ?? '', nodeId));
 }
 
 /** A click on a container row: pick it, and fold or unfold it. */
@@ -352,7 +355,7 @@ function onMenuCloseAutoFocus(event: Event): void {
 }
 
 async function copyLink(node: TreeNode): Promise<void> {
-  const href = `${window.location.origin}/pages/${node.id}`;
+  const href = `${window.location.origin}${pageUrl(props.workspaceSlug ?? '', node.id)}`;
   try {
     await navigator.clipboard.writeText(href);
     announcement.value = `Link to “${node.title}” copied.`;
@@ -440,7 +443,7 @@ defineShortcuts(computed(() => (focusInSidebar.value ? { meta_shift_f: { usingIn
 const menuItems = computed<ContextMenuItem[][]>(() => {
   const entry = menuEntry.value;
   if (!entry) return [];
-  return treeRowActions(entry.node, { index: entry.index, siblingCount: entry.siblings.length }).map((group) =>
+  return treeRowActions(entry.node, { index: entry.index, siblingCount: entry.siblings.length, workspaceSlug: props.workspaceSlug ?? '' }).map((group) =>
     group.map((action) => ({
       label: action.label,
       icon: action.icon,
@@ -601,6 +604,7 @@ const menuItems = computed<ContextMenuItem[][]>(() => {
               v-for="(node, index) in shownNodes"
               :key="node.id"
               :node="node"
+              :workspace-slug="workspaceSlug ?? ''"
               :depth="0"
               :parent-id="rootId ?? ''"
               :index="index"

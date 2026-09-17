@@ -7,7 +7,7 @@ import HistoryPage from './history.vue';
 const { usePageHistoryMock, useRouteMock, useCurrentWorkspaceMock, useWorkspaceTreeMock, useWorkspaceDirectoryMock, navigateToMock } = vi.hoisted(() => ({
   navigateToMock: vi.fn(async () => {}),
   usePageHistoryMock: vi.fn(),
-  useRouteMock: vi.fn(() => ({ params: { id: 'page-1' } })),
+  useRouteMock: vi.fn(() => ({ params: { workspace: 'acme', id: 'page-1' } })),
   useCurrentWorkspaceMock: vi.fn(),
   useWorkspaceTreeMock: vi.fn(),
   useWorkspaceDirectoryMock: vi.fn(),
@@ -28,7 +28,7 @@ mockNuxtImport('navigateTo', () => navigateToMock);
  * would let the breadcrumb test pass with the ancestors never rendered.
  */
 function mockFrame() {
-  useCurrentWorkspaceMock.mockReturnValue({ workspaceId: ref('ws-1'), enter: vi.fn() });
+  useCurrentWorkspaceMock.mockReturnValue({ workspace: ref({ id: 'ws-1', slug: 'acme' }), workspaceId: ref('ws-1'), workspaceSlug: ref('acme'), enter: vi.fn() });
   useWorkspaceTreeMock.mockReturnValue({
     status: ref('success'),
     nodes: ref([]),
@@ -55,6 +55,8 @@ function mockFrame() {
     ensure: vi.fn(async () => {}),
     refresh: vi.fn(async () => {}),
     nameOf: (id: string) => (id === 'ws-1' ? 'Acme' : null),
+    slugOf: (id: string) => (id === 'ws-1' ? 'acme' : null),
+    idOf: (slug: string) => (slug === 'acme' ? 'ws-1' : null),
   });
 }
 
@@ -178,7 +180,7 @@ describe('page-history screen', () => {
     expect(compare.text()).toMatch(/compare with previous/i);
     // Newest-first: row 0 is rev-2, and "previous" is rev-1, the row right
     // after it — never the oldest revision on a longer list.
-    expect(compare.attributes('href')).toBe(`/pages/page-1/diff?from=rev-1&to=rev-2`);
+    expect(compare.attributes('href')).toBe(`/w/acme/p/page-1/diff?from=rev-1&to=rev-2`);
     expect(compare.attributes('aria-disabled')).toBeUndefined();
   });
 
@@ -221,7 +223,7 @@ describe('page-history screen', () => {
 
     // In the bar's actions, not its breadcrumb — the page crumb links to
     // the same address, and is the frame's, not this screen's.
-    const back = component.get('header [data-slot="right"] a[href="/pages/page-1"]');
+    const back = component.get('header [data-slot="right"] a[href="/w/acme/p/page-1"]');
     expect(back.text()).toBe('Read page');
   });
 
@@ -290,7 +292,7 @@ describe('page-history screen', () => {
     await mountSuspended(PageInApp, FRAME_STUBS);
     const { useRouter } = await import('#imports');
 
-    expect(useRouter().getRoutes().find((route) => route.path === '/pages/:id()/history')?.meta.layout).toBe('workspace');
+    expect(useRouter().getRoutes().find((route) => route.path === '/w/:workspace()/p/:id()/history')?.meta.layout).toBe('workspace');
   });
 
   // Where the person is: workspace › shelf › book › page — through the
@@ -304,7 +306,7 @@ describe('page-history screen', () => {
     const nav = component.get('nav[aria-label="Where you are"]');
     const crumbs = nav.findAll('li').map((li) => li.text()).filter(Boolean);
     expect(crumbs).toEqual(['Acme', 'Engineering', 'Handbook', 'A Page', 'History']);
-    expect(nav.find('a[href="/pages/page-1"]').exists()).toBe(true);
+    expect(nav.find('a[href="/w/acme/p/page-1"]').exists()).toBe(true);
   });
 
   // The bar's actions: this screen's one way out, and nothing of the
@@ -315,7 +317,7 @@ describe('page-history screen', () => {
     const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
     const actions = component.get('header [data-slot="right"]');
-    expect(actions.findAll('a').map((a) => a.attributes('href'))).toEqual(['/pages/page-1']);
+    expect(actions.findAll('a').map((a) => a.attributes('href'))).toEqual(['/w/acme/p/page-1']);
     expect(actions.find('a[href*="/diff"]').exists()).toBe(false);
     expect(component.get('main li a[href*="/diff"]').text()).toMatch(/compare with previous/i);
   });

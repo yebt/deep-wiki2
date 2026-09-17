@@ -70,9 +70,12 @@
  */
 import type { TreeNode } from '~/composables/useTree';
 import { highlightSegments } from '~/composables/useTreeFilter';
+import { pageUrl } from '~/utils/routes';
 
 const props = defineProps<{
   node: TreeNode;
+  /** The workspace the tree belongs to, by the slug a page's address carries. */
+  workspaceSlug: string;
   depth: number;
   parentId: string;
   index: number;
@@ -124,7 +127,7 @@ const dropIndicator = ref<'before' | 'after' | 'on' | null>(null);
 
 /** Only a page has a destination in this batch; a shelf, book or chapter is a container to fold and to reorder, not a place to go. */
 const isNavigable = computed(() => props.node.type === 'page');
-const href = computed(() => `/pages/${props.node.id}`);
+const href = computed(() => pageUrl(props.workspaceSlug, props.node.id));
 /** The title's element: the link, for a page; a plain span for a container. */
 const NuxtLink = resolveComponent('NuxtLink');
 const titleTag = computed(() => (isNavigable.value ? NuxtLink : 'span'));
@@ -365,6 +368,7 @@ function onKeydown(event: KeyboardEvent): void {
         v-for="(child, childIndex) in node.children"
         :key="child.id"
         :node="child"
+        :workspace-slug="workspaceSlug"
         :depth="depth + 1"
         :parent-id="node.id"
         :index="childIndex"

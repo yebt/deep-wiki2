@@ -4,7 +4,7 @@ import { describe, expect, test, vi } from 'vitest';
 import { defineComponent, h } from 'vue';
 import AiPage from './ai.vue';
 
-const { useRouteMock } = vi.hoisted(() => ({ useRouteMock: vi.fn(() => ({ params: { workspaceId: 'ws-1' }, meta: { sidebar: 'management' } })) }));
+const { useRouteMock } = vi.hoisted(() => ({ useRouteMock: vi.fn(() => ({ params: { workspace: 'acme' }, meta: { sidebar: 'management' } })) }));
 mockNuxtImport('useRoute', () => useRouteMock);
 
 const FRAME_STUBS = { global: { stubs: { WorkspaceSidebar: true } } };
@@ -20,11 +20,11 @@ describe('workspace AI & models placeholder', () => {
     const notice = component.get('main [role="status"]');
     expect(notice.text()).toMatch(/not built yet/i);
     expect(notice.text()).toMatch(/no AI feature is switched on/i);
-    expect(component.findAll('a').find((a) => /back to workspace/i.test(a.text()))?.attributes('href')).toBe('/workspaces/ws-1');
+    expect(component.findAll('a').find((a) => /back to workspace/i.test(a.text()))?.attributes('href')).toBe('/w/acme');
   });
 
   test('is a management screen inside the workspace layout', async () => {
-    const route = useRouter().getRoutes().find((candidate) => candidate.path === '/workspaces/:workspaceId()/ai');
+    const route = useRouter().getRoutes().find((candidate) => candidate.path === '/w/:workspace()/ai');
     expect(route?.meta).toMatchObject({ layout: 'workspace', sidebar: 'management' });
   });
 });

@@ -4,7 +4,7 @@ import { describe, expect, test, vi } from 'vitest';
 import { defineComponent, h } from 'vue';
 import SettingsPage from './settings.vue';
 
-const { useRouteMock } = vi.hoisted(() => ({ useRouteMock: vi.fn(() => ({ params: { workspaceId: 'ws-1' }, meta: { sidebar: 'management' } })) }));
+const { useRouteMock } = vi.hoisted(() => ({ useRouteMock: vi.fn(() => ({ params: { workspace: 'acme' }, meta: { sidebar: 'management' } })) }));
 mockNuxtImport('useRoute', () => useRouteMock);
 
 const FRAME_STUBS = { global: { stubs: { WorkspaceSidebar: true } } };
@@ -20,12 +20,12 @@ describe('workspace settings placeholder', () => {
     const notice = component.get('main [role="status"]');
     expect(notice.text()).toMatch(/not built yet/i);
     expect(notice.text()).toMatch(/managed under Members/);
-    expect(component.findAll('a').find((a) => a.text() === 'Members')?.attributes('href')).toBe('/workspaces/ws-1/members');
+    expect(component.findAll('a').find((a) => a.text() === 'Members')?.attributes('href')).toBe('/w/acme/members');
     expect(component.findAll('[role="alert"]')).toHaveLength(0);
   });
 
   test('is a management screen inside the workspace layout', async () => {
-    const route = useRouter().getRoutes().find((candidate) => candidate.path === '/workspaces/:workspaceId()/settings');
+    const route = useRouter().getRoutes().find((candidate) => candidate.path === '/w/:workspace()/settings');
     expect(route?.meta).toMatchObject({ layout: 'workspace', sidebar: 'management' });
   });
 });

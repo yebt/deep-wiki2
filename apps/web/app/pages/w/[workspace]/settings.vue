@@ -20,23 +20,27 @@
  * designed against data the API does not serve — `PUT /workspaces/:id`
  * does not exist; the non-goal is building any of it here.
  */
+import { membersUrl } from '~/utils/routes';
+
 definePageMeta({ layout: 'workspace', sidebar: 'management' });
 
 const route = useRoute();
-const workspaceId = route.params.workspaceId as string;
+// The address names the workspace by its slug; nothing here asks the API,
+// so the frame resolves the id from the directory it already holds.
+const workspaceSlug = route.params.workspace as string;
 
 useSeoMeta({ title: 'Settings — deep-wiki' });
 </script>
 
 <template>
-  <AppShell :workspace-id="workspaceId" title="Settings">
+  <AppShell :workspace-id="null" title="Settings">
     <PageHeading heading="Settings" />
 
     <PageNotice icon="i-lucide-construction" heading="Not built yet" :level="2">
       A workspace's name and slug are set when it is created, and nothing about it can be changed here yet. Who is in
       the workspace, and who is invited, is managed under Members.
       <template #actions>
-        <UButton :to="`/workspaces/${workspaceId}/members`" variant="outline" color="neutral" icon="i-lucide-users">Members</UButton>
+        <UButton :to="membersUrl(workspaceSlug)" variant="outline" color="neutral" icon="i-lucide-users">Members</UButton>
       </template>
     </PageNotice>
   </AppShell>

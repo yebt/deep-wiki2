@@ -15,7 +15,7 @@ function byKind(groups: readonly (readonly TreeRowAction[])[], kind: TreeRowActi
   return flat(groups).filter((action) => action.kind === kind);
 }
 
-const MIDDLE = { index: 1, siblingCount: 3 };
+const MIDDLE = { index: 1, siblingCount: 3, workspaceSlug: 'acme' };
 
 describe('treeRowActions', () => {
   describe('"New <child>…" comes from the one LEGAL_PARENT_TYPES table', () => {
@@ -57,13 +57,13 @@ describe('treeRowActions', () => {
     });
 
     test('the first row keeps "Move up" in the menu, disabled with a reason; the last keeps "Move down"', () => {
-      const first = treeRowActions(node('page'), { index: 0, siblingCount: 3 });
+      const first = treeRowActions(node('page'), { ...MIDDLE, index: 0 });
       const up = byKind(first, 'move-up')[0]!;
       expect(up.disabled).toBe(true);
       expect(up.reason).toMatch(/already first/i);
       expect(byKind(first, 'move-down')[0]?.disabled).toBe(false);
 
-      const last = treeRowActions(node('page'), { index: 2, siblingCount: 3 });
+      const last = treeRowActions(node('page'), { ...MIDDLE, index: 2 });
       const down = byKind(last, 'move-down')[0]!;
       expect(down.disabled).toBe(true);
       expect(down.reason).toMatch(/already last/i);
@@ -71,7 +71,7 @@ describe('treeRowActions', () => {
     });
 
     test('an only child can move neither way, and both say why', () => {
-      const only = treeRowActions(node('shelf'), { index: 0, siblingCount: 1 });
+      const only = treeRowActions(node('shelf'), { ...MIDDLE, index: 0, siblingCount: 1 });
       expect(byKind(only, 'move-up')[0]?.disabled).toBe(true);
       expect(byKind(only, 'move-down')[0]?.disabled).toBe(true);
     });
@@ -80,12 +80,12 @@ describe('treeRowActions', () => {
   describe('destinations', () => {
     test('a page opens and has a history; a book has a history; a shelf and a chapter have neither', () => {
       const page = treeRowActions(node('page', 'p1'), MIDDLE);
-      expect(byKind(page, 'open')[0]?.to).toBe('/pages/p1');
-      expect(byKind(page, 'history')[0]?.to).toBe('/pages/p1/history');
+      expect(byKind(page, 'open')[0]?.to).toBe('/w/acme/p/p1');
+      expect(byKind(page, 'history')[0]?.to).toBe('/w/acme/p/p1/history');
 
       const book = treeRowActions(node('book', 'b1'), MIDDLE);
       expect(byKind(book, 'open')).toHaveLength(0);
-      expect(byKind(book, 'history')[0]?.to).toBe('/books/b1/history');
+      expect(byKind(book, 'history')[0]?.to).toBe('/w/acme/b/b1/history');
 
       for (const type of ['shelf', 'chapter']) {
         const groups = treeRowActions(node(type), MIDDLE);
@@ -121,7 +121,7 @@ describe('treeRowActions', () => {
 
   test('every disabled action carries a reason, and no enabled one does', () => {
     for (const type of ['shelf', 'book', 'chapter', 'page']) {
-      for (const ctx of [{ index: 0, siblingCount: 1 }, MIDDLE]) {
+      for (const ctx of [{ ...MIDDLE, index: 0, siblingCount: 1 }, MIDDLE]) {
         for (const action of flat(treeRowActions(node(type), ctx))) {
           if (action.disabled) expect(action.reason, `${type} ${action.kind}`).toBeTruthy();
           else expect(action.reason, `${type} ${action.kind}`).toBeUndefined();

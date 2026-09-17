@@ -20,13 +20,19 @@ describe('useWorkspaceDirectory', () => {
     expect(fetchWorkspaces).toHaveBeenCalledTimes(1);
     expect(second.nameOf('ws-dir-1')).toBe('Acme');
     expect(second.workspaces.value.map((workspace) => workspace.slug)).toEqual(['acme']);
+    // Both names of a workspace, each way round: the address carries the
+    // slug, the API is keyed by the id.
+    expect(second.slugOf('ws-dir-1')).toBe('acme');
+    expect(second.idOf('acme')).toBe('ws-dir-1');
   });
 
-  test('an unknown id has no name, so the caller can show the address rather than a wrong name', async () => {
+  test('an unknown id has no name and no slug, and an unknown slug no id, so the caller can show the address rather than a wrong name', async () => {
     const directory = useWorkspaceDirectory({ fetchWorkspaces: vi.fn(async () => ({ workspaces: [] })) });
     await directory.ensure();
 
     expect(directory.nameOf('nope')).toBeNull();
+    expect(directory.slugOf('nope')).toBeNull();
+    expect(directory.idOf('nope')).toBeNull();
   });
 
   test('a failed load leaves the list empty and the status honest, and `refresh` tries again', async () => {

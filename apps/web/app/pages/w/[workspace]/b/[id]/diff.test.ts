@@ -8,7 +8,7 @@ const { useBookDiffNavigatorMock, useRouteMock, navigateToMock } = vi.hoisted(()
   useBookDiffNavigatorMock: vi.fn(),
   useRouteMock: vi.fn(
     (): { params: Record<string, string>; query: Record<string, string> } => ({
-      params: { id: 'book-1' },
+      params: { workspace: 'acme', id: 'book-1' },
       query: { since: '2026-01-01T00:00:00.000Z' },
     }),
   ),
@@ -105,11 +105,11 @@ function mockNavigator(pagesContent: Record<string, PageContent>, overrides: Nav
 
 describe('book-diff screen', () => {
   afterEach(() => {
-    useRouteMock.mockReturnValue({ params: { id: 'book-1' }, query: { since: '2026-01-01T00:00:00.000Z' } });
+    useRouteMock.mockReturnValue({ params: { workspace: 'acme', id: 'book-1' }, query: { since: '2026-01-01T00:00:00.000Z' } });
   });
 
   test('a missing `since` query param renders a broken-link state without calling the API', async () => {
-    useRouteMock.mockReturnValue({ params: { id: 'book-1' }, query: {} });
+    useRouteMock.mockReturnValue({ params: { workspace: 'acme', id: 'book-1' }, query: {} });
     const { load } = mockNavigator({});
     const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
@@ -249,7 +249,7 @@ describe('book-diff screen', () => {
     const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
     expect(component.text()).toMatch(/created during this window|no earlier revision/i);
-    expect(component.find('a[href="/pages/page-1/history"]').exists()).toBe(true);
+    expect(component.find('a[href="/w/acme/p/page-1/history"]').exists()).toBe(true);
   });
 
   // The route names the book and each page now; before it did, the screen
@@ -286,8 +286,8 @@ describe('book-diff screen', () => {
     const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
     const crumbs = component.get('nav[aria-label="Where you are"]');
-    expect(crumbs.find('a[href="/workspaces/ws-1"]').exists()).toBe(true);
-    expect(crumbs.find('a[href="/books/book-1/history"]').exists()).toBe(true);
+    expect(crumbs.find('a[href="/w/acme"]').exists()).toBe(true);
+    expect(crumbs.find('a[href="/w/acme/b/book-1/history"]').exists()).toBe(true);
     expect(component.find('[aria-label="Workspace home"]').exists()).toBe(false);
     expect(component.findAll('a').filter((a) => /back to history/i.test(a.text())).length).toBe(0);
   });
@@ -342,6 +342,6 @@ describe('book-diff screen', () => {
     await mountSuspended(PageInApp, FRAME_STUBS);
     const { useRouter } = await import('#imports');
 
-    expect(useRouter().getRoutes().find((route) => route.path === '/books/:id()/diff')?.meta.layout).toBe('workspace');
+    expect(useRouter().getRoutes().find((route) => route.path === '/w/:workspace()/b/:id()/diff')?.meta.layout).toBe('workspace');
   });
 });

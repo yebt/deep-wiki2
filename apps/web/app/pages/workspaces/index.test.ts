@@ -70,7 +70,7 @@ describe('workspaces index screen', () => {
 
     mockWorkspaces({ status: 'success', workspaces: [alpha] });
     const loaded = await mountSuspended(PageInApp);
-    const loadedCard = loaded.get('a[href="/workspaces/ws-1"]').element.closest('.bg-emphasized');
+    const loadedCard = loaded.get('a[href="/w/alpha-handbook"]').element.closest('.bg-emphasized');
     expect(loadedCard!.querySelector('[data-slot="body"]')!.className).toBe(card!.querySelector('[data-slot="body"]')!.className);
   });
 
@@ -79,8 +79,8 @@ describe('workspaces index screen', () => {
     const component = await mountSuspended(PageInApp);
 
     const hrefs = component.findAll('a').map((a) => a.attributes('href'));
-    expect(hrefs).toContain('/workspaces/ws-1');
-    expect(hrefs).toContain('/workspaces/ws-2');
+    expect(hrefs).toContain('/w/alpha-handbook');
+    expect(hrefs).toContain('/w/bravo-handbook');
     expect(component.text()).toContain('Alpha Handbook');
     expect(component.text()).toContain('Bravo Handbook');
   });

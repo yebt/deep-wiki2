@@ -17,7 +17,7 @@ const { useWorkspaceActivityMock, usePresenceStreamMock, useRouteMock, useWorksp
   navigateToMock: vi.fn(async () => {}),
   useWorkspaceActivityMock: vi.fn(),
   usePresenceStreamMock: vi.fn(),
-  useRouteMock: vi.fn(() => ({ params: { workspaceId: 'ws-1' } })),
+  useRouteMock: vi.fn(() => ({ params: { workspace: 'acme' } })),
   useWorkspaceTreeMock: vi.fn(),
   useWorkspaceDirectoryMock: vi.fn(),
 }));
@@ -59,6 +59,7 @@ function mockAll(overrides: { status?: string; recent?: unknown[]; mine?: unknow
   useWorkspaceActivityMock.mockReturnValue({
     status: ref(overrides.status ?? 'success'),
     workspaceName: ref('Acme'),
+    workspace: ref(overrides.status === 'success' || overrides.status === undefined ? { id: 'ws-1', name: 'Acme', slug: 'acme' } : null),
     recent: ref(overrides.recent ?? []),
     mine: ref(overrides.mine ?? []),
     threads: ref(overrides.threads ?? []),
@@ -90,6 +91,8 @@ function mockAll(overrides: { status?: string; recent?: unknown[]; mine?: unknow
     ensure: vi.fn(async () => {}),
     refresh: vi.fn(async () => {}),
     nameOf: () => 'Acme',
+    slugOf: () => 'acme',
+    idOf: () => 'ws-1',
   });
   return { load, start, stop };
 }
@@ -111,7 +114,7 @@ describe('workspace dashboard', () => {
     await mountSuspended(PageInApp);
     const { useRouter } = await import('#imports');
 
-    expect(useRouter().getRoutes().find((route) => route.path === '/workspaces/:workspaceId()')?.meta.layout).toBe('workspace');
+    expect(useRouter().getRoutes().find((route) => route.path === '/w/:workspace()')?.meta.layout).toBe('workspace');
   });
 
   test('loads the activity and opens the workspace-wide presence stream on mount', async () => {
@@ -146,7 +149,7 @@ describe('workspace dashboard', () => {
 
     const row = component.get('[data-testid="dashboard-recent"] li');
     expect(row.text()).toContain('Ana Ruiz');
-    expect(row.get('a[href="/pages/p1"]').text()).toBe('Roadmap');
+    expect(row.get('a[href="/w/acme/p/p1"]').text()).toBe('Roadmap');
     expect(row.get('time').attributes('datetime')).toBe('2026-09-15T10:00:00.000Z');
     // Non-zero classes only, each in words — colour is never the sole carrier (§5).
     expect(row.text()).toContain('2 blocks added');
@@ -161,7 +164,7 @@ describe('workspace dashboard', () => {
 
     const row = component.get('[data-testid="dashboard-editing"] li');
     expect(row.text()).toContain('Cy Doe');
-    expect(row.get('a[href="/pages/p2"]').text()).toBe('Meeting notes');
+    expect(row.get('a[href="/w/acme/p/p2"]').text()).toBe('Meeting notes');
     expect(row.get('time').attributes('datetime')).toBe(EDITOR.since);
     expect(component.text()).not.toMatch(/locked/i);
   });
@@ -171,7 +174,7 @@ describe('workspace dashboard', () => {
     const component = await mountSuspended(PageInApp);
 
     const row = component.get('[data-testid="dashboard-threads"] li');
-    expect(row.get('a[href="/pages/p1"]').text()).toBe('Roadmap');
+    expect(row.get('a[href="/w/acme/p/p1"]').text()).toBe('Roadmap');
     expect(row.text()).toContain('the launch date');
     expect(row.text()).toContain('2 replies');
     expect(row.text()).toContain('Waiting on you');

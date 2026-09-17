@@ -57,7 +57,7 @@ describe('error screen', () => {
   });
 
   test('a 404 renders from the status code alone, so a denied resource cannot be told from a missing one', async () => {
-    atRoute('/pages/11111111-1111-4111-8111-111111111111/history');
+    atRoute('/w/acme/p/11111111-1111-4111-8111-111111111111/history');
 
     const denied = await mountSuspended(ErrorScreen, {
       props: {
@@ -82,7 +82,7 @@ describe('error screen', () => {
   });
 
   test('a 404 inside a workspace offers that workspace, not just “go home”', async () => {
-    atRoute('/workspaces/22222222-2222-4222-8222-222222222222/settings');
+    atRoute('/w/acme/settings');
 
     const component = await mountSuspended(ErrorScreen, {
       props: { error: asNuxtError({ statusCode: 404 }) },
@@ -127,8 +127,9 @@ describe('error screen', () => {
   test.each([
     ['/totally/unknown'],
     ['/workspaces/'],
-    ['/workspaces/44444444-4444-4444-8444-444444444444/settings'],
-    ['/pages/55555555-5555-4555-8555-555555555555/nope'],
+    ['/w/acme/settings'],
+    ['/w/acme/p/55555555-5555-4555-8555-555555555555/nope'],
+    ['/pages/55555555-5555-4555-8555-555555555555'],
   ])('sign-in is never the only way out of a 404 at %s', async (path) => {
     atRoute(path);
 
@@ -147,17 +148,17 @@ describe('error screen', () => {
   });
 
   test('the address the user typed is on the screen, because it came from the user', async () => {
-    atRoute('/workspaces/66666666-6666-4666-8666-666666666666/settings');
+    atRoute('/w/acme-handbook/settings');
 
     const component = await mountSuspended(ErrorScreen, {
       props: { error: asNuxtError({ statusCode: 404 }) },
     });
 
-    expect(component.text()).toContain('/workspaces/66666666-6666-4666-8666-666666666666/settings');
+    expect(component.text()).toContain('/w/acme-handbook/settings');
   });
 
   test('a server error is a different screen: it is announced, offers a retry, and carries a reference', async () => {
-    atRoute('/pages/33333333-3333-4333-8333-333333333333');
+    atRoute('/w/acme/p/33333333-3333-4333-8333-333333333333');
 
     const component = await mountSuspended(ErrorScreen, {
       props: { error: asNuxtError({ statusCode: 500, message: 'ECONNREFUSED 127.0.0.1:5432' }) },
@@ -174,7 +175,7 @@ describe('error screen', () => {
   });
 
   test('the server branch offers a retry and nothing else — a second exit there is not a choice', async () => {
-    atRoute('/pages/77777777-7777-4777-8777-777777777777');
+    atRoute('/w/acme/p/77777777-7777-4777-8777-777777777777');
 
     const component = await mountSuspended(ErrorScreen, {
       props: { error: asNuxtError({ statusCode: 503 }) },

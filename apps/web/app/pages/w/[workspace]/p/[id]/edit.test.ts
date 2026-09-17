@@ -23,7 +23,7 @@ const {
     useLockHeartbeatMock: vi.fn(),
     useSavePageMock: vi.fn(),
     usePresenceStreamMock: vi.fn(),
-    useRouteMock: vi.fn(() => ({ params: { id: 'page-1' } })),
+    useRouteMock: vi.fn(() => ({ params: { workspace: 'acme', id: 'page-1' } })),
     useWorkspaceTreeMock: vi.fn(),
     useWorkspaceDirectoryMock: vi.fn(),
   }));
@@ -88,6 +88,8 @@ function mockFrame() {
     ensure: vi.fn(async () => {}),
     refresh: vi.fn(async () => {}),
     nameOf: (id: string) => (id === 'ws-1' ? 'Acme' : null),
+    slugOf: (id: string) => (id === 'ws-1' ? 'acme' : null),
+    idOf: (slug: string) => (slug === 'acme' ? 'ws-1' : null),
   });
 }
 
@@ -204,7 +206,7 @@ describe('edit-mode page', () => {
     const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
     expect(component.text()).toMatch(/don't have access to edit/i);
-    expect(component.find('a[href="/pages/page-1"]').exists()).toBe(true);
+    expect(component.find('a[href="/w/acme/p/page-1"]').exists()).toBe(true);
   });
 
 
@@ -259,7 +261,7 @@ describe('edit-mode page', () => {
 
     // In the bar's actions, not its breadcrumb — the page crumb links to
     // the same address, and is the frame's, not this screen's.
-    const back = component.get('header [data-slot="right"] a[href="/pages/page-1"]');
+    const back = component.get('header [data-slot="right"] a[href="/w/acme/p/page-1"]');
     expect(back.text()).toBe('Read page');
     expect(back.find('[class*="i-lucide-eye"], .iconify').exists()).toBe(true);
   });
@@ -725,7 +727,7 @@ describe('edit-mode page', () => {
     const banner = component.get('[role="alert"]');
     expect(banner.text()).toMatch(/don't have permission/i);
     expect(banner.text()).toMatch(/nothing was saved/i);
-    expect(component.find('a[href="/pages/page-1"]').exists()).toBe(true);
+    expect(component.find('a[href="/w/acme/p/page-1"]').exists()).toBe(true);
     const saveButton = component.findAll('button').find((button) => /Save/.test(button.text()))!;
     expect(saveButton.attributes('aria-disabled')).toBe('true');
   });
@@ -824,7 +826,7 @@ describe('edit-mode page', () => {
     await mountSuspended(PageInApp, EDITOR_STUBS);
     const { useRouter } = await import('#imports');
 
-    expect(useRouter().getRoutes().find((route) => route.path === '/pages/:id()/edit')?.meta.layout).toBe('workspace');
+    expect(useRouter().getRoutes().find((route) => route.path === '/w/:workspace()/p/:id()/edit')?.meta.layout).toBe('workspace');
   });
 
   describe('inside the workspace frame', () => {
@@ -847,7 +849,7 @@ describe('edit-mode page', () => {
       expect(nav.find('button[aria-label="Show the full path"]').exists()).toBe(true);
       // The page crumb is the link back to reading it; the state crumb is
       // a place name, not a link.
-      expect(nav.find('a[href="/pages/page-1"]').exists()).toBe(true);
+      expect(nav.find('a[href="/w/acme/p/page-1"]').exists()).toBe(true);
       const editing = nav.findAll('li').find((li) => li.text() === 'Editing')!;
       expect(editing.find('a').exists()).toBe(false);
     });
@@ -864,7 +866,7 @@ describe('edit-mode page', () => {
       const header = component.get('header');
       const actions = header.get('[data-slot="right"]');
       expect(actions.text()).toMatch(/Ana is editing/);
-      expect(actions.get('a[href="/pages/page-1"]').text()).toBe('Read page');
+      expect(actions.get('a[href="/w/acme/p/page-1"]').text()).toBe('Read page');
       expect(actions.findAll('button').some((button) => /^Save/.test(button.text()))).toBe(true);
       // Presence first, then the quieter navigation, then the primary
       // action — the read screen's order.
@@ -874,7 +876,7 @@ describe('edit-mode page', () => {
       const main = component.get('main');
       expect(main.text()).not.toMatch(/Ana is editing/);
       expect(main.findAll('button').some((button) => /^Save/.test(button.text()))).toBe(false);
-      expect(main.find('a[href="/pages/page-1"]').exists()).toBe(false);
+      expect(main.find('a[href="/w/acme/p/page-1"]').exists()).toBe(false);
     });
 
     // The document's own title is the screen's `<h1>`, the same heading

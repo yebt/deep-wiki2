@@ -9,7 +9,7 @@ function mount(path: string) {
   return mountSuspended(
     defineComponent({
       name: 'ManagementInApp',
-      setup: () => () => h(UApp, null, { default: () => h(ManagementSidebar, { workspaceId: 'ws-1' }) }),
+      setup: () => () => h(UApp, null, { default: () => h(ManagementSidebar, { workspaceSlug: 'acme' }) }),
     }),
     { route: path },
   );
@@ -23,9 +23,9 @@ function mount(path: string) {
  */
 describe('ManagementSidebar', () => {
   test('leads with the way back to the workspace, then the three groups in order, each door a real link', async () => {
-    const component = await mount('/workspaces/ws-1/members');
+    const component = await mount('/w/acme/members');
 
-    const back = component.get('a[href="/workspaces/ws-1"]');
+    const back = component.get('a[href="/w/acme"]');
     expect(back.text()).toMatch(/back to workspace/i);
 
     const text = component.text();
@@ -39,9 +39,9 @@ describe('ManagementSidebar', () => {
     const hrefs = component.findAll('a').map((a) => a.attributes('href'));
     expect(hrefs).toEqual(
       expect.arrayContaining([
-        '/workspaces/ws-1/members',
-        '/workspaces/ws-1/settings',
-        '/workspaces/ws-1/ai',
+        '/w/acme/members',
+        '/w/acme/settings',
+        '/w/acme/ai',
         '/admin/registration',
         '/account',
       ]),
@@ -51,9 +51,9 @@ describe('ManagementSidebar', () => {
   });
 
   test('marks the door of the screen the person is on — and only that one', async () => {
-    const component = await mount('/workspaces/ws-1/members');
+    const component = await mount('/w/acme/members');
 
-    // `exact`: the way back is `/workspaces/ws-1`, a prefix of every
+    // `exact`: the way back is `/w/acme`, a prefix of every
     // management address, and must not read as current on all of them.
     const current = component.findAll('[aria-current="page"]');
     expect(current).toHaveLength(1);
@@ -61,7 +61,7 @@ describe('ManagementSidebar', () => {
   });
 
   test('every door is a tab stop: nothing is rendered disabled', async () => {
-    const component = await mount('/workspaces/ws-1/members');
+    const component = await mount('/w/acme/members');
 
     expect(component.findAll('[aria-disabled="true"], [tabindex="-1"]')).toHaveLength(0);
   });

@@ -30,7 +30,7 @@ describe('account placeholder', () => {
   });
 
   test('with a workspace remembered: the workspace frame, its sidebar in management mode', async () => {
-    document.cookie = `${LAST_WORKSPACE_COOKIE}=ws-1; path=/`;
+    document.cookie = `${LAST_WORKSPACE_COOKIE}=${encodeURIComponent('ws-1:acme')}; path=/`;
     const component = await mountSuspended(PageInApp, { ...FRAME_STUBS, route: '/account' });
 
     expect(component.find('footer').exists(), 'inside the frame there is no footer').toBe(false);

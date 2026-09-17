@@ -40,6 +40,8 @@ function mockFrameCollaborators() {
     ensure: vi.fn(async () => {}),
     refresh: vi.fn(async () => {}),
     nameOf: (id: string) => (id === 'ws-1' ? 'Acme' : null),
+    slugOf: (id: string) => (id === 'ws-1' ? 'acme' : null),
+    idOf: (slug: string) => (slug === 'acme' ? 'ws-1' : null),
   });
 }
 mockFrameCollaborators();
@@ -124,8 +126,8 @@ describe('AppShell', () => {
       const nav = component.get('nav[aria-label="Where you are"]');
       const labels = nav.findAll('li').map((li) => li.text()).filter((text) => text.length > 0);
       expect(labels).toEqual(['Acme', 'Engineering', 'Handbook', 'Onboarding']);
-      expect(nav.get('a[href="/workspaces/ws-1"]').text()).toBe('Acme');
-      expect(nav.get('a[href="/pages/page-1"]').text()).toBe('Onboarding');
+      expect(nav.get('a[href="/w/acme"]').text()).toBe('Acme');
+      expect(nav.get('a[href="/w/acme/p/page-1"]').text()).toBe('Onboarding');
       expect(nav.find('a[href*="shelf-1"]').exists()).toBe(false);
     });
 
@@ -160,8 +162,8 @@ describe('AppShell', () => {
         const html = nav.element.innerHTML;
         expect(html.indexOf('Show the full path')).toBeLessThan(html.indexOf('Onboarding'));
         // Nothing folded is drawn as a crumb; the workspace link is in the menu, not the row.
-        expect(nav.find('a[href="/workspaces/ws-1"]').exists()).toBe(false);
-        expect(nav.get('a[href="/pages/page-1"]').text()).toBe('Onboarding');
+        expect(nav.find('a[href="/w/acme"]').exists()).toBe(false);
+        expect(nav.get('a[href="/w/acme/p/page-1"]').text()).toBe('Onboarding');
       });
 
       test('the overflow control is a menu holding the folded crumbs in order, the workspace as a link and the places as names', async () => {
@@ -173,7 +175,7 @@ describe('AppShell', () => {
         expect(menu).toBeDefined();
         const items = (menu!.props('items') as { label: string; to?: string; type?: string }[][]).flat();
         expect(items.map((item) => item.label)).toEqual(['Acme', 'Engineering', 'Handbook']);
-        expect(items[0]).toMatchObject({ to: '/workspaces/ws-1' });
+        expect(items[0]).toMatchObject({ to: '/w/acme' });
         expect(items[1]?.to).toBeUndefined();
         expect(items[2]?.to).toBeUndefined();
       });

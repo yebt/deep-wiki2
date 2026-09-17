@@ -13,7 +13,7 @@
  * - Single primary action: none of its own — this is a reading surface;
  *   every row is a door to a page. Creating the first shelf is the
  *   sidebar's New…, which the empty state points at.
- * - Data: `GET /workspaces/:id/activity` (recent saves with block-diff
+ * - Data: `GET /workspaces/:slug/activity` (recent saves with block-diff
  *   class counts, the caller's own saves, open threads for the caller) and
  *   the presence stream (`usePresenceStream(null)` — every page in the
  *   workspace, the same stream read and edit mode open for one page).
@@ -35,24 +35,39 @@
 import type { ActivityChangeCounts } from '@deep-wiki/contracts';
 import { formatRevisionDate } from '~/utils/format-revision-date';
 import { initials } from '~/utils/initials';
+import { pageUrl, workspacesUrl } from '~/utils/routes';
 
 // Inside the workspace layout: the frame — and the tree in it — is mounted
 // once, and a click on a row swaps only this pane (`layouts/workspace.vue`).
 definePageMeta({ layout: 'workspace' });
 
 const route = useRoute();
-const workspaceId = route.params.workspaceId as string;
+// The address names the workspace by its slug (`/w/<slug>`, utils/routes.ts);
+// the API takes it as it takes the id, and the response names the id.
+const workspaceSlug = route.params.workspace as string;
 
-const activity = useWorkspaceActivity(workspaceId);
+const activity = useWorkspaceActivity(workspaceSlug);
 // A signed-out visit leaves for sign-in and comes back (`useSignInRedirect`).
 useSignInRedirect().redirectWhenSignedOut(activity.status);
 const presence = usePresenceStream(null);
 
+const workspaceId = computed(() => activity.workspace.value?.id ?? null);
+// The presence stream is workspace-scoped by id, which the response names:
+// it starts the moment the id is known and never before. Client only —
+// there is no browser to hold a stream during the server's render.
+watch(
+  workspaceId,
+  (id) => {
+    if (id && import.meta.client) presence.start(id);
+  },
+  { immediate: true },
+);
 onMounted(() => {
   void activity.load();
-  presence.start(workspaceId);
 });
 onBeforeUnmount(() => presence.stop());
+
+const allWorkspacesUrl = workspacesUrl();
 
 /** The four class counts as chips, non-zero ones only, each in words as well as a colour (§5). */
 const CLASSES: readonly { key: keyof ActivityChangeCounts; label: string; color: 'success' | 'error' | 'info' | 'secondary' }[] = [
@@ -79,7 +94,7 @@ useSeoMeta({ title: () => (activity.workspaceName.value ? `${activity.workspaceN
 </script>
 
 <template>
-  <AppShell :workspace-id="workspaceId" column="wide">
+  <AppShell :workspace-id="workspaceId" :workspace-slug="workspaceSlug" column="wide">
     <!-- Loading: the grid's own shape — a title line, then panels with the
          rows they will hold — never a spinner in the middle of content
          (§3; operate.md). -->
@@ -100,7 +115,7 @@ useSeoMeta({ title: () => (activity.workspaceName.value ? `${activity.workspaceN
     <PageNotice v-else-if="activity.status.value === 'not-found'" icon="i-lucide-file-question" heading="This workspace does not exist">
       It may have been renamed, or the link may be wrong — or it may be one you don't have access to; deep-wiki deliberately doesn't say which.
       <template #actions>
-        <UButton icon="i-lucide-library-big" variant="solid" color="primary" to="/workspaces">Your workspaces</UButton>
+        <UButton icon="i-lucide-library-big" variant="solid" color="primary" :to="allWorkspacesUrl">Your workspaces</UButton>
       </template>
     </PageNotice>
 
@@ -137,7 +152,7 @@ useSeoMeta({ title: () => (activity.workspaceName.value ? `${activity.workspaceN
                   <p class="text-body-medium text-default">
                     <span class="text-body-medium-emphasized text-highlighted">{{ change.author.displayName ?? 'Someone' }}</span>
                     edited
-                    <ULink :to="`/pages/${change.pageId}`" class="text-primary underline-offset-4 hover:underline">{{ change.pageTitle }}</ULink>
+                    <ULink :to="pageUrl(workspaceSlug, change.pageId)" class="text-primary underline-offset-4 hover:underline">{{ change.pageTitle }}</ULink>
                   </p>
                   <p class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-body-small text-muted">
                     <!-- Fetched client-side, never server-rendered, so the
@@ -173,7 +188,7 @@ useSeoMeta({ title: () => (activity.workspaceName.value ? `${activity.workspaceN
                   <p class="text-body-medium text-default">
                     <span class="text-body-medium-emphasized text-highlighted">{{ editor.userDisplayName }}</span>
                     is editing
-                    <ULink :to="`/pages/${editor.pageId}`" class="text-primary underline-offset-4 hover:underline">{{ editor.pageTitle }}</ULink>
+                    <ULink :to="pageUrl(workspaceSlug, editor.pageId)" class="text-primary underline-offset-4 hover:underline">{{ editor.pageTitle }}</ULink>
                   </p>
                   <p class="mt-1 text-body-small text-muted">since <time :datetime="editor.since">{{ formatRevisionDate(editor.since) }}</time></p>
                 </div>
@@ -191,7 +206,7 @@ useSeoMeta({ title: () => (activity.workspaceName.value ? `${activity.workspaceN
             <ol data-testid="dashboard-threads" class="divide-y divide-default">
               <li v-for="thread in activity.threads.value" :key="thread.id" class="px-4 py-3">
                 <p class="text-body-medium text-default">
-                  <ULink :to="`/pages/${thread.pageId}`" class="text-primary underline-offset-4 hover:underline">{{ thread.pageTitle }}</ULink>
+                  <ULink :to="pageUrl(workspaceSlug, thread.pageId)" class="text-primary underline-offset-4 hover:underline">{{ thread.pageTitle }}</ULink>
                   <span v-if="thread.orphaned" class="text-muted"> · text no longer on the page</span>
                 </p>
                 <!-- The excerpt the thread is about — one line, the thread's
@@ -212,7 +227,7 @@ useSeoMeta({ title: () => (activity.workspaceName.value ? `${activity.workspaceN
             <ol data-testid="dashboard-mine" class="divide-y divide-default">
               <li v-for="edit in activity.mine.value" :key="edit.revisionId" class="px-4 py-3">
                 <p class="text-body-medium text-default">
-                  <ULink :to="`/pages/${edit.pageId}`" class="text-primary underline-offset-4 hover:underline">{{ edit.pageTitle }}</ULink>
+                  <ULink :to="pageUrl(workspaceSlug, edit.pageId)" class="text-primary underline-offset-4 hover:underline">{{ edit.pageTitle }}</ULink>
                 </p>
                 <p class="mt-1 text-body-small text-muted"><time :datetime="edit.createdAt">{{ formatRevisionDate(edit.createdAt) }}</time></p>
               </li>

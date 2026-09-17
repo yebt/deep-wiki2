@@ -8,6 +8,10 @@ export interface UseWorkspaceDirectoryResult {
   /** Load again — after a workspace was created, or a failed load is retried. */
   readonly refresh: () => Promise<void>;
   readonly nameOf: (workspaceId: string) => string | null;
+  /** The slug every address carries, for a workspace known by id; `null` until the list holds it. */
+  readonly slugOf: (workspaceId: string) => string | null;
+  /** The id the API is keyed by, for a workspace known by the slug in an address; `null` until the list holds it. */
+  readonly idOf: (slug: string) => string | null;
 }
 
 interface DirectoryRecord {
@@ -42,11 +46,21 @@ export function useWorkspaceDirectory(deps: UseWorkspacesDeps = {}): UseWorkspac
     return record.value.workspaces.find((workspace) => workspace.id === workspaceId)?.name ?? null;
   }
 
+  function slugOf(workspaceId: string): string | null {
+    return record.value.workspaces.find((workspace) => workspace.id === workspaceId)?.slug ?? null;
+  }
+
+  function idOf(slug: string): string | null {
+    return record.value.workspaces.find((workspace) => workspace.slug === slug)?.id ?? null;
+  }
+
   return {
     status: computed(() => record.value.status),
     workspaces: computed(() => record.value.workspaces),
     ensure,
     refresh,
     nameOf,
+    slugOf,
+    idOf,
   };
 }

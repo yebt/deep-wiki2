@@ -5,7 +5,7 @@ import { usePageMentions } from './usePageMentions';
 
 function activity(threads: Partial<WorkspaceActivityResponse['threads'][number]>[]): WorkspaceActivityResponse {
   return {
-    workspace: { id: 'ws-1', name: 'Acme' },
+    workspace: { id: 'ws-1', name: 'Acme', slug: 'acme' },
     recent: [],
     mine: [],
     threads: threads.map((thread, index) => ({
