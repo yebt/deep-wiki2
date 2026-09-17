@@ -534,6 +534,36 @@ makes conventions portable across projects.
 
 Discoveries and constraints. Newest first.
 
+### 2026-09-17 — prosemirror-view's stylesheet was never loaded: a trailing space beside an inline element vanished under the next keystroke
+
+**How it surfaced.** The bare-URL input rule (below) turns `https://example.com/bare` into a link
+on the space that closes it and inserts that space itself, unmarked, after the link. In the
+browser the space showed after the rule ran — DOM `<a>…</a>" "` — and the next key replaced it:
+`"n"` where `" n"` should have been (measured with a DOM dump per keystroke, 2026-09-17). The
+unit test of the same transaction passed, so the loss was the DOM's, not the state's.
+
+**Cause.** `apps/web` never imported `prosemirror-view/style/prosemirror.css` (nor
+`prosemirror-gapcursor/style/gapcursor.css`). `.ProseMirror` therefore had `white-space:
+normal`, under which a trailing space is *collapsible* — Chrome's editing rewrites the text
+node around it when the next character lands — and ProseMirror itself warns about exactly this
+in the console on every mount ("ProseMirror expects the CSS white-space property to be set,
+preferably to 'pre-wrap'"). A space typed at the end of a longer text node had survived by
+Chrome's own nbsp juggling; a space that was a text node of its own, after a link, did not. The
+gap cursor — the caret ProseMirror draws between two blocks that hold no text, which
+`plugins.ts` installs precisely so a document ending in a table or a code block has a keyboard
+path past it — was an empty `<div>` with no rule to draw it, so it never showed.
+
+**Fix.** `main.css` §13 now carries both stylesheets' structural rules on `.prosemirror-editor`
+(`white-space: break-spaces` with the `pre-wrap` fallback, `word-wrap`, no ligatures, `li`
+positioned, `hideselection`, the separator image) and the gap cursor drawn in the caret's role
+(`--ui-primary`), never the packages' literals (`#8cf`, `black`) — checklist §4.2.
+`e2e/editor-source.spec.ts` measures the computed `white-space` on the focused editor.
+
+**Not done.** The two package stylesheets are not imported as files: `main.css` is the one
+stylesheet and Tailwind's `@import` of a package CSS would carry the colour literals with it.
+If prosemirror-view adds a structural rule in a future release it has to be copied here; the
+console warning is the tripwire.
+
 ### 2026-09-17 — The "border" around the document in edit mode was the focus indicator, and the caret is where it belongs
 
 **What the owner saw.** A rounded box hugging the content in `/pages/:id/edit`, fighting the

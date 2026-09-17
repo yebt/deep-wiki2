@@ -115,6 +115,7 @@ for (const theme of ['light', 'dark'] as const) {
           boxShadow: computed.boxShadow,
           borderRadius: computed.borderRadius,
           caretColor: computed.caretColor,
+          whiteSpace: computed.whiteSpace,
         };
       });
       expect(style.outlineStyle, 'no focus outline around the document').toBe('none');
@@ -122,6 +123,10 @@ for (const theme of ['light', 'dark'] as const) {
       expect(style.boxShadow).toBe('none');
       expect(style.borderRadius, 'nothing is drawn, so nothing is rounded').toBe('0px');
       expect(style.caretColor).toBe(await themeColour(page, '--ui-primary'));
+      // prosemirror-view's structural stylesheet is loaded (main.css §13):
+      // under `white-space: normal` a trailing space is collapsible and
+      // Chrome rewrites the text node around it (found 2026-09-17).
+      expect(style.whiteSpace).toBe('break-spaces');
 
       // The measure column is untouched: the first paragraph stands where
       // read mode's does (e2e/editor.spec.ts holds the two to the pixel;

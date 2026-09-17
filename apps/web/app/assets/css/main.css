@@ -764,8 +764,80 @@ body {
    §5.2: a container fill is for selected, never a state layer's job).
    Both read the theme's variables, never a literal (checklist §4.2).
    ───────────────────────────────────────────────────────────── */
+/* prosemirror-view's own stylesheet (`style/prosemirror.css`) was never
+   loaded — found on 2026-09-17 when a space an input rule inserted after
+   a link vanished under the next keystroke. Under `white-space: normal`
+   a trailing space is collapsible, so Chrome's editing rewrote the
+   text node around it; ProseMirror warns about exactly this in the
+   console ("expects the CSS white-space property to be set"). These are
+   that stylesheet's structural rules, the ones with no colour in them;
+   its `#8cf` selection outline is replaced by the tokens below and the
+   gap cursor's black rule by the caret's own role (checklist §4.2). */
 .prosemirror-editor {
+  position: relative;
   caret-color: var(--ui-primary);
+  word-wrap: break-word;
+  white-space: pre-wrap;
+  white-space: break-spaces;
+  font-variant-ligatures: none;
+  font-feature-settings: 'liga' 0;
+}
+
+.prosemirror-editor pre {
+  white-space: pre-wrap;
+}
+
+.prosemirror-editor li {
+  position: relative;
+}
+
+.prosemirror-editor [draggable][contenteditable='false'] {
+  user-select: text;
+}
+
+.prosemirror-editor.ProseMirror-hideselection *::selection {
+  background: transparent;
+}
+
+.prosemirror-editor.ProseMirror-hideselection {
+  caret-color: transparent;
+}
+
+.prosemirror-editor img.ProseMirror-separator {
+  display: inline !important;
+  border: none !important;
+  margin: 0 !important;
+}
+
+/* prosemirror-gapcursor's `style/gapcursor.css`, likewise never loaded:
+   the caret it draws between two blocks that hold no text (a table and
+   a code block, say) was a `<div>` with nothing in it. Drawn as the
+   caret is, in `primary`; the blink is the package's own. */
+.prosemirror-editor .ProseMirror-gapcursor {
+  display: none;
+  pointer-events: none;
+  position: absolute;
+  margin: 0;
+}
+
+.prosemirror-editor .ProseMirror-gapcursor::after {
+  content: '';
+  display: block;
+  position: absolute;
+  top: -2px;
+  width: 20px;
+  border-top: 1px solid var(--ui-primary);
+  animation: ProseMirror-cursor-blink 1.1s steps(2) infinite;
+}
+
+@keyframes ProseMirror-cursor-blink {
+  to {
+    visibility: hidden;
+  }
+}
+
+.prosemirror-editor.ProseMirror-focused .ProseMirror-gapcursor {
+  display: block;
 }
 
 .prosemirror-editor:focus-visible {
