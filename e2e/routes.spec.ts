@@ -45,12 +45,20 @@ async function shot(page: Page, name: string): Promise<void> {
   await page.screenshot({ path: `${SHOTS}/fb-routes-${name}.png`, fullPage: false });
 }
 
-/** Every link inside the frame carries the workspace's slug and none carries an old shape. */
+/**
+ * Every link inside the frame carries the workspace's slug and none carries
+ * an old shape. Polled: the sidebar's doors appear once the directory has
+ * answered, after hydration, and the dev server may reload a first visit
+ * while it optimises dependencies — a snapshot taken across either proves
+ * nothing.
+ */
 async function expectLinksInTheNewShape(page: Page, label: string): Promise<void> {
-  const hrefs = await page.locator('a[href^="/"]').evaluateAll((anchors) => anchors.map((a) => a.getAttribute('href') ?? ''));
-  const old = hrefs.filter((href) => /^\/(pages|books)\//.test(href) || /^\/workspaces\/[0-9a-f-]{36}/.test(href));
+  const hrefs = () => page.locator('a[href^="/"]').evaluateAll((anchors) => anchors.map((a) => a.getAttribute('href') ?? ''));
+  await expect
+    .poll(async () => (await hrefs()).some((href) => href.startsWith(`/w/${fixtures.workspaceSlug}`)), { timeout: 30_000, message: `${label}: links carry the slug` })
+    .toBe(true);
+  const old = (await hrefs()).filter((href) => /^\/(pages|books)\//.test(href) || /^\/workspaces\/[0-9a-f-]{36}/.test(href));
   expect(old, `${label}: links in the old shape`).toEqual([]);
-  expect(hrefs.some((href) => href.startsWith(`/w/${fixtures.workspaceSlug}`)), `${label}: links carry the slug`).toBe(true);
 }
 
 const SCREENS = [
