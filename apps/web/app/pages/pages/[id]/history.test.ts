@@ -217,7 +217,7 @@ describe('page-history screen', () => {
   });
 
   // Revisions minted before `savePage()` refused byte-identical saves
-  // (docs/TODO.md Findings, 2026-09-16) store the same bytes as the one
+  // (docs/TODO.md Findings, 2026-09-17) store the same bytes as the one
   // before them. The row is real history and stays; what it offers is
   // honest: it says so, and "Compare with previous" is unavailable with
   // that reason rather than a link to a diff that shows nothing

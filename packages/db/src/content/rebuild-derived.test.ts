@@ -125,7 +125,7 @@ describe('reconcileDerived — chain compression', () => {
     // Re-saving with no page_blocks-relevant edit still runs reconcileDerived,
     // and therefore compressChains, at the end of the transaction. The
     // edit is a real one — a byte-identical re-save writes nothing at all
-    // since 2026-09-16 (`savePage()`'s `unchanged`), so it would never
+    // since 2026-09-17 (`savePage()`'s `unchanged`), so it would never
     // reach reconciliation.
     const [row] = await sql<{ content_hash: string }[]>`SELECT content_hash FROM page_content WHERE node_id = ${nodeId}`;
     await savePage(sql, {

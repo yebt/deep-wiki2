@@ -75,7 +75,7 @@ describe('listPageRevisions', () => {
 
   // The history screen names a revision that stores the same bytes as the
   // one before it — rows minted before `savePage()` refused no-op saves
-  // (docs/TODO.md Findings, 2026-09-16) — from the hash alone, without
+  // (docs/TODO.md Findings, 2026-09-17) — from the hash alone, without
   // ever loading content into a list.
   test('each summary carries the revision content hash, so equal neighbours are recognisable without content', async () => {
     const { workspaceId, pageId, authorId } = await seedPage();

@@ -35,7 +35,7 @@ describe('RevisionSummarySchema', () => {
   });
 
   // The history screen marks a revision whose bytes equal the previous
-  // one's from the hash alone (docs/TODO.md Findings, 2026-09-16).
+  // one's from the hash alone (docs/TODO.md Findings, 2026-09-17).
   test('rejects a summary missing the content hash the history screen compares neighbours by', () => {
     const result = RevisionSummarySchema.safeParse({
       id: 'rev-1',

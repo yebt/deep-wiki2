@@ -190,7 +190,7 @@ describe('PUT /pages/:id', () => {
   // revision-history spec: a revision pairs with "the corresponding
   // `page_content` change"; a byte-identical save has none. The route
   // answers 200 with the same hash and says so, and the history gains no
-  // row whose diff would be empty (docs/TODO.md Findings, 2026-09-16).
+  // row whose diff would be empty (docs/TODO.md Findings, 2026-09-17).
   test('a byte-identical save answers 200 with `unchanged: true` and writes no revision', async () => {
     const fixture = await buildFixture();
     const first = await savePage(sql, { nodeId: fixture.pageId, workspaceId: fixture.workspaceId, markdown: '# Original\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });

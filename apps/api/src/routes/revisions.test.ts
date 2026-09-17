@@ -111,7 +111,7 @@ describe('GET /pages/:id/history', () => {
 
   // The history screen marks a revision whose stored bytes equal the
   // previous one's (rows minted before `savePage()` refused no-op saves —
-  // docs/TODO.md Findings, 2026-09-16) from the hash, never from content.
+  // docs/TODO.md Findings, 2026-09-17) from the hash, never from content.
   test('each revision carries its content hash and never its content', async () => {
     const fixture = await buildFixture();
     const first = await savePage(sql, { nodeId: fixture.pageId, workspaceId: fixture.workspaceId, markdown: '# One\n', expectedContentHash: null, updatedBy: fixture.authorId, changesetWindowMinutes: WINDOW_MINUTES });

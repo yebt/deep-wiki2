@@ -308,7 +308,7 @@ describe('edit-mode page', () => {
   });
 
   // The cause of "sometimes an empty history entry is saved" on the
-  // client side (docs/TODO.md Findings, 2026-09-16): every editor
+  // client side (docs/TODO.md Findings, 2026-09-17): every editor
   // transaction marked the buffer dirty, including one that left the
   // document byte-identical to what is saved — a character typed and
   // deleted, an Undo back to the start — so Save was live and sent the

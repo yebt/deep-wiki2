@@ -75,7 +75,7 @@ function diffHref(index: number): string {
 /**
  * A revision that stores the very bytes the one before it stores. Nothing
  * mints these any more — `savePage()` writes no revision for a
- * byte-identical save since 2026-09-16 — but the ones written before that
+ * byte-identical save since 2026-09-17 — but the ones written before that
  * are immutable history (revision-history spec) and stay in the list.
  * The row says what it is, and its compare control is unavailable with
  * that reason rather than a link onto a diff that shows nothing

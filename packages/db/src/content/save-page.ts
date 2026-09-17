@@ -68,7 +68,7 @@ export interface SavePageResult {
    * `page_content` change"; a save that changes nothing has no
    * corresponding change and therefore earns no revision. Before this
    * flag existed every such save minted a revision whose diff against
-   * its predecessor was empty (docs/TODO.md Findings, 2026-09-16).
+   * its predecessor was empty (docs/TODO.md Findings, 2026-09-17).
    */
   readonly unchanged: boolean;
 }

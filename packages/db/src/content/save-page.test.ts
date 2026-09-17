@@ -318,7 +318,7 @@ describe('savePage — revisions', () => {
   // whose markdown is byte-identical to the current row changes nothing,
   // so it earns no revision: the history screen showed such rows as an
   // entry whose "Compare with previous" opened onto "No differences"
-  // (docs/TODO.md Findings, 2026-09-16 — "sometimes an empty history entry
+  // (docs/TODO.md Findings, 2026-09-17 — "sometimes an empty history entry
   // is saved").
   test('a save whose markdown is byte-identical to the current row writes no revision and touches nothing', async () => {
     const { workspaceId, nodeId } = await seedPageNode();

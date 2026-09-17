@@ -56,7 +56,7 @@ const savedContentHash = ref<string | null>(null);
 // The text the server holds — the session's on open, the buffer's after
 // each successful Save. "Dirty" means the buffer differs from it, byte
 // for byte: a character typed and deleted, or an Undo back to the start,
-// leaves nothing to save. Until 2026-09-16 every editor transaction set
+// leaves nothing to save. Until 2026-09-17 every editor transaction set
 // the flag, so Save stayed live on an unchanged document and sent the
 // stored bytes back — the client half of "sometimes an empty history
 // entry is saved" (docs/TODO.md Findings; the server half is
