@@ -604,6 +604,95 @@ makes conventions portable across projects.
 
 Discoveries and constraints. Newest first.
 
+### 2026-09-17 — Cheap models first: OpenRouter's catalogue priced, and the cheapest routes that declare tools and JSON output (branch `feat/ai-cheap-models`)
+
+**The owner's instruction (2026-09-17).** "If the architecture works with cheap models, it will
+work wonderfully with expensive ones." The default model of every AI feature must be the
+cheapest one that passes conformance; an expensive model is an upgrade a workspace opts into,
+never the baseline. This Finding is the measurement that rule needs — prices from OpenRouter's
+public catalogue, then (below, appended as the branch progressed) what the registered cheap
+models actually did under `ai:conformance`.
+
+**How the table was produced.** `bun run -F @deep-wiki/api ai:catalogue` (new,
+`apps/api/src/ai/openrouter-catalogue{,-cli}.ts`) reads `GET /api/v1/models` and
+`GET /api/v1/embeddings/models` — both public, no key — and ranks paid routes by
+input + output price. A route is a candidate only when it emits text, declares both `tools`
+and `response_format` in `supported_parameters`, has a fixed price (OpenRouter reports `-1`
+for its `openrouter/auto` routers), and carries an id the registry could hold: `parseModelId`'s
+slug rule refuses `:free`/`:batch` variants and `~…-latest` aliases, so the ranking refuses
+them too. Free routes are excluded on purpose — rate-limited, and OpenRouter's terms let them
+train on prompts. The `structured_outputs` column is OpenRouter's own declaration that the
+route honours a JSON schema in `response_format`; it is a vendor claim, not a measurement.
+
+**Cheapest 20 chat routes declaring tools + `response_format`, prices as of 2026-09-17
+(USD per million tokens):**
+
+| Model | $/1M input | $/1M output | Context | `structured_outputs` |
+| --- | ---: | ---: | ---: | --- |
+| `mistralai/mistral-nemo` | 0.019 | 0.030 | 131,072 | yes |
+| `inclusionai/ling-3.0-flash` | 0.021 | 0.063 | 262,144 | no |
+| `meta-llama/llama-3.1-8b-instruct` | 0.050 | 0.080 | 131,072 | yes |
+| `qwen/qwen3.7-flash` | 0.030 | 0.130 | 1,000,000 | no |
+| `openai/gpt-oss-20b` | 0.030 | 0.130 | 131,072 | yes |
+| `deepseek/deepseek-v4-flash-0731` | 0.060 | 0.120 | 1,310,720 | yes |
+| `inception/mercury-2.5` | 0.040 | 0.150 | 260,000 | yes |
+| `mistralai/ministral-3b-2512` | 0.100 | 0.100 | 131,072 | yes |
+| `google/gemma-3-12b-it` | 0.050 | 0.150 | 131,072 | yes |
+| `openai/gpt-oss-120b` | 0.037 | 0.170 | 131,072 | yes |
+| `deepseek/deepseek-v4-flash` | 0.070 | 0.140 | 1,048,576 | yes |
+| `inclusionai/ling-3.0-flash-vl` | 0.060 | 0.180 | 131,072 | yes |
+| `qwen/qwen3-30b-a3b-instruct-2507` | 0.048 | 0.193 | 262,144 | yes |
+| `qwen/qwen3.5-9b` | 0.100 | 0.150 | 262,144 | yes |
+| `nvidia/nemotron-3.5-lightning` | 0.080 | 0.200 | 262,144 | yes |
+| `meta/muse-spark-1.3-contributor` | 0.100 | 0.200 | 1,048,576 | yes |
+| `meta/muse-spark-1.2-contributor` | 0.100 | 0.200 | 1,048,576 | yes |
+| `nvidia/nemotron-3-nano-30b-a3b` | 0.060 | 0.240 | 262,144 | yes |
+| `mistralai/ministral-8b-2512` | 0.150 | 0.150 | 262,144 | yes |
+| `qwen/qwen-2.5-7b-instruct` | 0.100 | 0.200 | 32,768 | yes |
+
+For scale: the one OpenRouter route the registry held before this branch,
+`meta-llama/llama-3.1-70b-instruct`, is listed at **0.40 / 0.40** today — the registry said
+0.52 / 0.75 (vendor docs, 2026-09-06). Roughly ten to twenty times the price of the top of
+this table, per token. The natively-wired entries are further out still (`gpt-4o` 2.50 / 10.00,
+`claude-3-5-sonnet` 3.00 / 15.00).
+
+**Embeddings: OpenRouter does offer them.** The 2026-09-06 Finding left OpenRouter embeddings
+"unknown" because no key was available; `GET /api/v1/embeddings/models` lists 33 routes today,
+and the `ai:probe` outcome against the real endpoint is recorded below. Cheapest 20 paid
+routes (dimensions are what the description states; OpenRouter has no field for it):
+
+| Model | $/1M input | Context | Dimensions (declared) |
+| --- | ---: | ---: | ---: |
+| `perplexity/pplx-embed-v1-0.6b` | 0.004 | 32,000 | not stated |
+| `thenlper/gte-base` | 0.005 | 512 | 768 |
+| `intfloat/e5-base-v2` | 0.005 | 512 | 768 |
+| `sentence-transformers/paraphrase-minilm-l6-v2` | 0.005 | 512 | 384 |
+| `sentence-transformers/all-minilm-l12-v2` | 0.005 | 512 | 384 |
+| `baai/bge-base-en-v1.5` | 0.005 | 512 | 768 |
+| `sentence-transformers/multi-qa-mpnet-base-dot-v1` | 0.005 | 512 | 768 |
+| `sentence-transformers/all-mpnet-base-v2` | 0.005 | 512 | 768 |
+| `sentence-transformers/all-minilm-l6-v2` | 0.005 | 512 | 384 |
+| `thenlper/gte-large` | 0.010 | 512 | 1024 |
+| `intfloat/e5-large-v2` | 0.010 | 512 | 1024 |
+| `intfloat/multilingual-e5-large` | 0.010 | 512 | 1024 |
+| `baai/bge-large-en-v1.5` | 0.010 | 512 | 1024 |
+| `baai/bge-m3` | 0.010 | 8,194 | 1024 |
+| `qwen/qwen3-embedding-8b` | 0.010 | 32,768 | not stated |
+| `voyageai/voyage-4-lite` | 0.020 | 32,000 | 256 |
+| `openai/text-embedding-3-small` | 0.020 | 8,192 | not stated |
+| `qwen/qwen3-embedding-4b` | 0.020 | 32,768 | not stated |
+| `perplexity/pplx-embed-v1-4b` | 0.030 | 32,000 | not stated |
+| `voyageai/voyage-4` | 0.060 | 32,000 | 256 |
+
+Two things to notice against SPECS §14's 1536-dimension column. Nothing in the cheap half of
+this table emits 1536: the sub-cent routes are 384/768/1024-dimensional, 512-token-context
+sentence-transformer classes. The 1536 routes are `openai/text-embedding-3-small` (0.02, native
+1536) and, by Matryoshka truncation, `qwen/qwen3-embedding-{4b,8b}` (2560/4096 native, the
+vendor documents any dimension from 32 up). The 2026-09-06 Finding "No local embedding model
+exists that emits 1536 dimensions" was about local models; this table says the hosted cheap
+tier does not either, which is one more reason the dimension is a settings value the first
+index generation fixes, not a constant.
+
 ### 2026-09-17 — `bun run test` lost 85 suites to one race: two processes creating `deepwiki_test_template`
 
 **What happened.** `bun run test` runs every package's suite at once (`--filter '*'`), and

@@ -9,7 +9,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "ai:rekey": "bun run src/ai/rekey-cli.ts",
     "ai:probe": "bun run src/ai/probe-cli.ts",
-    "ai:conformance": "bun run src/ai/conformance-cli.ts"
+    "ai:conformance": "bun run src/ai/conformance-cli.ts",
+    "ai:catalogue": "bun run src/ai/openrouter-catalogue-cli.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "4.0.49",
