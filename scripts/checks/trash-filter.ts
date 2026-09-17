@@ -101,26 +101,6 @@ export const ALLOW_LIST: Record<string, string> = {
   // this block exists to keep green until then. An entry that becomes
   // stale (its file no longer trips either rule) is a build error by
   // design — that is what turns "fixed" into "done", not a forgotten line.
-  'packages/db/src/nodes/create.ts': 'Phase 3/4 pending: task 3.3 (GREEN not yet landed — still queries the base nodes table).',
-  'packages/db/src/nodes/rename.ts': 'Phase 3/4 pending: task 3.5 (GREEN not yet landed — still queries the base nodes table).',
-  'packages/db/src/nodes/move.ts': 'Phase 3/4 pending: task 3.7 (GREEN not yet landed — still queries the base nodes table).',
-  'packages/db/src/nodes/reorder.ts': 'Phase 3/4 pending: task 3.9 (GREEN not yet landed — still queries the base nodes table).',
-  'packages/db/src/revisions/queries.ts':
-    'Phase 3/4 pending: task 3.15 (GREEN not yet landed — still queries the base nodes/page_content tables).',
-  'packages/db/src/changesets/history.ts':
-    'Phase 3/4 pending: task 3.17 (GREEN not yet landed — reads changeset/page_revision without naming a live view).',
-  'packages/db/src/comments/queries.ts':
-    'Phase 3/4 pending: task 3.19 (GREEN not yet landed — still queries the base nodes table and reads comments without naming a live view).',
-  'packages/db/src/presence/queries.ts':
-    'Phase 3/4 pending: not named by any task in tasks.md yet — found by this check\'s first real run (task 2.4). Reads presence without naming a live view; the closest named task is 4.16, which covers apps/api/src/routes/presence.ts, not this module.',
-  'packages/db/src/changesets/resolve-changeset.ts':
-    'Phase 3/4 pending: not named by any task in tasks.md yet — found by this check\'s first real run (task 2.4). Still queries the base nodes table; needs a task before Phase 3 closes.',
-  'packages/db/src/changesets/book-diff.ts':
-    'Phase 3/4 pending: not named by any task in tasks.md yet — found by this check\'s first real run (task 2.4). Reads page_revision without naming a live view; needs a task before Phase 3 closes.',
-  'packages/db/src/comments/reconcile-comments.ts':
-    'Phase 3/4 pending: not named by any task in tasks.md yet — found by this check\'s first real run (task 2.4). Reads comments without naming a live view; needs a task before Phase 3 closes.',
-  'packages/db/src/locks/page-lock.ts':
-    'Phase 3/4 pending: not named by any task in tasks.md yet — found by this check\'s first real run (task 2.4). Reads page_locks without naming a live view; needs a task before Phase 3 closes.',
   'apps/api/src/routes/tree.ts': 'Phase 3/4 pending: task 4.2 (GREEN not yet landed — still queries the base nodes table).',
   'apps/api/src/routes/pages.ts': 'Phase 3/4 pending: task 4.4 (GREEN not yet landed — still queries the base nodes table).',
   'apps/api/src/routes/links.ts':
