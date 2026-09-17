@@ -72,6 +72,23 @@ function diffHref(index: number): string {
   return `/pages/${nodeId}/diff?from=${previousRevisionId(index)}&to=${revision.id}`;
 }
 
+/**
+ * A revision that stores the very bytes the one before it stores. Nothing
+ * mints these any more — `savePage()` writes no revision for a
+ * byte-identical save since 2026-09-16 — but the ones written before that
+ * are immutable history (revision-history spec) and stay in the list.
+ * The row says what it is, and its compare control is unavailable with
+ * that reason rather than a link onto a diff that shows nothing
+ * (docs/UI-CHECKLIST.md §3 "Disabled — explains why"; §5 `aria-disabled`
+ * so the reason survives keyboard focus). Decided from the hash the
+ * history response carries, never by fetching content into a list.
+ */
+function sameAsPrevious(index: number): boolean {
+  return hasPrevious(index) && revisions.value[index]!.contentHash === revisions.value[index + 1]!.contentHash;
+}
+
+const SAME_CONTENT_REASON = 'Nothing to compare: this revision stores the same content as the previous one.';
+
 useHead({ htmlAttrs: { lang: 'en' } });
 useSeoMeta({ title: 'Revision history — deep-wiki' });
 </script>
@@ -217,6 +234,7 @@ useSeoMeta({ title: 'Revision history — deep-wiki' });
             <p class="mt-1 text-body-medium text-muted">
               <time :datetime="revision.createdAt">{{ formatRevisionDate(revision.createdAt) }}</time>
               <span v-if="revision.changesetId"> · Part of a changeset</span>
+              <span v-if="sameAsPrevious(index)"> · Same content as the previous revision</span>
             </p>
           </div>
 
@@ -224,9 +242,16 @@ useSeoMeta({ title: 'Revision history — deep-wiki' });
                and the one right before it. A real `NuxtLink`, not a
                button with a click handler — `UButton`'s `to` prop keeps
                it in the normal navigation semantics a keyboard user and a
-               screen reader both already expect from a link. -->
+               screen reader both already expect from a link. A revision
+               storing the same bytes as the previous one has nothing to
+               compare, and says so instead (`sameAsPrevious`). -->
+          <UTooltip v-if="sameAsPrevious(index)" :text="SAME_CONTENT_REASON">
+            <UButton size="sm" variant="ghost" trailing-icon="i-lucide-arrow-right" aria-disabled="true" @click.prevent>
+              Compare with previous
+            </UButton>
+          </UTooltip>
           <UButton
-            v-if="hasPrevious(index)"
+            v-else-if="hasPrevious(index)"
             size="sm"
             variant="ghost"
             trailing-icon="i-lucide-arrow-right"

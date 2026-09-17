@@ -9,6 +9,7 @@ describe('RevisionSummarySchema', () => {
       authorDisplayName: null,
       createdAt: '2026-01-01T00:00:00.000Z',
       changesetId: null,
+      contentHash: 'a'.repeat(64),
     });
 
     expect(parsed.authorId).toBeNull();
@@ -22,6 +23,7 @@ describe('RevisionSummarySchema', () => {
       authorId: 'user-1',
       createdAt: '2026-01-01T00:00:00.000Z',
       changesetId: null,
+      contentHash: 'a'.repeat(64),
     });
 
     expect(result.success).toBe(false);
@@ -30,6 +32,22 @@ describe('RevisionSummarySchema', () => {
     // The name of this test claims one specific field; without this, a
     // schema that refused the body for any other reason would satisfy it.
     expect(result.error.issues.map((issue) => issue.path)).toEqual([['authorDisplayName']]);
+  });
+
+  // The history screen marks a revision whose bytes equal the previous
+  // one's from the hash alone (docs/TODO.md Findings, 2026-09-16).
+  test('rejects a summary missing the content hash the history screen compares neighbours by', () => {
+    const result = RevisionSummarySchema.safeParse({
+      id: 'rev-1',
+      authorId: null,
+      authorDisplayName: null,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      changesetId: null,
+    });
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.path)).toEqual([['contentHash']]);
   });
 });
 
@@ -45,8 +63,8 @@ describe('PageHistoryResponseSchema', () => {
   test('parses a revision list, handing it back in the order it arrived', () => {
     const parsed = PageHistoryResponseSchema.parse({
       revisions: [
-        { id: 'rev-2', authorId: 'user-1', authorDisplayName: 'Owner', createdAt: '2026-01-02T00:00:00.000Z', changesetId: 'cs-1' },
-        { id: 'rev-1', authorId: 'user-1', authorDisplayName: 'Owner', createdAt: '2026-01-01T00:00:00.000Z', changesetId: null },
+        { id: 'rev-2', authorId: 'user-1', authorDisplayName: 'Owner', createdAt: '2026-01-02T00:00:00.000Z', changesetId: 'cs-1', contentHash: 'b'.repeat(64) },
+        { id: 'rev-1', authorId: 'user-1', authorDisplayName: 'Owner', createdAt: '2026-01-01T00:00:00.000Z', changesetId: null, contentHash: 'a'.repeat(64) },
       ],
     });
 
@@ -57,6 +75,7 @@ describe('PageHistoryResponseSchema', () => {
       authorDisplayName: 'Owner',
       createdAt: '2026-01-02T00:00:00.000Z',
       changesetId: 'cs-1',
+      contentHash: 'b'.repeat(64),
     });
   });
 
@@ -71,6 +90,7 @@ describe('PageHistoryResponseSchema', () => {
       ['revisions', 0, 'authorDisplayName'],
       ['revisions', 0, 'createdAt'],
       ['revisions', 0, 'changesetId'],
+      ['revisions', 0, 'contentHash'],
     ]);
   });
 });

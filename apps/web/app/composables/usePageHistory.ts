@@ -8,6 +8,8 @@ export interface RevisionSummary {
   readonly authorDisplayName: string | null;
   readonly createdAt: string;
   readonly changesetId: string | null;
+  /** The stored markdown's hash; equal on two neighbours means the same bytes, which the history screen names (see history.vue). */
+  readonly contentHash: string;
 }
 
 export interface PageHistoryResponse {

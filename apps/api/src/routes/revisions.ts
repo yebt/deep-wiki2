@@ -53,6 +53,7 @@ export function createRevisionRoutes(deps: RevisionRouteDeps): Hono<{ Variables:
           authorDisplayName: revision.authorDisplayName,
           createdAt: revision.createdAt.toISOString(),
           changesetId: revision.changesetId,
+          contentHash: revision.contentHash,
         })),
       }),
     );

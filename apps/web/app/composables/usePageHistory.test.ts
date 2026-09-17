@@ -31,8 +31,8 @@ beforeAll(() => {
 describe('usePageHistory', () => {
   test('starts idle and moves through loading to success with the revisions, newest first as the server sent them', async () => {
     const revisions = [
-      { id: 'rev-2', authorId: 'user-1', authorDisplayName: 'Ada', createdAt: '2026-01-02T00:00:00.000Z', changesetId: null },
-      { id: 'rev-1', authorId: 'user-1', authorDisplayName: 'Ada', createdAt: '2026-01-01T00:00:00.000Z', changesetId: null },
+      { id: 'rev-2', authorId: 'user-1', authorDisplayName: 'Ada', createdAt: '2026-01-02T00:00:00.000Z', changesetId: null, contentHash: 'hash-2' },
+      { id: 'rev-1', authorId: 'user-1', authorDisplayName: 'Ada', createdAt: '2026-01-01T00:00:00.000Z', changesetId: null, contentHash: 'hash-1' },
     ];
     const fetcher = vi.fn(async () => ({ revisions }));
     const { status, revisions: result, load } = usePageHistory(nextId('page'), fetcher);
