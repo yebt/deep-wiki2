@@ -13,6 +13,8 @@ export const RevisionSummarySchema = z.object({
   authorDisplayName: z.string().nullable(),
   createdAt: z.string(),
   changesetId: z.string().nullable(),
+  /** The revision's stored-markdown hash: two neighbours with the same hash store the same bytes, which the history screen names rather than offering a comparison that would show nothing. */
+  contentHash: z.string(),
 });
 export type RevisionSummaryPayload = z.infer<typeof RevisionSummarySchema>;
 

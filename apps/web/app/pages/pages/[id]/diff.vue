@@ -21,13 +21,24 @@
  *   apps/api/src/routes/attach-block-text.ts). No page title: neither this
  *   endpoint nor the history one returns one, so none is invented here.
  * - Non-goals: no restore/rollback of a revision (out of this change), no
- *   line-level diff inside a block (block-diff spec forbids a text/line
- *   differ outright — it is what would destroy "moved").
+ *   line-level diff *between* blocks (block-diff spec forbids a text/line
+ *   differ for classification — it is what would destroy "moved"). Inside
+ *   one edited block the words that changed are marked (`segments` on a
+ *   `modified` change, `diffInline()` in `packages/core`) — the owner's
+ *   review of gate 10.4 on 2026-09-17 asked for "a diff like GitHub's".
  * - Empty / overflow: two revisions with no differences is a real,
  *   reachable state (every change classifies `unchanged`) — never folded
  *   into the error branch. A block containing a long unbroken token (a
  *   URL, a table) wraps or scrolls inside its own row rather than
  *   widening the page (docs/UI-CHECKLIST.md §6).
+ *
+ * The blocks themselves — the four classes, the word marks, the legend
+ * and the "Unified | Side by side" control — are `DiffBlockChanges`, the
+ * one component the book diff renders too (docs/UI-CHECKLIST.md §4.1).
+ * This screen used to draw its own rows with a full-width
+ * accent-container wash per changed row (the 2026-09-14 audit's
+ * "highlighter pass over source"); the shared rows carry the signal on a
+ * 4px accent border and an outlined badge instead, on the neutral inset.
  */
 import { formatRevisionDate } from '~/utils/format-revision-date';
 
@@ -56,120 +67,11 @@ onMounted(() => {
   void load();
 });
 
-type Kind = 'added' | 'removed' | 'modified' | 'moved' | 'unchanged';
-
-interface ChangeMeta {
-  readonly label: string;
-  readonly icon: string;
-  readonly color: 'success' | 'error' | 'warning' | 'secondary';
-}
-
-// Moved is deliberately NOT a shade of added/removed/modified: `secondary`
-// sits on a different hue entirely from the green/amber/red spectrum the
-// other three share, so the distinction survives even for a viewer who
-// cannot use hue at all (the icon and label carry it too — checklist §5,
-// "colour is never the sole carrier of meaning").
-//
-// `moved`'s own icon/label are placeholders here — `badgeIcon`/`badgeLabel`
-// below always replace them with a directional one (`↓`/`↑`, "Moved
-// down"/"Moved up"). A generic crosshair icon and a bare "Moved" label are
-// legible only by reading the badge; a review of the first cut of this
-// screen found exactly that: the moved block appeared only in its NEW
-// position with nothing communicating that it came from somewhere else.
-// The direction is free — `moved`/`modified.moved` always carry distinct
-// `fromSlot`/`toSlot` by construction (block-diff spec) — so an arrow that
-// actually points the right way costs nothing extra to compute.
-const KIND_META: Record<Exclude<Kind, 'unchanged'>, ChangeMeta> = {
-  added: { label: 'Added', icon: 'i-lucide-plus', color: 'success' },
-  removed: { label: 'Removed', icon: 'i-lucide-minus', color: 'error' },
-  modified: { label: 'Modified', icon: 'i-lucide-pencil', color: 'warning' },
-  moved: { label: 'Moved', icon: 'i-lucide-move', color: 'secondary' },
-};
-
-/** "down" when the block's new position is later in the document than its old one, "up" otherwise. `fromSlot`/`toSlot` are always distinct for `moved` and for `modified` with `moved: true` (block-diff spec). */
-function movedDirection(fromSlot: number, toSlot: number): 'up' | 'down' {
-  return toSlot > fromSlot ? 'down' : 'up';
-}
-
-/**
- * The 2026-09-14 audit read this screen as "a highlighter pass over
- * source, not a document" and laid out three directions: (a) render each
- * block as `doc-body` prose with a left rule and a badge; (b) keep the
- * slabs, fix the invisible badge, and show the before-text under a
- * modified block; (c) a "moved from here" ghost at the old position.
- * (b) is taken here as the cheapest honest improvement: the badge is a
- * `UBadge variant="soft"` on a row painted the very same container token,
- * and measured **1.00:1** — fixed at the system level (`app.config.ts`,
- * `TONAL_BOUNDARY`: every tonal chip and button carries an `outline`-role
- * ring), so the badge now reads as a chip on any ground. The before-text
- * half of (b) needs `apps/api/src/routes/attach-block-text.ts`, the diff
- * response contract and `usePageDiff.ts` to carry a `before` text for
- * `modified`, which this pass does not own; it is recorded as a follow-up.
- * (a) and (c) remain the owner's call.
- */
-const ROW_CLASS: Record<Exclude<Kind, 'unchanged'>, string> = {
-  added: 'bg-success-container',
-  removed: 'bg-error-container',
-  modified: 'bg-warning-container',
-  moved: 'bg-secondary-container',
-};
-
-const TEXT_CLASS: Record<Kind, string> = {
-  added: 'text-on-success-container',
-  removed: 'text-on-error-container',
-  modified: 'text-on-warning-container',
-  moved: 'text-on-secondary-container',
-  unchanged: 'text-default',
-};
-
-function rowClass(change: BlockChangeWithText): string {
-  return change.kind === 'unchanged' ? '' : ROW_CLASS[change.kind];
-}
-
-function textClass(change: BlockChangeWithText): string {
-  return TEXT_CLASS[change.kind];
-}
-
-function badgeLabel(change: BlockChangeWithText): string {
-  if (change.kind === 'unchanged') return '';
-  if (change.kind === 'moved') {
-    return movedDirection(change.fromSlot, change.toSlot) === 'down' ? 'Moved down' : 'Moved up';
-  }
-  if (change.kind === 'modified' && change.moved) {
-    return movedDirection(change.fromSlot, change.toSlot) === 'down' ? 'Modified · moved down' : 'Modified · moved up';
-  }
-  return KIND_META[change.kind].label;
-}
-
-function badgeIcon(change: BlockChangeWithText): string {
-  if (change.kind === 'unchanged') return '';
-  if (change.kind === 'moved' || (change.kind === 'modified' && change.moved)) {
-    return movedDirection(change.fromSlot, change.toSlot) === 'down' ? 'i-lucide-arrow-down' : 'i-lucide-arrow-up';
-  }
-  return KIND_META[change.kind].icon;
-}
-
-function badgeColor(change: BlockChangeWithText): ChangeMeta['color'] | undefined {
-  return change.kind === 'unchanged' ? undefined : KIND_META[change.kind].color;
-}
-
-/** The after-document's own order: `slot` for added/unchanged, `toSlot` for anything that landed on the after side by moving or changing. */
-function afterPosition(change: BlockChangeWithText): number {
-  return change.kind === 'modified' || change.kind === 'moved' ? change.toSlot : change.slot;
-}
-
-const removedChanges = computed(() =>
-  (diff.value?.changes ?? [])
-    .filter((change): change is Extract<BlockChangeWithText, { kind: 'removed' }> => change.kind === 'removed')
-    .toSorted((a, b) => a.slot - b.slot),
-);
-
-const currentChanges = computed(() =>
-  (diff.value?.changes ?? []).filter((change) => change.kind !== 'removed').toSorted((a, b) => afterPosition(a) - afterPosition(b)),
-);
-
 /** Same constant, same reason as history.vue: a bare `'p-2'` leaves `UCard`'s `sm:p-6` standing, so the rows were inset 8px below 640px and 24px above (audit, 2026-09-14). 8px of card plus the row's 16px is 24px from the edge at every width. */
 const CARD_BODY_INSET = 'p-2 sm:p-2';
+
+/** The shared rows' own classes, repeated by the skeleton so its row is the loaded row's box by construction (docs/UI-CHECKLIST.md §3). */
+const ROW_CLASS = 'rounded-md bg-default px-4 py-3 border-l-4 border-transparent';
 
 const hasDifferences = computed(() => (diff.value?.changes ?? []).some((change) => change.kind !== 'unchanged'));
 
@@ -211,19 +113,26 @@ useSeoMeta({ title: 'Page diff — deep-wiki' });
         <USkeleton as="span" class="block h-4 w-80 max-w-full" data-testid="diff-skeleton-caption" />
       </p>
       <UCard variant="soft" :ui="{ body: CARD_BODY_INSET }">
-        <ol class="divide-y divide-default">
-          <li v-for="n in 3" :key="n" class="rounded-md px-4 py-3" data-testid="diff-skeleton-row">
-            <!-- The badge line (`UBadge size="sm"`: a 12px line on 4px of
-                 padding each side, 20px) and one `body-medium` line of
-                 block text (20px). -->
-            <p class="mb-2 flex">
-              <USkeleton as="span" class="block h-5 w-20" />
-            </p>
-            <p class="flex text-body-medium">
-              <USkeleton as="span" class="block h-5 w-full" />
-            </p>
-          </li>
-        </ol>
+        <div class="space-y-6">
+          <!-- The legend line and the 32px layout control (`DiffBlockChanges`'s header row). -->
+          <div class="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
+            <p class="flex text-body-small"><USkeleton as="span" class="block h-4 w-72 max-w-full" /></p>
+            <USkeleton class="h-8 w-48" />
+          </div>
+          <ol class="space-y-2">
+            <li v-for="n in 3" :key="n" :class="ROW_CLASS" data-testid="diff-skeleton-row">
+              <!-- The badge line (`UBadge size="sm"`: a 12px line on 4px of
+                   padding each side, 20px) and one `body-medium` line of
+                   block text (20px). -->
+              <p class="mb-2 flex">
+                <USkeleton as="span" class="block h-5 w-20" />
+              </p>
+              <p class="flex text-body-medium">
+                <USkeleton as="span" class="block h-5 w-full" />
+              </p>
+            </li>
+          </ol>
+        </div>
       </UCard>
     </div>
 
@@ -281,47 +190,14 @@ useSeoMeta({ title: 'Page diff — deep-wiki' });
         These two revisions have identical content.
       </PageNotice>
 
-      <div v-else class="space-y-6">
-        <UCard v-if="removedChanges.length > 0" variant="soft" :ui="{ body: CARD_BODY_INSET }">
-          <p class="px-4 pt-3 text-label-large text-muted">Removed in this revision</p>
-          <ol aria-label="Blocks removed since the earlier revision" class="divide-y divide-default">
-            <li
-              v-for="change in removedChanges"
-              :key="`removed-${change.id}`"
-              class="rounded-md px-4 py-3"
-              :class="rowClass(change)"
-            >
-              <!-- In its own flex line, so the row's first line box is the
-                   badge's own height rather than the inherited strut's —
-                   what lets the skeleton draw the same box by construction. -->
-              <p class="mb-2 flex">
-                <UBadge :color="badgeColor(change)" variant="soft" :icon="badgeIcon(change)" size="sm">
-                  {{ badgeLabel(change) }}
-                </UBadge>
-              </p>
-              <pre class="overflow-x-auto font-mono text-body-medium whitespace-pre-wrap break-words" :class="textClass(change)">{{ change.text }}</pre>
-            </li>
-          </ol>
-        </UCard>
-
-        <UCard variant="soft" :ui="{ body: CARD_BODY_INSET }">
-          <ol aria-label="Current revision, annotated with what changed" class="divide-y divide-default">
-            <li
-              v-for="change in currentChanges"
-              :key="`current-${change.id}`"
-              class="rounded-md px-4 py-3"
-              :class="rowClass(change)"
-            >
-              <p v-if="change.kind !== 'unchanged'" class="mb-2 flex">
-                <UBadge :color="badgeColor(change)" variant="soft" :icon="badgeIcon(change)" size="sm">
-                  {{ badgeLabel(change) }}
-                </UBadge>
-              </p>
-              <pre class="overflow-x-auto font-mono text-body-medium whitespace-pre-wrap break-words" :class="textClass(change)">{{ change.text }}</pre>
-            </li>
-          </ol>
-        </UCard>
-      </div>
+      <UCard v-else variant="soft" :ui="{ body: CARD_BODY_INSET }">
+        <DiffBlockChanges
+          :changes="diff!.changes"
+          current-label="Current revision, annotated with what changed"
+          removed-heading="Removed in this revision"
+          removed-label="Blocks removed since the earlier revision"
+        />
+      </UCard>
     </template>
   </AppShell>
 </template>

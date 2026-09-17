@@ -22,6 +22,20 @@ const RemovedChangeSchema = z.object({
   mergedInto: z.string().optional(),
   text: z.string(),
 });
+/**
+ * One run of text inside an edited block (`packages/core/src/content/
+ * inline-diff.ts`'s `InlineSegment`): what the block reads like on one
+ * side or both. Concatenating every non-`inserted` segment gives the
+ * before text, every non-`deleted` one the after text — `text` on the
+ * change is the after text and stays, so a reader of the previous shape
+ * loses nothing.
+ */
+export const InlineSegmentSchema = z.object({
+  kind: z.enum(['equal', 'inserted', 'deleted']),
+  text: z.string(),
+});
+export type InlineSegmentPayload = z.infer<typeof InlineSegmentSchema>;
+
 const ModifiedChangeSchema = z.object({
   kind: z.literal('modified'),
   id: z.string(),
@@ -29,6 +43,8 @@ const ModifiedChangeSchema = z.object({
   toSlot: z.number(),
   moved: z.boolean(),
   text: z.string(),
+  /** The word-level changes between the block's two sides — only an edited block has two sides of one block to show, so no other kind carries this. */
+  segments: z.array(InlineSegmentSchema),
 });
 const MovedChangeSchema = z.object({
   kind: z.literal('moved'),

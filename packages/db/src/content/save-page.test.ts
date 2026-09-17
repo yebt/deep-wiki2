@@ -100,7 +100,7 @@ describe('savePage', () => {
     // here by construction: only `markdown` and the concurrency guard are
     // accepted.
     const result = await savePage(sql, { nodeId, workspaceId, markdown: 'Body.\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
-    expect(Object.keys(result).sort()).toEqual(['blockIndex', 'contentHash', 'renderedHtml']);
+    expect(Object.keys(result).sort()).toEqual(['blockIndex', 'contentHash', 'renderedHtml', 'unchanged']);
   });
 
   test('a stale expected content hash is rejected without writing', async () => {
@@ -310,5 +310,50 @@ describe('savePage — revisions', () => {
     expect(revisionRows).toHaveLength(0);
     const contentRows = await sql<{ markdown: string }[]>`SELECT markdown FROM page_content WHERE node_id = ${nodeId}`;
     expect(contentRows[0]!.markdown).toBe('# First\n');
+  });
+
+  // revision-history spec: a revision is written "in the same database
+  // transaction as the `page_content` update", and a save "MUST NOT commit
+  // a revision without the corresponding `page_content` change". A save
+  // whose markdown is byte-identical to the current row changes nothing,
+  // so it earns no revision: the history screen showed such rows as an
+  // entry whose "Compare with previous" opened onto "No differences"
+  // (docs/TODO.md Findings, 2026-09-17 — "sometimes an empty history entry
+  // is saved").
+  test('a save whose markdown is byte-identical to the current row writes no revision and touches nothing', async () => {
+    const { workspaceId, nodeId } = await seedPageNode();
+    const first = await savePage(sql, { nodeId, workspaceId, markdown: '# Same\n', expectedContentHash: null, updatedBy: undefined, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
+    const [before] = await sql<{ updated_at: Date }[]>`SELECT updated_at FROM page_content WHERE node_id = ${nodeId}`;
+
+    const second = await savePage(sql, { nodeId, workspaceId, markdown: '# Same\n', expectedContentHash: first.contentHash, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
+
+    expect(second.contentHash).toBe(first.contentHash);
+    expect(second.unchanged).toBe(true);
+    expect(first.unchanged).toBe(false);
+    const revisionRows = await sql`SELECT 1 AS x FROM page_revision WHERE page_id = ${nodeId}`;
+    expect(revisionRows).toHaveLength(1);
+    const [after] = await sql<{ updated_at: Date }[]>`SELECT updated_at FROM page_content WHERE node_id = ${nodeId}`;
+    expect(after!.updated_at.getTime()).toBe(before!.updated_at.getTime());
+  });
+
+  test('a byte-identical save still refuses a stale expected content hash', async () => {
+    const { workspaceId, nodeId } = await seedPageNode();
+    await savePage(sql, { nodeId, workspaceId, markdown: '# Same\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
+
+    await expect(
+      savePage(sql, { nodeId, workspaceId, markdown: '# Same\n', expectedContentHash: 'wrong-hash', changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES }),
+    ).rejects.toThrow(StaleContentError);
+  });
+
+  test('a real change after a no-op save still writes its revision against the right predecessor', async () => {
+    const { workspaceId, nodeId } = await seedPageNode();
+    const first = await savePage(sql, { nodeId, workspaceId, markdown: '# One\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
+    const noop = await savePage(sql, { nodeId, workspaceId, markdown: '# One\n', expectedContentHash: first.contentHash, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
+
+    const third = await savePage(sql, { nodeId, workspaceId, markdown: '# Two\n', expectedContentHash: noop.contentHash, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
+
+    expect(third.unchanged).toBe(false);
+    const rows = await sql<{ content: string }[]>`SELECT content FROM page_revision WHERE page_id = ${nodeId} ORDER BY created_at ASC`;
+    expect(rows.map((r) => r.content)).toEqual(['# One\n', '# Two\n']);
   });
 });

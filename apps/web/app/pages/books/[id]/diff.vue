@@ -262,8 +262,11 @@ useSeoMeta({ title: () => `${heading.value} — deep-wiki` });
           This page's content since {{ sinceLabel }} is identical.
         </PageNotice>
 
+        <!-- The blocks, the word marks inside an edited one, the legend and
+             the "Unified | Side by side" control: `DiffBlockChanges`, the
+             one component the page diff renders too (§4.1). -->
         <UCard v-else variant="soft" :ui="{ body: 'p-2 sm:p-2' }">
-          <BookDiffBlockChanges :changes="nav!.currentPage.value?.diff.changes ?? []" />
+          <DiffBlockChanges :changes="nav!.currentPage.value?.diff.changes ?? []" />
         </UCard>
       </div>
     </template>

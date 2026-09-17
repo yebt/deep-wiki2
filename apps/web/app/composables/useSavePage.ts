@@ -2,7 +2,7 @@ import { keysStaledBySave } from '~/utils/api-keys';
 
 export type SavePageStatus = 'idle' | 'saving' | 'success' | 'stale' | 'not-canonical' | 'dead-anchor' | 'forbidden' | 'network-error';
 
-export type SavePageFetcher = (nodeId: string, markdown: string, expectedContentHash: string | null) => Promise<{ contentHash: string }>;
+export type SavePageFetcher = (nodeId: string, markdown: string, expectedContentHash: string | null) => Promise<{ contentHash: string; unchanged?: boolean }>;
 
 /** One retired block anchor the save would have reintroduced (page-content spec / `DeadAnchorError`). */
 export interface DeadAnchorInfo {
@@ -42,7 +42,7 @@ export function useSavePage(nodeId: string, fetcher?: SavePageFetcher): UseSaveP
     fetcher ??
     ((id: string, markdown: string, expectedContentHash: string | null) => {
       const api = useApiClient();
-      return api<{ contentHash: string }>(`/pages/${id}`, { method: 'PUT', body: { markdown, expectedContentHash } });
+      return api<{ contentHash: string; unchanged: boolean }>(`/pages/${id}`, { method: 'PUT', body: { markdown, expectedContentHash } });
     });
 
   const status = ref<SavePageStatus>('idle');
@@ -58,15 +58,22 @@ export function useSavePage(nodeId: string, fetcher?: SavePageFetcher): UseSaveP
 
     try {
       const result = await put(nodeId, markdown, expectedContentHash);
-      // The read layer (`useApiRead`) keeps this page, its history and the
-      // lists a new revision appears in; the next screen must fetch them.
-      clearNuxtData(keysStaledBySave(nodeId));
+      // `unchanged`: the bytes sent were the bytes stored, so the server
+      // wrote nothing and minted no revision (revision-history spec via
+      // `savePage()`). What is cached is still what is stored, and
+      // "Saved." would confirm a revision that does not exist
+      // (docs/UI-CHECKLIST.md §3, "Success — specifically").
+      if (!result.unchanged) {
+        // The read layer (`useApiRead`) keeps this page, its history and the
+        // lists a new revision appears in; the next screen must fetch them.
+        clearNuxtData(keysStaledBySave(nodeId));
+      }
       contentHash.value = result.contentHash;
       canonical.value = null;
       corrected.value = null;
       anchors.value = [];
       status.value = 'success';
-      message.value = 'Saved.';
+      message.value = result.unchanged ? 'Nothing changed since the last save.' : 'Saved.';
     } catch (error) {
       const code = httpStatusOf(error);
       if (code === 403) {

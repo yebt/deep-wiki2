@@ -75,6 +75,7 @@ interface Revision {
   authorDisplayName: string | null;
   createdAt: string;
   changesetId: string | null;
+  contentHash: string;
 }
 
 function mockHistory(overrides: Partial<{ status: string; revisions: Revision[]; message: string }> = {}) {
@@ -90,8 +91,8 @@ function mockHistory(overrides: Partial<{ status: string; revisions: Revision[];
 }
 
 const TWO_REVISIONS: Revision[] = [
-  { id: 'rev-2', authorId: 'user-1', authorDisplayName: 'Ada Lovelace', createdAt: '2026-01-02T00:00:00.000Z', changesetId: 'cs-1' },
-  { id: 'rev-1', authorId: 'user-1', authorDisplayName: 'Ada Lovelace', createdAt: '2026-01-01T00:00:00.000Z', changesetId: null },
+  { id: 'rev-2', authorId: 'user-1', authorDisplayName: 'Ada Lovelace', createdAt: '2026-01-02T00:00:00.000Z', changesetId: 'cs-1', contentHash: 'hash-2' },
+  { id: 'rev-1', authorId: 'user-1', authorDisplayName: 'Ada Lovelace', createdAt: '2026-01-01T00:00:00.000Z', changesetId: null, contentHash: 'hash-1' },
 ];
 
 const originalTz = process.env.TZ;
@@ -185,7 +186,7 @@ describe('page-history screen', () => {
   test('an author-less revision renders a named fallback, never a blank row', async () => {
     mockHistory({
       status: 'success',
-      revisions: [{ id: 'rev-1', authorId: null, authorDisplayName: null, createdAt: '2026-01-01T00:00:00.000Z', changesetId: null }],
+      revisions: [{ id: 'rev-1', authorId: null, authorDisplayName: null, createdAt: '2026-01-01T00:00:00.000Z', changesetId: null, contentHash: 'hash-1' }],
     });
     const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
@@ -213,6 +214,35 @@ describe('page-history screen', () => {
     expect(component.find('main a[href="/workspaces"]').exists()).toBe(true);
     expect(component.find('main a[href="/login"]').exists()).toBe(true);
     expect(component.text()).toMatch(/deliberately doesn't say which/);
+  });
+
+  // Revisions minted before `savePage()` refused byte-identical saves
+  // (docs/TODO.md Findings, 2026-09-17) store the same bytes as the one
+  // before them. The row is real history and stays; what it offers is
+  // honest: it says so, and "Compare with previous" is unavailable with
+  // that reason rather than a link to a diff that shows nothing
+  // (docs/UI-CHECKLIST.md §3 "Disabled — explains why", §5 `aria-disabled`).
+  test('a revision storing the same bytes as the previous one says so, and its compare control is unavailable with the reason', async () => {
+    mockHistory({
+      status: 'success',
+      revisions: [
+        { id: 'rev-3', authorId: 'user-1', authorDisplayName: 'Ada', createdAt: '2026-01-03T00:00:00.000Z', changesetId: null, contentHash: 'hash-2' },
+        ...TWO_REVISIONS,
+      ],
+    });
+    const component = await mountSuspended(PageInApp, FRAME_STUBS);
+
+    const items = component.findAll('main li');
+    expect(items).toHaveLength(3);
+    expect(items[0]!.text()).toMatch(/same content as the previous revision/i);
+    expect(items[0]!.find('a[href*="/diff"]').exists()).toBe(false);
+    const compare = items[0]!.findAll('button, a').find((el) => /compare with previous/i.test(el.text()))!;
+    expect(compare.attributes('aria-disabled')).toBe('true');
+    const tooltipTexts = component.findAllComponents({ name: 'UTooltip' }).map((tooltip) => String(tooltip.props('text')));
+    expect(tooltipTexts.some((text) => /nothing to compare/i.test(text))).toBe(true);
+    // The genuinely different neighbour below keeps its link.
+    expect(items[1]!.text()).not.toMatch(/same content as the previous revision/i);
+    expect(items[1]!.find('a[href="/pages/page-1/diff?from=rev-1&to=rev-2"]').exists()).toBe(true);
   });
 
   test('the app bar’s way to the page is "Read page" with the eye, the same chrome edit mode uses', async () => {

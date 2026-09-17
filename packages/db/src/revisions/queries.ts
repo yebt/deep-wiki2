@@ -18,6 +18,8 @@ export interface RevisionSummary {
   readonly authorDisplayName: string | null;
   readonly createdAt: Date;
   readonly changesetId: string | null;
+  /** The sha256 of the revision's stored markdown — what the history screen compares neighbours by to name a revision that stores the same bytes as the one before it. Never the content itself. */
+  readonly contentHash: string;
 }
 
 interface RevisionSummaryRow {
@@ -26,6 +28,7 @@ interface RevisionSummaryRow {
   author_display_name: string | null;
   created_at: Date;
   changeset_id: string | null;
+  content_hash: string;
 }
 
 export interface ListPageRevisionsInput {
@@ -42,7 +45,7 @@ export interface ListPageRevisionsInput {
  */
 export async function listPageRevisions(sql: SqlExecutor, input: ListPageRevisionsInput): Promise<RevisionSummary[]> {
   const rows = await sql<RevisionSummaryRow[]>`
-    SELECT r.id, r.author_id, u.display_name AS author_display_name, r.created_at, r.changeset_id
+    SELECT r.id, r.author_id, u.display_name AS author_display_name, r.created_at, r.changeset_id, r.content_hash
       FROM page_revision r
       LEFT JOIN users u ON u.id = r.author_id
      WHERE r.page_id = ${input.pageId} AND r.workspace_id = ${input.workspaceId}
@@ -54,6 +57,7 @@ export async function listPageRevisions(sql: SqlExecutor, input: ListPageRevisio
     authorDisplayName: row.author_display_name,
     createdAt: row.created_at,
     changesetId: row.changeset_id,
+    contentHash: row.content_hash,
   }));
 }
 

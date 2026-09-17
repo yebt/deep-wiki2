@@ -86,6 +86,7 @@ interface Change {
   splitFrom?: string;
   mergedInto?: string;
   text: string;
+  segments?: { kind: 'equal' | 'inserted' | 'deleted'; text: string }[];
 }
 
 function mockDiff(overrides: Partial<{ status: string; changes: Change[]; message: string }> = {}) {
@@ -111,7 +112,7 @@ function mockDiff(overrides: Partial<{ status: string; changes: Change[]; messag
 // isolation from every other kind's treatment.
 const MIXED_CHANGES: Change[] = [
   { kind: 'removed', id: 'b-removed', slot: 0, text: 'Paragraph about apples, removed entirely.' },
-  { kind: 'modified', id: 'b-modified', fromSlot: 1, toSlot: 0, moved: false, text: 'Paragraph about grapes, now changed.' },
+  { kind: 'modified', id: 'b-modified', fromSlot: 1, toSlot: 0, moved: false, text: 'Paragraph about grapes, now changed.', segments: [] },
   { kind: 'unchanged', id: 'b-unchanged', slot: 1, text: 'Paragraph about pears, never touched.' },
   { kind: 'added', id: 'b-added', slot: 2, text: 'Paragraph about kiwis, brand new.' },
   { kind: 'moved', id: 'b-moved', fromSlot: 0, toSlot: 3, text: 'Paragraph about bananas, only its position changed.' },
@@ -216,6 +217,9 @@ describe('page-diff screen', () => {
   // The quality-bar case named explicitly by task 10.3: moved must be
   // visually distinct from every other kind, not merely labeled
   // differently — asserted on the row's own classes, not just its text.
+  // Since 2026-09-17 the rows are `DiffBlockChanges`'s (shared with the
+  // book diff): the signal is the accent left border, never a background
+  // wash — every row shares the neutral `bg-default`.
   test('a moved block gets a visual treatment distinct from added, removed and modified', async () => {
     mockDiff({ status: 'success', changes: MIXED_CHANGES });
     const component = await mountSuspended(PageInApp, FRAME_STUBS);
@@ -228,17 +232,50 @@ describe('page-diff screen', () => {
 
     expect(movedRow.text()).toContain('Moved');
 
-    // Only the colour-carrying classes matter here — `px-4`/`py-3`/
-    // `rounded-md` are shared row structure, not the signal under test.
-    // The actual proof that "moved" is not "added, but blue": its own
-    // background class is not any of the other three kinds' background
-    // class.
-    const backgroundClassOf = (row: typeof movedRow) => row.classes().find((c) => c.startsWith('bg-'));
-    const movedBackground = backgroundClassOf(movedRow);
-    expect(movedBackground).toBeDefined();
-    expect([backgroundClassOf(addedRow), backgroundClassOf(removedRow), backgroundClassOf(modifiedRow)]).not.toContain(
-      movedBackground,
-    );
+    const borderClassOf = (row: typeof movedRow) => row.classes().find((c) => c.startsWith('border-') && !c.startsWith('border-l-4'));
+    const movedBorder = borderClassOf(movedRow);
+    expect(movedBorder).toBeDefined();
+    expect([borderClassOf(addedRow), borderClassOf(removedRow), borderClassOf(modifiedRow)]).not.toContain(movedBorder);
+    for (const row of [movedRow, addedRow, removedRow, modifiedRow]) {
+      expect(row.classes()).toContain('bg-default');
+      expect(row.classes().some((c) => /-container\b|container$/.test(c))).toBe(false);
+    }
+  });
+
+  // The word-level half of "a diff like GitHub's" (owner review
+  // 2026-09-17, gate 10.4) reaches this screen through the shared
+  // component: an edited block's inserted and deleted words as
+  // `<ins>`/`<del>`, one legend, and the layout control.
+  test('an edited block shows its inserted and deleted words as <ins>/<del>, with the legend and the layout control once', async () => {
+    mockDiff({
+      status: 'success',
+      changes: [
+        {
+          kind: 'modified',
+          id: 'b1',
+          fromSlot: 0,
+          toSlot: 0,
+          moved: false,
+          text: 'The page as it was first saved, now with one small edit.',
+          segments: [
+            { kind: 'equal', text: 'The page as it was first saved, ' },
+            { kind: 'inserted', text: 'now ' },
+            { kind: 'equal', text: 'with ' },
+            { kind: 'deleted', text: 'no edits yet' },
+            { kind: 'inserted', text: 'one small edit' },
+            { kind: 'equal', text: '.' },
+          ],
+        },
+      ],
+    });
+    const component = await mountSuspended(PageInApp, FRAME_STUBS);
+
+    const row = component.findAll('main li').find((li) => li.text().includes('first saved'))!;
+    expect(row.findAll('ins').map((el) => el.element.textContent)).toEqual(['now ', 'one small edit']);
+    expect(row.findAll('del').map((el) => el.element.textContent)).toEqual(['no edits yet']);
+    expect(component.findAll('[data-testid="diff-legend"]')).toHaveLength(1);
+    expect(component.find('main [role="group"][aria-label="Diff layout"]').exists()).toBe(true);
+    expect(component.findAll('main button').filter((b) => /unified|side by side/i.test(b.text()))).toHaveLength(2);
   });
 
   // Follow-up from owner review of the first cut: a moved block appearing
@@ -277,7 +314,7 @@ describe('page-diff screen', () => {
     mockDiff({
       status: 'success',
       changes: [
-        { kind: 'modified', id: 'b1', fromSlot: 0, toSlot: 2, moved: true, text: 'Edited and moved later.' },
+        { kind: 'modified', id: 'b1', fromSlot: 0, toSlot: 2, moved: true, text: 'Edited and moved later.', segments: [] },
       ],
     });
     const component = await mountSuspended(PageInApp, FRAME_STUBS);

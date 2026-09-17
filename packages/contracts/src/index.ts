@@ -133,8 +133,8 @@ export type {
   RevisionSummaryPayload,
 } from './revisions';
 
-export { BookDiffResponseSchema, ChangedPageDiffSchema, DiffBlockChangeSchema, PageDiffResponseSchema, RevisionMetaSchema } from './diff';
-export type { BookDiffResponse, ChangedPageDiffPayload, DiffBlockChangePayload, PageDiffResponse, RevisionMetaPayload } from './diff';
+export { BookDiffResponseSchema, ChangedPageDiffSchema, DiffBlockChangeSchema, InlineSegmentSchema, PageDiffResponseSchema, RevisionMetaSchema } from './diff';
+export type { BookDiffResponse, ChangedPageDiffPayload, DiffBlockChangePayload, InlineSegmentPayload, PageDiffResponse, RevisionMetaPayload } from './diff';
 
 export {
   CreateNodeRequestSchema,

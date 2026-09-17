@@ -123,12 +123,15 @@ describe('reconcileDerived — chain compression', () => {
     await insertBlock(nodeId, workspaceId, 'block-1', 'superseded', 'block-2');
 
     // Re-saving with no page_blocks-relevant edit still runs reconcileDerived,
-    // and therefore compressChains, at the end of the transaction.
+    // and therefore compressChains, at the end of the transaction. The
+    // edit is a real one — a byte-identical re-save writes nothing at all
+    // since 2026-09-17 (`savePage()`'s `unchanged`), so it would never
+    // reach reconciliation.
     const [row] = await sql<{ content_hash: string }[]>`SELECT content_hash FROM page_content WHERE node_id = ${nodeId}`;
     await savePage(sql, {
       nodeId,
       workspaceId,
-      markdown: 'A page with no anchors at all.\n',
+      markdown: 'A page with no anchors at all.\n\nOne more anchorless line.\n',
       expectedContentHash: row!.content_hash, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES,
     });
 
@@ -159,7 +162,7 @@ describe('reconcileDerived — chain compression', () => {
       savePage(sql, {
         nodeId,
         workspaceId,
-        markdown: 'A page with no anchors at all.\n',
+        markdown: 'A page with no anchors at all.\n\nOne more anchorless line.\n',
         expectedContentHash: row!.content_hash, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES,
       }),
     ).rejects.toThrow(ChainCompressionError);
@@ -180,7 +183,7 @@ describe('reconcileDerived — chain compression', () => {
       savePage(sql, {
         nodeId,
         workspaceId,
-        markdown: 'A page with no anchors at all.\n',
+        markdown: 'A page with no anchors at all.\n\nOne more anchorless line.\n',
         expectedContentHash: row!.content_hash, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES,
       }),
     ).rejects.toThrow(ChainCompressionError);

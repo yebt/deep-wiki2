@@ -2,6 +2,12 @@ import { pageDiffKey } from '~/utils/api-keys';
 
 export type PageDiffStatus = 'idle' | 'loading' | 'success' | 'not-found' | 'unauthenticated' | 'network-error';
 
+/** One run of an edited block's text (`InlineSegmentSchema`): shared by both sides, or only the after (`inserted`) or only the before (`deleted`) side. */
+export interface InlineSegment {
+  readonly kind: 'equal' | 'inserted' | 'deleted';
+  readonly text: string;
+}
+
 export type BlockChangeWithText =
   | { readonly kind: 'added'; readonly id: string; readonly slot: number; readonly splitFrom?: string; readonly text: string }
   | { readonly kind: 'removed'; readonly id: string; readonly slot: number; readonly mergedInto?: string; readonly text: string }
@@ -12,6 +18,8 @@ export type BlockChangeWithText =
       readonly toSlot: number;
       readonly moved: boolean;
       readonly text: string;
+      /** The word-level changes between the block's two sides; only an edited block has them. */
+      readonly segments: readonly InlineSegment[];
     }
   | { readonly kind: 'moved'; readonly id: string; readonly fromSlot: number; readonly toSlot: number; readonly text: string }
   | { readonly kind: 'unchanged'; readonly id: string; readonly slot: number; readonly text: string };

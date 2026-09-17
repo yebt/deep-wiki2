@@ -18,7 +18,7 @@ import {
 } from '@deep-wiki/db';
 import { probe } from '@deep-wiki/editor';
 import type { PresenceBroadcaster } from '@deep-wiki/core';
-import { ErrorResponseSchema, SavePageRequestSchema } from '@deep-wiki/contracts';
+import { ErrorResponseSchema, SavePageRequestSchema, SavePageResponseSchema } from '@deep-wiki/contracts';
 import { Hono } from 'hono';
 import type postgres from 'postgres';
 import { sessionMiddleware, type SessionVariables } from '../middleware/session';
@@ -89,7 +89,7 @@ export function createPageRoutes(deps: PageRouteDeps): Hono<{ Variables: Session
         updatedBy: session.userId,
         changesetWindowMinutes: deps.changesetWindowMinutes,
       });
-      return c.json({ contentHash: result.contentHash });
+      return c.json(SavePageResponseSchema.parse({ contentHash: result.contentHash, unchanged: result.unchanged }));
     } catch (error) {
       if (error instanceof StaleContentError) {
         return c.json(ErrorResponseSchema.parse({ error: 'stale content: reload before saving again' }), 409);

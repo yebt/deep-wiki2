@@ -184,6 +184,30 @@ describe('PUT /pages/:id', () => {
     expect(res.status).toBe(200);
     const [row] = await sql`SELECT markdown FROM page_content WHERE node_id = ${fixture.pageId}`;
     expect(row!.markdown).toBe('# Changed\n');
+    expect(((await res.json()) as { unchanged: boolean }).unchanged).toBe(false);
+  });
+
+  // revision-history spec: a revision pairs with "the corresponding
+  // `page_content` change"; a byte-identical save has none. The route
+  // answers 200 with the same hash and says so, and the history gains no
+  // row whose diff would be empty (docs/TODO.md Findings, 2026-09-17).
+  test('a byte-identical save answers 200 with `unchanged: true` and writes no revision', async () => {
+    const fixture = await buildFixture();
+    const first = await savePage(sql, { nodeId: fixture.pageId, workspaceId: fixture.workspaceId, markdown: '# Original\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
+    const app = buildApp();
+
+    const res = await app.request(`/pages/${fixture.pageId}`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json', cookie: fixture.writerCookie },
+      body: JSON.stringify({ markdown: '# Original\n', expectedContentHash: first.contentHash }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { contentHash: string; unchanged: boolean };
+    expect(body.contentHash).toBe(first.contentHash);
+    expect(body.unchanged).toBe(true);
+    const revisions = await sql`SELECT 1 AS x FROM page_revision WHERE page_id = ${fixture.pageId}`;
+    expect(revisions).toHaveLength(1);
   });
 
   // page-content spec, mirroring `DeadAnchorError`'s own fixtures in

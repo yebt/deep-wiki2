@@ -15,6 +15,8 @@ export type SavePageRequest = z.infer<typeof SavePageRequestSchema>;
 
 export const SavePageResponseSchema = z.object({
   contentHash: z.string(),
+  /** `true` when the submitted markdown was byte-identical to what was stored: nothing was written and no revision exists for this save (`savePage()`'s own `unchanged`). */
+  unchanged: z.boolean(),
 });
 export type SavePageResponse = z.infer<typeof SavePageResponseSchema>;
 

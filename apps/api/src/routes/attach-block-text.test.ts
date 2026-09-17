@@ -60,6 +60,43 @@ describe('attachBlockText', () => {
     expect(result[0]!.text).toContain('grapes');
   });
 
+  // The word-level half (owner review 2026-09-17): an edited block carries
+  // its inline segments, computed by `diffInline()` in `packages/core`
+  // from the two sides' own slice text — never here, never in the route.
+  test('a modified block carries word-level segments between its before and after text; no other kind does', () => {
+    const before = 'First paragraph about apples and oranges.\n\nSecond paragraph about bananas.\n';
+    const after = 'First paragraph about apples, oranges and grapes.\n\nSecond paragraph about bananas.\n\nThird.\n';
+    const beforeSlices = sliceBlocks(parse(before), before);
+    const afterSlices = sliceBlocks(parse(after), after);
+    const changes: BlockChange[] = [
+      { kind: 'modified', id: afterSlices[0]!.id, fromSlot: 0, toSlot: 0, moved: false },
+      { kind: 'unchanged', id: afterSlices[1]!.id, slot: 1 },
+      { kind: 'added', id: afterSlices[2]!.id, slot: 2 },
+    ];
+
+    const result = attachBlockText(changes, beforeSlices, afterSlices);
+
+    const modified = result[0] as { segments: readonly { kind: string; text: string }[] };
+    expect(modified.segments.filter((s) => s.kind !== 'inserted').map((s) => s.text).join('')).toBe(beforeSlices[0]!.text);
+    expect(modified.segments.filter((s) => s.kind !== 'deleted').map((s) => s.text).join('')).toBe(afterSlices[0]!.text);
+    expect(modified.segments.some((s) => s.kind === 'inserted' && s.text.includes('grapes'))).toBe(true);
+    expect(result[1]).not.toHaveProperty('segments');
+    expect(result[2]).not.toHaveProperty('segments');
+  });
+
+  test('a modified block that also moved diffs against its OLD slot, not the block that now stands there', () => {
+    const before = 'Alpha paragraph about apples.\n\nBeta paragraph about bananas and more bananas.\n';
+    const after = 'Beta paragraph about bananas and fewer bananas.\n\nAlpha paragraph about apples.\n';
+    const beforeSlices = sliceBlocks(parse(before), before);
+    const afterSlices = sliceBlocks(parse(after), after);
+    const changes: BlockChange[] = [{ kind: 'modified', id: afterSlices[0]!.id, fromSlot: 1, toSlot: 0, moved: true }];
+
+    const [modified] = attachBlockText(changes, beforeSlices, afterSlices) as { segments: readonly { kind: string; text: string }[] }[];
+
+    expect(modified!.segments.filter((s) => s.kind !== 'inserted').map((s) => s.text).join('')).toBe(beforeSlices[1]!.text);
+    expect(modified!.segments.map((s) => s.kind)).toEqual(['equal', 'deleted', 'inserted', 'equal']);
+  });
+
   // The quality-bar fixture: a block that GENUINELY moved (byte-identical
   // text, different slot), asserted against a document where something
   // else also stayed put — so this is not the trivial no-op case either.

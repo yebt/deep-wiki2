@@ -73,6 +73,23 @@ describe('listPageRevisions', () => {
     expect(revisions).toHaveLength(0);
   });
 
+  // The history screen names a revision that stores the same bytes as the
+  // one before it — rows minted before `savePage()` refused no-op saves
+  // (docs/TODO.md Findings, 2026-09-17) — from the hash alone, without
+  // ever loading content into a list.
+  test('each summary carries the revision content hash, so equal neighbours are recognisable without content', async () => {
+    const { workspaceId, pageId, authorId } = await seedPage();
+    const first = await savePage(sql, { nodeId: pageId, workspaceId, markdown: '# One\n', expectedContentHash: null, updatedBy: authorId, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
+    await savePage(sql, { nodeId: pageId, workspaceId, markdown: '# Two\n', expectedContentHash: first.contentHash, updatedBy: authorId, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
+
+    const revisions = await listPageRevisions(sql, { pageId, workspaceId });
+
+    expect(revisions[1]!.contentHash).toBe(first.contentHash);
+    expect(revisions[0]!.contentHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(revisions[0]!.contentHash).not.toBe(revisions[1]!.contentHash);
+    expect(Object.keys(revisions[0]!)).not.toContain('content');
+  });
+
   test('carries the author\'s display name, not just their id, for the history screen to render "who"', async () => {
     const { workspaceId, pageId, authorId } = await seedPage();
     await savePage(sql, { nodeId: pageId, workspaceId, markdown: '# One\n', expectedContentHash: null, updatedBy: authorId, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });

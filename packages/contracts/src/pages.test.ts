@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { EditSessionResponseSchema, ReadPageResponseSchema, TakeOverResponseSchema } from './pages';
+import { EditSessionResponseSchema, ReadPageResponseSchema, SavePageResponseSchema, TakeOverResponseSchema } from './pages';
 
 describe('ReadPageResponseSchema', () => {
   // The read screen opens the workspace-scoped presence stream
@@ -57,5 +57,20 @@ describe('TakeOverResponseSchema', () => {
         lock: { holderUserId: 'me', acquiredAt: '2026-01-01T00:00:00Z', heartbeatAt: '2026-01-01T00:00:00Z' },
       }),
     ).toThrow();
+  });
+});
+
+// revision-history spec, via `savePage()`'s `unchanged`: a byte-identical
+// save writes nothing and the response says so, so the edit screen can
+// confirm honestly ("nothing changed") rather than claim a revision that
+// does not exist (docs/UI-CHECKLIST.md §3, "Success — specifically").
+describe('SavePageResponseSchema', () => {
+  test('carries whether the save wrote anything', () => {
+    expect(SavePageResponseSchema.parse({ contentHash: 'abc', unchanged: true }).unchanged).toBe(true);
+    expect(SavePageResponseSchema.parse({ contentHash: 'abc', unchanged: false }).unchanged).toBe(false);
+  });
+
+  test('the flag is required, so a route cannot silently omit it', () => {
+    expect(() => SavePageResponseSchema.parse({ contentHash: 'abc' })).toThrow();
   });
 });
