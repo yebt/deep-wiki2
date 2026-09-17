@@ -155,3 +155,34 @@ test.describe('the surface draws no frame, 320x900', () => {
     await shot(page, 'surface-320-light');
   });
 });
+
+/**
+ * The inline shortcuts the pipeline already parses (owner decision,
+ * 2026-09-17), typed through a real keyboard: `~~x~~`, `*x*`, `__x__`,
+ * `[text](url)` and a bare URL closed by a space. The unit suite holds
+ * each rule's transaction and its round trip; this holds the one thing
+ * it cannot — that the typed closing character reaches the rule through
+ * ProseMirror's own input handling, and that the space after a bare URL
+ * is still there to keep typing after.
+ */
+test.describe('live input rules', () => {
+  test.use({ viewport: { width: 1280, height: 900 } });
+
+  test('typing the markdown spellings renders the marks in place, and the bare URL keeps its trailing space', async ({ page }) => {
+    test.setTimeout(90000);
+    await signInAs(page, editorFixtures.writerSessionToken);
+    await useTheme(page, 'light');
+    const editor = await openEditor(page);
+    await caretToEnd(editor);
+
+    await page.keyboard.type(' ~~gone~~ *soft* __loud__ [docs](https://example.com/docs) https://example.com/bare next');
+    const paragraph = editor.locator(':scope > p').first();
+    await expect(paragraph.locator('del')).toHaveText('gone');
+    await expect(paragraph.locator('em')).toHaveText('soft');
+    await expect(paragraph.locator('strong')).toHaveText('loud');
+    await expect(paragraph.locator('a[href="https://example.com/docs"]')).toHaveText('docs');
+    await expect(paragraph.locator('a[href="https://example.com/bare"]')).toHaveText('https://example.com/bare');
+    // The punctuation is consumed; the words and the space after the URL are not.
+    await expect(paragraph).toHaveText(`${editorFixtures.editablePageMarkdown.trim()} gone soft loud docs https://example.com/bare next`);
+  });
+});

@@ -534,6 +534,43 @@ makes conventions portable across projects.
 
 Discoveries and constraints. Newest first.
 
+### 2026-09-17 — The live input rules now cover what the pipeline already parses inline; GATE-2 is 182
+
+**What was missing.** `packages/editor/src/mount/input-rules.ts` had `**x**`, `_x_` and
+`` `x` `` — three of the inline constructs the schema models as marks. A person who typed
+`~~gone~~`, `*em*`, `__strong__`, `[text](url)` or a bare URL saw the punctuation stay as text
+until they reached for the toolbar (owner decision, 2026-09-17).
+
+**What was added, and what each writes.** A rule accepts the spelling a person *types*; the
+editor *writes* the pinned canonical one, so the saved bytes are what `canonicalise()` would have
+produced for the same input: `*em*` → `_em_`, `__strong__` → `__strong__` (and `**bold**` →
+`__bold__`, as before), `~~gone~~` → `~~gone~~`, `[text](url)` → `[text](url)` (`resourceLink`
+is pinned, so this is canonical and re-opens as typed; no title form), and a bare
+`http(s)://…` closed by a space → a link to itself, `[url](url)` — the spelling the pipeline's
+autolink-literal parse canonicalises to (`pins/pin-resourceLink.md`; `<url>` is in `refused/`).
+`input-rules.test.ts` holds every rule's transaction and, for all eight inline rules, the result
+through `toMarkdown` → `fromMarkdown` back to an equal document. Two fixtures join the corpus:
+`modelled/inline-shortcuts.md` (every spelling the rules emit, on one line) and
+`refused/autolink-literal.md` (a bare URL as bytes is non-canonical and must be refused on
+open, never silently rewritten). GATE-2: 177 → **182**.
+
+**Two things found on the way.**
+
+- **A marker beside a space is not a marker.** The pipeline reads `** bar **` as text (a
+  delimiter run next to whitespace is not flanking), so a rule that marked ` bar ` would write
+  `__ bar __`, read it back as text, and refuse the document on its next open. Every inline
+  rule now requires its content to begin and end with a non-space; the three pre-existing rules
+  had the hole too and are closed the same way (`markers padded with spaces fire nothing`).
+- **A trailing `.` or `)` stays in the URL.** `https://example.com/a.` followed by a space links
+  `https://example.com/a.`; GFM's autolink-literal parse trims trailing punctuation, this rule
+  does not. The document stays canonical either way (the mark's text is its href), so it is a
+  taste question for the owner, recorded rather than guessed.
+
+**The bare URL's space is the typed character.** `prosemirror-inputrules` matches text-before
+plus the typed text and the handler's transaction *replaces* the insertion, so the rule inserts
+the space itself as an unmarked node and clears the stored mark — which is what surfaced the
+missing stylesheet above.
+
 ### 2026-09-17 — prosemirror-view's stylesheet was never loaded: a trailing space beside an inline element vanished under the next keystroke
 
 **How it surfaced.** The bare-URL input rule (below) turns `https://example.com/bare` into a link

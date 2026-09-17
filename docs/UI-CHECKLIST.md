@@ -1555,6 +1555,17 @@ saving?" from the previous entry; the two-icon-pack requirement (§4.3) remains 
    assertions unchanged and green. Recorded in `docs/DESIGN-SYSTEM.md` §14. Screenshots
    `fb-editor2-surface-{1280-light,1280-dark,320-light}.png`.
 
+2. **Live input rules for what the parser already reads.** `~~x~~`, `*x*`, `__x__`,
+   `[text](url)` and a bare URL closed by a space now become their marks as they are typed
+   (§4.6, "live preview renders in place"), and each writes the pinned canonical spelling —
+   `_em_`, `__strong__`, `[url](url)` — so the first save cannot rewrite what was typed.
+   Every rule has a unit test and a `toMarkdown` → `fromMarkdown` identity test; two fixtures
+   join GATE-2 (182, from 177). Measured in `e2e/editor-source.spec.ts` through a real
+   keyboard: the marks in place, the punctuation consumed, the space after a bare URL kept.
+   Found on the way and fixed first: prosemirror-view's stylesheet had never been loaded
+   (`docs/TODO.md` Findings, 2026-09-17), so the gap cursor between two textless blocks was
+   invisible and a lone trailing space could vanish under the next key.
+
 ---
 
 *The next entry goes below this one.*
