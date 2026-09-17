@@ -53,16 +53,16 @@ Chain strategy: stacked-to-main
 
 ## Phase 1: Schema Foundation and Core Rules
 
-- [ ] 1.1 RED: `packages/core/src/trash/rules.test.ts` — `decideTrash()` table per the `node-trash` spec: manage+empty → ok; read-only, no manage/owner → `forbidden`; non-owner+non-empty → `not_empty`; owner+correct name+current count → ok; owner+wrong name → `name_mismatch`; owner+stale count → `stale_count`.
-- [ ] 1.2 GREEN: `packages/core/src/trash/rules.ts` — `decideTrash()`, zero framework imports.
-- [ ] 1.3 RED: extend `packages/core/src/trash/rules.test.ts` — `decideRestore()` table per the `trash-restore` spec: parent trashed → `ancestor_trashed`; slug held by a live sibling → `slug_taken`; neither → ok.
-- [ ] 1.4 GREEN: add `decideRestore()`, `TRASH_RETENTION_DAYS = 30`, and `daysUntilPurge()` to `packages/core/src/trash/rules.ts`; `packages/core/src/trash/index.ts` barrel.
-- [ ] 1.5 Run `bun run -F @deep-wiki/core check` to confirm core-purity holds for the new files.
-- [ ] 1.6 RED: a `packages/db` migration test — asserts `nodes` gains `trashed_at`/`trash_operation_id`/`trashed_by` with the paired-nullability `CHECK`, `nodes_parent_slug_unique` is replaced by `nodes_parent_slug_live_idx` (live rows only), `live_nodes`/`live_page_content` views exist, `node_deletions` and `trash_purge_runs` exist, and `nodes_trash_guard()` raises when a live row is inserted or moved under a trashed parent outside its own `trash_operation_id`.
-- [ ] 1.7 GREEN: `packages/db/drizzle/0022_trash.sql` + `packages/db/drizzle/down/0022_trash.down.sql` per design Decision 1; `packages/db/src/schema.ts` gains the three columns, `liveNodes`/`livePageContent` (`pgView(...).existing()`), `nodeDeletions`, `trashPurgeRuns`.
-- [ ] 1.8 RED: a down-migration test — the down path refuses (`RAISE EXCEPTION`) while any trashed row shares `(parent_id, slug)` with a live sibling, and otherwise restores the unconditional unique constraint and drops the three columns.
-- [ ] 1.9 GREEN: complete the refusal branch in `drizzle/down/0022_trash.down.sql` so 1.8 passes.
-- [ ] 1.10 Update `packages/db/src/nodes/create.test.ts` and `packages/db/src/nodes/rename.test.ts` to state live-only slug uniqueness explicitly (`tenancy-model` spec: a live node may take a trashed sibling's slug; two live siblings still cannot share one).
+- [x] 1.1 RED: `packages/core/src/trash/rules.test.ts` — `decideTrash()` table per the `node-trash` spec: manage+empty → ok; read-only, no manage/owner → `forbidden`; non-owner+non-empty → `not_empty`; owner+correct name+current count → ok; owner+wrong name → `name_mismatch`; owner+stale count → `stale_count`.
+- [x] 1.2 GREEN: `packages/core/src/trash/rules.ts` — `decideTrash()`, zero framework imports.
+- [x] 1.3 RED: extend `packages/core/src/trash/rules.test.ts` — `decideRestore()` table per the `trash-restore` spec: parent trashed → `ancestor_trashed`; slug held by a live sibling → `slug_taken`; neither → ok.
+- [x] 1.4 GREEN: add `decideRestore()`, `TRASH_RETENTION_DAYS = 30`, and `daysUntilPurge()` to `packages/core/src/trash/rules.ts`; `packages/core/src/trash/index.ts` barrel.
+- [x] 1.5 Run `bun run -F @deep-wiki/core check` to confirm core-purity holds for the new files. (No `check` script exists on `packages/core`'s own `package.json` — ran `bun run scripts/checks/core-purity.ts` from the repo root instead, which is the actual check `bun run check` invokes; reports `core-purity: ok`.)
+- [x] 1.6 RED: a `packages/db` migration test — asserts `nodes` gains `trashed_at`/`trash_operation_id`/`trashed_by` with the paired-nullability `CHECK`, `nodes_parent_slug_unique` is replaced by `nodes_parent_slug_live_idx` (live rows only), `live_nodes`/`live_page_content` views exist, `node_deletions` and `trash_purge_runs` exist, and `nodes_trash_guard()` raises when a live row is inserted or moved under a trashed parent outside its own `trash_operation_id`.
+- [x] 1.7 GREEN: `packages/db/drizzle/0022_trash.sql` + `packages/db/drizzle/down/0022_trash.down.sql` per design Decision 1; `packages/db/src/schema.ts` gains the three columns, `liveNodes`/`livePageContent` (`pgView(...).existing()`), `nodeDeletions`, `trashPurgeRuns`.
+- [x] 1.8 RED: a down-migration test — the down path refuses (`RAISE EXCEPTION`) while any trashed row shares `(parent_id, slug)` with a live sibling, and otherwise restores the unconditional unique constraint and drops the three columns.
+- [x] 1.9 GREEN: complete the refusal branch in `drizzle/down/0022_trash.down.sql` so 1.8 passes.
+- [x] 1.10 Update `packages/db/src/nodes/create.test.ts` and `packages/db/src/nodes/rename.test.ts` to state live-only slug uniqueness explicitly (`tenancy-model` spec: a live node may take a trashed sibling's slug; two live siblings still cannot share one).
 
 ## Phase 2: Trash-Filter Structural Check — Red On Every Existing Site
 
