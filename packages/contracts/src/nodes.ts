@@ -1,4 +1,10 @@
-import { LEGAL_PARENT_TYPES, legalChildTypes, NODE_TYPES, type NodeType } from '@deep-wiki/core';
+// The two node modules by their own subpaths, not the core barrel: the
+// contracts barrel rides in every page's client bundle, and through
+// `@deep-wiki/core` it pulled the whole domain — the permissions
+// resolver, the AI registry, pricing and budget, e-mail, secrets —
+// into the browser for a hierarchy table (19 module requests per screen
+// on the dev server; measured 2026-09-17, docs/TODO.md).
+import { LEGAL_PARENT_TYPES, legalChildTypes, NODE_TYPES, type NodeType } from '@deep-wiki/core/nodes/hierarchy';
 import { z } from 'zod';
 
 /**

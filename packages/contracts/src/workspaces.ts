@@ -1,4 +1,5 @@
-import { MAX_SLUG_LENGTH, slugifyTitle } from '@deep-wiki/core';
+// By its own subpath, not the core barrel — see nodes.ts.
+import { MAX_SLUG_LENGTH, slugifyTitle } from '@deep-wiki/core/nodes/slug';
 import { z } from 'zod';
 import { StartingGrantSchema } from './invitations';
 

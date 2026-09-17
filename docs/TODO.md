@@ -604,6 +604,45 @@ makes conventions portable across projects.
 
 Discoveries and constraints. Newest first.
 
+### 2026-09-17 — The node responses name their workspace; the edit route's 501st request was never `/location`, it was the core barrel in the browser (branch `fix/routes-followups`)
+
+**What happened.** Two follow-ups from the routes batch (2026-09-16, "one more request per
+node screen"). The fold is done: `GET /pages/:id`, `/pages/:id/edit-session` (and its 409
+refusal), `/pages/:id/history`, `/pages/:id/diff`, `/books/:id/history` and `/books/:id/diff`
+carry `workspace: { id, slug }` (`NodeWorkspaceSchema`), each node composable exposes a
+`NodeLocation` (pending / located / unknown, `nodeLocationOf()`), the six screens pass it to
+`AppShell`, and the shell asks `useNodeLocation` for nothing on them — the composable stays
+for a screen that cannot say, the endpoint for the legacy redirect. `e2e/routes.spec.ts`
+counts zero `/nodes/:id/location` requests across three node screens and a client-side hop.
+`workspaceId` stays beside `workspace.id` on the four responses that had it: the presence
+stream and the mention endpoints read it, and renaming their input is its own change.
+
+**The perf premise was wrong.** `e2e/perf.spec.ts`'s "fewer than 500 requests" measured 501
+on `main` and the routes batch's note blamed the location request. Measured on a throwaway
+worktree at `043efdb` and on this branch after the fold: the browser's resource list is
+byte-for-byte the same 501 entries (module URLs aside), and `/nodes/:id/location` is in
+neither — on a full load the read layer answers it on the server, so the browser never sent
+it. What the list did hold: **19 modules of `packages/core`** — `ai/{aad,budget,degrade,
+embedding-configuration,embedding-registration,ids,prefix,pricing,registry}`,
+`permissions/{actions,can,decide,decide-many}`, `email`, `secret`, `paths`, `result`,
+`content/inline-diff`, and the barrel — because `packages/contracts/src/nodes.ts` and
+`workspaces.ts` imported a hierarchy table and a slug rule through `@deep-wiki/core`'s barrel,
+and the contracts barrel rides in every page's client bundle. The same shape as the
+2026-09-16 "no data layer" finding for `contracts/env`, one package down. Production
+tree-shakes it (`sideEffects: false`); the dev server serves it file by file, and that is what
+the budget counts.
+
+**The fix.** `@deep-wiki/core` gains two subpath exports, `./nodes/hierarchy` and
+`./nodes/slug`, and the two contracts modules import through them. The edit route now loads
+**482** resources, 2 of them core. Nothing else changed in what the browser runs.
+
+**Not done.** A guard that the contracts barrel's closure never reaches `packages/core/src/
+index.ts` again — `bundle-isolation.ts` follows `exports` maps already and could hold it; the
+perf budget is the only assertion today. And the budget itself is a coarse count of dev-server
+module requests (Nuxt's own `?macro=true` reads of every page, devtools, `main.css` twice);
+its next breach will be another creeping module, and `perf-resources`-style listing is how to
+find it: `performance.getEntriesByType('resource')` from the test, diffed against `main`.
+
 ### 2026-09-17 — The owner's review of v0.5.1: twelve decisions, and the first Phase 3 gate verdicts
 
 **What happened.** The owner reviewed the shipped `v0.5.1` tag and answered twelve standing
