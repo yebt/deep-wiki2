@@ -34,7 +34,7 @@ interface NodeRow {
 export async function reorderNode(sql: postgres.Sql, input: ReorderNodeInput): Promise<void> {
   await sql.begin(async (tx) => {
     const [moved] = await tx<NodeRow[]>`
-      SELECT id, workspace_id, parent_id, type, path FROM nodes WHERE id = ${input.nodeId}
+      SELECT id, workspace_id, parent_id, type, path FROM live_nodes WHERE id = ${input.nodeId}
     `;
     if (!moved) {
       throw new Error(`node ${input.nodeId} does not exist`);
@@ -44,8 +44,11 @@ export async function reorderNode(sql: postgres.Sql, input: ReorderNodeInput): P
     // does — two concurrent drags in the same tree must not interleave.
     await tx`SELECT id FROM workspaces WHERE id = ${moved.workspace_id} FOR UPDATE`;
 
+    // live_nodes, not nodes: a trashed target answers exactly like a
+    // missing one, never the raw nodes_trash_guard check-violation
+    // (trash-non-disclosure spec).
     const [newParent] = await tx<NodeRow[]>`
-      SELECT id, workspace_id, parent_id, type, path FROM nodes WHERE id = ${input.newParentId}
+      SELECT id, workspace_id, parent_id, type, path FROM live_nodes WHERE id = ${input.newParentId}
     `;
     if (!newParent) {
       throw new Error(`node ${input.newParentId} does not exist`);
@@ -64,8 +67,11 @@ export async function reorderNode(sql: postgres.Sql, input: ReorderNodeInput): P
     const parentChanged = moved.parent_id !== newParent.id;
     const oldPrefix = moved.path;
 
+    // live_nodes: a trashed sibling has no place in the live position
+    // sequence this loop writes back, and its own row is never touched by
+    // it (node-trash spec — "reordering excludes trashed siblings").
     const siblingRows = await tx<{ id: string }[]>`
-      SELECT id FROM nodes WHERE parent_id = ${newParent.id} AND id <> ${moved.id} ORDER BY position ASC, id ASC
+      SELECT id FROM live_nodes WHERE parent_id = ${newParent.id} AND id <> ${moved.id} ORDER BY position ASC, id ASC
     `;
     const siblingIds = siblingRows.map((row) => row.id);
     const clampedIndex = Math.max(0, Math.min(input.newIndex, siblingIds.length));
@@ -76,7 +82,7 @@ export async function reorderNode(sql: postgres.Sql, input: ReorderNodeInput): P
       // new parent_id; it never rewrites descendants.
       await tx`UPDATE nodes SET parent_id = ${newParent.id}, updated_at = now() WHERE id = ${moved.id}`;
 
-      const [rewired] = await tx<{ path: string }[]>`SELECT path FROM nodes WHERE id = ${moved.id}`;
+      const [rewired] = await tx<{ path: string }[]>`SELECT path FROM live_nodes WHERE id = ${moved.id}`;
       await rewriteDescendantPaths(tx, {
         workspaceId: moved.workspace_id,
         oldPrefix,

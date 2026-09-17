@@ -45,7 +45,7 @@ interface NodeRow {
 export async function moveNode(sql: postgres.Sql, input: MoveNodeInput): Promise<void> {
   await sql.begin(async (tx) => {
     const [moved] = await tx<NodeRow[]>`
-      SELECT id, workspace_id, parent_id, type, path FROM nodes WHERE id = ${input.nodeId}
+      SELECT id, workspace_id, parent_id, type, path FROM live_nodes WHERE id = ${input.nodeId}
     `;
     if (!moved) {
       throw new Error(`node ${input.nodeId} does not exist`);
@@ -55,8 +55,12 @@ export async function moveNode(sql: postgres.Sql, input: MoveNodeInput): Promise
     // portable row-lock idiom createWorkspace() uses for plan limits.
     await tx`SELECT id FROM workspaces WHERE id = ${moved.workspace_id} FOR UPDATE`;
 
+    // live_nodes, not nodes: a trashed target answers exactly like a
+    // missing one, never the raw nodes_trash_guard check-violation the
+    // reparenting UPDATE below would otherwise raise (trash-non-disclosure
+    // spec — a subject must not learn a trashed node exists at that id).
     const [newParent] = await tx<NodeRow[]>`
-      SELECT id, workspace_id, parent_id, type, path FROM nodes WHERE id = ${input.newParentId}
+      SELECT id, workspace_id, parent_id, type, path FROM live_nodes WHERE id = ${input.newParentId}
     `;
     if (!newParent) {
       throw new Error(`node ${input.newParentId} does not exist`);
@@ -75,7 +79,7 @@ export async function moveNode(sql: postgres.Sql, input: MoveNodeInput): Promise
     const oldPrefix = moved.path;
 
     const positionRows = await tx<{ next_position: number }[]>`
-      SELECT COALESCE(MAX(position) + 1, 0) AS next_position FROM nodes WHERE parent_id = ${newParent.id}
+      SELECT COALESCE(MAX(position) + 1, 0) AS next_position FROM live_nodes WHERE parent_id = ${newParent.id}
     `;
     const nextPosition = positionRows[0]!.next_position;
 
@@ -86,7 +90,7 @@ export async function moveNode(sql: postgres.Sql, input: MoveNodeInput): Promise
        WHERE id = ${moved.id}
     `;
 
-    const [rewired] = await tx<{ path: string }[]>`SELECT path FROM nodes WHERE id = ${moved.id}`;
+    const [rewired] = await tx<{ path: string }[]>`SELECT path FROM live_nodes WHERE id = ${moved.id}`;
     const newPrefix = rewired!.path;
 
     await rewriteDescendantPaths(tx, {

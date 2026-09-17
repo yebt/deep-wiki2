@@ -24,10 +24,13 @@
  *
  * ── The name collision, and why it is a refusal ────────────────────────
  *
- * `nodes_parent_slug_unique (parent_id, slug)` is the constraint
- * `packages/db/seed.ts` already looks a node up by, so two siblings
- * cannot share a slug. Two answers were available: silently uniquify
- * ("overview" → "overview-2"), or refuse and say so. This module refuses.
+ * `nodes_parent_slug_live_idx (parent_id, slug) WHERE trashed_at IS NULL`
+ * (deletion-and-trash design.md Decision 1 — replaces the earlier
+ * unconditional `nodes_parent_slug_unique`) is the constraint
+ * `packages/db/seed.ts` already looks a node up by, so two *live* siblings
+ * cannot share a slug; a trashed one frees its name. Two answers were
+ * available: silently uniquify ("overview" → "overview-2"), or refuse and
+ * say so. This module refuses.
  *
  * Uniquifying is the quieter code and the worse product: the user typed a
  * name, and a wiki that stores a *different* name than the one typed —
@@ -121,7 +124,7 @@ export async function resolveSiblingSlug(
 
   const exceptId = input.exceptNodeId ?? null;
   const taken = await tx<{ id: string }[]>`
-    SELECT id FROM nodes
+    SELECT id FROM live_nodes
      WHERE parent_id = ${input.parentId}
        AND slug = ${slug}
        AND (${exceptId}::uuid IS NULL OR id <> ${exceptId}::uuid)
@@ -137,7 +140,7 @@ export async function resolveSiblingSlug(
 export async function createNode(sql: postgres.Sql, input: CreateNodeInput): Promise<CreatedNode> {
   return sql.begin(async (tx) => {
     const [parent] = await tx<ParentRow[]>`
-      SELECT id, workspace_id, type FROM nodes WHERE id = ${input.parentId}
+      SELECT id, workspace_id, type FROM live_nodes WHERE id = ${input.parentId}
     `;
     if (!parent) {
       throw new ParentNodeNotFoundError(input.parentId);
@@ -152,7 +155,7 @@ export async function createNode(sql: postgres.Sql, input: CreateNodeInput): Pro
     const slug = await resolveSiblingSlug(tx, { parentId: parent.id, title: input.title });
 
     const positionRows = await tx<{ next_position: number }[]>`
-      SELECT COALESCE(MAX(position) + 1, 0) AS next_position FROM nodes WHERE parent_id = ${parent.id}
+      SELECT COALESCE(MAX(position) + 1, 0) AS next_position FROM live_nodes WHERE parent_id = ${parent.id}
     `;
     const position = positionRows[0]!.next_position;
 

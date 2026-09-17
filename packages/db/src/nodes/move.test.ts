@@ -162,3 +162,36 @@ describe('moveNode — subtree move rewrites path (tenancy-model)', () => {
     expect(chapter2Path.startsWith(bookCPath)).toBe(true);
   });
 });
+
+describe('moveNode — a trashed target (node-trash / trash-non-disclosure)', () => {
+  /**
+   * Phase 3 (design.md Decision 9): both node lookups now go through
+   * `live_nodes`, so a trashed target answers exactly like a missing one —
+   * never the raw `nodes_trash_guard` check-violation the database would
+   * otherwise raise on the reparenting UPDATE.
+   */
+  test('moving into a trashed target container is refused identically to a missing target', async () => {
+    const workspaceId = await seedWorkspace();
+    const root = await insertNode(workspaceId, null, 'workspace', 'root');
+    const shelf = await insertNode(workspaceId, root.id, 'shelf', 'shelf');
+    const bookA = await insertNode(workspaceId, shelf.id, 'book', 'book-a');
+    const bookB = await insertNode(workspaceId, shelf.id, 'book', 'book-b', 1);
+    const chapter = await insertNode(workspaceId, bookA.id, 'chapter', 'chapter');
+    await sql`UPDATE nodes SET trashed_at = now(), trash_operation_id = ${crypto.randomUUID()} WHERE id = ${bookB.id}`;
+
+    let error: unknown;
+    try {
+      await moveNode(sql, { nodeId: chapter.id, newParentId: bookB.id });
+    } catch (e) {
+      error = e;
+    }
+
+    expect(error).toBeInstanceOf(Error);
+    // Byte-identical to the "missing target" error below — never the raw
+    // nodes_trash_guard check-violation, which would disclose that a
+    // trashed node sits at that id.
+    expect((error as Error).message).toBe(`node ${bookB.id} does not exist`);
+    const [after] = await sql<{ parent_id: string | null }[]>`SELECT parent_id FROM nodes WHERE id = ${chapter.id}`;
+    expect(after!.parent_id).toBe(bookA.id);
+  });
+});

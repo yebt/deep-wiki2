@@ -60,7 +60,7 @@ interface NodeRow {
 export async function renameNode(sql: postgres.Sql, input: RenameNodeInput): Promise<RenamedNode> {
   return sql.begin(async (tx) => {
     const [node] = await tx<NodeRow[]>`
-      SELECT id, workspace_id, parent_id, type FROM nodes WHERE id = ${input.nodeId}
+      SELECT id, workspace_id, parent_id, type FROM live_nodes WHERE id = ${input.nodeId}
     `;
     if (!node) {
       throw new NodeNotFoundError(input.nodeId);

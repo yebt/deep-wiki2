@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { IllegalParentTypeError } from '@deep-wiki/core';
 import postgres from 'postgres';
 import { provisionTestDatabase, type ProvisionedTestDatabase } from '../../testing/provision';
-import { createNode, DuplicateSiblingSlugError, UnslugifiableTitleError } from './create';
+import { createNode, DuplicateSiblingSlugError, ParentNodeNotFoundError, UnslugifiableTitleError } from './create';
 
 let db: ProvisionedTestDatabase;
 let sql: postgres.Sql;
@@ -236,5 +236,38 @@ describe('createNode — a missing parent', () => {
     expect(error).toBeInstanceOf(Error);
     const after = await sql<{ count: number }[]>`SELECT COUNT(*)::int AS count FROM nodes`;
     expect(after[0]!.count).toBe(before[0]!.count);
+  });
+});
+
+describe('createNode — a trashed parent (node-trash / trash-non-disclosure)', () => {
+  /**
+   * Phase 3 (design.md Decision 9): `createNode()` now looks its parent up
+   * through `live_nodes`, so a trashed parent answers exactly like a
+   * missing one — never the raw `nodes_trash_guard` check-violation the
+   * database would otherwise raise on the INSERT.
+   */
+  test('creating under a trashed parent is refused identically to a missing parent', async () => {
+    const tree = await seedTree();
+    const opId = crypto.randomUUID();
+    await sql`UPDATE nodes SET trashed_at = now(), trash_operation_id = ${opId} WHERE id = ${tree.chapter.id}`;
+
+    const error = await createNode(sql, { parentId: tree.chapter.id, type: 'page', title: 'Ghost Page' }).catch(
+      (e: unknown) => e,
+    );
+
+    expect(error).toBeInstanceOf(ParentNodeNotFoundError);
+    const rows = await sql<{ id: string }[]>`SELECT id FROM nodes WHERE parent_id = ${tree.chapter.id} AND title = 'Ghost Page'`;
+    expect(rows).toHaveLength(0);
+  });
+
+  test('creating with a trashed sibling’s slug succeeds — the collision rule only sees live siblings', async () => {
+    const tree = await seedTree();
+    const first = await createNode(sql, { parentId: tree.book.id, type: 'chapter', title: 'Overview' });
+    await sql`UPDATE nodes SET trashed_at = now(), trash_operation_id = ${crypto.randomUUID()} WHERE id = ${first.id}`;
+
+    const second = await createNode(sql, { parentId: tree.book.id, type: 'chapter', title: 'Overview' });
+
+    expect(second.slug).toBe('overview');
+    expect(second.id).not.toBe(first.id);
   });
 });

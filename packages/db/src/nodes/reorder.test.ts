@@ -100,4 +100,49 @@ describe('reorderNode', () => {
     const ordered = await positionsUnder(bookA.id);
     expect(ordered.map((r) => r.id)).toEqual([chapter1.id, movingChapter.id, chapter2.id]);
   });
+
+  // node-trash / trash-non-disclosure: a trashed sibling has no position at
+  // all — it is not part of the live order this module writes back.
+  test('reordering excludes trashed siblings from the live position sequence', async () => {
+    const workspaceId = await seedWorkspace();
+    const root = await insertNode(workspaceId, null, 'workspace', 'root');
+    const shelf = await insertNode(workspaceId, root.id, 'shelf', 'shelf');
+    const bookA = await insertNode(workspaceId, shelf.id, 'book', 'book-a', 0);
+    const bookB = await insertNode(workspaceId, shelf.id, 'book', 'book-b', 1);
+    const bookC = await insertNode(workspaceId, shelf.id, 'book', 'book-c', 2);
+    await sql`UPDATE nodes SET trashed_at = now(), trash_operation_id = ${crypto.randomUUID()} WHERE id = ${bookB.id}`;
+
+    await reorderNode(sql, { nodeId: bookC.id, newParentId: shelf.id, newIndex: 0 });
+
+    const ordered = await positionsUnder(shelf.id);
+    // The trashed sibling never appears in the sequence this module
+    // rewrites, so its own row is never touched — it keeps the position it
+    // already had — while the two live siblings occupy 0 and 1.
+    const trashedRow = ordered.find((r) => r.id === bookB.id);
+    expect(trashedRow!.position).toBe(1);
+    const live = ordered.filter((r) => r.id !== bookB.id);
+    expect(live.map((r) => r.id)).toEqual([bookC.id, bookA.id]);
+    expect(live.map((r) => r.position)).toEqual([0, 1]);
+  });
+
+  // node-trash: moving into a trashed target container is refused identically to a missing target.
+  test('moving into a trashed target container is refused identically to a missing target', async () => {
+    const workspaceId = await seedWorkspace();
+    const root = await insertNode(workspaceId, null, 'workspace', 'root');
+    const shelf = await insertNode(workspaceId, root.id, 'shelf', 'shelf');
+    const bookA = await insertNode(workspaceId, shelf.id, 'book', 'book-a');
+    const bookB = await insertNode(workspaceId, shelf.id, 'book', 'book-b', 1);
+    const chapter = await insertNode(workspaceId, bookA.id, 'chapter', 'chapter');
+    await sql`UPDATE nodes SET trashed_at = now(), trash_operation_id = ${crypto.randomUUID()} WHERE id = ${bookB.id}`;
+
+    let error: unknown;
+    try {
+      await reorderNode(sql, { nodeId: chapter.id, newParentId: bookB.id, newIndex: 0 });
+    } catch (e) {
+      error = e;
+    }
+
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe(`node ${bookB.id} does not exist`);
+  });
 });

@@ -153,3 +153,29 @@ describe('nodes_parent_slug_live_idx — live-only slug uniqueness (tenancy-mode
     expect(error).toBeInstanceOf(Error);
   });
 });
+
+describe('renameNode — a trashed node (node-trash / trash-non-disclosure)', () => {
+  /** Phase 3 (design.md Decision 9): the node lookup now goes through `live_nodes`. */
+  test('renaming a trashed node is refused identically to an unknown node', async () => {
+    const tree = await seedTree();
+    const chapter = await createNode(sql, { parentId: tree.book.id, type: 'chapter', title: 'Overview' });
+    await sql`UPDATE nodes SET trashed_at = now(), trash_operation_id = ${crypto.randomUUID()} WHERE id = ${chapter.id}`;
+
+    const error = await renameNode(sql, { nodeId: chapter.id, title: 'New Title' }).catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(NodeNotFoundError);
+    const [row] = await sql<{ title: string }[]>`SELECT title FROM nodes WHERE id = ${chapter.id}`;
+    expect(row!.title).toBe('Overview');
+  });
+
+  test('renaming to a trashed sibling’s slug succeeds — the collision rule only sees live siblings', async () => {
+    const tree = await seedTree();
+    const trashed = await createNode(sql, { parentId: tree.book.id, type: 'chapter', title: 'Overview' });
+    await sql`UPDATE nodes SET trashed_at = now(), trash_operation_id = ${crypto.randomUUID()} WHERE id = ${trashed.id}`;
+    const other = await createNode(sql, { parentId: tree.book.id, type: 'chapter', title: 'Appendix' });
+
+    const renamed = await renameNode(sql, { nodeId: other.id, title: 'Overview' });
+
+    expect(renamed.slug).toBe('overview');
+  });
+});
