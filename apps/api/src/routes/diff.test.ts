@@ -122,6 +122,43 @@ describe('GET /pages/:id/diff', () => {
     expect(added?.text).toContain('brand new paragraph');
   });
 
+  test('a modified block carries its word-level segments, validated by the response contract', async () => {
+    const owner = await seedUser('Owner');
+    const [ws] = await sql<{ id: string }[]>`
+      INSERT INTO workspaces (owner_id, name, slug) VALUES (${owner}, 'WS', ${`ws-${crypto.randomUUID()}`}) RETURNING id
+    `;
+    const [root] = await sql<{ id: string }[]>`
+      INSERT INTO nodes (workspace_id, parent_id, type, path, position, slug, title)
+      VALUES (${ws!.id}, NULL, 'workspace', '', 0, 'root', 'Root') RETURNING id
+    `;
+    const [page] = await sql<{ id: string }[]>`
+      INSERT INTO nodes (workspace_id, parent_id, type, path, position, slug, title)
+      VALUES (${ws!.id}, ${root!.id}, 'page', '', 0, ${`page-${crypto.randomUUID()}`}, 'A Page') RETURNING id
+    `;
+    await sql`
+      INSERT INTO permissions (workspace_id, subject_type, subject_id, resource_id, action, effect)
+      VALUES (${ws!.id}, 'user', ${owner}, ${page!.id}, 'read', 'allow')
+    `;
+    const first = await savePage(sql, { nodeId: page!.id, workspaceId: ws!.id, markdown: 'The page as it was first saved, with no edits yet.\n', expectedContentHash: null, updatedBy: owner, changesetWindowMinutes: WINDOW_MINUTES });
+    await savePage(sql, { nodeId: page!.id, workspaceId: ws!.id, markdown: 'The page as it was first saved, now with one small edit.\n', expectedContentHash: first.contentHash, updatedBy: owner, changesetWindowMinutes: WINDOW_MINUTES });
+    const revisions = await sql<{ id: string }[]>`SELECT id FROM page_revision WHERE page_id = ${page!.id} ORDER BY created_at ASC`;
+    const app = buildApp();
+
+    const res = await app.request(`/pages/${page!.id}/diff?from=${revisions[0]!.id}&to=${revisions[1]!.id}`, { headers: { cookie: await cookieFor(owner) } });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { diff: { changes: (BlockChange & { text: string; segments?: { kind: string; text: string }[] })[] } };
+    const modified = body.diff.changes.find((change) => change.kind === 'modified');
+    expect(modified?.segments).toEqual([
+      { kind: 'equal', text: 'The page as it was first saved, ' },
+      { kind: 'inserted', text: 'now ' },
+      { kind: 'equal', text: 'with ' },
+      { kind: 'deleted', text: 'no edits yet' },
+      { kind: 'inserted', text: 'one small edit' },
+      { kind: 'equal', text: '.' },
+    ]);
+  });
+
   test('a genuinely moved block is reported moved with its own byte-identical text, distinct from the unrelated block that stayed put', async () => {
     const owner = await seedUser('Owner');
     const reader = await seedUser('Reader');

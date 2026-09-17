@@ -42,6 +42,8 @@ export type { Revision } from './content/revision';
 export type { Changeset } from './content/changeset';
 export type { CommentAnchor } from './content/comment';
 export type { BlockChange, BlockDiff } from './content/diff';
+export { diffInline, tokenizeInline } from './content/inline-diff';
+export type { InlineSegment } from './content/inline-diff';
 export type { InvalidModelId, InvalidModelIdReason, ModelRef, ProviderId } from './ai/ids';
 export { parseModelId } from './ai/ids';
 export type { ModelCapabilities, ModelPricing, StructuredOutputLevel, UnknownModel } from './ai/registry';

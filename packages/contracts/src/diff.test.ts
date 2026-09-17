@@ -24,7 +24,7 @@ describe('PageDiffResponseSchema', () => {
         changes: [
           { kind: 'added', id: 'b1', slot: 1, text: 'New paragraph.' },
           { kind: 'removed', id: 'b2', slot: 2, text: 'Gone paragraph.' },
-          { kind: 'modified', id: 'b3', fromSlot: 0, toSlot: 0, moved: false, text: 'Changed paragraph.' },
+          { kind: 'modified', id: 'b3', fromSlot: 0, toSlot: 0, moved: false, text: 'Changed paragraph.', segments: [{ kind: 'equal', text: 'Changed ' }, { kind: 'deleted', text: 'sentence' }, { kind: 'inserted', text: 'paragraph' }, { kind: 'equal', text: '.' }] },
           { kind: 'moved', id: 'b4', fromSlot: 0, toSlot: 1, text: 'Same paragraph.' },
           { kind: 'unchanged', id: 'b5', slot: 3, text: 'Untouched paragraph.' },
         ],
@@ -34,7 +34,7 @@ describe('PageDiffResponseSchema', () => {
     expect(parsed.diff.changes).toEqual([
       { kind: 'added', id: 'b1', slot: 1, text: 'New paragraph.' },
       { kind: 'removed', id: 'b2', slot: 2, text: 'Gone paragraph.' },
-      { kind: 'modified', id: 'b3', fromSlot: 0, toSlot: 0, moved: false, text: 'Changed paragraph.' },
+      { kind: 'modified', id: 'b3', fromSlot: 0, toSlot: 0, moved: false, text: 'Changed paragraph.', segments: [{ kind: 'equal', text: 'Changed ' }, { kind: 'deleted', text: 'sentence' }, { kind: 'inserted', text: 'paragraph' }, { kind: 'equal', text: '.' }] },
       { kind: 'moved', id: 'b4', fromSlot: 0, toSlot: 1, text: 'Same paragraph.' },
       { kind: 'unchanged', id: 'b5', slot: 3, text: 'Untouched paragraph.' },
     ]);
@@ -51,7 +51,7 @@ describe('PageDiffResponseSchema', () => {
         diff: {
           from: { id: 'rev-1', createdAt: '2026-01-01T00:00:00.000Z' },
           to: { id: 'rev-2', createdAt: '2026-01-02T00:00:00.000Z' },
-          changes: [{ kind: 'modified', id: 'b3', fromSlot: 0, toSlot: 2, moved, text: 'Changed.' }],
+          changes: [{ kind: 'modified', id: 'b3', fromSlot: 0, toSlot: 2, moved, text: 'Changed.', segments: [] }],
         },
       }).diff.changes[0];
     }
@@ -63,6 +63,7 @@ describe('PageDiffResponseSchema', () => {
       toSlot: 2,
       moved: true,
       text: 'Changed.',
+      segments: [],
     });
     expect(modifiedWith(false)).toEqual({
       kind: 'modified',
@@ -71,6 +72,7 @@ describe('PageDiffResponseSchema', () => {
       toSlot: 2,
       moved: false,
       text: 'Changed.',
+      segments: [],
     });
   });
 
@@ -87,6 +89,23 @@ describe('PageDiffResponseSchema', () => {
     if (result.success) return;
 
     expect(result.error.issues.map((issue) => issue.path)).toEqual([['diff', 'changes', 0, 'text']]);
+  });
+
+  // The word-level half of "a diff like GitHub's" (owner review
+  // 2026-09-17): an edited block carries its inline segments; no other
+  // kind does, because no other kind has two sides of one block to show.
+  test('only a modified block carries inline segments, and it must', () => {
+    const base = { from: { id: 'rev-1', createdAt: '2026-01-01T00:00:00.000Z' }, to: { id: 'rev-2', createdAt: '2026-01-02T00:00:00.000Z' } };
+
+    const missing = PageDiffResponseSchema.safeParse({ diff: { ...base, changes: [{ kind: 'modified', id: 'b3', fromSlot: 0, toSlot: 0, moved: false, text: 'x' }] } });
+    expect(missing.success).toBe(false);
+    if (!missing.success) expect(missing.error.issues.map((issue) => issue.path)).toEqual([['diff', 'changes', 0, 'segments']]);
+
+    const badKind = PageDiffResponseSchema.safeParse({ diff: { ...base, changes: [{ kind: 'modified', id: 'b3', fromSlot: 0, toSlot: 0, moved: false, text: 'x', segments: [{ kind: 'changed', text: 'x' }] }] } });
+    expect(badKind.success).toBe(false);
+
+    const onUnchanged = PageDiffResponseSchema.parse({ diff: { ...base, changes: [{ kind: 'unchanged', id: 'b5', slot: 0, text: 'x', segments: [{ kind: 'equal', text: 'x' }] }] } });
+    expect(onUnchanged.diff.changes[0]).toEqual({ kind: 'unchanged', id: 'b5', slot: 0, text: 'x' });
   });
 
   test('rejects an unknown change kind', () => {
