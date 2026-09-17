@@ -1533,4 +1533,60 @@ saving?" from the previous entry; the two-icon-pack requirement (§4.3) remains 
 
 ---
 
+### 2026-09-16 — Workspace-scoped addresses, the old ones redirected, and the confirm dialog above the drawer — awaiting the owner's eye
+
+**Reviewer:** none yet — this entry is what was shipped for review, not a review.
+**Verdict:** Pending
+
+Two owner decisions of 2026-09-17, on `feat/workspace-routes` (`docs/TODO.md` Findings, same
+date, has the reasoning and what was found on the way).
+
+1. **Every address inside a workspace carries the workspace's slug and the node's id:
+   `/w/<slug>/p/<uuid>`** (option b). Nothing a person sees changed on the screens themselves —
+   read, edit, history, diff, book history and diff, the dashboard, members, settings — beyond
+   the address bar and every link's `href`; measured in `e2e/routes.spec.ts` at 1280 light, 1280
+   dark and 320 light: every link in the new shape, none in the old, `expectNoHorizontalOverflow`
+   on pane and document (§6). Two things are new to look at:
+   - **The old addresses land** (§3, never a dead end). `/pages/<id>`, `/books/<id>/history`,
+     `/workspaces/<id>` and the rest answer a server `301` to the new address, query kept; signed
+     out, sign-in first with the old address as the way back. A page the caller cannot read and a
+     page that never existed bounce to the *same* not-found screen at the old address (§3,
+     "permission-denied does not leak existence"): `e2e/legacy-routes.spec.ts`.
+   - **An address whose slug is not the page's is "There is nothing at this address"** — a new
+     screen state on every node screen, `PageNotice` in the reading measure in place of the
+     screen (§4.1: the one container a screen shows instead of its content; §4.4: the `h1` keeps
+     its role), the screen's bar actions withheld with it, the sidebar standing on the workspace
+     the address named — or on nothing — and no row marked, and the copy saying out loud that it
+     does not disclose which half was wrong (§3). Offers: the address's workspace when it is one
+     the caller can open, always the list. `fb-routes-not-found-{1280-light,1280-dark,320-light}.png`.
+2. **The confirm dialog outranks every overlay.** At 320 the sidebar drawer stood above "Leave
+   without saving?" when a row in the drawer was clicked with a dirty editor (this log,
+   2026-09-16, "Integration regressions", known and not fixed): two Reka dialogs at `z-index:
+   auto`, the later portal on top. `docs/DESIGN-SYSTEM.md` §4.5 is the stacking ladder, stated
+   once — every `UModal` `z-60`, `ConfirmDialog` `z-70`, scrim and content, the library's
+   overlays and the drawer at `auto` — and `e2e/editor.spec.ts` measures it: `elementFromPoint`
+   at Cancel's centre is Cancel, at the row's centre never the drawer, the computed z-index 70
+   against the drawer's `auto`, focus inside the dialog with Tab cycling its two actions (§5,
+   trapped), and back on the row that asked after Cancel (§5, returned).
+   `fb-routes-edit-confirm-drawer-320-light.png`.
+
+Screenshots `fb-routes-{dashboard,read,history,book-history,members,settings,not-found}-{1280-light,
+1280-dark,320-light}.png` and `fb-routes-edit-confirm-drawer-320-light.png` in the session
+scratchpad. No new colour, token or rung beyond the seven stacking rungs, which are numbers on
+the z scale, not tones.
+
+**Known before review, not fixed**
+
+- The dashboard's four panels lose their accessible names after hydration **in a production
+  build, on `main` as well** (`useId` mismatch between the `section`'s `aria-labelledby` and its
+  `h2`; `docs/TODO.md` Findings has the measurement). `e2e/frame.spec.ts`'s dashboard geometry
+  test fails against a production build for this reason and passes against the dev server.
+- A `dw-workspace` cookie from before this change remembers nothing: `/` goes to the chooser
+  once.
+- One extra `GET /nodes/:id/location` per node screen, beside the page read.
+- Everything the 2026-09-16 entries carried forward: the contextual (third) pane is an overlay,
+  the resize handle is pointer-only, the two-icon-pack requirement (§4.3) is untested.
+
+---
+
 *The next entry goes below this one.*
