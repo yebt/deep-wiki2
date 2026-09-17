@@ -468,7 +468,10 @@ accordingly rather than left as a blanket unchecked list.
       vendor documentation (no probe needed). OpenAI, Gemini and OpenRouter remain **unknown** —
       `ai:probe` was built and run, but no provider key was available in this session. See the
       2026-09-06 Finding "Per-provider embedding support: OpenAI, Gemini and OpenRouter remain
-      unverified this session". Left unchecked until a real probe run resolves the remaining three.
+      unverified this session". **OpenRouter resolved 2026-09-17**: `ai:probe` with a real key
+      observed HTTP 200 and 1536 dimensions from `openai/text-embedding-3-small` (Finding
+      2026-09-17, "Cheap models first"). OpenAI and Gemini direct still unknown. Left unchecked
+      until those two are probed and an OpenRouter `EmbeddingModelPort` adapter exists.
 - [ ] ~~Provide a local embedding fallback so an operator holding only a chat credential
       still gets working retrieval.~~ **Seam built, not satisfied, 2026-09-06**: the registration
       guard and resolution path exist (`packages/core/src/ai/embedding-registration.ts`,
@@ -603,6 +606,205 @@ makes conventions portable across projects.
 ## Findings
 
 Discoveries and constraints. Newest first.
+
+### 2026-09-17 — Cheap models first: OpenRouter's catalogue priced, and the cheapest routes that declare tools and JSON output (branch `feat/ai-cheap-models`)
+
+**The owner's instruction (2026-09-17).** "If the architecture works with cheap models, it will
+work wonderfully with expensive ones." The default model of every AI feature must be the
+cheapest one that passes conformance; an expensive model is an upgrade a workspace opts into,
+never the baseline. This Finding is the measurement that rule needs — prices from OpenRouter's
+public catalogue, then (below, appended as the branch progressed) what the registered cheap
+models actually did under `ai:conformance`.
+
+**How the table was produced.** `bun run -F @deep-wiki/api ai:catalogue` (new,
+`apps/api/src/ai/openrouter-catalogue{,-cli}.ts`) reads `GET /api/v1/models` and
+`GET /api/v1/embeddings/models` — both public, no key — and ranks paid routes by
+input + output price. A route is a candidate only when it emits text, declares both `tools`
+and `response_format` in `supported_parameters`, has a fixed price (OpenRouter reports `-1`
+for its `openrouter/auto` routers), and carries an id the registry could hold: `parseModelId`'s
+slug rule refuses `:free`/`:batch` variants and `~…-latest` aliases, so the ranking refuses
+them too. Free routes are excluded on purpose — rate-limited, and OpenRouter's terms let them
+train on prompts. The `structured_outputs` column is OpenRouter's own declaration that the
+route honours a JSON schema in `response_format`; it is a vendor claim, not a measurement.
+
+**Cheapest 20 chat routes declaring tools + `response_format`, prices as of 2026-09-17
+(USD per million tokens):**
+
+| Model | $/1M input | $/1M output | Context | `structured_outputs` |
+| --- | ---: | ---: | ---: | --- |
+| `mistralai/mistral-nemo` | 0.019 | 0.030 | 131,072 | yes |
+| `inclusionai/ling-3.0-flash` | 0.021 | 0.063 | 262,144 | no |
+| `meta-llama/llama-3.1-8b-instruct` | 0.050 | 0.080 | 131,072 | yes |
+| `qwen/qwen3.7-flash` | 0.030 | 0.130 | 1,000,000 | no |
+| `openai/gpt-oss-20b` | 0.030 | 0.130 | 131,072 | yes |
+| `deepseek/deepseek-v4-flash-0731` | 0.060 | 0.120 | 1,310,720 | yes |
+| `inception/mercury-2.5` | 0.040 | 0.150 | 260,000 | yes |
+| `mistralai/ministral-3b-2512` | 0.100 | 0.100 | 131,072 | yes |
+| `google/gemma-3-12b-it` | 0.050 | 0.150 | 131,072 | yes |
+| `openai/gpt-oss-120b` | 0.037 | 0.170 | 131,072 | yes |
+| `deepseek/deepseek-v4-flash` | 0.070 | 0.140 | 1,048,576 | yes |
+| `inclusionai/ling-3.0-flash-vl` | 0.060 | 0.180 | 131,072 | yes |
+| `qwen/qwen3-30b-a3b-instruct-2507` | 0.048 | 0.193 | 262,144 | yes |
+| `qwen/qwen3.5-9b` | 0.100 | 0.150 | 262,144 | yes |
+| `nvidia/nemotron-3.5-lightning` | 0.080 | 0.200 | 262,144 | yes |
+| `meta/muse-spark-1.3-contributor` | 0.100 | 0.200 | 1,048,576 | yes |
+| `meta/muse-spark-1.2-contributor` | 0.100 | 0.200 | 1,048,576 | yes |
+| `nvidia/nemotron-3-nano-30b-a3b` | 0.060 | 0.240 | 262,144 | yes |
+| `mistralai/ministral-8b-2512` | 0.150 | 0.150 | 262,144 | yes |
+| `qwen/qwen-2.5-7b-instruct` | 0.100 | 0.200 | 32,768 | yes |
+
+For scale: the one OpenRouter route the registry held before this branch,
+`meta-llama/llama-3.1-70b-instruct`, is listed at **0.40 / 0.40** today — the registry said
+0.52 / 0.75 (vendor docs, 2026-09-06). Roughly ten to twenty times the price of the top of
+this table, per token. The natively-wired entries are further out still (`gpt-4o` 2.50 / 10.00,
+`claude-3-5-sonnet` 3.00 / 15.00).
+
+**Embeddings: OpenRouter does offer them.** The 2026-09-06 Finding left OpenRouter embeddings
+"unknown" because no key was available; `GET /api/v1/embeddings/models` lists 33 routes today,
+and the `ai:probe` outcome against the real endpoint is recorded below. Cheapest 20 paid
+routes (dimensions are what the description states; OpenRouter has no field for it):
+
+| Model | $/1M input | Context | Dimensions (declared) |
+| --- | ---: | ---: | ---: |
+| `perplexity/pplx-embed-v1-0.6b` | 0.004 | 32,000 | not stated |
+| `thenlper/gte-base` | 0.005 | 512 | 768 |
+| `intfloat/e5-base-v2` | 0.005 | 512 | 768 |
+| `sentence-transformers/paraphrase-minilm-l6-v2` | 0.005 | 512 | 384 |
+| `sentence-transformers/all-minilm-l12-v2` | 0.005 | 512 | 384 |
+| `baai/bge-base-en-v1.5` | 0.005 | 512 | 768 |
+| `sentence-transformers/multi-qa-mpnet-base-dot-v1` | 0.005 | 512 | 768 |
+| `sentence-transformers/all-mpnet-base-v2` | 0.005 | 512 | 768 |
+| `sentence-transformers/all-minilm-l6-v2` | 0.005 | 512 | 384 |
+| `thenlper/gte-large` | 0.010 | 512 | 1024 |
+| `intfloat/e5-large-v2` | 0.010 | 512 | 1024 |
+| `intfloat/multilingual-e5-large` | 0.010 | 512 | 1024 |
+| `baai/bge-large-en-v1.5` | 0.010 | 512 | 1024 |
+| `baai/bge-m3` | 0.010 | 8,194 | 1024 |
+| `qwen/qwen3-embedding-8b` | 0.010 | 32,768 | not stated |
+| `voyageai/voyage-4-lite` | 0.020 | 32,000 | 256 |
+| `openai/text-embedding-3-small` | 0.020 | 8,192 | not stated |
+| `qwen/qwen3-embedding-4b` | 0.020 | 32,768 | not stated |
+| `perplexity/pplx-embed-v1-4b` | 0.030 | 32,000 | not stated |
+| `voyageai/voyage-4` | 0.060 | 32,000 | 256 |
+
+Two things to notice against SPECS §14's 1536-dimension column. Nothing in the cheap half of
+this table emits 1536: the sub-cent routes are 384/768/1024-dimensional, 512-token-context
+sentence-transformer classes. The 1536 routes are `openai/text-embedding-3-small` (0.02, native
+1536) and, by Matryoshka truncation, `qwen/qwen3-embedding-{4b,8b}` (2560/4096 native, the
+vendor documents any dimension from 32 up). The 2026-09-06 Finding "No local embedding model
+exists that emits 1536 dimensions" was about local models; this table says the hosted cheap
+tier does not either, which is one more reason the dimension is a settings value the first
+index generation fixes, not a constant.
+
+**What the cheap routes did under the real ladder.** Registered
+(`packages/core/src/ai/registry.ts`): `mistralai/mistral-nemo`,
+`meta-llama/llama-3.1-8b-instruct`, `qwen/qwen3-30b-a3b-instruct-2507`, each at
+`structuredOutput: 'prompted'`, `source: 'probe'`, `verifiedAt: 2026-09-17`; the 70b route kept
+as the upgrade and repriced. Chosen by screening the top of the table with the conformance
+request itself (system "Respond only with JSON matching the provided schema", one user turn,
+`maxOutputTokens: 64`) through the real `OpenRouterChatModel`. Then
+`bun run -F @deep-wiki/api ai:conformance` — the real `generateStructured` ladder at the declared
+rung, exit 0 on every run — three times; the CLI now reports rungs, tokens, cost at the
+registry price and elapsed time (`ConformanceResult` grew those fields):
+
+| Model (declared `prompted`) | Run 1 | Run 2 | Run 3 |
+| --- | --- | --- | --- |
+| `mistralai/mistral-nemo` | matched, 1 rung, 36/11 tok, 1 µ$, 2852 ms | matched, 2 rungs, 111/25 tok, 3 µ$, 4215 ms | matched, 2 rungs, 111/25 tok, 3 µ$, 3137 ms |
+| `meta-llama/llama-3.1-8b-instruct` | matched, 1 rung, 48/6 tok, 3 µ$, 530 ms | matched, 1 rung, 48/10 tok, 3 µ$, 566 ms | matched, 1 rung, 47/10 tok, 3 µ$, 1127 ms |
+| `qwen/qwen3-30b-a3b-instruct-2507` | matched, 1 rung, 45/14 tok, 5 µ$, 1472 ms | matched, 1 rung, 45/15 tok, 5 µ$, 1003 ms | matched, 1 rung, 45/15 tok, 5 µ$, 1840 ms |
+| `meta-llama/llama-3.1-70b-instruct` | matched, 2 rungs, 129/37 tok, 66 µ$, 1460 ms | matched, 1 rung, 47/7 tok, 22 µ$, 718 ms | matched, 2 rungs, 129/21 tok, 60 µ$, 1603 ms |
+
+"2 rungs" is the `prompted` rung's one repair pass doing its job: the first answer came back
+fenced (`` ```json … ``` ``), the validator's strict `JSON.parse` refused it, the repair turn
+carried the error verbatim, and the second answer was bare JSON. That is the ladder working as
+designed, so it is a pass — but it is also the one measurable difference between these routes,
+so it was measured on its own. First-attempt validity over twelve conformance-shaped calls
+each (one screen, eight repeats, three conformance runs):
+
+| Model | First attempt valid | Failure shape | Latency (first attempt) |
+| --- | ---: | --- | --- |
+| `mistralai/mistral-nemo` | 6 / 12 | `` ```json `` fence every time | 1.0–3.9 s |
+| `meta-llama/llama-3.1-8b-instruct` | 11 / 12 | one `` ```json `` fence | 0.5–2.5 s |
+| `qwen/qwen3-30b-a3b-instruct-2507` | 12 / 12 | — | 0.5–1.5 s (one 6.7 s outlier) |
+| `meta-llama/llama-3.1-70b-instruct` | 6 / 11 | bare `` ``` `` fence | 0.6–2.8 s |
+
+**The default is `mistralai/mistral-nemo`, and here is the arithmetic.** The owner's rule is
+the cheapest route that passes conformance, and `registry.test.ts` now holds every declared
+default to it mechanically: it must be a `source: 'probe'` entry and the cheapest such entry for
+its provider by `computeCostMicroUsd` over a reference call. Nemo passes 3/3. Its 50 %
+first-attempt rate means half its structured calls pay a repair pass — and even then a
+conformance call costs 2.9 µ$ against llama-8b's 3.2 µ$ single rung, because nemo's token price
+is 2.6× lower. What the default trades away is latency (3–4 s with the repair against
+0.5–1.1 s), not money. If the product's structured flows turn out to be latency-bound rather
+than cost-bound, `DEFAULT_MODEL_BY_PROVIDER` is one line and the test will still hold the
+replacement to the cost rule — llama-8b is the next cheapest probe-verified entry.
+`defaultModelFor(provider)` is the mechanism; nothing consumes it yet because no AI feature
+has a settings screen (Phase 5's deferred half). The first one to ship must read it instead of
+carrying its own literal.
+
+**Screened and rejected, and why.** Every reasoning-by-default route in the cheap tier —
+`inclusionai/ling-3.0-flash`, `qwen/qwen3.7-flash`, `openai/gpt-oss-20b`,
+`deepseek/deepseek-v4-flash-0731`, `inception/mercury-2.5` — returned **empty text with
+`finish_reason: length`**: the 64-token ceiling was spent on hidden reasoning tokens and no
+answer followed. The adapter does not send `reasoning: { enabled: false }` (OpenRouter's switch)
+and the conformance ceiling is the conformance, so these fail, and the ceiling was not loosened.
+`google/gemma-3-{12b,27b}-it`, `mistralai/ministral-3b-2512`,
+`mistralai/mistral-small-3.2-24b-instruct`, `meta-llama/llama-4-scout` and
+`google/gemini-2.5-flash-lite` all answered correctly inside a `` ```json `` fence on the first
+attempt — the same shape nemo's repair pass recovers from, but at a higher price than the three
+that passed clean, so nothing was gained by registering them.
+
+**The `schema` rung is real on the wire and unreachable from the runtime.** Sent by hand with
+`response_format: { type: 'json_schema', strict: true, … }`, all four registered routes
+returned bare, valid JSON **12 / 12** (three each) — no fence, no repair. But no adapter in
+`apps/api/src/ai/gateway/providers/` reads `request.structuredOutput`: every one passes
+`{ system, messages }` to `generateText` and drops the schema and the level on the floor. So
+today the ladder's `schema`, `tool-call` and `prompted` rungs put **the same bytes on the
+wire**, and a validation failure "at `schema`" measures nothing a failure at `prompted` would
+not; the `prompted` rung's only real mechanism is the repair turn, and even the schema is
+conveyed by the caller's own prompt text (`conformance.ts` spells the field name out in the user
+turn). That is why these entries declare `prompted` although OpenRouter's catalogue declares
+`structured_outputs` for all three: `prompted` is the rung the runtime actually exercised. It
+also means `openai:gpt-4o` and `google:gemini-1.5-pro` declare a `schema` level (vendor docs)
+that `ai:conformance` would "verify" without ever sending a schema. Owed, and the single biggest
+cost lever this Finding found: wire `structuredOutput.level` into the adapters —
+`response_format`/`providerOptions` for `schema`, a single required tool for `tool-call`, the
+schema appended to the system text for `prompted` — then re-run `ai:conformance` and raise the
+cheap entries to the rung they measure at. Recorded under Open Questions.
+
+**Embeddings over OpenRouter: supported, 1536 observed.**
+`AI_PROBE_OPENROUTER_KEY=… bun run -F @deep-wiki/api ai:probe` →
+`openrouter embeddings — supported=true (HTTP 200 — embedding dimensions observed: 1536)`
+against `openai/text-embedding-3-small`; the probe now reports the observed dimension the way
+the OpenAI probe does. This closes the OpenRouter third of the 2026-09-06 "remain unverified"
+Finding; OpenAI and Gemini direct remain unknown (no key in this session). OpenRouter is not yet
+an `embedding_provider` — there is still no `EmbeddingModelPort` adapter for it, and the
+registry's `embeddings: false` on its entries stays until one exists.
+
+**Recorded, not synthetic.** The fixtures under
+`apps/api/src/ai/gateway/providers/__fixtures__/openrouter-{mistral-nemo,llama-3.1-8b,qwen3-30b-a3b}-*`
+are real responses from 2026-09-17 — `generate` ("Say hello in five words or fewer"),
+`structured` (the conformance request), `error-401` (the same call with an invalid key) — with
+nothing to redact in the bodies, and `openrouter-error-429-upstream.json` is a real upstream
+rate limit captured by bursting a free route (`user_id` redacted); a 429 cannot be provoked on
+a paid route on demand and the mapping is by status, so the one capture serves every route.
+The scrubber in `fixtures.test.ts` still refuses any key-shaped string. Two things the real
+bodies show that the synthetic ones did not: OpenRouter reports `usage.cost` in USD on every
+response (1.47 µ$ for the hello call), which is a second source a future ledger reconciliation
+can compare the registry price against; and `provider` names a different upstream host per
+call (Novita, DekaLLM, CoreWeave, StreamLake, DeepInfra) — the route's behaviour is the
+behaviour of whichever host OpenRouter picked, which is one more reason `verifiedAt` is a date
+and not a promise.
+
+**Nothing in `bun run test` reaches the network — confirmed and now enforced.** The CLIs are
+the only network path, they read one env var each, and their tests spawn them with an
+environment of exactly `PATH` and `HOME`; every probe and adapter test injects a fixture
+`fetch`. Run with `AI_CONFORMANCE_OPENROUTER_KEY` and `AI_PROBE_OPENROUTER_KEY` deliberately
+set to invalid values in the test process: 143/143 of the `src/ai` suites pass and the CLI tests still see "skipped"
+and "unknown". The enforcement is `apps/api/testing/no-network.ts`, preloaded by
+`apps/api/bunfig.toml` under `bun test`: the global `fetch` refuses any host that is not
+loopback, so a test that forgets its fixture fails at the call with a message naming the fix,
+rather than spending money and passing.
 
 ### 2026-09-17 — `bun run test` lost 85 suites to one race: two processes creating `deepwiki_test_template`
 
@@ -5489,6 +5691,15 @@ in Findings.
   shared machine, a copied header — is not actually revoked. Owed: a `DELETE` (or `POST
   /auth/logout`) route that invalidates the session row, called from wherever the control
   ends up living (the sidebar footer is the obvious door, next to Members).
+- **The structured-output rungs are not on the wire.** No provider adapter reads
+  `ChatRequest.structuredOutput`; `schema`, `tool-call` and `prompted` send identical bytes and
+  the ladder's only working mechanism is the `prompted` repair turn. Measured 2026-09-17: with
+  `response_format: json_schema` sent by hand, the four OpenRouter routes went from 6–12/12
+  first-attempt validity to 12/12 each. Owed: wire the level into the adapters (native schema
+  mode, a single required tool, or the schema appended to the system text), re-run
+  `ai:conformance`, and raise each entry to the rung it measures at. Until then a `schema`
+  declaration on `openai:gpt-4o` or `google:gemini-1.5-pro` is a vendor claim the conformance
+  suite cannot falsify. See Findings 2026-09-17 ("Cheap models first").
 - **Serving avatars.** `POST /uploads/avatar` validates, resizes and stores an image and writes
   its key to `users.avatar_key` (`apps/api/src/routes/uploads.ts`), but no route reads a key
   back into bytes a browser can request — there is no `GET /avatars/…` and no signed-URL

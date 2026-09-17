@@ -1,0 +1,5 @@
+# apps/api test configuration. The preload is the budget guard: under
+# `bun test` the global fetch refuses every host that is not loopback, so
+# no suite can reach a model provider by mistake (testing/no-network.ts).
+[test]
+preload = ["./testing/no-network.ts"]

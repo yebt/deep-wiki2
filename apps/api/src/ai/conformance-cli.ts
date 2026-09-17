@@ -21,6 +21,10 @@ const CASES: readonly { readonly modelId: string; readonly envVar: string }[] = 
   { modelId: 'openai:gpt-4o', envVar: 'AI_CONFORMANCE_OPENAI_KEY' },
   { modelId: 'google:gemini-1.5-pro', envVar: 'AI_CONFORMANCE_GOOGLE_KEY' },
   { modelId: 'deepseek:deepseek-chat', envVar: 'AI_CONFORMANCE_DEEPSEEK_KEY' },
+  // Cheapest first (docs/TODO.md Finding 2026-09-17 — "Cheap models first"); the 70b route is the upgrade.
+  { modelId: 'openrouter:mistralai/mistral-nemo', envVar: 'AI_CONFORMANCE_OPENROUTER_KEY' },
+  { modelId: 'openrouter:meta-llama/llama-3.1-8b-instruct', envVar: 'AI_CONFORMANCE_OPENROUTER_KEY' },
+  { modelId: 'openrouter:qwen/qwen3-30b-a3b-instruct-2507', envVar: 'AI_CONFORMANCE_OPENROUTER_KEY' },
   { modelId: 'openrouter:meta-llama/llama-3.1-70b-instruct', envVar: 'AI_CONFORMANCE_OPENROUTER_KEY' },
 ];
 
@@ -48,7 +52,9 @@ async function main(): Promise<void> {
 
   let allMatched = true;
   for (const result of results) {
-    console.log(`ai:conformance: ${result.modelId} (declared "${result.declaredLevel}") — matched=${result.matched} (${result.detail})`);
+    console.log(
+      `ai:conformance: ${result.modelId} (declared "${result.declaredLevel}") — matched=${result.matched} (${result.detail}) — rungs=${result.rungs} tokens=${result.usage.inputTokens}/${result.usage.outputTokens} cost=${result.costMicroUsd}µ$ elapsed=${result.elapsedMs}ms`,
+    );
     if (!result.matched) allMatched = false;
   }
 

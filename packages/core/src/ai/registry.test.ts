@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
-import { capabilitiesOf, MODEL_REGISTRY } from './registry';
-import type { ModelRef } from './ids';
+import { capabilitiesOf, DEFAULT_MODEL_BY_PROVIDER, defaultModelFor, MODEL_REGISTRY } from './registry';
+import { computeCostMicroUsd } from './pricing';
+import type { ModelRef, ProviderId } from './ids';
 
 const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -66,5 +67,64 @@ describe('registry provenance assertion', () => {
 
   test('the registry is non-empty (a provenance check over nothing proves nothing)', () => {
     expect(Object.keys(MODEL_REGISTRY).length).toBeGreaterThan(0);
+  });
+});
+
+// docs/TODO.md Finding 2026-09-17 — "Cheap models first". The owner's rule
+// is that every AI feature defaults to the cheapest model that passes
+// conformance. A rule needs a mechanism: the default is a registry entry,
+// and this suite holds it to the rule.
+describe('defaultModelFor', () => {
+  test('OpenRouter has a default, and it is a registered entry', () => {
+    const result = defaultModelFor('openrouter');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.provider).toBe('openrouter');
+      expect(capabilitiesOf(result.value).ok).toBe(true);
+    }
+  });
+
+  test('a provider with no declared default is a typed refusal, never a guess', () => {
+    const result = defaultModelFor('local');
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.reason).toBe('no-default-model');
+      expect(result.error.provider).toBe('local');
+    }
+  });
+
+  test('every declared default is probe-verified and the cheapest probe-verified entry for its provider', () => {
+    // A representative call: one thousand tokens in, one thousand out, nothing cached.
+    const usage = { inputTokens: 1_000, cachedInputTokens: 0, outputTokens: 1_000 };
+
+    for (const [provider, slug] of Object.entries(DEFAULT_MODEL_BY_PROVIDER) as [ProviderId, string][]) {
+      const chosen = capabilitiesOf({ provider, slug });
+      expect(chosen.ok).toBe(true);
+      if (!chosen.ok) continue;
+      // Only a measured entry may be a default — vendor documentation is a claim, a probe is evidence.
+      expect(chosen.value.source).toBe('probe');
+
+      const chosenCost = computeCostMicroUsd(usage, chosen.value.pricing);
+      for (const [key, capabilities] of Object.entries(MODEL_REGISTRY)) {
+        if (!key.startsWith(`${provider}:`) || capabilities.source !== 'probe') continue;
+        expect(computeCostMicroUsd(usage, capabilities.pricing)).toBeGreaterThanOrEqual(chosenCost);
+      }
+    }
+  });
+
+  test('the three cheap OpenRouter routes are registered at the level the ladder measured, and the 70b entry remains as the upgrade', () => {
+    for (const slug of ['mistralai/mistral-nemo', 'meta-llama/llama-3.1-8b-instruct', 'qwen/qwen3-30b-a3b-instruct-2507']) {
+      const result = capabilitiesOf({ provider: 'openrouter', slug });
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.structuredOutput).toBe('prompted');
+        expect(result.value.source).toBe('probe');
+        expect(result.value.promptCaching).toBe(false);
+        expect(result.value.proxiedModel).toBe(slug);
+      }
+    }
+    expect(capabilitiesOf({ provider: 'openrouter', slug: 'meta-llama/llama-3.1-70b-instruct' }).ok).toBe(true);
   });
 });

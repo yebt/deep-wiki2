@@ -52,11 +52,16 @@ describe('probeOpenRouterEmbeddings — no EmbeddingModelPort adapter exists, so
     expect(outcome).toEqual({ provider: 'openrouter', supported: false, detail: 'HTTP 404 — no embeddings endpoint' });
   });
 
-  test('HTTP 200 is read as supported', async () => {
+  test('HTTP 200 is read as supported, reporting the observed dimension like the OpenAI probe does', async () => {
     const outcome = await probeOpenRouterEmbeddings(new Secret('sk-fake'), jsonFetch(200, { data: [{ embedding: [0.1, 0.2] }] }));
 
-    expect(outcome.provider).toBe('openrouter');
-    expect(outcome.supported).toBe(true);
+    expect(outcome).toEqual({ provider: 'openrouter', supported: true, detail: 'HTTP 200 — embedding dimensions observed: 2' });
+  });
+
+  test('HTTP 200 with a body that is not an embeddings list is still supported, with the dimension unknown', async () => {
+    const outcome = await probeOpenRouterEmbeddings(new Secret('sk-fake'), jsonFetch(200, { unexpected: true }));
+
+    expect(outcome).toEqual({ provider: 'openrouter', supported: true, detail: 'HTTP 200 — embedding dimensions observed: unknown' });
   });
 
   test('a transport failure reports unsupported rather than throwing', async () => {

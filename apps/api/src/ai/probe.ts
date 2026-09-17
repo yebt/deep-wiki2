@@ -53,6 +53,17 @@ export async function probeGoogleEmbeddings(apiKey: Secret<string>, fetchImpl?: 
   return { provider: 'google', supported: true, detail: `embedding dimensions observed: ${result.value.embeddings[0]?.length ?? 'unknown'}` };
 }
 
+/** The OpenAI-compatible shape: `data[0].embedding` is the vector. Anything else reads as `unknown`, never as a claim. */
+async function observedDimensions(response: Response): Promise<number | 'unknown'> {
+  try {
+    const body = (await response.json()) as { data?: { embedding?: unknown }[] };
+    const embedding = body.data?.[0]?.embedding;
+    return Array.isArray(embedding) ? embedding.length : 'unknown';
+  } catch {
+    return 'unknown';
+  }
+}
+
 /** No `EmbeddingModelPort` adapter exists for OpenRouter — probed directly against its documented REST endpoint (OpenAI-compatible shape). */
 export async function probeOpenRouterEmbeddings(apiKey: Secret<string>, fetchImpl: typeof fetch = fetch): Promise<EmbeddingProbeOutcome> {
   try {
@@ -68,7 +79,7 @@ export async function probeOpenRouterEmbeddings(apiKey: Secret<string>, fetchImp
     if (!response.ok) {
       return { provider: 'openrouter', supported: false, detail: `HTTP ${response.status}` };
     }
-    return { provider: 'openrouter', supported: true, detail: `HTTP ${response.status}` };
+    return { provider: 'openrouter', supported: true, detail: `HTTP ${response.status} — embedding dimensions observed: ${await observedDimensions(response)}` };
   } catch {
     return { provider: 'openrouter', supported: false, detail: 'network error' };
   }
