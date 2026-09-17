@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import postgres from 'postgres';
 import { provisionTestDatabase, type ProvisionedTestDatabase } from '../../testing/provision';
-import { queryDescendantIds } from './subtree';
+import { queryDescendantIds, trashLiveDescendants } from './subtree';
 
 let db: ProvisionedTestDatabase;
 let sql: postgres.Sql;
@@ -43,6 +43,19 @@ async function seedWorkspace(): Promise<string> {
     INSERT INTO workspaces (owner_id, name, slug) VALUES (${user!.id}, 'Acme', ${`acme-${crypto.randomUUID()}`}) RETURNING id
   `;
   return workspace!.id as string;
+}
+
+/** The `trashed_by` actor `trashLiveDescendants` stamps every affected row with. */
+async function seedUser(): Promise<string> {
+  const [plan] = await sql`
+    INSERT INTO plans (name, max_workspaces, max_seats, max_storage_bytes, max_ai_tokens_monthly)
+    VALUES (${`plan-${crypto.randomUUID()}`}, 10, 5, '1000000', '1000') RETURNING id
+  `;
+  const [user] = await sql`
+    INSERT INTO users (email, password_hash, display_name, plan_id)
+    VALUES (${`actor-${crypto.randomUUID()}@example.com`}, 'hash', 'Actor', ${plan!.id}) RETURNING id
+  `;
+  return user!.id as string;
 }
 
 describe('queryDescendantIds', () => {
@@ -124,4 +137,75 @@ describe('queryDescendantIds', () => {
     expect(planText).toContain('nodes_ws_path_idx');
     void targetShelfId;
   }, 30_000);
+
+  // deletion-and-trash design.md Decision 3: `trashNode()`'s live descendant
+  // count must exclude rows already trashed by an earlier operation.
+  test('liveOnly excludes a descendant already trashed by an earlier operation', async () => {
+    const workspaceId = await seedWorkspace();
+    const root = await insertNode(workspaceId, null, 'workspace', 'root');
+    const shelf = await insertNode(workspaceId, root.id, 'shelf', 'shelf');
+    const book = await insertNode(workspaceId, shelf.id, 'book', 'book');
+    const page = await insertNode(workspaceId, book.id, 'page', 'page');
+    await sql`UPDATE nodes SET trashed_at = now(), trash_operation_id = ${crypto.randomUUID()} WHERE id = ${page.id}`;
+
+    const ids = await queryDescendantIds(sql, { workspaceId, ancestorPath: shelf.path, liveOnly: true });
+
+    expect(new Set(ids)).toEqual(new Set([shelf.id, book.id]));
+  });
+
+  test('liveOnly combines with excludeSelf', async () => {
+    const workspaceId = await seedWorkspace();
+    const root = await insertNode(workspaceId, null, 'workspace', 'root');
+    const shelf = await insertNode(workspaceId, root.id, 'shelf', 'shelf');
+    const book = await insertNode(workspaceId, shelf.id, 'book', 'book');
+    await sql`UPDATE nodes SET trashed_at = now(), trash_operation_id = ${crypto.randomUUID()} WHERE id = ${book.id}`;
+
+    const ids = await queryDescendantIds(sql, { workspaceId, ancestorPath: shelf.path, excludeSelf: true, liveOnly: true });
+
+    expect(ids).toEqual([]);
+  });
+});
+
+describe('trashLiveDescendants', () => {
+  test('stamps every live row at or under the ancestor path with the same operation, self-inclusive', async () => {
+    const workspaceId = await seedWorkspace();
+    const userId = await seedUser();
+    const root = await insertNode(workspaceId, null, 'workspace', 'root');
+    const shelf = await insertNode(workspaceId, root.id, 'shelf', 'shelf');
+    const book = await insertNode(workspaceId, shelf.id, 'book', 'book');
+    const page = await insertNode(workspaceId, book.id, 'page', 'page');
+    const operationId = crypto.randomUUID();
+
+    const stamped = await trashLiveDescendants(sql, { workspaceId, ancestorPath: book.path, operationId, userId });
+
+    expect(new Set(stamped)).toEqual(new Set([book.id, page.id]));
+    const rows = await sql<{ id: string; trashed_at: Date | null; trash_operation_id: string | null; trashed_by: string | null }[]>`
+      SELECT id, trashed_at, trash_operation_id, trashed_by FROM nodes WHERE id = ANY(${[book.id, page.id]})
+    `;
+    for (const row of rows) {
+      expect(row.trashed_at).not.toBeNull();
+      expect(row.trash_operation_id).toBe(operationId);
+      expect(row.trashed_by).toBe(userId);
+    }
+    const [untouched] = await sql<{ trashed_at: Date | null }[]>`SELECT trashed_at FROM nodes WHERE id = ${shelf.id}`;
+    expect(untouched!.trashed_at).toBeNull();
+  });
+
+  test('a descendant already trashed by an earlier operation keeps its own operation id', async () => {
+    const workspaceId = await seedWorkspace();
+    const userId = await seedUser();
+    const root = await insertNode(workspaceId, null, 'workspace', 'root');
+    const shelf = await insertNode(workspaceId, root.id, 'shelf', 'shelf');
+    const book = await insertNode(workspaceId, shelf.id, 'book', 'book');
+    const page = await insertNode(workspaceId, book.id, 'page', 'page');
+    const earlierOpId = crypto.randomUUID();
+    await sql`UPDATE nodes SET trashed_at = now(), trash_operation_id = ${earlierOpId} WHERE id = ${page.id}`;
+    const operationId = crypto.randomUUID();
+
+    const stamped = await trashLiveDescendants(sql, { workspaceId, ancestorPath: book.path, operationId, userId });
+
+    expect(stamped).toEqual([book.id]);
+    const [pageRow] = await sql<{ trash_operation_id: string | null }[]>`SELECT trash_operation_id FROM nodes WHERE id = ${page.id}`;
+    expect(pageRow!.trash_operation_id).toBe(earlierOpId);
+  });
 });
