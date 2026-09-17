@@ -75,26 +75,37 @@ Chain strategy: stacked-to-main
 
 *3.1 is sequential and blocks the rest of this phase; 3.2–3.19 touch disjoint files and can run in parallel worktrees once 3.1 lands.*
 
-- [ ] 3.1 (sequential) GREEN: `packages/db/src/nodes/subtree.ts` — `liveOnly` option on `queryDescendantIds`; new `trashLiveDescendants(tx, { workspaceId, ancestorPath, operationId, userId })`; add to `ALLOW_LIST`.
-- [ ] 3.2 (parallel) RED: `packages/db/src/nodes/create.test.ts` — create under a trashed parent is refused; create with a trashed sibling's slug succeeds.
-- [ ] 3.3 (parallel) GREEN: `packages/db/src/nodes/create.ts` — lookups and `resolveSiblingSlug` over `live_nodes`.
-- [ ] 3.4 (parallel) RED: `packages/db/src/nodes/rename.test.ts` — renaming a trashed node is refused identically to an unknown node; renaming to a trashed sibling's slug succeeds.
-- [ ] 3.5 (parallel) GREEN: `packages/db/src/nodes/rename.ts` — live-view lookups.
-- [ ] 3.6 (parallel) RED: `packages/db/src/nodes/move.test.ts` — moving into a trashed target container is refused.
-- [ ] 3.7 (parallel) GREEN: `packages/db/src/nodes/move.ts` — live-view lookups.
-- [ ] 3.8 (parallel) RED: `packages/db/src/nodes/reorder.test.ts` — reordering excludes trashed siblings from the live position sequence.
-- [ ] 3.9 (parallel) GREEN: `packages/db/src/nodes/reorder.ts` — live-view lookups.
-- [ ] 3.10 (parallel) RED: `packages/db/src/content/read-page.test.ts` — a former reader requesting a now-trashed page's content is denied identically to an unknown page (`page-content` spec).
-- [ ] 3.11 (parallel) GREEN: `packages/db/src/content/read-page.ts` — join `live_page_content`.
-- [ ] 3.12 (parallel) RED: `packages/db/src/content/save-page.test.ts` — saving to a trashed page is denied identically to absence.
-- [ ] 3.13 (parallel) GREEN: `packages/db/src/content/save-page.ts` — check `live_nodes` before the write transaction opens.
-- [ ] 3.14 (parallel) RED: `packages/db/src/revisions/queries.test.ts` — a former reader's history query on a now-trashed page is denied identically to no `read` (`revision-history` spec).
-- [ ] 3.15 (parallel) GREEN: `packages/db/src/revisions/queries.ts` — join `live_nodes`.
-- [ ] 3.16 (parallel) RED: `packages/db/src/changesets/history.test.ts` — a trashed page's revisions are excluded from book history for a subject without `manage` on that page; other pages in the same changeset still appear (`changesets` spec).
-- [ ] 3.17 (parallel) GREEN: `packages/db/src/changesets/history.ts` — join `live_nodes` per revision row.
-- [ ] 3.18 (parallel) RED: `packages/db/src/comments/queries.test.ts` — comment data for a trashed page is fully absent for a former reader, scanned with `expect-no-disclosure` (`comment-threads` spec).
-- [ ] 3.19 (parallel) GREEN: `packages/db/src/comments/queries.ts` — join `live_nodes`.
-- [ ] 3.20 Run `bun run scripts/checks/trash-filter.ts` — confirm every file touched in this phase is green; route-layer files stay red until Phase 4.
+- [x] 3.1 (sequential) GREEN: `packages/db/src/nodes/subtree.ts` — `liveOnly` option on `queryDescendantIds`; new `trashLiveDescendants(tx, { workspaceId, ancestorPath, operationId, userId })`; add to `ALLOW_LIST`.
+- [x] 3.2 (parallel) RED: `packages/db/src/nodes/create.test.ts` — create under a trashed parent is refused; create with a trashed sibling's slug succeeds.
+- [x] 3.3 (parallel) GREEN: `packages/db/src/nodes/create.ts` — lookups and `resolveSiblingSlug` over `live_nodes`.
+- [x] 3.4 (parallel) RED: `packages/db/src/nodes/rename.test.ts` — renaming a trashed node is refused identically to an unknown node; renaming to a trashed sibling's slug succeeds.
+- [x] 3.5 (parallel) GREEN: `packages/db/src/nodes/rename.ts` — live-view lookups.
+- [x] 3.6 (parallel) RED: `packages/db/src/nodes/move.test.ts` — moving into a trashed target container is refused.
+- [x] 3.7 (parallel) GREEN: `packages/db/src/nodes/move.ts` — live-view lookups.
+- [x] 3.8 (parallel) RED: `packages/db/src/nodes/reorder.test.ts` — reordering excludes trashed siblings from the live position sequence.
+- [x] 3.9 (parallel) GREEN: `packages/db/src/nodes/reorder.ts` — live-view lookups.
+- [ ] 3.10 (parallel) RED: `packages/db/src/content/read-page.test.ts` — a former reader requesting a now-trashed page's content is denied identically to an unknown page (`page-content` spec). **Not in this work unit's assigned scope — see apply-progress.md.**
+- [ ] 3.11 (parallel) GREEN: `packages/db/src/content/read-page.ts` — join `live_page_content`. **Not in this work unit's assigned scope — see apply-progress.md.**
+- [ ] 3.12 (parallel) RED: `packages/db/src/content/save-page.test.ts` — saving to a trashed page is denied identically to absence. **Not in this work unit's assigned scope — see apply-progress.md.**
+- [ ] 3.13 (parallel) GREEN: `packages/db/src/content/save-page.ts` — check `live_nodes` before the write transaction opens. **Not in this work unit's assigned scope — see apply-progress.md.**
+- [x] 3.14 (parallel) RED: `packages/db/src/revisions/queries.test.ts` — a former reader's history query on a now-trashed page is denied identically to no `read` (`revision-history` spec).
+- [x] 3.15 (parallel) GREEN: `packages/db/src/revisions/queries.ts` — join `live_nodes`.
+- [x] 3.16 (parallel) RED: `packages/db/src/changesets/history.test.ts` — a trashed page's revisions are excluded from book history for a subject without `manage` on that page; other pages in the same changeset still appear (`changesets` spec).
+- [x] 3.17 (parallel) GREEN: `packages/db/src/changesets/history.ts` — join `live_nodes` per revision row.
+- [x] 3.18 (parallel) RED: `packages/db/src/comments/queries.test.ts` — comment data for a trashed page is fully absent for a former reader, scanned with `expect-no-disclosure` (`comment-threads` spec).
+- [x] 3.19 (parallel) GREEN: `packages/db/src/comments/queries.ts` — join `live_nodes`.
+- [x] 3.20 Run `bun run scripts/checks/trash-filter.ts` — confirm every file touched in this phase is green; route-layer files stay red until Phase 4. (`content/read-page.ts`/`save-page.ts` — tasks 3.10–3.13 — remain untouched; not flagged by the check since they are Decision-2 initial `ALLOW_LIST` entries, but functionally still pending, out of this work unit's scope.)
+- [x] 3.21 RED: `packages/db/src/changesets/resolve-changeset.test.ts` — `resolveBookId` on a trashed node id returns `null`, identically to an unknown id (gap file found by task 2.4's red list, not named by any prior task).
+- [x] 3.22 GREEN: `packages/db/src/changesets/resolve-changeset.ts` — the ancestor-walk CTE reads `live_nodes`.
+- [x] 3.23 RED: `packages/db/src/changesets/book-diff.test.ts` — a trashed page's revisions are excluded from `listChangedPagesSince` for the book-level diff (`trash-non-disclosure` spec — "diff" is a named surface; gap file, not named by any prior task).
+- [x] 3.24 GREEN: `packages/db/src/changesets/book-diff.ts` — join `live_nodes` in the touched-pages query.
+- [x] 3.25 RED: `packages/db/src/comments/reconcile-comments.test.ts` — reconciliation for a trashed page's anchored comments is a no-op, identically to a page with none (gap file, not named by any prior task).
+- [x] 3.26 GREEN: `packages/db/src/comments/reconcile-comments.ts` — join `live_nodes` in the anchored-roots query.
+- [x] 3.27 RED: `packages/db/src/locks/page-lock.test.ts` — `readLockStatus` on a trashed page reports `held: false`, identically to no lock at all (gap file, not named by any prior task).
+- [x] 3.28 GREEN: `packages/db/src/locks/page-lock.ts` — join `live_nodes` in `readLockStatus`. (`acquireLock`/`heartbeatLock`/`takeOverLock` are write actions gated by the route's own permission check, out of scope here — recorded as a Finding.)
+- [x] 3.29 RED: `packages/db/src/presence/queries.test.ts` — `listActivePresence` excludes a trashed page's presence row (gap file, not named by any prior task).
+- [x] 3.30 GREEN: `packages/db/src/presence/queries.ts` — join `live_nodes`.
+- [x] 3.31 Run `bun run scripts/checks/trash-filter.ts` again — confirm all five gap-file `ALLOW_LIST` entries are gone and the check is green with no `Phase 3/4 pending` entries left for the db layer (`apps/api/src/routes/comments.ts` remains — Phase 4).
 
 ## Phase 4: Green One File At A Time — api Routes
 
