@@ -489,7 +489,17 @@ export default defineAppConfig({
     // project `--text-*` role in a slot override is read as a colour and
     // dropped. The description the library ships, `text-sm text-muted`
     // (14px / 20px), already is `body-medium`.
-    modal: { slots: { content: 'bg-accented', title: 'text-2xl font-normal text-highlighted' } },
+    //
+    // Where a modal stands: the ladder in docs/DESIGN-SYSTEM.md §4.5.
+    // Every Reka overlay portals into the body at `z-index: auto`, so two
+    // of them stack by the order they opened — and at 320 the sidebar
+    // drawer, opened after "Leave without saving?" had been asked from a
+    // row in it, stood *above* the question (2026-09-17). A modal is a
+    // question or a form the person must settle before anything else, so
+    // it takes the rung above the drawer, the menus and the popovers;
+    // scrim and content alike, or the scrim would not cover the drawer.
+    // `ConfirmDialog` takes the rung above this one.
+    modal: { slots: { overlay: 'z-60', content: 'z-60 bg-accented', title: 'text-2xl font-normal text-highlighted' } },
     popover: { slots: { content: 'bg-accented' } },
   },
 });

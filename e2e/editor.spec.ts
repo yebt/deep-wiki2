@@ -921,6 +921,12 @@ async function shotShell(page: Page, name: string): Promise<void> {
   await page.screenshot({ path: `${SHOTS}/fb-shell-${name}.png`, fullPage: false });
 }
 
+/** The 2026-09-17 batch's review material: the confirm dialog above the drawer. */
+async function shotRoutes(page: Page, name: string): Promise<void> {
+  if (!SHOTS) return;
+  await page.screenshot({ path: `${SHOTS}/fb-routes-${name}.png`, fullPage: false });
+}
+
 async function useTheme(page: Page, theme: 'light' | 'dark'): Promise<void> {
   await page.addInitScript((value) => localStorage.setItem('nuxt-color-mode', value), theme);
 }
@@ -1276,5 +1282,90 @@ for (const { theme, width } of [
       await expect(dialog).toBeHidden();
       await expect(editor).toContainText('Not saved yet.');
     });
+
+    /**
+     * The question outranks the drawer it was asked from (owner decision,
+     * 2026-09-17; docs/DESIGN-SYSTEM.md §4.5). Recorded on 2026-09-16 as
+     * known-and-not-fixed: at 320 the drawer — a Reka dialog portalled into
+     * the body when opened — stood *above* "Leave without saving?", both
+     * at `z-index: auto`, so Escape could answer it and a pointer could
+     * not. What this measures is the pointer's view: the element at the
+     * centre of Cancel is Cancel, the scrim covers the drawer's row, and —
+     * focus being Reka's own stack, untouched by the rung — focus is in
+     * the dialog while the drawer waits behind it, and back on the row
+     * that asked once it closes.
+     */
+    if (width === 320) {
+      test('asked from a row in the open drawer, the dialog stands above the drawer: the pointer reaches Cancel, focus is inside, and returns to the row', async ({ page }) => {
+        test.setTimeout(90000);
+        await signInAs(page, editorFixtures.writerSessionToken);
+        await useTheme(page, theme);
+
+        await page.goto(pageEditUrl(seed.workspaceSlug, editorFixtures.editablePageId));
+        const editor = page.getByTestId('editor-surface');
+        await expect(editor).toContainText(editorFixtures.editablePageMarkdown.trim(), { timeout: 30000 });
+        await caretToEnd(editor);
+        await page.keyboard.type(' Not saved yet.');
+        await expect(page.locator('#content-bar').getByRole('button', { name: /^Save/ })).not.toHaveAttribute('aria-disabled');
+
+        await page.getByRole('button', { name: 'Open sidebar' }).click();
+        // The drawer is the dialog that slides in from a side. By CSS rather
+        // than by role: once the question opens, Reka hides everything else
+        // from assistive technology, and a role query would find nothing —
+        // which is the point of the measurement, not an obstacle to it.
+        const drawer = page.locator('[role="dialog"][data-side]');
+        const row = drawer.locator('[role="treeitem"]', { hasText: editorFixtures.editablePageTitle }).first();
+        await expect(row).toBeVisible({ timeout: 30000 });
+        await row.getByText(editorFixtures.editablePageTitle).click();
+
+        const dialog = page.getByRole('dialog', { name: 'Leave without saving?' });
+        await expect(dialog).toBeVisible();
+        await expect(drawer).toBeVisible();
+        const cancel = dialog.getByRole('button', { name: 'Keep editing' });
+        await expect(cancel).toBeFocused();
+
+        // The dialog is on the rung above the drawer, scrim and content.
+        const stacking = await page.evaluate(() => {
+          const question = document.querySelector<HTMLElement>('[role="dialog"]:not([data-side])')!;
+          const overlay = document.querySelector<HTMLElement>('[data-slot="overlay"].z-70')!;
+          const drawerPane = document.querySelector<HTMLElement>('[role="dialog"][data-side]')!;
+          return { content: getComputedStyle(question).zIndex, overlay: getComputedStyle(overlay).zIndex, drawer: getComputedStyle(drawerPane).zIndex };
+        });
+        expect(stacking).toEqual({ content: '70', overlay: '70', drawer: 'auto' });
+
+        // What the pointer would hit: Cancel, at its own centre, and the
+        // scrim — never the drawer's row — at the row's centre.
+        const cancelBox = (await cancel.boundingBox())!;
+        const rowBox = (await row.boundingBox())!;
+        const hit = await page.evaluate(
+          ({ cancelAt, rowAt }) => {
+            const describe = (element: Element | null) => {
+              if (!element) return null;
+              const dialog = element.closest('[role="dialog"]');
+              return { text: element.textContent?.trim() ?? '', inDialog: dialog !== null && !dialog.hasAttribute('data-side'), inDrawer: dialog !== null && dialog.hasAttribute('data-side') };
+            };
+            return {
+              cancel: describe(document.elementFromPoint(cancelAt.x, cancelAt.y)?.closest('button') ?? document.elementFromPoint(cancelAt.x, cancelAt.y)),
+              row: describe(document.elementFromPoint(rowAt.x, rowAt.y)),
+            };
+          },
+          { cancelAt: { x: cancelBox.x + cancelBox.width / 2, y: cancelBox.y + cancelBox.height / 2 }, rowAt: { x: rowBox.x + rowBox.width / 2, y: rowBox.y + rowBox.height / 2 } },
+        );
+        expect(hit.cancel).toEqual({ text: 'Keep editing', inDialog: true, inDrawer: false });
+        expect(hit.row?.inDrawer, 'the scrim covers the drawer').toBe(false);
+        await shotRoutes(page, `edit-confirm-drawer-${width}-${theme}`);
+
+        // Focus is trapped in the dialog while the drawer waits behind it.
+        await page.keyboard.press('Tab');
+        await expect(dialog.getByRole('button', { name: 'Leave' })).toBeFocused();
+        await page.keyboard.press('Tab');
+        await expect(cancel).toBeFocused();
+
+        await cancel.click();
+        await expect(dialog).toBeHidden();
+        await expect(row).toBeFocused();
+        await expect(editor).toContainText('Not saved yet.');
+      });
+    }
   });
 }
