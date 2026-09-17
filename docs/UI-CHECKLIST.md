@@ -1588,6 +1588,25 @@ saving?" from the previous entry; the two-icon-pack requirement (§4.3) remains 
    `fb-editor2-source-{1280-light,1280-dark,320-light}.png` and
    `fb-editor2-source-refused-1280-light.png`.
 
+4. **The creation dialog asks only what it does not know.** From a row's context menu ("New
+   page…" on a book) the place and the kind are answered by the invocation, so the dialog is
+   "New page", leads with the name field — focused (§5) — and states the answers in one line
+   ("Page in “Handbook”") beside a "Change…" disclosure (`aria-expanded`, `aria-controls`)
+   that reveals the radios pre-answered. From the toolbar the kind is a guess, so the radios
+   show as before, with or without a row picked. One component, two shapes, one submit path
+   (§4.1). Measured in `e2e/tree-writes.spec.ts` against the real API: the menu path creates
+   the page under the book from the name alone; both shapes at 1280 light, 1280 dark and 320
+   with `expectNoHorizontalOverflow`. Screenshots
+   `fb-editor2-dialog-{answered,asking}-{1280-light,1280-dark,320-light}.png`.
+
+**Known before review, not fixed**
+
+- Save is icon-only below `sm` (item 3); the owner may prefer the "Editing" crumb to give
+  instead. A syntax-highlighting layer for the source view is recorded as a future item, not
+  built (`docs/TODO.md`). The bare-URL rule keeps a trailing `.` or `)` in the link, where GFM's
+  autolink parse would trim it (item 2). The two-icon-pack requirement (§4.3) remains untested;
+  everything the 2026-09-16 entries carried forward and this batch did not touch.
+
 ---
 
 *The next entry goes below this one.*

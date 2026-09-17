@@ -534,6 +534,29 @@ makes conventions portable across projects.
 
 Discoveries and constraints. Newest first.
 
+### 2026-09-17 — The creation dialog asks only what it does not know
+
+**What was wrong.** `NavigationTreeActions.vue`'s "New item" dialog showed the Location and Type
+radios even when a row's context menu had already answered both — "New page…" on a chapter
+opened a dialog that asked "Location? Type?" with the answers pre-selected, and the name field,
+the only real question, stood third (owner decision, 2026-09-17).
+
+**What changed.** `openCreate(type)` now records whether the invocation *answered* the kind
+(`answered`: a `type` was given and the picked row may hold it). When it did, the dialog is
+titled for the thing being made ("New page", "New chapter"), leads with the name field —
+focused through `UInput`'s `autofocus`, which lands after Reka's own initial focus — and states
+the two answers in one line ("Page in “Onboarding”", or "Shelf at the top level") beside a
+"Change…" disclosure: a text button with `aria-expanded`/`aria-controls` that reveals the same
+two radio groups, pre-answered, and reads "Hide the choices" while they show. From the toolbar
+the kind is only a guess (the first legal one), so the radios show as before, whether or not a
+row is picked; a type the row cannot hold ("New book…" would never be offered on a chapter, but
+the exposed method is callable) falls back to the asking shape. One dialog, two shapes, one
+submit path (`NavigationTreeActions.test.ts`: both shapes, the disclosure both ways, the posted
+body; `e2e/tree-writes.spec.ts`: the menu path against the real API, the created row, both
+shapes at 1280 light, 1280 dark and 320 with `expectNoHorizontalOverflow`).
+
+**Not changed.** The Rename dialog, which never asked anything it knew.
+
 ### 2026-09-17 — Source mode: one edit mode, two views of one buffer, and what the toggle refuses
 
 **Shape.** `pages/[id]/edit.vue` owns `currentMarkdown` and always did; source mode

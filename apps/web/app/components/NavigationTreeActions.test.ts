@@ -341,3 +341,115 @@ describe('NavigationTreeActions — the toolbar row', () => {
     expect(rename.className).toMatch(/\bmin-h-8\b/);
   });
 });
+
+/**
+ * The creation dialog asks only what it does not know (owner decision,
+ * 2026-09-17). Opened from a row's context menu — "New page…" on a
+ * chapter — the location and the type are already answered by the
+ * invocation, so the dialog is titled for the thing being made, leads
+ * with the name field, focused, and states the two answers in one line
+ * with a "Change…" disclosure that reveals the radios. Opened from the
+ * toolbar, where the type is not known (and, with no row picked, neither
+ * is the place), the radios show as before.
+ */
+describe('NavigationTreeActions — the dialog asks only what it does not know', () => {
+  function actions(m: Mounted) {
+    return m.wrapper.findComponent(NavigationTreeActions).vm as unknown as { openCreate: (type?: string) => void };
+  }
+
+  function dialogTitle(m: Mounted): string {
+    for (const root of m.roots) {
+      const heading = root.querySelector('.dw-create-dialog-title');
+      if (heading) return heading.textContent?.trim() ?? '';
+    }
+    return '';
+  }
+
+  test('from a row’s "New page…": titled "New page", the name first and focused, the answers summarised, no radios', async () => {
+    const mounted = await mountActions({ selectedId: 'chapter-1' });
+    actions(mounted).openCreate('page');
+    await settle();
+
+    expect(dialogTitle(mounted)).toBe('New page');
+    expect(byTestId(mounted, 'tree-create-location')).toBeNull();
+    expect(byTestId(mounted, 'tree-create-type')).toBeNull();
+    const summary = byTestId(mounted, 'tree-create-summary')!;
+    expect(summary.textContent).toContain('Page in “Onboarding”');
+
+    const title = byTestId(mounted, 'tree-create-title') as HTMLInputElement;
+    // `UInput`'s `autofocus` focuses on a macrotask after mount, after
+    // Reka's own initial focus has landed on the first tabbable control.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(document.activeElement).toBe(title);
+    // The name field precedes the summary and its disclosure in the dialog's order.
+    const dialog = title.closest('[role="dialog"]')!;
+    const order = Array.from(dialog.querySelectorAll<HTMLElement>('[data-testid="tree-create-title"], [data-testid="tree-create-summary"]'));
+    expect(order.map((el) => el.dataset.testid)).toEqual(['tree-create-title', 'tree-create-summary']);
+  });
+
+  test('"Change…" reveals the radios with the invocation’s answers checked, and says it is expanded', async () => {
+    const mounted = await mountActions({ selectedId: 'chapter-1' });
+    actions(mounted).openCreate('page');
+    await settle();
+
+    const change = byTestId(mounted, 'tree-create-change')!;
+    expect(change.getAttribute('aria-expanded')).toBe('false');
+    change.click();
+    await settle();
+
+    expect(change.getAttribute('aria-expanded')).toBe('true');
+    expect(checkedRadio(mounted, 'tree-create-location')).toBe('chapter-1');
+    expect(radioValues(mounted, 'tree-create-type')).toEqual(legalChildTypes('chapter'));
+    expect(checkedRadio(mounted, 'tree-create-type')).toBe('page');
+    expect(byTestId(mounted, 'tree-create-summary')).toBeNull();
+    // The region the button controls is the one holding the radios.
+    const controls = change.getAttribute('aria-controls')!;
+    const region = mounted.roots.map((root) => root.querySelector(`#${controls}`)).find(Boolean)!;
+    expect(region.querySelector('[data-testid="tree-create-type"]')).not.toBeNull();
+
+    // Collapsing brings the summary back, reflecting the radios as they stand.
+    change.click();
+    await settle();
+    expect(change.getAttribute('aria-expanded')).toBe('false');
+    expect(byTestId(mounted, 'tree-create-summary')!.textContent).toContain('Page in “Onboarding”');
+  });
+
+  test('the pre-answered dialog posts the invocation’s location and type with the name', async () => {
+    const createFetcher = vi.fn(async () => ({ id: 'new-2', parentId: 'book-1', type: 'chapter' as const, slug: 'two', title: 'Chapter two', position: 1 }));
+    const mounted = await mountActions({ selectedId: 'book-1', createFetcher });
+    actions(mounted).openCreate('chapter');
+    await settle();
+    expect(dialogTitle(mounted)).toBe('New chapter');
+
+    await typeAndSubmit(mounted, 'tree-create-title', 'tree-create-submit', 'Chapter two');
+
+    expect(createFetcher).toHaveBeenCalledWith({ parentId: 'book-1', type: 'chapter', title: 'Chapter two' });
+  });
+
+  test('from the toolbar the type is not known, so the radios show — with a row picked and with none', async () => {
+    const withRow = await mountActions({ selectedId: 'book-1' });
+    await openCreate(withRow);
+    expect(dialogTitle(withRow)).toBe('New item');
+    expect(byTestId(withRow, 'tree-create-type')).not.toBeNull();
+    expect(byTestId(withRow, 'tree-create-location')).not.toBeNull();
+    expect(byTestId(withRow, 'tree-create-summary')).toBeNull();
+    withRow.wrapper.unmount();
+    mounted = null;
+
+    const withNone = await mountActions({ nodes: [], selectedId: null });
+    await openCreate(withNone);
+    expect(dialogTitle(withNone)).toBe('New item');
+    expect(byTestId(withNone, 'tree-create-type')).not.toBeNull();
+    expect(byTestId(withNone, 'tree-create-summary')).toBeNull();
+  });
+
+  test('a type the row cannot hold is not pre-answered: the radios show with the first legal type', async () => {
+    const mounted = await mountActions({ selectedId: 'chapter-1' });
+    actions(mounted).openCreate('book');
+    await settle();
+
+    expect(dialogTitle(mounted)).toBe('New item');
+    expect(byTestId(mounted, 'tree-create-type')).not.toBeNull();
+    expect(checkedRadio(mounted, 'tree-create-type')).toBe('page');
+  });
+});

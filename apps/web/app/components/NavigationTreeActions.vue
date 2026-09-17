@@ -198,6 +198,19 @@ function openCreate(): void {
 }
 
 /**
+ * The dialog asks only what it does not know (owner decision,
+ * 2026-09-17). Opened from a row's context menu — "New page…" on a
+ * chapter — the invocation has answered both the place and the kind, so
+ * `answered` is true: the dialog is titled for the thing being made,
+ * leads with the name, and states the two answers in one line with a
+ * "Change…" disclosure (`choicesShown`) that reveals the radios. Opened
+ * from the toolbar the kind is a guess (the first legal one) and the
+ * radios show as before, whether or not a row is picked.
+ */
+const answered = ref(false);
+const choicesShown = ref(false);
+
+/**
  * `type` is the row's context menu asking for a specific child ("New
  * page…" on a chapter); the toolbar asks for none and gets the first
  * legal one. Either way the location is the picked row, so the menu
@@ -206,12 +219,24 @@ function openCreate(): void {
 function openCreateAs(type?: NodeType): void {
   createParentId.value = nearestContainerId.value;
   const legal = legalChildTypes(typeOf(createParentId.value));
-  createType.value = (type && legal.includes(type) ? type : (legal[0] ?? 'shelf')) as NodeType;
+  const known = type !== undefined && legal.includes(type);
+  createType.value = (known ? type : (legal[0] ?? 'shelf')) as NodeType;
+  answered.value = known;
+  choicesShown.value = !known;
   createTitle.value = '';
   createNameError.value = null;
   createFormError.value = null;
   createOpen.value = true;
 }
+
+/** "New page" when the invocation named the kind; "New item" when the dialog is about to ask. */
+const createDialogTitle = computed(() => (answered.value ? `New ${TYPE_LABELS[createType.value].toLowerCase()}` : 'New item'));
+
+/** The one line that stands in for the two radio groups: "Page in “Onboarding”", or "Shelf at the top level". */
+const createSummary = computed(() => {
+  const kind = TYPE_LABELS[createType.value];
+  return createParentId.value === rootLocationId.value ? `${kind} at ${ROOT_LABEL}` : `${kind} in “${titleOf(createParentId.value)}”`;
+});
 
 const canSubmitCreate = computed(() => createTitle.value.trim().length > 0 && createTypeOptions.value.length > 0);
 
@@ -395,25 +420,70 @@ function applyWriteError(
       {{ announcement }}
     </p>
 
-    <UModal v-model:open="createOpen" title="New item" description="Add a shelf, book, chapter or page to this workspace.">
+    <!-- Titled for the thing being made when the invocation named it;
+         "New item" when the dialog is about to ask. `:ui.title` carries a
+         test id so a test reads the heading and not the whole dialog. -->
+    <UModal
+      v-model:open="createOpen"
+      :title="createDialogTitle"
+      :description="answered ? 'Give it a name. The address is made from the name.' : 'Add a shelf, book, chapter or page to this workspace.'"
+      :ui="{ title: 'dw-create-dialog-title' }"
+    >
       <template #body>
         <div class="space-y-6">
           <p v-if="createFormError" role="alert" data-testid="tree-create-error" class="rounded-md bg-error-container px-3 py-2 text-body-small text-on-error-container">
             {{ createFormError }}
           </p>
 
-          <UFormField v-if="locationOptions.length > 1" label="Location" required>
-            <URadioGroup v-model="createParentId" :items="locationOptions" data-testid="tree-create-location" />
+          <!-- The name first and focused when the place and the kind are
+               already answered (the invocation was "New page…" on a row);
+               after the choices when they are still to be made, so the
+               form reads in the order it is filled. `autofocus` is what
+               Reka's dialog honours for its initial focus. -->
+          <UFormField v-if="answered" label="Name" required :error="createNameError ?? undefined" data-testid="tree-create-title-field">
+            <UInput
+              v-model="createTitle"
+              class="w-full"
+              autocomplete="off"
+              autofocus
+              data-testid="tree-create-title"
+              @keydown.enter.prevent="submitCreate"
+            />
           </UFormField>
-          <p v-else data-testid="tree-create-location-fixed" class="text-body-medium text-muted">
-            This will be created at the top level of the workspace.
+
+          <!-- The two answers in one line, with the disclosure that turns
+               them back into questions. A text button (`link`), named for
+               what it reveals, `aria-expanded` and `aria-controls` on the
+               region below (§5). -->
+          <p v-if="answered" class="flex flex-wrap items-baseline gap-x-3 text-body-medium text-default">
+            <span v-if="!choicesShown" data-testid="tree-create-summary">{{ createSummary }}</span>
+            <UButton
+              variant="link"
+              size="sm"
+              class="p-0"
+              :aria-expanded="choicesShown ? 'true' : 'false'"
+              aria-controls="tree-create-choices"
+              data-testid="tree-create-change"
+              @click="choicesShown = !choicesShown"
+            >
+              {{ choicesShown ? 'Hide the choices' : 'Change…' }}
+            </UButton>
           </p>
 
-          <UFormField label="Type" required :help="createTypeHelp">
-            <URadioGroup v-model="createType" :items="createTypeOptions" data-testid="tree-create-type" />
-          </UFormField>
+          <div v-if="choicesShown" id="tree-create-choices" class="space-y-6">
+            <UFormField v-if="locationOptions.length > 1" label="Location" required>
+              <URadioGroup v-model="createParentId" :items="locationOptions" data-testid="tree-create-location" />
+            </UFormField>
+            <p v-else data-testid="tree-create-location-fixed" class="text-body-medium text-muted">
+              This will be created at the top level of the workspace.
+            </p>
 
-          <UFormField label="Name" required :error="createNameError ?? undefined" data-testid="tree-create-title-field">
+            <UFormField label="Type" required :help="createTypeHelp">
+              <URadioGroup v-model="createType" :items="createTypeOptions" data-testid="tree-create-type" />
+            </UFormField>
+          </div>
+
+          <UFormField v-if="!answered" label="Name" required :error="createNameError ?? undefined" data-testid="tree-create-title-field">
             <UInput
               v-model="createTitle"
               class="w-full"
@@ -423,7 +493,7 @@ function applyWriteError(
             />
           </UFormField>
 
-          <p class="text-body-small text-muted">All fields are required. The address is made from the name.</p>
+          <p v-if="!answered" class="text-body-small text-muted">All fields are required. The address is made from the name.</p>
         </div>
       </template>
       <template #footer>
