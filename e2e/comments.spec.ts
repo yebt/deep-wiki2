@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 import { waitForHydration } from './hydration';
 import { expectNoHorizontalOverflow } from './overflow';
+import { pageEditUrl, pageUrl } from '../apps/web/app/utils/routes';
 
 /**
  * The comment gutter and thread panel on the read screen (comment-overlay
@@ -20,6 +21,7 @@ import { expectNoHorizontalOverflow } from './overflow';
 
 interface SeedFixtures {
   readonly workspaceId: string;
+  readonly workspaceSlug: string;
   readonly readerSessionToken: string;
 }
 
@@ -84,7 +86,7 @@ function dialog(page: Page) {
 test('a commenter opens a thread from the mark beside its block, replies, and resolves it — by clicking', async ({ page, context }) => {
   await signInAs(context, fixtures.commenterSessionToken);
 
-  await page.goto(`/pages/${fixtures.commentsPageId}`);
+  await page.goto(pageUrl(seed.workspaceSlug, fixtures.commentsPageId));
   await expect(page.getByRole('heading', { level: 1, name: fixtures.commentsPageTitle })).toBeVisible({ timeout: 30000 });
 
   // One mark, beside the commented block, counting root plus reply, and
@@ -151,7 +153,7 @@ test('a commenter opens a thread from the mark beside its block, replies, and re
 test('a reader with read but not comment sees the page and nothing of the overlay — no gutter, no chip, no panel', async ({ page, context }) => {
   await signInAs(context, seed.readerSessionToken);
 
-  await page.goto(`/pages/${fixtures.commentsPageId}`);
+  await page.goto(pageUrl(seed.workspaceSlug, fixtures.commentsPageId));
   await expect(page.getByRole('heading', { level: 1, name: fixtures.commentsPageTitle })).toBeVisible({ timeout: 30000 });
   await expect(page.getByText(fixtures.commentedQuote)).toBeVisible();
 
@@ -184,7 +186,7 @@ test('a reader with read but not comment sees the page and nothing of the overla
 test('a commenter starts a thread from a block’s "+": hover, type, Post — the mark and the thread appear, and survive a reload', async ({ page, context }) => {
   await signInAs(context, fixtures.commenterSessionToken);
 
-  await page.goto(`/pages/${fixtures.freshPageId}`);
+  await page.goto(pageUrl(seed.workspaceSlug, fixtures.freshPageId));
   await expect(page.getByRole('heading', { level: 1, name: fixtures.freshPageTitle })).toBeVisible({ timeout: 30000 });
   const paragraph = page.locator('article > p', { hasText: fixtures.freshFirstParagraph });
   await expect(paragraph).toHaveAttribute('data-derived-block-id', /^d:[0-9a-f]{12}#0$/);
@@ -250,7 +252,7 @@ test('a commenter starts a thread from a block’s "+": hover, type, Post — th
 test('a commenter selects words inside a block and starts a thread on them — the thread carries the selection as its excerpt', async ({ page, context }) => {
   await signInAs(context, fixtures.commenterSessionToken);
 
-  await page.goto(`/pages/${fixtures.freshPageId}`);
+  await page.goto(pageUrl(seed.workspaceSlug, fixtures.freshPageId));
   await expect(page.getByRole('heading', { level: 1, name: fixtures.freshPageTitle })).toBeVisible({ timeout: 30000 });
   const paragraph = page.locator('article > p', { hasText: fixtures.freshSecondParagraph });
   await expect(paragraph).toBeVisible();
@@ -315,7 +317,7 @@ test('a commenter selects words inside a block and starts a thread on them — t
 test('the gutter is one tab stop: the arrow keys move between the marks and the "+" slots, and Enter opens the composer', async ({ page, context }) => {
   await signInAs(context, fixtures.commenterSessionToken);
 
-  await page.goto(`/pages/${fixtures.commentsPageId}`);
+  await page.goto(pageUrl(seed.workspaceSlug, fixtures.commentsPageId));
   await expect(page.getByRole('heading', { level: 1, name: fixtures.commentsPageTitle })).toBeVisible({ timeout: 30000 });
   const gutter = page.getByRole('list', { name: 'Comments beside the text' });
   await expect(gutter).toBeVisible();
@@ -344,7 +346,7 @@ test('at 320px the affordance fits the column and nothing scrolls sideways; in d
   const narrow = await browser.newContext({ viewport: { width: 320, height: 900 } });
   const page = await narrow.newPage();
   await signInAs(narrow, fixtures.commenterSessionToken);
-  await page.goto(`/pages/${fixtures.commentsPageId}`);
+  await page.goto(pageUrl(seed.workspaceSlug, fixtures.commentsPageId));
   await expect(page.getByRole('heading', { level: 1, name: fixtures.commentsPageTitle })).toBeVisible({ timeout: 30000 });
   await expectNoHorizontalOverflow(page);
   await page.getByText('The first paragraph, which nobody has commented on.').hover();
@@ -359,7 +361,7 @@ test('at 320px the affordance fits the column and nothing scrolls sideways; in d
   const darkPage = await dark.newPage();
   await useTheme(darkPage, 'dark');
   await signInAs(dark, fixtures.commenterSessionToken);
-  await darkPage.goto(`/pages/${fixtures.commentsPageId}`);
+  await darkPage.goto(pageUrl(seed.workspaceSlug, fixtures.commentsPageId));
   await expect(darkPage.getByRole('heading', { level: 1, name: fixtures.commentsPageTitle })).toBeVisible({ timeout: 30000 });
   await darkPage.getByText('The first paragraph, which nobody has commented on.').hover();
   await shot(darkPage, 'read-hover-1280-dark');
@@ -392,7 +394,7 @@ test('a thread whose paragraph another user deleted is shown as orphaned, with i
   const editorContext = await browser.newContext();
   const editorPage = await editorContext.newPage();
   await signInAs(editorContext, fixtures.editorSessionToken);
-  await editorPage.goto(`/pages/${fixtures.orphanPageId}/edit`);
+  await editorPage.goto(pageEditUrl(seed.workspaceSlug, fixtures.orphanPageId));
   const editSurface = editorPage.getByTestId('editor-surface');
   await expect(editSurface).toBeVisible({ timeout: 30000 });
   await expect(editSurface).toContainText(fixtures.orphanQuote, { timeout: 30000 });
@@ -413,7 +415,7 @@ test('a thread whose paragraph another user deleted is shown as orphaned, with i
   const readerContext = await browser.newContext();
   const readerPage = await readerContext.newPage();
   await signInAs(readerContext, fixtures.commenterSessionToken);
-  await readerPage.goto(`/pages/${fixtures.orphanPageId}`);
+  await readerPage.goto(pageUrl(seed.workspaceSlug, fixtures.orphanPageId));
   await expect(readerPage.getByRole('heading', { level: 1, name: fixtures.orphanPageTitle })).toBeVisible({ timeout: 30000 });
   await expect(readerPage.getByText('The paragraph that stays.')).toBeVisible();
   await expect(readerPage.getByText(fixtures.orphanQuote)).toHaveCount(0);
@@ -442,7 +444,7 @@ test('a thread whose paragraph another user deleted is shown as orphaned, with i
 test('a page whose cached render predates block anchors says its comment cannot be placed yet, and still shows it', async ({ page, context }) => {
   await signInAs(context, fixtures.commenterSessionToken);
 
-  await page.goto(`/pages/${fixtures.legacyPageId}`);
+  await page.goto(pageUrl(seed.workspaceSlug, fixtures.legacyPageId));
   await expect(page.getByRole('heading', { level: 1, name: fixtures.legacyPageTitle })).toBeVisible({ timeout: 30000 });
   await expect(page.getByText(fixtures.legacyQuote)).toBeVisible();
   // The pre-backfill render carries no anchor for the gutter to use — and

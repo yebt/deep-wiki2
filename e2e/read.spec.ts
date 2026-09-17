@@ -3,6 +3,7 @@ import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 import { boundaryContrast } from './contrast';
 import { waitForHydration } from './hydration';
 import { expectNoHorizontalOverflow } from './overflow';
+import { pageHistoryUrl, pageUrl } from '../apps/web/app/utils/routes';
 
 /**
  * Read mode (document-modes spec: "Read Mode Serves Pre-Rendered HTML
@@ -23,6 +24,7 @@ import { expectNoHorizontalOverflow } from './overflow';
 interface Fixtures {
   readonly apiUrl: string;
   readonly readPageId: string;
+  readonly workspaceSlug: string;
   readonly readerSessionToken: string;
   readonly outsiderSessionToken: string;
 }
@@ -49,7 +51,7 @@ test('a reader sees the cached content, and the response never reaches the Prose
     if (/prosemirror|milkdown|tiptap/i.test(request.url())) editorRequests.push(request.url());
   });
 
-  await page.goto(`/pages/${fixtures.readPageId}`);
+  await page.goto(pageUrl(fixtures.workspaceSlug, fixtures.readPageId));
 
   // A generous timeout on the first assertion only: the dev server
   // compiles this route on first visit, which under load can take longer
@@ -63,7 +65,7 @@ test('a reader sees the cached content, and the response never reaches the Prose
 test('an outsider with no read grant sees a coherent permission-denied state, not a crash or an empty page', async ({ page, context }) => {
   await signInAs(context, fixtures.outsiderSessionToken);
 
-  await page.goto(`/pages/${fixtures.readPageId}`);
+  await page.goto(pageUrl(fixtures.workspaceSlug, fixtures.readPageId));
 
   await expect(page.getByRole('heading', { name: "You don't have access to this page" })).toBeVisible({ timeout: 30000 });
   await expect(page.getByText('E2E Read Page')).toHaveCount(0);
@@ -91,7 +93,7 @@ for (const theme of ['light', 'dark'] as const) {
     await signInAs(context, fixtures.readerSessionToken);
     await useTheme(page, theme);
 
-    await page.goto(`/pages/${fixtures.readPageId}`);
+    await page.goto(pageUrl(fixtures.workspaceSlug, fixtures.readPageId));
     const edit = page.getByRole('link', { name: 'Edit' });
     await expect(edit).toBeVisible({ timeout: 30000 });
     await expect(page.locator('html')).toHaveClass(theme === 'dark' ? /dark/ : /light/);
@@ -129,9 +131,9 @@ test('the read skeleton occupies the box the loaded document takes: title and fi
     await route.continue();
   });
 
-  await page.goto(`/pages/${fixtures.readPageId}/history`);
+  await page.goto(pageHistoryUrl(fixtures.workspaceSlug, fixtures.readPageId));
   await waitForHydration(page);
-  await page.getByRole('link', { name: 'Read page' }).click({ timeout: 30000 });
+  await page.getByRole('link', { name: 'Read page', exact: true }).click({ timeout: 30000 });
   const skeleton = page.getByTestId('read-skeleton');
   await expect(skeleton).toBeVisible({ timeout: 30000 });
   const skeletonTitle = (await skeleton.getByTestId('read-skeleton-title').boundingBox())!;
@@ -212,7 +214,7 @@ test.describe('the comments toggle', () => {
         await signInAs(context, comments.commenterSessionToken);
         await useTheme(page, theme);
 
-        await page.goto(`/pages/${comments.commentsPageId}`);
+        await page.goto(pageUrl(fixtures.workspaceSlug, comments.commentsPageId));
         await expect(page.getByRole('heading', { level: 1, name: comments.commentsPageTitle })).toBeVisible({ timeout: 30000 });
         const mark = page.getByRole('button', { name: /comments? on this block$/ });
         await expect(mark).toBeVisible({ timeout: 30000 });
@@ -276,7 +278,7 @@ test.describe('the comments toggle', () => {
         { name: 'dw-frame-sidebar-workspace', value: encodeURIComponent(JSON.stringify({ size: 17.5, collapsed: true })), domain: 'localhost', path: '/' },
       ]);
 
-      await page.goto(`/pages/${comments.commentsPageId}`);
+      await page.goto(pageUrl(fixtures.workspaceSlug, comments.commentsPageId));
       await expect(page.getByRole('heading', { level: 1, name: comments.commentsPageTitle })).toBeVisible({ timeout: 30000 });
       await expect(page.getByRole('button', { name: /on this block$/ })).toHaveCount(0);
       await expect(page.getByRole('button', { name: /^Show comments — \d+ open thread/ })).toBeVisible({ timeout: 30000 });
@@ -294,7 +296,7 @@ test.describe('the comments toggle', () => {
         await signInAs(context, fixtures.readerSessionToken);
         await context.addCookies([{ name: 'dw-comments', value: preference, domain: 'localhost', path: '/' }]);
 
-        await page.goto(`/pages/${comments.commentsPageId}`);
+        await page.goto(pageUrl(fixtures.workspaceSlug, comments.commentsPageId));
         await expect(page.getByRole('heading', { level: 1, name: comments.commentsPageTitle })).toBeVisible({ timeout: 30000 });
 
         await expect(page.locator('[data-block-id="E2ECMTTWO"]')).toHaveCount(1);

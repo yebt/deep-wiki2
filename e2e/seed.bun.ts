@@ -60,9 +60,12 @@ async function seedFixtures(sql: postgres.Sql, CHANGESET_WINDOW_MINUTES: number)
     VALUES (${`e2e-owner-${randomUUID()}@example.com`}, 'unused', 'E2E Owner')
     RETURNING id
   `;
+  // The slug is what every address the specs drive carries (`/w/<slug>/…`,
+  // apps/web/app/utils/routes.ts); the id is what the API is keyed by.
+  const workspaceSlug = `e2e-workspace-${randomUUID()}`;
   const [ws] = await sql<{ id: string }[]>`
     INSERT INTO workspaces (owner_id, name, slug)
-    VALUES (${owner!.id}, 'E2E Workspace', ${`e2e-workspace-${randomUUID()}`})
+    VALUES (${owner!.id}, 'E2E Workspace', ${workspaceSlug})
     RETURNING id
   `;
   const [root] = await sql<{ id: string }[]>`
@@ -393,6 +396,7 @@ async function seedFixtures(sql: postgres.Sql, CHANGESET_WINDOW_MINUTES: number)
     historySecondRevisionId,
     emptyHistoryPageId: emptyHistoryPage!.id,
     workspaceId: ws!.id,
+    workspaceSlug,
     bookHistoryShelfTitle: 'E2E Book Shelf',
     bookHistoryBookId: book!.id,
     bookHistoryBookTitle: 'E2E Book History Handbook',

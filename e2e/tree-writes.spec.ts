@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import { expectNoHorizontalOverflow } from './overflow';
 import { API_URL } from './ports';
+import { pageUrl, workspaceUrl } from '../apps/web/app/utils/routes';
 
 /**
  * The tree's writes are optimistic (2026-09-16; `useTree.ts`): a dropped
@@ -27,6 +28,7 @@ test.describe.configure({ mode: 'serial', timeout: 180_000 });
 
 interface SeedFixtures {
   readonly workspaceId: string;
+  readonly workspaceSlug: string;
 }
 
 interface TreeFixtures {
@@ -98,7 +100,7 @@ test.beforeAll(async ({ browser }) => {
   const fixtures = mintFixtures();
   const page = await browser.newPage();
   await signInAs(page, fixtures.writerSessionToken);
-  await page.goto(`/workspaces/${seed.workspaceId}`);
+  await page.goto(workspaceUrl(seed.workspaceSlug));
   await expect(page.getByRole('treeitem', { name: new RegExp(fixtures.secondPageTitle) })).toBeVisible({ timeout: 120_000 });
   await page.close();
 });
@@ -113,7 +115,7 @@ async function pageOrder(page: Page, fixtures: TreeFixtures): Promise<string[]> 
 /** Opens the dashboard with the writer's book unfolded and both pages on screen. */
 async function openTree(page: Page, fixtures: TreeFixtures): Promise<void> {
   await signInAs(page, fixtures.writerSessionToken);
-  await page.goto(`/workspaces/${seed.workspaceId}`);
+  await page.goto(workspaceUrl(seed.workspaceSlug));
   await expect(page.getByRole('treeitem', { name: new RegExp(fixtures.secondPageTitle) })).toBeVisible({ timeout: 120_000 });
   expect(await pageOrder(page, fixtures)).toEqual([fixtures.firstPageTitle, fixtures.secondPageTitle]);
 }
@@ -233,14 +235,14 @@ for (const [width, theme] of [
         route.fulfill({ status: 403, contentType: 'application/json', body: JSON.stringify({ error: 'forbidden' }) }),
       );
       await signInAs(page, fixtures.writerSessionToken);
-      await page.goto(`/workspaces/${seed.workspaceId}`);
+      await page.goto(workspaceUrl(seed.workspaceSlug));
       await expect(page.getByRole('heading', { level: 1, name: 'E2E Workspace' })).toBeVisible({ timeout: 120_000 });
       await openDrawerIfNarrow(page);
       const first = page.getByRole('treeitem', { name: new RegExp(fixtures.firstPageTitle) });
       await expect(first).toBeVisible({ timeout: 120_000 });
 
       await first.locator('[draggable="true"]').first().hover();
-      await expect(first.getByRole('link')).toHaveAttribute('href', `/pages/${fixtures.firstPageId}`);
+      await expect(first.getByRole('link')).toHaveAttribute('href', pageUrl(seed.workspaceSlug, fixtures.firstPageId));
       await shot(page, `tree-row-hover-${width}-${theme}`);
       await expectNoHorizontalOverflow(page, `tree row hover ${width} ${theme}`);
 

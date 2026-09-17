@@ -212,12 +212,36 @@ const frameWorkspaceSlug = computed(() => {
   return current.workspaceId.value === id ? current.workspaceSlug.value : null;
 });
 
+/**
+ * Whether the address has been checked — or there was nothing to check.
+ * A location still in flight is not a verdict either way: on the server
+ * this runs at setup, before the prefetch that answers it, and entering
+ * on the address's word there would write a pair the answer may dispute
+ * into the cookie `/` reopens on.
+ */
+const scopeSettled = computed(() => location.status.value !== 'loading');
+
+/**
+ * Whether the person is *in* the frame's workspace — the screen's response
+ * named it, or the address did and the directory confirms it is one they
+ * can open (a management screen the API refused still stands in the room
+ * the address named). Never the remembered one on its own: a screen that
+ * names nothing does not re-enter it.
+ */
+const frameWorkspaceNamed = computed(() => {
+  const id = frameWorkspaceId.value;
+  if (!id) return false;
+  if (props.workspaceId === id) return true;
+  return routeSlug.value !== null && directory.idOf(routeSlug.value) === id;
+});
+
 // Entering is what the next screen starts from and what `/` reopens, so it
-// waits for both names, and never for a workspace the address disputes.
+// waits for both names, for the address to be checked, and never for a
+// workspace the address disputes.
 watch(
-  [frameWorkspaceId, frameWorkspaceSlug, () => props.workspaceId, scopeMismatch],
-  ([id, slug, own, mismatch]) => {
-    if (id && slug && own === id && !mismatch) current.enter({ id, slug });
+  [frameWorkspaceId, frameWorkspaceSlug, frameWorkspaceNamed, scopeMismatch, scopeSettled],
+  ([id, slug, named, mismatch, settled]) => {
+    if (id && slug && named && settled && !mismatch) current.enter({ id, slug });
   },
   { immediate: true },
 );

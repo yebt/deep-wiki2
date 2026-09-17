@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
+import { workspaceUrl } from '../apps/web/app/utils/routes';
 
 /**
  * Navigation, end to end: from the front door to a page's content, by
@@ -7,8 +8,8 @@ import { expect, test, type BrowserContext, type Page } from '@playwright/test';
  *
  * **Why every step is a click.** The defect this suite guards is that
  * nothing told a client which workspaces exist for it, so the tree could
- * only be reached by someone who already knew an id. A test that called
- * `page.goto('/workspaces/<id>')` would therefore pass with the
+ * only be reached by someone who already knew a slug. A test that called
+ * `page.goto('/w/<slug>')` would therefore pass with the
  * entire navigation deleted — it would be exercising the tree screen, not
  * the way there. Exactly one address is typed in the happy path below, and
  * it is `/`; everything after it is a link the product had to render.
@@ -23,6 +24,7 @@ interface Fixtures {
   readonly bookHistoryShelfTitle: string;
   readonly bookHistoryBookTitle: string;
   readonly workspaceId: string;
+  readonly workspaceSlug: string;
   readonly readerSessionToken: string;
   readonly outsiderSessionToken: string;
   readonly superRootEmail: string;
@@ -82,7 +84,7 @@ test('a signed-in reader gets from the front door to a page by clicking, never b
   // The workspace's home: its name is the screen's heading, and its tree
   // stands in the sidebar beside it rather than being a screen of its own.
   await expect(page.getByRole('heading', { level: 1, name: 'E2E Workspace' })).toBeVisible({ timeout: 30000 });
-  await expect(page).toHaveURL(/\/workspaces\/[0-9a-f-]+$/);
+  await expect(page).toHaveURL(/\/w\/[a-z0-9-]+$/);
 
   // Click 2 — the tree row in the sidebar, which is what the sidebar is for.
   await page.getByRole('treeitem', { name: /E2E Read Page/ }).click();
@@ -136,10 +138,10 @@ test('a signed-out visitor to the workspace list is sent to sign in, told why, a
 });
 
 test('a signed-out visitor to a screen inside the frame is sent to sign in with that screen as the way back', async ({ page }) => {
-  await page.goto(`/workspaces/${fixtures.workspaceId}`);
+  await page.goto(workspaceUrl(fixtures.workspaceSlug));
 
   await expect(page).toHaveURL(/\/login\?next=/, { timeout: 30000 });
-  expect(new URL(page.url()).searchParams.get('next')).toBe(`/workspaces/${fixtures.workspaceId}`);
+  expect(new URL(page.url()).searchParams.get('next')).toBe(workspaceUrl(fixtures.workspaceSlug));
   await expect(page.getByRole('status')).toContainText(/session has ended/i);
   // The screen that bounced is gone, and nothing about it claimed a network fault.
   await expect(page.getByRole('alert')).toHaveCount(0);
@@ -183,7 +185,7 @@ test('a signed-in member reaches the workspace members screen by clicking the tr
   await page.getByRole('link', { name: 'Members' }).click();
 
   await expect(page.getByRole('heading', { level: 1, name: 'Members' })).toBeVisible({ timeout: 30000 });
-  await expect(page).toHaveURL(/\/workspaces\/[0-9a-f-]+\/members$/);
+  await expect(page).toHaveURL(/\/w\/[a-z0-9-]+\/members$/);
 });
 
 /*
@@ -275,7 +277,7 @@ test('the workspace list skeleton occupies the box the loaded rows take', async 
 test('the tree toolbar is 32px, acts only on a row the user picked, and container rows fold on Enter', async ({ page, context }) => {
   await signInAs(context, fixtures.readerSessionToken);
 
-  await page.goto(`/workspaces/${fixtures.workspaceId}`);
+  await page.goto(workspaceUrl(fixtures.workspaceSlug));
   const shelf = page.getByRole('treeitem', { name: new RegExp(fixtures.bookHistoryShelfTitle) });
   await expect(shelf).toBeVisible({ timeout: 30000 });
 

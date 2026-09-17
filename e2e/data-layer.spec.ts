@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 import { waitForHydration } from './hydration';
+import { pageUrl, workspaceUrl } from '../apps/web/app/utils/routes';
 
 /**
  * The read layer (`apps/web/app/composables/useApiRead.ts`), against a
@@ -25,6 +26,7 @@ import { waitForHydration } from './hydration';
 interface Fixtures {
   readonly apiUrl: string;
   readonly workspaceId: string;
+  readonly workspaceSlug: string;
   readonly readPageId: string;
   readonly readerSessionToken: string;
   readonly outsiderSessionToken: string;
@@ -69,7 +71,7 @@ test.describe('a full load is answered on the server', () => {
   test('the article of a page the reader may see is in the document, and the skeleton is not', async ({ context }) => {
     await signInAs(context, fixtures.readerSessionToken);
 
-    const response = await context.request.get(`/pages/${fixtures.readPageId}`, { timeout: 120_000 });
+    const response = await context.request.get(pageUrl(fixtures.workspaceSlug, fixtures.readPageId), { timeout: 120_000 });
     expect(response.status()).toBe(200);
     const html = await response.text();
 
@@ -81,7 +83,7 @@ test.describe('a full load is answered on the server', () => {
   test('a page the caller may not see is refused in the document too, with nothing of the page in it', async ({ context }) => {
     await signInAs(context, fixtures.outsiderSessionToken);
 
-    const response = await context.request.get(`/pages/${fixtures.readPageId}`, { timeout: 120_000 });
+    const response = await context.request.get(pageUrl(fixtures.workspaceSlug, fixtures.readPageId), { timeout: 120_000 });
     expect(response.status()).toBe(200);
     const html = await response.text();
 
@@ -92,7 +94,7 @@ test.describe('a full load is answered on the server', () => {
   });
 
   test('with no session at all the server renders the skeleton and leaves the read to the browser', async ({ context }) => {
-    const response = await context.request.get(`/pages/${fixtures.readPageId}`, { timeout: 120_000 });
+    const response = await context.request.get(pageUrl(fixtures.workspaceSlug, fixtures.readPageId), { timeout: 120_000 });
     expect(response.status()).toBe(200);
     const html = await response.text();
 
@@ -104,10 +106,11 @@ test.describe('a full load is answered on the server', () => {
 test.describe('a screen the person comes back to renders from memory', () => {
   test('back to the dashboard shows the lists at once, then refreshes them behind the content', async ({ page, context }) => {
     await signInAs(context, fixtures.readerSessionToken);
-    const activity = await holdRequests(page, `${fixtures.apiUrl}/workspaces/${fixtures.workspaceId}/activity`);
+    // The dashboard asks by the slug its address carries (`/w/<slug>`), not by id.
+    const activity = await holdRequests(page, `${fixtures.apiUrl}/workspaces/${fixtures.workspaceSlug}/activity`);
 
     // Full load: server-rendered, so the browser never asks for the activity.
-    await page.goto(`/workspaces/${fixtures.workspaceId}`);
+    await page.goto(workspaceUrl(fixtures.workspaceSlug));
     const lists = page.locator('[data-testid="dashboard-recent"], [data-testid="dashboard-empty"]');
     await expect(lists.first()).toBeVisible({ timeout: 60_000 });
     await expect(page.getByTestId('dashboard-skeleton')).toHaveCount(0);
@@ -136,7 +139,7 @@ test.describe('a screen the person comes back to renders from memory', () => {
     await signInAs(context, fixtures.readerSessionToken);
     const read = await holdRequests(page, `${fixtures.apiUrl}/pages/${fixtures.readPageId}`);
 
-    await page.goto(`/pages/${fixtures.readPageId}`);
+    await page.goto(pageUrl(fixtures.workspaceSlug, fixtures.readPageId));
     const title = page.getByRole('heading', { level: 1, name: 'E2E Read Page' });
     await expect(title).toBeVisible({ timeout: 60_000 });
     expect(read.count()).toBe(0);

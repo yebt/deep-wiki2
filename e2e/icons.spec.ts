@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import { waitForHydration } from './hydration';
+import { workspaceUrl } from '../apps/web/app/utils/routes';
 
 /**
  * Icons ship in the bundle. A self-hosted, possibly air-gapped product
@@ -19,6 +20,7 @@ import { waitForHydration } from './hydration';
 interface SeedFixtures {
   readonly apiUrl: string;
   readonly workspaceId: string;
+  readonly workspaceSlug: string;
 }
 
 interface EditorFixtures {
@@ -54,7 +56,7 @@ test('no icon is fetched at runtime, from this server or from Iconify, across da
     if (url.includes('api.iconify.design') || url.includes('/api/_nuxt_icon/')) iconRequests.push(url);
   });
 
-  await page.goto(`/workspaces/${seed.workspaceId}`);
+  await page.goto(workspaceUrl(seed.workspaceSlug));
   await expect(page.locator('[data-testid="dashboard-recent"], [data-testid="dashboard-empty"]').first()).toBeVisible({ timeout: 60_000 });
   // The dashboard is server-rendered; the hops below are client-side, so
   // the app has to have hydrated first.

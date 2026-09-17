@@ -1,18 +1,20 @@
 import { UApp } from '#components';
 import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime';
-import { describe, expect, test, vi } from 'vitest';
+import { afterEach, describe, expect, test, vi } from 'vitest';
 import { computed, defineComponent, h, ref, type VNode } from 'vue';
 import AppShell from './AppShell.vue';
 import SidebarToggle from './SidebarToggle.vue';
 import WorkspaceFrame from './WorkspaceFrame.vue';
 import WorkspaceSidebar from './WorkspaceSidebar.vue';
 
-const { useWorkspaceTreeMock, useWorkspaceDirectoryMock } = vi.hoisted(() => ({
+const { useWorkspaceTreeMock, useWorkspaceDirectoryMock, useNodeLocationMock } = vi.hoisted(() => ({
   useWorkspaceTreeMock: vi.fn(),
   useWorkspaceDirectoryMock: vi.fn(),
+  useNodeLocationMock: vi.fn(),
 }));
 mockNuxtImport('useWorkspaceTree', () => useWorkspaceTreeMock);
 mockNuxtImport('useWorkspaceDirectory', () => useWorkspaceDirectoryMock);
+mockNuxtImport('useNodeLocation', () => useNodeLocationMock);
 
 const PATH = [
   { id: 'shelf-1', type: 'shelf', slug: 's', title: 'Engineering', position: 0, children: [] },
@@ -43,6 +45,16 @@ function mockFrameCollaborators() {
     slugOf: (id: string) => (id === 'ws-1' ? 'acme' : null),
     idOf: (slug: string) => (slug === 'acme' ? 'ws-1' : null),
   });
+  mockLocation('idle');
+}
+
+/** What `useNodeLocation` answers: nothing asked, in flight, or a node located in `acme`. */
+function mockLocation(state: 'idle' | 'loading' | 'located') {
+  useNodeLocationMock.mockReturnValue({
+    status: computed(() => (state === 'located' ? 'success' : state)),
+    location: computed(() => (state === 'located' ? { id: 'page-1', type: 'page', workspaceId: 'ws-1', workspaceSlug: 'acme' } : null)),
+    load: vi.fn(async () => {}),
+  });
 }
 mockFrameCollaborators();
 
@@ -67,13 +79,26 @@ mockFrameCollaborators();
  * §2.4's table gives it. `mx-auto` disappearing from this file is exactly
  * the regression, and it now costs a red test rather than a review.
  */
-function mountInApp(render: () => VNode) {
-  return mountSuspended(
+/**
+ * Every shell is taken down after its test. A shell left mounted keeps
+ * watching the shared workspace state and the router — the real app has
+ * one at a time — and would enter its own pair again the moment a later
+ * test navigates or changes the workspace.
+ */
+const mounted: { unmount: () => void }[] = [];
+afterEach(() => {
+  for (const component of mounted.splice(0)) component.unmount();
+});
+
+async function mountInApp(render: () => VNode) {
+  const component = await mountSuspended(
     defineComponent({
       name: 'ShellInApp',
       setup: () => () => h(UApp, null, { default: render }),
     }),
   );
+  mounted.push(component);
+  return component;
 }
 
 const SLOT = { 'data-testid': 'shell-slot' } as const;
@@ -299,6 +324,92 @@ describe('AppShell', () => {
       const component = await mountShell({ workspaceId: null });
 
       expect(component.findComponent(WorkspaceSidebar).props('workspaceId')).toBe('ws-1');
+    });
+  });
+
+  /*
+   * The address is held to its word (2026-09-17): `/w/<slug>/p/<id>` names
+   * a place twice, and the two must agree. The node's location is asked
+   * beside the screen's own read; a located node whose workspace slug is
+   * not the address's is not found, without saying which name was wrong.
+   */
+  describe('the address, held to its word', () => {
+    afterEach(() => mockLocation('idle'));
+
+    async function mountAt(route: string, props: Record<string, unknown>) {
+      const component = await mountSuspended(
+        defineComponent({
+          name: 'ShellAtRoute',
+          setup: () => () =>
+            h(UApp, null, {
+              default: () => h(AppShell, props, { 'default': () => h('p', SLOT, 'screen content'), 'header-end': () => h('button', { type: 'button' }, 'Edit') }),
+            }),
+        }),
+        { route },
+      );
+      mounted.push(component);
+      return component;
+    }
+
+    test('a node whose workspace is the address’s renders the screen and enters the workspace by both names', async () => {
+      mockLocation('located');
+      const component = await mountAt('/w/acme/p/page-1', { workspaceId: 'ws-1', nodeId: 'page-1' });
+
+      expect(component.find('[data-testid="shell-slot"]').exists()).toBe(true);
+      expect(component.find('[data-testid="scope-not-found"]').exists()).toBe(false);
+      expect(useCurrentWorkspace().workspace.value).toEqual({ id: 'ws-1', slug: 'acme' });
+    });
+
+    test('a node whose workspace is not the address’s is not found: the notice in place of the screen, its actions withheld, nothing entered, no row handed to the frame', async () => {
+      useCurrentWorkspace().enter({ id: 'ws-0', slug: 'before' });
+      mockLocation('located');
+      const component = await mountAt('/w/other/p/page-1', { workspaceId: 'ws-1', nodeId: 'page-1' });
+
+      const notice = component.get('[data-testid="scope-not-found"]');
+      expect(notice.text()).toContain('There is nothing at this address');
+      expect(notice.text()).toContain("deliberately doesn't say which");
+      expect(component.find('[data-testid="shell-slot"]').exists()).toBe(false);
+      expect(component.findAll('button').some((button) => button.text() === 'Edit')).toBe(false);
+      // The frame does not stand on the node's real workspace, and marks no row.
+      expect(useCurrentWorkspace().workspace.value).toEqual({ id: 'ws-0', slug: 'before' });
+      expect(component.findComponent(WorkspaceFrame).props('nodeId')).toBeNull();
+      expect(component.findComponent(WorkspaceSidebar).props('workspaceId')).toBe('ws-0');
+      // The offers: the list always; the address's workspace only when it is one the caller can open — `other` is not.
+      const offers = component.get('[data-testid="scope-not-found"]').findAll('a').map((a) => a.attributes('href'));
+      expect(offers).toEqual(['/workspaces']);
+    });
+
+    test('while the location is still in flight nothing is entered — the address has not been checked', async () => {
+      useCurrentWorkspace().enter({ id: 'ws-0', slug: 'before' });
+      mockLocation('loading');
+      const component = await mountAt('/w/acme/p/page-1', { workspaceId: 'ws-1', nodeId: 'page-1' });
+
+      expect(component.find('[data-testid="shell-slot"]').exists()).toBe(true);
+      expect(useCurrentWorkspace().workspace.value).toEqual({ id: 'ws-0', slug: 'before' });
+    });
+
+    test('a screen the API refused still stands in the room the address named, when the directory says it is one the caller can open', async () => {
+      useCurrentWorkspace().enter({ id: 'ws-0', slug: 'before' });
+      const component = await mountAt('/w/acme/members', { workspaceId: null, workspaceSlug: 'acme', title: 'Members' });
+
+      expect(useCurrentWorkspace().workspace.value).toEqual({ id: 'ws-1', slug: 'acme' });
+      expect(component.findComponent(WorkspaceSidebar).props('workspaceId')).toBe('ws-1');
+      expect(component.get('nav[aria-label="Where you are"] a[href="/w/acme"]').text()).toBe('Acme');
+    });
+
+    test('an address naming a workspace the directory does not hold enters nothing and stands on the remembered one', async () => {
+      useCurrentWorkspace().enter({ id: 'ws-0', slug: 'before' });
+      await mountAt('/w/other/settings', { workspaceId: null, title: 'Settings' });
+
+      expect(useCurrentWorkspace().workspace.value).toEqual({ id: 'ws-0', slug: 'before' });
+    });
+
+    test('a screen about no node, or an address outside the family, asks no location', async () => {
+      useNodeLocationMock.mockClear();
+      await mountAt('/w/acme', { workspaceId: 'ws-1', workspaceSlug: 'acme' });
+      await mountAt('/workspaces', { workspaceId: 'ws-1', nodeId: 'page-1' });
+      expect(useNodeLocationMock.mock.calls.length).toBeGreaterThan(0);
+      for (const call of useNodeLocationMock.mock.calls) expect(call[0]).toBeNull();
     });
   });
 

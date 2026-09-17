@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
 import { MAILPIT_HTTP_URL } from './ports';
+import { membersUrl } from '../apps/web/app/utils/routes';
 
 /**
  * The front door: a fresh user with no workspace signs in, creates one by
@@ -76,6 +77,8 @@ async function acceptLinkMailedTo(address: string): Promise<string> {
 }
 
 const WORKSPACE_NAME = 'Founder Handbook';
+/** The slug the server derives from `WORKSPACE_NAME` — asserted below, right where the form fills it in. */
+const WORKSPACE_SLUG = 'founder-handbook';
 let workspaceUrl = '';
 
 test('a fresh user creates a workspace by clicking, is handed the members screen, and invites a colleague', async ({ page }) => {
@@ -103,7 +106,7 @@ test('a fresh user creates a workspace by clicking, is handed the members screen
   // too, and an unscoped query would match both.
   await expect(page.getByRole('navigation', { name: 'Where you are' }).getByText(WORKSPACE_NAME)).toBeVisible();
   workspaceUrl = page.url();
-  expect(workspaceUrl).toMatch(/\/workspaces\/[0-9a-f-]{36}\/members$/);
+  expect(workspaceUrl).toMatch(new RegExp(`${membersUrl(WORKSPACE_SLUG)}$`));
 
   // The screen the creation handed off to: invite a colleague from it and
   // see the invitation pending — the same session, no address typed. The
@@ -307,7 +310,7 @@ test('a member without manage cannot see the members screen, and cannot tell it 
   await expect(denied).toContainText(/does not exist, or you do not manage it/i);
   await expect(page.getByRole('form')).toHaveCount(0);
 
-  await page.goto(workspaceUrl.replace(/[0-9a-f-]{36}\/members$/, '00000000-0000-4000-8000-000000000000/members'));
+  await page.goto(workspaceUrl.replace(/\/w\/[a-z0-9-]+\/members$/, '/w/never-minted-workspace/members'));
   await page.waitForLoadState('networkidle');
   await expect(page.getByRole('main').getByRole('status')).toContainText(/does not exist, or you do not manage it/i);
 });

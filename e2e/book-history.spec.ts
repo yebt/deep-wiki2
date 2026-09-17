@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
+import { bookDiffUrl, bookHistoryUrl, workspaceUrl } from '../apps/web/app/utils/routes';
 
 /**
  * Book-level changeset history and book diff (changesets spec: "Book-Level
@@ -21,6 +22,7 @@ import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 interface Fixtures {
   readonly apiUrl: string;
   readonly workspaceId: string;
+  readonly workspaceSlug: string;
   readonly bookHistoryBookId: string;
   readonly bookHistoryBookTitle: string;
   readonly bookHistoryPageAId: string;
@@ -58,7 +60,7 @@ test('a reader reaches book history from the tree, and book diff from history, e
   await signInAs(context, fixtures.readerSessionToken);
 
   // The one and only address this test types.
-  await page.goto(`/workspaces/${fixtures.workspaceId}`, { timeout: 30000 });
+  await page.goto(workspaceUrl(fixtures.workspaceSlug), { timeout: 30000 });
   await expect(page.getByRole('heading', { level: 1, name: /E2E Workspace/ })).toBeVisible({ timeout: 30000 });
 
   // Click 1 — the book row's context action in the sidebar's tree: a menu
@@ -72,7 +74,7 @@ test('a reader reaches book history from the tree, and book diff from history, e
   await page.getByRole('button', { name: `Actions for ${fixtures.bookHistoryBookTitle}` }).click();
   await page.getByRole('menuitem', { name: 'Book history' }).click();
 
-  await expect(page).toHaveURL(`/books/${fixtures.bookHistoryBookId}/history`, { timeout: 30000 });
+  await expect(page).toHaveURL(bookHistoryUrl(fixtures.workspaceSlug, fixtures.bookHistoryBookId), { timeout: 30000 });
   // The screen names the book it is about, not only what kind of screen it
   // is — an `<h1>` for the accessibility tree; the frame's own breadcrumb
   // carries the same name beside it, for sighted readers.
@@ -100,7 +102,10 @@ test('a reader reaches book history from the tree, and book diff from history, e
   await expect(diffLink).toBeVisible({ timeout: 30000 });
   await diffLink.click();
 
-  await expect(page).toHaveURL(new RegExp(`^.*/books/${fixtures.bookHistoryBookId}/diff\\?since=`), { timeout: 30000 });
+  await expect(page).toHaveURL(
+    new RegExp(`^.*${bookDiffUrl(fixtures.workspaceSlug, fixtures.bookHistoryBookId)}\\?since=`),
+    { timeout: 30000 },
+  );
   await expect(page.getByRole('heading', { level: 1, name: `${fixtures.bookHistoryBookTitle} — book diff` })).toBeVisible({ timeout: 30000 });
   await expect(crumbs).toContainText(fixtures.bookHistoryBookTitle);
   await expect(crumbs).toContainText('History');
@@ -156,7 +161,7 @@ test('a reader reaches book history from the tree, and book diff from history, e
   // first crumb now carries (the screen's own hand-built "Workspace home"
   // button duplicated it and is gone).
   await crumbs.getByRole('link', { name: /E2E Workspace/ }).click();
-  await expect(page).toHaveURL(`/workspaces/${fixtures.workspaceId}`, { timeout: 30000 });
+  await expect(page).toHaveURL(workspaceUrl(fixtures.workspaceSlug), { timeout: 30000 });
 });
 
 test('an outsider with no read grant sees the same not-found state a nonexistent book would render, for both screens', async ({
@@ -165,16 +170,16 @@ test('an outsider with no read grant sees the same not-found state a nonexistent
 }) => {
   await signInAs(context, fixtures.outsiderSessionToken);
 
-  await page.goto(`/books/${fixtures.bookHistoryBookId}/history`);
+  await page.goto(bookHistoryUrl(fixtures.workspaceSlug, fixtures.bookHistoryBookId));
   await expect(page.getByRole('heading', { name: 'This book does not exist' })).toBeVisible({ timeout: 30000 });
   const deniedHistoryHtml = await page.content();
   expect(deniedHistoryHtml).not.toContain(fixtures.bookHistoryBookTitle);
   expect(deniedHistoryHtml).not.toContain('E2E Owner');
 
-  await page.goto(`/books/${crypto.randomUUID()}/history`);
+  await page.goto(bookHistoryUrl(fixtures.workspaceSlug, crypto.randomUUID()));
   await expect(page.getByRole('heading', { name: 'This book does not exist' })).toBeVisible({ timeout: 30000 });
 
-  await page.goto(`/books/${fixtures.bookHistoryBookId}/diff?since=2026-01-01T00%3A00%3A00.000Z`);
+  await page.goto(bookDiffUrl(fixtures.workspaceSlug, fixtures.bookHistoryBookId, { since: '2026-01-01T00:00:00.000Z' }));
   await expect(page.getByRole('heading', { name: 'This book does not exist' })).toBeVisible({ timeout: 30000 });
 });
 
@@ -188,7 +193,7 @@ test('an outsider with no read grant sees the same not-found state a nonexistent
 test('a broken book-diff link with no `since` renders a real explanation, not a server error', async ({ page, context }) => {
   await signInAs(context, fixtures.readerSessionToken);
 
-  await page.goto(`/books/${fixtures.bookHistoryBookId}/diff`);
+  await page.goto(bookDiffUrl(fixtures.workspaceSlug, fixtures.bookHistoryBookId));
 
   await expect(page.getByRole('heading', { name: /missing its date/i })).toBeVisible({ timeout: 30000 });
 });
@@ -208,14 +213,18 @@ for (const [width, themes] of [[1280, ['light', 'dark']], [320, ['light']]] as c
         await signInAs(context, fixtures.readerSessionToken);
         await useTheme(page, theme);
 
-        await page.goto(`/books/${fixtures.bookHistoryBookId}/history`);
+        await page.goto(bookHistoryUrl(fixtures.workspaceSlug, fixtures.bookHistoryBookId));
         await expect(page.getByRole('heading', { level: 1 })).toBeVisible({ timeout: 30000 });
         await expect(page.getByRole('main').getByRole('listitem').first()).toBeVisible({ timeout: 30000 });
         await shot(page, `history-${width}-${theme}`);
 
         await page.getByRole('link', { name: /compare since/i }).click();
-        await expect(page).toHaveURL(new RegExp(`^.*/books/${fixtures.bookHistoryBookId}/diff\\?since=`), { timeout: 30000 });
-        await expect(page.getByRole('link', { name: /E2E Book Page/ })).toBeVisible({ timeout: 30000 });
+        await expect(page).toHaveURL(
+          new RegExp(`^.*${bookDiffUrl(fixtures.workspaceSlug, fixtures.bookHistoryBookId)}\\?since=`),
+          { timeout: 30000 },
+        );
+        // The switcher's current page, in the contextual bar: the sidebar's tree links the same pages beside it.
+        await expect(page.locator('#content-bar').getByRole('link', { name: /E2E Book Page/ })).toBeVisible({ timeout: 30000 });
         await shot(page, `diff-${width}-${theme}`);
       });
     }

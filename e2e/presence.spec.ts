@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
 import { API_URL } from './ports';
+import { pageEditUrl, pageUrl } from '../apps/web/app/utils/routes';
 
 /**
  * Editing presence (editing-presence spec; design.md Decision 5; tasks.md
@@ -31,6 +32,7 @@ interface SeedFixtures {
   readonly bookHistoryPageAId: string;
   readonly bookHistoryPageBId: string;
   readonly workspaceId: string;
+  readonly workspaceSlug: string;
   readonly readerSessionToken: string;
 }
 
@@ -39,6 +41,8 @@ const seed: SeedFixtures = JSON.parse(readFileSync(new URL('.auth-fixtures.json'
 
 const PAGE_ID = '44444444-4444-4444-4444-444444444444';
 const WORKSPACE_ID = 'ws-presence-e2e';
+/** The mocked-route tests below never seed a real workspace — any well-formed slug works, since these screens read the page by id from the mocked API, not the slug from a real backend. */
+const WORKSPACE_SLUG = 'presence-e2e';
 
 function apiOrigin(): string {
   return API_URL;
@@ -131,7 +135,7 @@ test('a displaced editor is shown, by name and since when, who now holds the pag
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ status: 'ok' }) }),
   );
 
-  await pageA.goto(`/pages/${PAGE_ID}/edit`);
+  await pageA.goto(pageEditUrl(WORKSPACE_SLUG, PAGE_ID));
   await expect(pageA.getByTestId('editor-surface')).toBeVisible({ timeout: 30000 });
 
   // Nobody else is editing yet: no presence indicator at all.
@@ -169,7 +173,7 @@ test('a displaced editor is shown, by name and since when, who now holds the pag
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ status: 'ok' }) }),
   );
 
-  await pageB.goto(`/pages/${PAGE_ID}/edit`);
+  await pageB.goto(pageEditUrl(WORKSPACE_SLUG, PAGE_ID));
   await expect(pageB.getByRole('button', { name: 'Take over editing' })).toBeVisible({ timeout: 30000 });
   await pageB.getByRole('button', { name: 'Take over editing' }).click();
   await pageB.getByRole('button', { name: 'Take over', exact: true }).click();
@@ -235,7 +239,7 @@ test('stale presence expires visibly once its heartbeat window lapses, tied to t
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ status: 'ok' }) }),
   );
 
-  await page.goto(`/pages/${PAGE_ID}/edit`);
+  await page.goto(pageEditUrl(WORKSPACE_SLUG, PAGE_ID));
   await expect(page.getByTestId('editor-surface')).toBeVisible({ timeout: 30000 });
   await expect(page.getByTestId('presence-indicator')).toContainText('User B is editing', { timeout: 10000 });
 
@@ -270,7 +274,7 @@ test('a reader sees who is editing the page, and since when, without acquiring a
     });
   });
 
-  await page.goto(`/pages/${PAGE_ID}`);
+  await page.goto(pageUrl(WORKSPACE_SLUG, PAGE_ID));
   await expect(page.getByRole('heading', { level: 1, name: 'Presence E2E Page' })).toBeVisible({ timeout: 30000 });
 
   // §4.8: who, and since when — named, with the exact instant preserved.
@@ -303,7 +307,7 @@ test('a presence stream held open for 25 seconds is one request — the server k
     if (request.url().endsWith(`/workspaces/${seed.workspaceId}/presence/stream`)) streamRequests.push(Date.now());
   });
 
-  await page.goto(`/pages/${seed.readPageId}`);
+  await page.goto(pageUrl(seed.workspaceSlug, seed.readPageId));
   // The stream opens once the read response has named the workspace;
   // under load, hydration alone can take tens of seconds.
   await expect.poll(() => streamRequests.length, { timeout: 120_000, message: 'the presence stream never opened' }).toBe(1);
@@ -330,7 +334,7 @@ test('two consecutive page hops open one presence stream', async ({ page }) => {
     if (request.url().endsWith(`/workspaces/${seed.workspaceId}/presence/stream`)) streamRequests.push(request.url());
   });
 
-  await page.goto(`/pages/${seed.bookHistoryPageAId}`);
+  await page.goto(pageUrl(seed.workspaceSlug, seed.bookHistoryPageAId));
   await expect(page.getByRole('main').getByRole('heading', { level: 1, name: 'E2E Book Page Alpha' })).toBeVisible({ timeout: 120_000 });
   await expect.poll(() => streamRequests.length, { timeout: 60_000, message: 'the presence stream never opened' }).toBe(1);
 
@@ -339,7 +343,7 @@ test('two consecutive page hops open one presence stream', async ({ page }) => {
   const beta = sidebar.getByRole('treeitem', { name: /E2E Book Page Beta/ });
   await expect(beta).toBeVisible({ timeout: 60_000 });
   await beta.locator('[draggable="true"]').first().click();
-  await expect(page).toHaveURL(new RegExp(`/pages/${seed.bookHistoryPageBId}$`));
+  await expect(page).toHaveURL(new RegExp(`${pageUrl(seed.workspaceSlug, seed.bookHistoryPageBId)}$`));
   await expect(page.getByRole('main').getByRole('heading', { level: 1, name: 'E2E Book Page Beta' })).toBeVisible({ timeout: 60_000 });
 
   // Long enough for a second screen that reopened the stream to have done so.

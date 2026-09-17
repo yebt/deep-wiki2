@@ -2,6 +2,8 @@ import { readFileSync } from 'node:fs';
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 import { waitForHydration } from './hydration';
 import { expectNoHorizontalOverflow } from './overflow';
+import { pageDiffUrl, pageHistoryUrl, pageUrl } from '../apps/web/app/utils/routes';
+import { rememberWorkspaceCookieValue } from '../apps/web/app/utils/workspace-cookie';
 
 /**
  * Page history (revision-history spec: "Page History Query Returns
@@ -22,6 +24,7 @@ interface Fixtures {
   readonly historySecondRevisionId: string;
   readonly emptyHistoryPageId: string;
   readonly workspaceId: string;
+  readonly workspaceSlug: string;
   readonly readerSessionToken: string;
   readonly outsiderSessionToken: string;
 }
@@ -42,7 +45,7 @@ async function signInAs(context: BrowserContext, token: string): Promise<void> {
 test('a reader sees every revision newest-first, with its author and changeset membership', async ({ page, context }) => {
   await signInAs(context, fixtures.readerSessionToken);
 
-  await page.goto(`/pages/${fixtures.historyPageId}/history`);
+  await page.goto(pageHistoryUrl(fixtures.workspaceSlug, fixtures.historyPageId));
 
   // `<h1>Revision history</h1>` is server-rendered and in the tree
   // immediately regardless of client hydration — for assistive technology;
@@ -91,7 +94,7 @@ test('a reader sees every revision newest-first, with its author and changeset m
 test('the history screen is reachable from the read screen by its control, not only by its URL', async ({ page, context }) => {
   await signInAs(context, fixtures.readerSessionToken);
 
-  await page.goto(`/pages/${fixtures.historyPageId}`);
+  await page.goto(pageUrl(fixtures.workspaceSlug, fixtures.historyPageId));
   await expect(page.getByRole('heading', { level: 1, name: 'E2E History Page' })).toBeVisible({ timeout: 30000 });
 
   // By accessible name (docs/UI-CHECKLIST.md §7): the control is
@@ -103,7 +106,7 @@ test('the history screen is reachable from the read screen by its control, not o
 
   await history.click();
 
-  await expect(page).toHaveURL(`/pages/${fixtures.historyPageId}/history`);
+  await expect(page).toHaveURL(pageHistoryUrl(fixtures.workspaceSlug, fixtures.historyPageId));
   await expect(page.getByRole('heading', { level: 1, name: 'Revision history' })).toBeAttached();
   // Arrived at the history of *this* page, not merely at the route: the
   // seeded page has two revisions and the empty one has none.
@@ -116,7 +119,7 @@ test('the history control is operable with the keyboard alone, and names itself 
   test.setTimeout(240_000);
   await signInAs(context, fixtures.readerSessionToken);
 
-  await page.goto(`/pages/${fixtures.historyPageId}`);
+  await page.goto(pageUrl(fixtures.workspaceSlug, fixtures.historyPageId));
   await expect(page.getByRole('heading', { level: 1, name: 'E2E History Page' })).toBeVisible({ timeout: 30000 });
   // The heading is server-rendered; the keyboard needs the hydrated app.
   await waitForHydration(page);
@@ -160,7 +163,7 @@ test('the history control is operable with the keyboard alone, and names itself 
 
   await page.keyboard.press('Enter');
 
-  await expect(page).toHaveURL(`/pages/${fixtures.historyPageId}/history`);
+  await expect(page).toHaveURL(pageHistoryUrl(fixtures.workspaceSlug, fixtures.historyPageId));
   await expect(page.getByRole('heading', { level: 1, name: 'Revision history' })).toBeAttached();
 });
 
@@ -211,7 +214,7 @@ test("a revision's timestamp reads in each viewer's own timezone, and hydrates w
     page.on('console', (message) => consoleMessages.push(message.text()));
     page.on('pageerror', (error) => consoleMessages.push(error.message));
 
-    await page.goto(`/pages/${fixtures.historyPageId}/history`);
+    await page.goto(pageHistoryUrl(fixtures.workspaceSlug, fixtures.historyPageId));
 
     const timestamp = page.getByRole('main').getByRole('listitem').nth(0).locator('time');
     await expect(timestamp).toBeVisible({ timeout: 30000 });
@@ -260,14 +263,17 @@ test("a revision's timestamp reads in each viewer's own timezone, and hydrates w
 test('the compare control is a real, keyboard-operable link, not a disabled placeholder', async ({ page, context }) => {
   await signInAs(context, fixtures.readerSessionToken);
 
-  await page.goto(`/pages/${fixtures.historyPageId}/history`);
+  await page.goto(pageHistoryUrl(fixtures.workspaceSlug, fixtures.historyPageId));
 
   const compare = page.getByRole('main').getByRole('listitem').nth(0).getByRole('link', { name: /compare with previous/i });
   await expect(compare).toBeVisible({ timeout: 30000 });
   await expect(compare).not.toHaveAttribute('aria-disabled', 'true');
   await expect(compare).toHaveAttribute(
     'href',
-    `/pages/${fixtures.historyPageId}/diff?from=${fixtures.historyFirstRevisionId}&to=${fixtures.historySecondRevisionId}`,
+    pageDiffUrl(fixtures.workspaceSlug, fixtures.historyPageId, {
+      from: fixtures.historyFirstRevisionId,
+      to: fixtures.historySecondRevisionId,
+    }),
   );
 
   await compare.focus();
@@ -277,7 +283,7 @@ test('the compare control is a real, keyboard-operable link, not a disabled plac
 test('a page that has never been saved shows the empty state with a path forward', async ({ page, context }) => {
   await signInAs(context, fixtures.readerSessionToken);
 
-  await page.goto(`/pages/${fixtures.emptyHistoryPageId}/history`);
+  await page.goto(pageHistoryUrl(fixtures.workspaceSlug, fixtures.emptyHistoryPageId));
 
   await expect(page.getByRole('heading', { name: /no revisions yet/i })).toBeVisible({ timeout: 30000 });
   await expect(page.getByRole('main').getByRole('listitem')).toHaveCount(0);
@@ -287,7 +293,7 @@ test('a page that has never been saved shows the empty state with a path forward
 test('an outsider with no read grant sees the same not-found state a nonexistent page would render', async ({ page, context }) => {
   await signInAs(context, fixtures.outsiderSessionToken);
 
-  await page.goto(`/pages/${fixtures.historyPageId}/history`);
+  await page.goto(pageHistoryUrl(fixtures.workspaceSlug, fixtures.historyPageId));
   await expect(page.getByRole('heading', { name: 'This page does not exist' })).toBeVisible({ timeout: 30000 });
   // Non-disclosure: neither the page's own title nor any revision content
   // leaks into a response the viewer is not entitled to.
@@ -296,7 +302,7 @@ test('an outsider with no read grant sees the same not-found state a nonexistent
   expect(deniedHtml).not.toContain('E2E Owner');
   await expect(page.getByRole('main').getByRole('listitem')).toHaveCount(0);
 
-  await page.goto(`/pages/${crypto.randomUUID()}/history`);
+  await page.goto(pageHistoryUrl(fixtures.workspaceSlug, crypto.randomUUID()));
   await expect(page.getByRole('heading', { name: 'This page does not exist' })).toBeVisible({ timeout: 30000 });
 });
 
@@ -327,7 +333,7 @@ test('the history skeleton occupies the box the loaded list takes: same first-ro
   // history screen is answered on the server since the data layer
   // (`useApiRead`), with no skeleton to measure — the skeleton is for a
   // list the browser has not seen yet (see e2e/data-layer.spec.ts).
-  await page.goto(`/pages/${fixtures.historyPageId}`);
+  await page.goto(pageUrl(fixtures.workspaceSlug, fixtures.historyPageId));
   await waitForHydration(page);
   await page.getByRole('link', { name: 'Revision history' }).click({ timeout: 30000 });
   const skeletonRows = page.getByTestId('history-skeleton').locator('li');
@@ -358,7 +364,7 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 320, height: 900 
   test(`the revision rows are inset 24px from the card edge at ${viewport.width}px`, async ({ page, context }) => {
     await page.setViewportSize(viewport);
     await signInAs(context, fixtures.readerSessionToken);
-    await page.goto(`/pages/${fixtures.historyPageId}/history`);
+    await page.goto(pageHistoryUrl(fixtures.workspaceSlug, fixtures.historyPageId));
     const rows = page.getByRole('list', { name: /revision history/i }).locator('li');
     await expect(rows.first()).toBeVisible({ timeout: 30000 });
 
@@ -411,7 +417,14 @@ const PANE_INSET = 24;
  * on and gets the bar's trailing crumb alone.
  */
 async function inWorkspace(context: BrowserContext): Promise<void> {
-  await context.addCookies([{ name: 'dw-workspace', value: fixtures.workspaceId, domain: 'localhost', path: '/' }]);
+  await context.addCookies([
+    {
+      name: 'dw-workspace',
+      value: rememberWorkspaceCookieValue({ id: fixtures.workspaceId, slug: fixtures.workspaceSlug }),
+      domain: 'localhost',
+      path: '/',
+    },
+  ]);
 }
 
 for (const theme of ['light', 'dark'] as const) {
@@ -426,7 +439,7 @@ for (const theme of ['light', 'dark'] as const) {
       await useTheme(page, theme);
       await inWorkspace(context);
 
-      await page.goto(`/pages/${fixtures.historyPageId}/history`);
+      await page.goto(pageHistoryUrl(fixtures.workspaceSlug, fixtures.historyPageId));
       const rows = page.getByRole('list', { name: /revision history/i }).locator('li');
       await expect(rows.first()).toBeVisible({ timeout: 30000 });
       await expect(page.locator('html')).toHaveClass(theme === 'dark' ? /dark/ : /light/);
@@ -476,7 +489,7 @@ test.describe('inside the workspace frame, 320x900 light', () => {
     await signInAs(context, fixtures.readerSessionToken);
     await useTheme(page, 'light');
 
-    await page.goto(`/pages/${fixtures.historyPageId}/history`);
+    await page.goto(pageHistoryUrl(fixtures.workspaceSlug, fixtures.historyPageId));
     const rows = page.getByRole('list', { name: /revision history/i }).locator('li');
     await expect(rows.first()).toBeVisible({ timeout: 30000 });
 

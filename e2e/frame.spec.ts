@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 import { waitForHydration } from './hydration';
 import { expectNoHorizontalOverflow } from './overflow';
+import { pageUrl, workspaceUrl } from '../apps/web/app/utils/routes';
 
 /**
  * The workspace frame, measured in a real browser: a persistent sidebar
@@ -20,6 +21,7 @@ interface Fixtures {
   readonly readPageId: string;
   readonly historyPageId: string;
   readonly workspaceId: string;
+  readonly workspaceSlug: string;
   readonly readerSessionToken: string;
 }
 
@@ -69,7 +71,7 @@ for (const theme of ['light', 'dark'] as const) {
       await signInAs(context, fixtures.readerSessionToken);
       await useTheme(page, theme);
 
-      await page.goto(`/workspaces/${fixtures.workspaceId}`);
+      await page.goto(workspaceUrl(fixtures.workspaceSlug));
       await expect(page.getByRole('heading', { level: 1, name: 'E2E Workspace' })).toBeVisible({ timeout: 30000 });
       await expect(page.locator('html')).toHaveClass(theme === 'dark' ? /dark/ : /light/);
 
@@ -111,7 +113,7 @@ for (const theme of ['light', 'dark'] as const) {
       await signInAs(context, fixtures.readerSessionToken);
       await useTheme(page, theme);
 
-      await page.goto(`/pages/${fixtures.readPageId}`);
+      await page.goto(pageUrl(fixtures.workspaceSlug, fixtures.readPageId));
       const title = page.getByRole('heading', { level: 1, name: 'E2E Read Page' });
       await expect(title).toBeVisible({ timeout: 30000 });
 
@@ -166,7 +168,7 @@ test.describe('the sidebar survives a navigation', () => {
     await signInAs(context, fixtures.readerSessionToken);
     await useTheme(page, 'light');
 
-    await page.goto(`/workspaces/${fixtures.workspaceId}`);
+    await page.goto(workspaceUrl(fixtures.workspaceSlug));
     await expect(page.getByRole('heading', { level: 1, name: 'E2E Workspace' })).toBeVisible({ timeout: 30000 });
     const sidebar = page.getByRole('navigation', { name: 'Workspace' });
     const tree = sidebar.getByRole('tree');
@@ -195,7 +197,7 @@ test.describe('the sidebar survives a navigation', () => {
     // but not the frame's.
     await tree.getByRole('treeitem', { name: /E2E History Page/ }).click();
     await expect(page.getByRole('heading', { level: 1, name: 'E2E History Page' })).toBeVisible({ timeout: 30000 });
-    await expect(page).toHaveURL(new RegExp(`/pages/${fixtures.historyPageId}$`));
+    await expect(page).toHaveURL(new RegExp(`${pageUrl(fixtures.workspaceSlug, fixtures.historyPageId)}$`));
 
     // The same node, not a rebuilt one — and everything it held.
     expect(await sidebar.evaluate((el) => (el as HTMLElement & { __dwFrameProbe?: string }).__dwFrameProbe)).toBe('mounted-once');
@@ -224,7 +226,7 @@ for (const theme of ['light', 'dark'] as const) {
       await signInAs(context, fixtures.readerSessionToken);
       await useTheme(page, theme);
 
-      await page.goto(`/pages/${fixtures.readPageId}`);
+      await page.goto(pageUrl(fixtures.workspaceSlug, fixtures.readPageId));
       await expect(page.getByRole('heading', { level: 1, name: 'E2E Read Page' })).toBeVisible({ timeout: 30000 });
       // The article is server-rendered; the button below needs the hydrated app.
       await waitForHydration(page);
@@ -277,7 +279,7 @@ test.describe('focus mode and the keyboard', () => {
   test('hiding the sidebar while focus is inside it moves focus to the content bar rather than losing it', async ({ page, context }) => {
     await signInAs(context, fixtures.readerSessionToken);
 
-    await page.goto(`/pages/${fixtures.readPageId}`);
+    await page.goto(pageUrl(fixtures.workspaceSlug, fixtures.readPageId));
     await expect(page.getByRole('heading', { level: 1, name: 'E2E Read Page' })).toBeVisible({ timeout: 30000 });
     const sidebar = page.getByRole('navigation', { name: 'Workspace' });
     const row = sidebar.getByRole('treeitem', { name: /E2E Read Page/ });
@@ -308,18 +310,18 @@ test.describe('the front door', () => {
   test('after visiting a workspace, `/` opens onto it rather than the list', async ({ page, context }) => {
     await signInAs(context, fixtures.readerSessionToken);
 
-    await page.goto(`/workspaces/${fixtures.workspaceId}`);
+    await page.goto(workspaceUrl(fixtures.workspaceSlug));
     await expect(page.getByRole('heading', { level: 1, name: 'E2E Workspace' })).toBeVisible({ timeout: 30000 });
 
     await page.goto('/');
 
-    await expect(page).toHaveURL(new RegExp(`/workspaces/${fixtures.workspaceId}$`), { timeout: 30000 });
+    await expect(page).toHaveURL(new RegExp(`${workspaceUrl(fixtures.workspaceSlug)}$`), { timeout: 30000 });
     await expect(page.getByRole('heading', { level: 1, name: 'E2E Workspace' })).toBeVisible({ timeout: 30000 });
     // The list was never rendered on the way: the server answered `/` with the redirect.
     const response = await page.request.get('/', { maxRedirects: 0 });
     expect(response.status(), 'the server redirects `/` itself').toBeGreaterThanOrEqual(300);
     expect(response.status()).toBeLessThan(400);
-    expect(response.headers()['location']).toContain(`/workspaces/${fixtures.workspaceId}`);
+    expect(response.headers()['location']).toContain(workspaceUrl(fixtures.workspaceSlug));
   });
 });
 
@@ -339,7 +341,7 @@ test.describe('320x900 light', () => {
       { name: 'dw-frame-sidebar-workspace', value: encodeURIComponent(JSON.stringify({ size: 17.5, collapsed: true })), domain: 'localhost', path: '/' },
     ]);
 
-    await page.goto(`/workspaces/${fixtures.workspaceId}`);
+    await page.goto(workspaceUrl(fixtures.workspaceSlug));
     await expect(page.getByRole('heading', { level: 1, name: 'E2E Workspace' })).toBeVisible({ timeout: 30000 });
     // The dashboard is server-rendered; the drawer below needs the hydrated app.
     await waitForHydration(page);
@@ -401,7 +403,7 @@ test.describe('320x900 light, the pane blind spot', () => {
     await signInAs(context, fixtures.readerSessionToken);
     await useTheme(page, 'light');
 
-    await page.goto(`/workspaces/${fixtures.workspaceId}`);
+    await page.goto(workspaceUrl(fixtures.workspaceSlug));
     await expect(page.getByRole('heading', { level: 1, name: 'E2E Workspace' })).toBeVisible({ timeout: 30000 });
 
     await page.evaluate(() => {

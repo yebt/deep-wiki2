@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 import { waitForHydration } from './hydration';
 import { expectNoHorizontalOverflow } from './overflow';
+import { membersUrl, settingsUrl, workspaceUrl } from '../apps/web/app/utils/routes';
 
 /**
  * The management sidebar: on a management screen the sidebar switches
@@ -20,6 +21,7 @@ import { expectNoHorizontalOverflow } from './overflow';
 
 interface Fixtures {
   readonly workspaceId: string;
+  readonly workspaceSlug: string;
   readonly readerSessionToken: string;
 }
 
@@ -56,7 +58,7 @@ for (const theme of ['light', 'dark'] as const) {
       await signInAs(context, fixtures.readerSessionToken);
       await useTheme(page, theme);
 
-      await page.goto(`/workspaces/${fixtures.workspaceId}`);
+      await page.goto(workspaceUrl(fixtures.workspaceSlug));
       // The first route of the run is compiled on demand by the dev server; measured at 38s cold on 2026-09-16.
       await expect(page.getByRole('heading', { level: 1, name: 'E2E Workspace' })).toBeVisible({ timeout: 60000 });
       const sidebar = page.getByRole('navigation', { name: 'Workspace' });
@@ -89,7 +91,7 @@ for (const theme of ['light', 'dark'] as const) {
       // Click 2 — a door that is not built yet opens a screen that says so.
       await management.getByRole('link', { name: 'Settings', exact: true }).click();
       await expect(page.getByRole('heading', { level: 1, name: 'Settings' })).toBeVisible({ timeout: 30000 });
-      await expect(page).toHaveURL(new RegExp(`/workspaces/${fixtures.workspaceId}/settings$`));
+      await expect(page).toHaveURL(new RegExp(`${settingsUrl(fixtures.workspaceSlug)}$`));
       await expect(page.getByRole('main').getByRole('status')).toContainText(/not built yet/i);
       await expect(management.locator('[aria-current="page"]')).toHaveText('Settings');
       await expectNoHorizontalOverflow(page, `settings 1280 ${theme}`);
@@ -120,7 +122,7 @@ test.describe('the management doors by keyboard', () => {
   test('every door is a tab stop, and Enter on one opens its screen', async ({ page, context }) => {
     await signInAs(context, fixtures.readerSessionToken);
 
-    await page.goto(`/workspaces/${fixtures.workspaceId}/members`);
+    await page.goto(membersUrl(fixtures.workspaceSlug));
     await expect(page.getByRole('heading', { level: 1, name: 'Members' })).toBeVisible({ timeout: 30000 });
     // The heading and, since the read layer, the reader's denied state are
     // both server-rendered — neither says the page is hydrated. The keys
@@ -153,7 +155,7 @@ test.describe('320x900 light', () => {
     await signInAs(context, fixtures.readerSessionToken);
     await useTheme(page, 'light');
 
-    await page.goto(`/workspaces/${fixtures.workspaceId}/members`);
+    await page.goto(membersUrl(fixtures.workspaceSlug));
     await expect(page.getByRole('heading', { level: 1, name: 'Members' })).toBeVisible({ timeout: 30000 });
     // The heading and, since the read layer, the reader's denied state are
     // both server-rendered: until 2026-09-16 the denied state was the
