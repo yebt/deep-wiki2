@@ -88,4 +88,16 @@ describe('listActivePresence', () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]?.pageId).toBe(a.pageId);
   });
+
+  // trash-non-disclosure spec: "presence" is a named read surface — a
+  // trashed page's presence row is absent, identically to no active lock.
+  test('excludes presence for a now-trashed page', async () => {
+    const { workspaceId, pageId, userId } = await seedPage();
+    await acquireLock(sql, { nodeId: pageId, workspaceId, userId, ttlSeconds: TTL_SECONDS });
+    await sql`UPDATE nodes SET trashed_at = now(), trash_operation_id = ${crypto.randomUUID()} WHERE id = ${pageId}`;
+
+    const rows = await listActivePresence(sql, { workspaceId, ttlSeconds: TTL_SECONDS });
+
+    expect(rows).toHaveLength(0);
+  });
 });

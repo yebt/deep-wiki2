@@ -32,13 +32,20 @@ export interface ListActivePresenceInput {
   readonly ttlSeconds: number;
 }
 
-/** Every currently-active `editing` presence in one workspace, newest heartbeat first is not guaranteed — callers that need an order sort themselves. */
+/**
+ * Every currently-active `editing` presence in one workspace, newest
+ * heartbeat first is not guaranteed — callers that need an order sort
+ * themselves. The `live_nodes` join excludes a trashed page's presence
+ * (trash-non-disclosure spec names "presence" as a read surface), even
+ * though its underlying lock row can still physically exist pending purge.
+ */
 export async function listActivePresence(sql: SqlExecutor, input: ListActivePresenceInput): Promise<PresenceRow[]> {
   const rows = await sql<PresenceViewRow[]>`
-    SELECT page_id, workspace_id, user_id, since, heartbeat_at
-      FROM presence
-     WHERE workspace_id = ${input.workspaceId}
-       AND heartbeat_at > now() - (${input.ttlSeconds} || ' seconds')::interval
+    SELECT p.page_id, p.workspace_id, p.user_id, p.since, p.heartbeat_at
+      FROM presence p
+      JOIN live_nodes ln ON ln.id = p.page_id
+     WHERE p.workspace_id = ${input.workspaceId}
+       AND p.heartbeat_at > now() - (${input.ttlSeconds} || ' seconds')::interval
   `;
   return rows.map((row) => ({
     pageId: row.page_id,

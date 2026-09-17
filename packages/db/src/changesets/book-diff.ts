@@ -36,10 +36,14 @@ export async function listChangedPagesSince(
   sql: SqlExecutor,
   input: ListChangedPagesSinceInput,
 ): Promise<ChangedPageSummary[]> {
+  // live_nodes: a trashed page's revisions never surface in the book-level
+  // diff (trash-non-disclosure spec names "diff" as a read surface), though
+  // other pages in the same book still do.
   const touchedPages = await sql<{ page_id: string }[]>`
     SELECT DISTINCT pr.page_id
       FROM page_revision pr
       JOIN changeset c ON c.id = pr.changeset_id AND c.workspace_id = pr.workspace_id
+      JOIN live_nodes ln ON ln.id = pr.page_id
      WHERE pr.workspace_id = ${input.workspaceId}
        AND c.book_id = ${input.bookId}
        AND pr.created_at > ${input.since}

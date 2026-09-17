@@ -156,4 +156,36 @@ describe('listChangedPagesSince', () => {
 
     expect(result).toHaveLength(0);
   });
+
+  // trash-non-disclosure spec: "diff" is a named read surface — a trashed
+  // page's revisions must not surface in the book-level diff aggregation,
+  // though other pages in the same book still do.
+  test('excludes a trashed page, but another page in the same book still appears', async () => {
+    const { workspaceId, bookId, authorId } = await seedWorkspaceAndBook();
+    const trashedPage = await seedPageUnder(workspaceId, bookId);
+    const otherPage = await seedPageUnder(workspaceId, bookId);
+    const since = new Date(Date.now() - 60_000);
+
+    await savePage(sql, {
+      nodeId: trashedPage,
+      workspaceId,
+      markdown: '# Trashed page\n',
+      expectedContentHash: null,
+      updatedBy: authorId,
+      changesetWindowMinutes: WINDOW_MINUTES,
+    });
+    await savePage(sql, {
+      nodeId: otherPage,
+      workspaceId,
+      markdown: '# Other page\n',
+      expectedContentHash: null,
+      updatedBy: authorId,
+      changesetWindowMinutes: WINDOW_MINUTES,
+    });
+    await sql`UPDATE nodes SET trashed_at = now(), trash_operation_id = ${crypto.randomUUID()} WHERE id = ${trashedPage}`;
+
+    const result = await listChangedPagesSince(sql, { workspaceId, bookId, since });
+
+    expect(result.map((r) => r.pageId)).toEqual([otherPage]);
+  });
 });

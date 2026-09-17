@@ -161,14 +161,18 @@ export type LockStatus =
 /**
  * Expiry is evaluated here, on read, never stored or swept (design D15): a
  * row can physically exist past its TTL and still be reported `held:
- * false`. Issues no `UPDATE` — a read never writes.
+ * false`. Issues no `UPDATE` — a read never writes. The `live_nodes` join
+ * reports the same `held: false` for a trashed page, identically to no
+ * lock row at all — the lock row can still physically exist pending purge,
+ * but "locks" is a read surface `trash-non-disclosure` names explicitly.
  */
 export async function readLockStatus(sql: SqlExecutor, input: ReadLockStatusInput): Promise<LockStatus> {
   const [row] = await sql<LockRow[]>`
-    SELECT holder_user_id, acquired_at, heartbeat_at, taken_over_from, taken_over_at
-      FROM page_locks
-     WHERE node_id = ${input.nodeId} AND workspace_id = ${input.workspaceId}
-       AND heartbeat_at > now() - (${input.ttlSeconds} || ' seconds')::interval
+    SELECT pl.holder_user_id, pl.acquired_at, pl.heartbeat_at, pl.taken_over_from, pl.taken_over_at
+      FROM page_locks pl
+      JOIN live_nodes ln ON ln.id = pl.node_id
+     WHERE pl.node_id = ${input.nodeId} AND pl.workspace_id = ${input.workspaceId}
+       AND pl.heartbeat_at > now() - (${input.ttlSeconds} || ' seconds')::interval
   `;
   if (!row) return { held: false };
   return { held: true, holderUserId: row.holder_user_id, acquiredAt: row.acquired_at, heartbeatAt: row.heartbeat_at };

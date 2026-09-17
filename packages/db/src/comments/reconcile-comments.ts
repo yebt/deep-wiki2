@@ -200,9 +200,16 @@ async function resolveOneAnchor(
 }
 
 export async function reconcileComments(tx: SqlExecutor, input: ReconcileCommentsInput): Promise<void> {
+  // live_nodes: this only ever runs on the page currently being saved
+  // (entered after the route already located it through live_nodes), but
+  // the join makes reconciliation a no-op for a trashed id too — never
+  // touching a comment row on a page nobody should be able to write to
+  // anymore (trash-non-disclosure spec).
   const roots = await tx<AnchoredRoot[]>`
-    SELECT id, block_id, offset_start, offset_end, quote FROM comments
-     WHERE page_id = ${input.nodeId} AND parent_id IS NULL AND status = 'anchored'
+    SELECT c.id, c.block_id, c.offset_start, c.offset_end, c.quote
+      FROM comments c
+      JOIN live_nodes ln ON ln.id = c.page_id
+     WHERE c.page_id = ${input.nodeId} AND c.parent_id IS NULL AND c.status = 'anchored'
   `;
   if (roots.length === 0) return;
 

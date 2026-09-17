@@ -27,19 +27,25 @@ export interface ResolveBookIdInput {
 }
 
 /**
- * Walks `nodes.parent_id` upward from `nodeId` to its nearest `book`
+ * Walks `live_nodes.parent_id` upward from `nodeId` to its nearest `book`
  * ancestor, or `null` when no book ancestor exists (e.g. a page parented
  * directly under the workspace root, which this change does not require
  * every page to avoid — a page with no book ancestor simply never joins a
- * changeset).
+ * changeset). A trashed `nodeId` resolves to `null` too, identically to an
+ * unknown one (trash-non-disclosure spec): the invariant "live implies
+ * parent live" (0022_trash.sql's `nodes_trash_guard`) means a live node's
+ * whole ancestor chain is always live, so reading through the view changes
+ * nothing for this function's one real caller — `insert-revision.ts`,
+ * entered only after the route already located the page through
+ * `live_nodes`.
  */
 export async function resolveBookId(sql: SqlExecutor, input: ResolveBookIdInput): Promise<string | null> {
   const rows = await sql<{ id: string }[]>`
     WITH RECURSIVE ancestors(id, parent_id, type, depth) AS (
-      SELECT id, parent_id, type, 0 FROM nodes WHERE id = ${input.nodeId} AND workspace_id = ${input.workspaceId}
+      SELECT id, parent_id, type, 0 FROM live_nodes WHERE id = ${input.nodeId} AND workspace_id = ${input.workspaceId}
       UNION ALL
       SELECT n.id, n.parent_id, n.type, a.depth + 1
-        FROM nodes n
+        FROM live_nodes n
         JOIN ancestors a ON n.id = a.parent_id
        WHERE n.workspace_id = ${input.workspaceId}
     )

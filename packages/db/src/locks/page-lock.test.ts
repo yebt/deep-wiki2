@@ -234,4 +234,17 @@ describe('readLockStatus', () => {
 
     expect(status.held).toBe(false);
   });
+
+  // trash-non-disclosure spec: "locks" is a named read surface — a trashed
+  // page's lock reports not held, identically to no lock at all, even
+  // though the row itself is still physically present pending purge.
+  test('a trashed page reports not held, identically to no lock at all', async () => {
+    const { workspaceId, nodeId, userA } = await seedPageWithContent();
+    await acquireLock(sql, { nodeId, workspaceId, userId: userA, ttlSeconds: TTL_SECONDS });
+    await sql`UPDATE nodes SET trashed_at = now(), trash_operation_id = ${crypto.randomUUID()} WHERE id = ${nodeId}`;
+
+    const status = await readLockStatus(sql, { nodeId, workspaceId, ttlSeconds: TTL_SECONDS });
+
+    expect(status.held).toBe(false);
+  });
 });

@@ -284,4 +284,36 @@ describe('reconcileComments — confidence table', () => {
     const after = await readComment(row!.id);
     expect(after.status).toBe('orphaned');
   });
+
+  // trash-non-disclosure spec: this function only ever runs inside the save
+  // transaction on the page currently being saved (`rebuild-derived.ts`,
+  // entered after the route already located it through `live_nodes`), but
+  // reconciliation itself must be a no-op for a trashed id, identically to
+  // an id with no anchored comments at all — never touching a comment row
+  // that belongs to a page nobody should be able to write to anymore.
+  test('is a no-op for a trashed page, identically to a page with no anchored comments', async () => {
+    const { workspaceId, rootId } = await seedWorkspace();
+    const pageId = await seedPage(workspaceId, rootId);
+    await seedPageContent(pageId, workspaceId, 'irrelevant');
+    await seedBlock(pageId, workspaceId, 'block-a', 'active');
+    const text = 'This paragraph never changes at all between saves.';
+    const quote = 'never changes';
+    const offsetStart = text.indexOf(quote);
+    const commentId = await seedComment(workspaceId, pageId, 'block-a', quote, offsetStart, offsetStart + quote.length);
+    await sql`UPDATE nodes SET trashed_at = now(), trash_operation_id = ${crypto.randomUUID()} WHERE id = ${pageId}`;
+
+    await reconcileComments(sql, {
+      nodeId: pageId,
+      assignments: [],
+      mintedIds: [],
+      // A shape that would otherwise orphan the comment (no block named
+      // 'block-a' survives) — proving the no-op comes from the trashed
+      // guard, not from a matching confidence-table row.
+      nextBlocks: [],
+    });
+
+    const after = await readComment(commentId);
+    expect(after.status).toBe('anchored');
+    expect(after.block_id).toBe('block-a');
+  });
 });

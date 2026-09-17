@@ -152,6 +152,23 @@ describe('resolveBookId', () => {
     const resolved = await resolveBookId(sql, { nodeId: pageId, workspaceId });
     expect(resolved).toBeNull();
   });
+
+  // trash-non-disclosure spec: this ancestor walk only ever runs on the
+  // page currently being saved (`insert-revision.ts`, entered after the
+  // route already located it through `live_nodes`), but the walk itself
+  // must answer a trashed id exactly as it answers an unknown one — null,
+  // never a raw base-table lookup a caller could otherwise misuse.
+  test('a trashed node resolves to null, identically to an unknown node', async () => {
+    const { workspaceId, rootId } = await seedWorkspace();
+    const bookId = await seedBook(workspaceId, rootId);
+    const pageId = await seedPageUnder(workspaceId, bookId);
+    await sql`UPDATE nodes SET trashed_at = now(), trash_operation_id = ${crypto.randomUUID()} WHERE id = ${pageId}`;
+
+    const resolved = await resolveBookId(sql, { nodeId: pageId, workspaceId });
+
+    expect(resolved).toBeNull();
+    expect(await resolveBookId(sql, { nodeId: crypto.randomUUID(), workspaceId })).toBeNull();
+  });
 });
 
 // changesets spec: "Saves Group Implicitly By Author, Book, And Window";
