@@ -1566,6 +1566,28 @@ saving?" from the previous entry; the two-icon-pack requirement (§4.3) remains 
    (`docs/TODO.md` Findings, 2026-09-17), so the gap cursor between two textless blocks was
    invisible and a lone trailing space could vanish under the next key.
 
+3. **Source mode, like Obsidian.** One edit mode; `Ctrl`/`⌘`+`E` and a segmented control in the
+   condensed bar ("Visual | Source", `aria-pressed` with the opaque `secondary-container` fill,
+   tooltips with the keys — §4.3, §5) swap the live document for its markdown in a plain text
+   area and back, losslessly: visual → source is `toMarkdown` of the live document; source →
+   visual runs the probe and a non-canonical text **stays in source** with a chip notice that
+   names the first non-canonical line by its two spellings — never a silent rewrite (§3,
+   "recoverable", with the real next action). Save works from either view (the buffer is the
+   screen's; `flush()` applies); dirty state, lock, heartbeat, presence and confirm-on-leave are
+   shared, not duplicated; the choice persists per browser (`dw-editor-view`). The text area is
+   set in the code family at the reading surface's metrics (16px on 26px — §9.5's floor over
+   §2.3's 14px code role; recorded in `docs/DESIGN-SYSTEM.md` §14), same column, same reach, no
+   box, the caret its indicator; `Tab` indents two spaces and `Escape` is the stated way out
+   (§5, no keyboard trap). Below `sm` the control folds to one icon-only toggle and **Save is
+   icon-only** (label kept for assistive technology) — measured at 320, the "Editing" crumb was
+   otherwise clipped; the owner may prefer the crumb to give. Measured in
+   `e2e/editor-source.spec.ts` against the real backend: the bytes saved from the visual view
+   after a source edit are the bytes source showed, read back through a fresh edit session; the
+   refusal; the cookie across a reload; the crumb whole at 320 in both views;
+   `expectNoHorizontalOverflow` at 1280 and 320. Screenshots
+   `fb-editor2-source-{1280-light,1280-dark,320-light}.png` and
+   `fb-editor2-source-refused-1280-light.png`.
+
 ---
 
 *The next entry goes below this one.*

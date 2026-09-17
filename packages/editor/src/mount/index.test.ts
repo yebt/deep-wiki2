@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
-import { fromMarkdown as rootFromMarkdown, toMarkdown as rootToMarkdown } from '../index';
-import { fromMarkdown, toMarkdown } from './index';
+import { fromMarkdown as rootFromMarkdown, probe as rootProbe, toMarkdown as rootToMarkdown } from '../index';
+import { fromMarkdown, probe, toMarkdown } from './index';
 
 /**
  * `"./mount"` re-exports the converters so the one consumer that needs
@@ -12,9 +12,10 @@ import { fromMarkdown, toMarkdown } from './index';
  * 2.3 MB in dev, before anything needed them). They must be the same
  * functions: a second binding would be a second parser by another name.
  */
-test('"./mount" re-exports the "." export\'s fromMarkdown and toMarkdown, not copies', () => {
+test('"./mount" re-exports the "." export\'s fromMarkdown, toMarkdown and probe, not copies', () => {
   expect(fromMarkdown).toBe(rootFromMarkdown);
   expect(toMarkdown).toBe(rootToMarkdown);
+  expect(probe).toBe(rootProbe);
 });
 
 test('the re-exported converters round-trip a document', () => {

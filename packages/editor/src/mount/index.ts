@@ -33,6 +33,12 @@ export type { LinkAttrs, Rect, SelectionCoords, SelectionPluginOptions, Selectio
  */
 export { fromMarkdown, UnsupportedConstructError } from '../from-markdown';
 export { toMarkdown } from '../to-markdown';
+// The probe too, for the same reason and with the same identity rule:
+// source mode (apps/web, 2026-09-17) asks it whether the text a person
+// typed may open in the visual view, and it is the one fail-closed check
+// the edit-session route already applies before opening a page.
+export { probe } from '../probe';
+export type { ProbeResult } from '../probe';
 
 export { createMentionPlugin, insertMention, mentionPluginKey, moveSelection, reduceMentionState, INACTIVE_MENTION_STATE } from './mention-plugin';
 export type { MentionAction, MentionCandidate, MentionPluginOptions, MentionState } from './mention-plugin';

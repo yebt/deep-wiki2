@@ -787,6 +787,16 @@ body {
   white-space: pre-wrap;
 }
 
+/* The source view's text area (`EditorSourceSurface`, 2026-09-17) is
+   the same document and takes the same indicator: the caret. */
+.dw-source-editor {
+  caret-color: var(--ui-primary);
+}
+
+.dw-source-editor:focus-visible {
+  outline: none;
+}
+
 .prosemirror-editor li {
   position: relative;
 }

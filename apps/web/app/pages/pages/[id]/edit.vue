@@ -20,6 +20,7 @@
  *   separate empty state to design for beyond that.
  */
 import { loadEditorMount } from '~/utils/editor-mount';
+import { EDITOR_VIEWS, requestView, type EditorViewMode, type SourceRefusal } from '~/utils/editor-view';
 import { formatRevisionDate } from '~/utils/format-revision-date';
 
 // Inside the workspace layout: the frame is mounted once and this screen
@@ -149,7 +150,62 @@ onBeforeUnmount(() => {
 function onEditorUpdate(markdown: string): void {
   currentMarkdown.value = markdown;
   isDirty.value = true;
+  // The refusal was about the text as it stood; the next attempt judges
+  // the new text.
+  viewRefusal.value = null;
 }
+
+/* ─── Visual ↔ source (owner decision, 2026-09-17, "like Obsidian") ────
+ * One edit mode, two views of the same buffer. `currentMarkdown` is the
+ * truth whichever view is up: the visual view reports it 300ms after
+ * the last transaction (and `flush()` closes that window), the source
+ * view on every keystroke. Dirty state, the lock, the heartbeat,
+ * presence and the confirm-on-leave are this screen's and do not know
+ * which view is up. The choice persists per browser (`dw-editor-view`,
+ * like `dw-comments`); whether a switch is allowed is
+ * `~/utils/editor-view`'s decision: leaving the visual view is always
+ * granted, leaving the source view only when the probe says the text is
+ * canonical — otherwise the person stays in source with the offending
+ * line named by its two spellings, and nothing they typed is rewritten.
+ */
+const { view, set: setView } = useEditorView();
+const { getKbdKey } = useKbd();
+const viewRefusal = ref<SourceRefusal | null>(null);
+const viewAnnouncement = ref('');
+const sourceSurface = ref<{ focus: () => void } | null>(null);
+
+const VIEW_LABELS: Record<EditorViewMode, string> = { visual: 'Visual', source: 'Source' };
+/** Beside the label, never instead of it (§4.3): the rendered paragraph, and the angle brackets of source. */
+const VIEW_ICONS: Record<EditorViewMode, string> = { visual: 'i-lucide-pilcrow', source: 'i-lucide-code' };
+
+async function showView(target: EditorViewMode): Promise<void> {
+  if (status.value !== 'ready') return;
+  if (view.value === 'visual') editorSurface.value?.flush?.();
+  const mod = await loadEditorMount();
+  const decision = requestView(target, view.value, currentMarkdown.value, mod.probe, (markdown) => mod.toMarkdown(mod.fromMarkdown(markdown)));
+  viewRefusal.value = decision.refusal;
+  if (decision.view === view.value) {
+    if (decision.refusal) viewAnnouncement.value = `Still in the source view: line ${decision.refusal.line} is not in canonical form.`;
+    return;
+  }
+  setView(decision.view);
+  const modifier = getKbdKey('meta');
+  viewAnnouncement.value =
+    decision.view === 'source' ? `Source view. Press ${modifier}E for the visual view.` : `Visual view. Press ${modifier}E for the source view.`;
+  await nextTick();
+  if (decision.view === 'source') sourceSurface.value?.focus();
+  else editorSurface.value?.focus?.();
+}
+
+function toggleView(): void {
+  void showView(view.value === 'visual' ? 'source' : 'visual');
+}
+
+// Obsidian's binding for the same toggle. `usingInput`: the person is in
+// one of the two surfaces when they reach for it.
+defineShortcuts({
+  meta_e: { usingInput: true, handler: toggleView },
+});
 
 // Undo and Redo in the bar, beside Save. The depths are the history
 // plugin's own, reported by the surface after every transaction; the
@@ -157,9 +213,10 @@ function onEditorUpdate(markdown: string): void {
 // `Ctrl+Shift+Z` run inside it — so a button and its keys never disagree.
 // A remounted editor (the corrected/canonical document loaded back)
 // starts with an empty history, and the buttons say so until it reports.
-// `flush` is optional in the type only because this screen's tests stub
-// the surface as an empty component; the real one always exposes it.
-const editorSurface = ref<{ undo: () => void; redo: () => void; flush?: () => void; focus: () => void } | null>(null);
+// `flush` and `focus` are optional in the type only because this
+// screen's tests stub the surface as an empty component; the real one
+// always exposes both.
+const editorSurface = ref<{ undo: () => void; redo: () => void; flush?: () => void; focus?: () => void } | null>(null);
 const history = ref({ undoDepth: 0, redoDepth: 0 });
 watch(editorRemountKey, () => {
   history.value = { undoDepth: 0, redoDepth: 0 };
@@ -310,7 +367,8 @@ useSeoMeta({ title: () => (session.value?.title ? `Editing ${session.value.title
 
          The contextual bar: who else is here, then what this screen can
          do — the same order the read screen uses (presence, then its
-         actions), so the bar reads the same in both modes. -->
+         actions), so the bar reads the same in both modes. Between them,
+         which view of the document is up (Visual | Source). -->
     <template #header-end>
       <!-- editing-presence spec: "show the other holder if one appears
            mid-session" — not the soft lock itself (the `locked` refusal
@@ -328,6 +386,44 @@ useSeoMeta({ title: () => (session.value?.title ? `Editing ${session.value.title
            holds the drawer toggle, the crumb, this, Undo, Redo and Save,
            and with the label drawn the "Editing" crumb clipped (measured
            in `e2e/editor.spec.ts` when Undo and Redo arrived). -->
+      <!-- The view: a segmented control mirroring `Ctrl`/`⌘`+`E`, pressed
+           as `aria-pressed` plus the opaque `secondary-container` fill the
+           selection toolbar uses for the same state (never colour alone,
+           §5); the other view is the Outlined emphasis. Named as a group
+           and each half tooltipped with the keys (§4.3). Below `sm` the
+           group gives way to one icon-only toggle, pressed while the
+           source view is up — the comments toggle's own shape: measured
+           at 320 with the two halves drawn, even icon-only, the "Editing"
+           crumb clipped to "Editi…" beside Undo, Redo and Save. -->
+      <UFieldGroup v-if="status === 'ready'" size="sm" role="group" aria-label="Editor view" class="mr-2 hidden sm:inline-flex">
+        <UTooltip v-for="option in EDITOR_VIEWS" :key="option" :text="`${VIEW_LABELS[option]} view`" :kbds="['meta', 'E']">
+          <UButton
+            :icon="VIEW_ICONS[option]"
+            :variant="view === option ? 'soft' : 'outline'"
+            :color="view === option ? 'secondary' : 'neutral'"
+            size="sm"
+            :label="VIEW_LABELS[option]"
+            :aria-pressed="view === option ? 'true' : 'false'"
+            :aria-keyshortcuts="`${modifierName}+E`"
+            :data-testid="`editor-view-${option}`"
+            @click="showView(option)"
+          />
+        </UTooltip>
+      </UFieldGroup>
+      <UTooltip v-if="status === 'ready'" text="Source view" :kbds="['meta', 'E']" class="sm:hidden">
+        <UButton
+          :icon="VIEW_ICONS.source"
+          :variant="view === 'source' ? 'soft' : 'ghost'"
+          :color="view === 'source' ? 'secondary' : 'neutral'"
+          size="sm"
+          square
+          aria-label="Source view"
+          :aria-pressed="view === 'source' ? 'true' : 'false'"
+          :aria-keyshortcuts="`${modifierName}+E`"
+          data-testid="editor-view-toggle"
+          @click="toggleView"
+        />
+      </UTooltip>
       <UTooltip v-if="status === 'ready'" text="Read page">
         <UButton icon="i-lucide-eye" variant="ghost" color="neutral" size="sm" :to="`/pages/${nodeId}`" label="Read page" :ui="{ label: 'max-sm:sr-only' }" />
       </UTooltip>
@@ -338,7 +434,10 @@ useSeoMeta({ title: () => (session.value?.title ? `Editing ${session.value.title
            the command acts on the editor, and the surface hands focus
            back to it — while a keyboard user keeps focus on the button
            they activated. -->
-      <template v-if="status === 'ready'">
+      <!-- Only beside the live view: the text area's undo is the
+           keyboard's own, and a button that ran the other view's
+           history would be the inert control §6 names. -->
+      <template v-if="status === 'ready' && view === 'visual'">
         <UTooltip :text="undoDisabledReason ?? 'Undo'" :kbds="['meta', 'Z']">
           <UButton
             icon="i-lucide-undo-2"
@@ -373,6 +472,12 @@ useSeoMeta({ title: () => (session.value?.title ? `Editing ${session.value.title
            "Normalise" button already follow): a disabled control with no
            reason is a defect, and the attribute alone removes it from the
            tab order, hiding that reason from anyone who cannot hover. -->
+      <!-- Below `sm` the label is for assistive technology only, as "Read
+           page" beside it: measured at 320 on 2026-09-17 with the view
+           toggle in the bar, the right-hand group ran to 213px and left
+           the "Editing" crumb 31px — "Editi…". The fill and the icon
+           still say which control is the primary action (§2); the name
+           and the tooltip say what it does (§4.3). -->
       <UTooltip :text="saveDisabledReason ?? 'Save this page.'">
         <UButton
           v-if="status === 'ready'"
@@ -380,12 +485,12 @@ useSeoMeta({ title: () => (session.value?.title ? `Editing ${session.value.title
           variant="solid"
           color="primary"
           size="sm"
+          :label="saveStatus === 'saving' ? 'Saving…' : 'Save'"
+          :ui="{ label: 'max-sm:sr-only' }"
           :loading="saveStatus === 'saving'"
           :aria-disabled="saveDisabledReason ? 'true' : undefined"
           @click="onSave"
-        >
-          {{ saveStatus === 'saving' ? 'Saving…' : 'Save' }}
-        </UButton>
+        />
       </UTooltip>
     </template>
 
@@ -591,8 +696,25 @@ useSeoMeta({ title: () => (session.value?.title ? `Editing ${session.value.title
       <InlineNotice v-else-if="showSavedBanner" tier="chip" tone="success" class="mb-4">
         Saved “{{ session?.title }}”.
       </InlineNotice>
+      <!-- The source view's refusal: the chip tier, above the text area
+           it is about. The line is named by example — as typed beside as
+           the pipeline would write it — because "not canonical" alone is
+           not something a person can act on (§3, "recoverable"). -->
+      <InlineNotice v-if="viewRefusal" tier="chip" tone="error" role="alert" class="mb-4" data-testid="editor-view-refusal">
+        <template v-if="viewRefusal.construct">
+          Line {{ viewRefusal.line }} holds {{ viewRefusal.construct }}, which the visual view does not support yet. Change it, or keep editing here.
+        </template>
+        <template v-else>
+          Line {{ viewRefusal.line }} is not in canonical form. As typed: <code class="font-mono">{{ viewRefusal.typed }}</code> — canonical:
+          <code class="font-mono">{{ viewRefusal.canonical }}</code> Write it the canonical way to open the visual view, or keep editing here.
+        </template>
+      </InlineNotice>
+      <p data-testid="editor-view-status" role="status" aria-live="polite" class="sr-only">{{ viewAnnouncement }}</p>
+      <!-- Both surfaces read `currentMarkdown` once, on mount, and are
+           keyed alike so the corrected or canonical document loaded back
+           after a refusal reaches whichever is up. -->
       <EditorSurface
-        v-if="session"
+        v-if="session && view === 'visual'"
         ref="editorSurface"
         :key="editorRemountKey"
         :markdown="currentMarkdown"
@@ -601,6 +723,7 @@ useSeoMeta({ title: () => (session.value?.title ? `Editing ${session.value.title
         @update="onEditorUpdate"
         @history="onEditorHistory"
       />
+      <EditorSourceSurface v-else-if="session" ref="sourceSurface" :key="`source-${editorRemountKey}`" :markdown="currentMarkdown" @update="onEditorUpdate" />
     </template>
   </AppShell>
 </template>
