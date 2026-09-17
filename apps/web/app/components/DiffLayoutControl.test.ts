@@ -30,6 +30,11 @@ describe('DiffLayoutControl', () => {
 
     const group = component.get('[role="group"]');
     expect(group.attributes('aria-label')).toBe('Diff layout');
+    // A real `UFieldGroup`, not an unresolved tag: an unknown component
+    // renders its children on the client and nothing on the server, which
+    // is how this control first shipped invisible until hydration.
+    expect(group.find('[data-orientation="horizontal"]').exists()).toBe(true);
+    expect(component.html()).not.toMatch(/<ubuttongroup/i);
     const buttons = component.findAllComponents(UButton);
     expect(buttons.map((b) => b.text())).toEqual(['Unified', 'Side by side']);
     expect(buttons[0]!.attributes('aria-pressed')).toBe('true');

@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
+import { boundaryContrast } from './contrast';
 import { waitForHydration } from './hydration';
 import { expectNoHorizontalOverflow } from './overflow';
 
@@ -21,6 +22,8 @@ interface Fixtures {
   readonly historyFirstRevisionId: string;
   readonly historySecondRevisionId: string;
   readonly workspaceId: string;
+  readonly bookHistoryBookId: string;
+  readonly bookDiffSinceIso: string;
   readonly readerSessionToken: string;
   readonly outsiderSessionToken: string;
 }
@@ -45,6 +48,14 @@ test('a reader reaches the diff by clicking from history, and sees all four clas
   page,
   context,
 }) => {
+  // This is the suite's first test on a cold dev server, and it compiles
+  // two routes on demand (`/history`, then `/diff` after the click). Under
+  // load — a host running several worktrees' suites, load average 13–19
+  // measured 2026-09-17 — the two compiles alone outran Playwright's 30s
+  // test timeout, and in serial mode the thirteen tests behind it were
+  // reported "did not run" (docs/TODO.md Findings, 2026-09-17). The same
+  // allowance the skeleton test below already takes, for the same reason.
+  test.setTimeout(120_000);
   await signInAs(context, fixtures.readerSessionToken);
 
   await page.goto(`/pages/${fixtures.historyPageId}/history`);
@@ -315,5 +326,186 @@ test.describe('inside the workspace frame, the skeleton', () => {
     expect(Math.abs(skeletonRow.x - loadedRow.x), `row left: skeleton ${skeletonRow.x}, loaded ${loadedRow.x}`).toBeLessThanOrEqual(1);
     expect(Math.abs(skeletonRow.width - loadedRow.width), `row width: skeleton ${skeletonRow.width}, loaded ${loadedRow.width}`).toBeLessThanOrEqual(1);
     expect(Math.abs(skeletonRow.height - loadedRow.height), `row height: skeleton ${skeletonRow.height}, loaded ${loadedRow.height}`).toBeLessThanOrEqual(1);
+  });
+});
+
+/**
+ * Word-level changes inside an edited block, and the "Unified | Side by
+ * side" layout (owner review 2026-09-17, gates 10.4/10.6: "a diff like
+ * GitHub's"). Against the seeded fixture's one edited block — "with no
+ * edits yet" → "now with one small edit" — so the marks asserted are
+ * `diffInline()`'s real output through the real API, never a stubbed
+ * response. Screenshots `fb-diff-*.png` when `DEEPWIKI_FRAME_SHOTS` is set.
+ */
+async function shotFb(page: Page, name: string): Promise<void> {
+  if (!SHOTS) return;
+  await page.screenshot({ path: `${SHOTS}/fb-diff-${name}.png`, fullPage: false });
+}
+
+const EDITED_ROW_TEXT = 'first saved';
+const BOOK_DIFF_URL = `/books/${fixtures.bookHistoryBookId}/diff?since=${encodeURIComponent(fixtures.bookDiffSinceIso)}`;
+
+/** The layout cookie, set before the first request so the server renders the choice (`useDiffLayout`). */
+async function withLayoutCookie(context: BrowserContext, layout: 'unified' | 'side-by-side'): Promise<void> {
+  await context.addCookies([{ name: 'dw-diff-layout', value: layout, domain: 'localhost', path: '/' }]);
+}
+
+for (const theme of ['light', 'dark'] as const) {
+  test.describe(`word-level marks and the layout control, 1280x900 ${theme}`, () => {
+    test.use({ viewport: { width: 1280, height: 900 } });
+
+    test('an edited block marks its inserted and deleted words as <ins>/<del>, each mark bounded at 3:1 or better; the legend and the control are server-rendered, once', async ({
+      page,
+      context,
+    }) => {
+      await signInAs(context, fixtures.readerSessionToken);
+      await useTheme(page, theme);
+      await inWorkspace(context);
+
+      await page.goto(DIFF_URL);
+      await expect(page.locator('html')).toHaveClass(theme === 'dark' ? /dark/ : /light/);
+      const row = page.getByRole('list', { name: /current revision/i }).locator('li').filter({ hasText: EDITED_ROW_TEXT });
+      await expect(row).toBeVisible({ timeout: 30000 });
+
+      // The real differ's output, through the real API: the shared prefix
+      // plain, the rewritten phrase one mark per side.
+      await expect(row.locator('ins')).toHaveText(['now ', 'one small edit']);
+      await expect(row.locator('del')).toHaveText(['no edits yet']);
+      await expect(row.getByText('Modified', { exact: true })).toBeVisible();
+
+      // docs/UI-CHECKLIST.md §5: 3:1 for the boundary of a mark on its
+      // ground — the 2026-09-14 audit measured a badge at 1.00:1 on its
+      // own row, and a token name is not a measurement.
+      for (const [name, mark] of [['ins', row.locator('ins').first()], ['del', row.locator('del').first()]] as const) {
+        const ratio = await boundaryContrast(mark);
+        // Printed so a run's log carries the number the Review Log quotes.
+        console.log(`diff mark boundary contrast, ${theme} <${name}>: ${ratio.toFixed(2)}:1`);
+        expect(ratio, `${theme}: <${name}> boundary ${ratio.toFixed(2)}:1`).toBeGreaterThanOrEqual(3);
+      }
+      // Never colour alone: the strike and the underline.
+      expect(await row.locator('del').first().evaluate((el) => getComputedStyle(el).textDecorationLine)).toContain('line-through');
+      expect(await row.locator('ins').first().evaluate((el) => getComputedStyle(el).textDecorationLine)).toContain('underline');
+
+      const legend = page.getByTestId('diff-legend');
+      await expect(legend).toHaveCount(1);
+      await expect(legend).toContainText(/inserted words/i);
+      await expect(legend).toContainText(/deleted words/i);
+      // Present before hydration too — the first cut used a tag Nuxt UI 4
+      // does not have (`UButtonGroup`), which rendered nothing on the
+      // server, and this assertion runs on the server's DOM.
+      await expect(page.getByRole('group', { name: 'Diff layout' }).getByRole('button', { name: 'Side by side' })).toBeVisible();
+
+      await expectNoHorizontalOverflow(page, `diff unified 1280 ${theme}`);
+      await shotFb(page, `page-unified-1280-${theme}`);
+    });
+
+    test('"Side by side" lays an edited block out as before and after columns, is remembered in the dw-diff-layout cookie, and survives a reload', async ({
+      page,
+      context,
+    }) => {
+      await signInAs(context, fixtures.readerSessionToken);
+      await useTheme(page, theme);
+      await inWorkspace(context);
+
+      await page.goto(DIFF_URL);
+      await waitForHydration(page);
+      const group = page.getByRole('group', { name: 'Diff layout' });
+      const unified = group.getByRole('button', { name: 'Unified' });
+      const sideBySide = group.getByRole('button', { name: 'Side by side' });
+      await expect(unified).toHaveAttribute('aria-pressed', 'true');
+      await expect(sideBySide).toHaveAttribute('aria-pressed', 'false');
+
+      await sideBySide.click();
+      await expect(sideBySide).toHaveAttribute('aria-pressed', 'true');
+      await expect(unified).toHaveAttribute('aria-pressed', 'false');
+
+      const row = page.getByRole('list', { name: /current revision/i }).locator('li').filter({ hasText: EDITED_ROW_TEXT });
+      const columns = row.locator('pre');
+      await expect(columns).toHaveCount(2);
+      await expect(columns.nth(0)).toContainText('with no edits yet');
+      await expect(columns.nth(0).locator('ins')).toHaveCount(0);
+      await expect(columns.nth(1)).toContainText('now with one small edit');
+      await expect(columns.nth(1).locator('del')).toHaveCount(0);
+      // Two real columns beside each other, not stacked.
+      const [before, after] = await Promise.all([columns.nth(0).boundingBox(), columns.nth(1).boundingBox()]);
+      expect(after!.x).toBeGreaterThan(before!.x + before!.width - 1);
+      expect(Math.abs(after!.y - before!.y)).toBeLessThanOrEqual(1);
+      // An added block has no before side, and the cell says so.
+      const added = page.getByRole('list', { name: /current revision/i }).locator('li').filter({ hasText: 'kiwis' });
+      await expect(added).toContainText(/not in the earlier revision/i);
+
+      const cookie = (await context.cookies()).find((c) => c.name === 'dw-diff-layout');
+      expect(cookie?.value).toBe('side-by-side');
+
+      await page.reload();
+      await expect(page.getByRole('group', { name: 'Diff layout' }).getByRole('button', { name: 'Side by side' })).toHaveAttribute('aria-pressed', 'true', { timeout: 30000 });
+      await expect(row.locator('pre')).toHaveCount(2);
+
+      await expectNoHorizontalOverflow(page, `diff side-by-side 1280 ${theme}`);
+      await shotFb(page, `page-side-by-side-1280-${theme}`);
+    });
+
+    test('the book diff carries the same marks and the same control through the shared component', async ({ page, context }) => {
+      await signInAs(context, fixtures.readerSessionToken);
+      await useTheme(page, theme);
+      await inWorkspace(context);
+
+      await page.goto(BOOK_DIFF_URL);
+      const row = page.getByRole('list', { name: /current content/i }).locator('li').filter({ hasText: EDITED_ROW_TEXT });
+      await expect(row).toBeVisible({ timeout: 30000 });
+      await expect(row.locator('del')).toHaveText(['no edits yet']);
+      await expect(page.getByTestId('diff-legend')).toHaveCount(1);
+      await expectNoHorizontalOverflow(page, `book diff unified 1280 ${theme}`);
+      await shotFb(page, `book-unified-1280-${theme}`);
+
+      await waitForHydration(page);
+      await page.getByRole('group', { name: 'Diff layout' }).getByRole('button', { name: 'Side by side' }).click();
+      await expect(row.locator('pre')).toHaveCount(2);
+      await expectNoHorizontalOverflow(page, `book diff side-by-side 1280 ${theme}`);
+      await shotFb(page, `book-side-by-side-1280-${theme}`);
+    });
+  });
+}
+
+test.describe('word-level marks and the layout at 320x900 light', () => {
+  test.use({ viewport: { width: 320, height: 900 } });
+
+  test('a side-by-side preference is honoured as one column below md, the control still shows it pressed, and nothing scrolls sideways', async ({
+    page,
+    context,
+  }) => {
+    await signInAs(context, fixtures.readerSessionToken);
+    await useTheme(page, 'light');
+    await withLayoutCookie(context, 'side-by-side');
+
+    await page.goto(DIFF_URL);
+    const row = page.getByRole('list', { name: /current revision/i }).locator('li').filter({ hasText: EDITED_ROW_TEXT });
+    await expect(row).toBeVisible({ timeout: 30000 });
+    await waitForHydration(page);
+
+    await expect(row.locator('pre')).toHaveCount(1);
+    await expect(row.locator('ins')).toHaveText(['now ', 'one small edit']);
+    await expect(row.locator('del')).toHaveText(['no edits yet']);
+    const sideBySide = page.getByRole('group', { name: 'Diff layout' }).getByRole('button', { name: 'Side by side' });
+    await expect(sideBySide).toHaveAttribute('aria-pressed', 'true');
+
+    await expectNoHorizontalOverflow(page, 'diff side-by-side preference at 320');
+    await shotFb(page, 'page-side-by-side-320-light');
+  });
+
+  test('unified at 320: the marks wrap inside the row and nothing scrolls sideways', async ({ page, context }) => {
+    await signInAs(context, fixtures.readerSessionToken);
+    await useTheme(page, 'light');
+
+    await page.goto(DIFF_URL);
+    const row = page.getByRole('list', { name: /current revision/i }).locator('li').filter({ hasText: EDITED_ROW_TEXT });
+    await expect(row.locator('del')).toHaveText(['no edits yet'], { timeout: 30000 });
+    await expectNoHorizontalOverflow(page, 'diff unified at 320');
+    await shotFb(page, 'page-unified-320-light');
+
+    await page.goto(BOOK_DIFF_URL);
+    await expect(page.getByRole('list', { name: /current content/i }).locator('del').first()).toBeVisible({ timeout: 30000 });
+    await expectNoHorizontalOverflow(page, 'book diff unified at 320');
+    await shotFb(page, 'book-unified-320-light');
   });
 });

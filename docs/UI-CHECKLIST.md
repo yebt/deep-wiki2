@@ -1533,4 +1533,84 @@ saving?" from the previous entry; the two-icon-pack requirement (§4.3) remains 
 
 ---
 
+### 2026-09-17 — Page diff and book diff: word-level marks and a side-by-side layout — awaiting the owner's eye on gates 10.4 / 10.6
+
+**Reviewer:** none yet — this entry is what was shipped for review, not a review.
+**Verdict:** Pending
+
+The owner's review of 2026-09-17 failed gates **10.4** (page diff) and **10.6** (book diff) with
+one sentence: "a diff like GitHub's". Branch `feat/word-level-diff`, one commit per piece;
+`docs/TODO.md` Findings, 2026-09-17, has the two entries (the empty history row, and the diff).
+
+**Pre-build contract (§2).** *Who:* a member with `read`, arriving from page history or book
+history to see what a save changed. *Goal:* "show me the words that changed, not just which
+paragraphs." *Primary action:* none — a reading surface; "Unified | Side by side" is a view
+preference, not an action on data. *Data:* `GET /pages/:id/diff` and `GET /books/:id/diff`,
+whose `modified` changes now carry `segments` (`diffInline()` in `packages/core`); nothing is
+computed in the browser. *Not:* a character diff, a line differ between blocks (block-diff
+spec), restore. *Empty / too much:* "No differences" is unchanged; a 2,000-word paragraph
+rewritten end to end is one `<del>` and one `<ins>`, wrapped inside its row.
+
+**What to look at**
+
+1. **Inside an edited block, the words that changed** (`DiffInlineText`, on both screens
+   through the one `DiffBlockChanges` — §4.1): `<ins>` on `success-container` /
+   `on-success-container`, `<del>` on `error-container` / `on-error-container` — M3's
+   `tertiary-container` role carried by `success`, the alias that already names "Added" on the
+   badge beside it (`docs/DESIGN-SYSTEM.md` §14, 2026-09-17) — each with the 1px inset accent
+   ring every tonal chip carries, so the mark has a boundary and not only a fill (§4.2, §5).
+   Never raw red/green, never alpha. The underline and the strike stay as the second signal
+   (§5, "never colour alone"), and the elements themselves are the semantics assistive
+   technology reads. A legend once per screen, drawn with the real marks. "Moved up/down"
+   is unchanged; a block that moved *and* changed shows the directional badge and its marks.
+2. **"Unified | Side by side"** (`DiffLayoutControl`): M3's segmented button — a `UFieldGroup`
+   of outlined segments, the pressed one on `secondary-container` with `aria-pressed` (§5),
+   icon beside label (§4.3), a tooltip each; the side-by-side one states that below 768px the
+   choice is honoured as one column. Persisted per browser in `dw-diff-layout` like
+   `dw-comments`, read before the first render. Side by side is a two-column grid per row:
+   before carries the deletions, after the insertions, an added or removed block says which
+   side it is not on, and column headings stand once above the list (each cell also carries
+   a visually hidden "Before:"/"After:").
+3. **The page diff's rows are now the book diff's rows.** The full-row accent-container wash
+   the 2026-09-14 audit called "a highlighter pass over source" is gone from the page screen;
+   both screens carry the signal on the 4px accent border and the outlined badge, on the
+   neutral `bg-default` inset (§9.4). The page-diff skeleton draws the new row and the
+   header row by the same classes.
+4. **History no longer offers a comparison that shows nothing.** A revision storing the same
+   bytes as the one before it — rows minted before `savePage()` refused byte-identical saves
+   (the "empty history entry", `docs/TODO.md` Findings 2026-09-17) — says "Same content as the
+   previous revision" and its "Compare with previous" is `aria-disabled` with the reason in the
+   tooltip (§3 "Disabled — explains why", §5). New rows of that kind cannot be minted.
+
+**Measured** in `e2e/diff.spec.ts` against the real backend, at 1280×900 in both themes and
+320×900 in light: the seeded edit renders exactly `<ins>now </ins>`, `<del>no edits yet</del>`,
+`<ins>one small edit</ins>`; each mark's boundary (`boundaryContrast`, §5's 3:1) at
+**6.19:1** (`<ins>`) and **7.08:1** (`<del>`) in light, **12.13:1** and **11.46:1** in dark;
+one legend; the control present on the server-rendered DOM (its first cut was not — see
+`docs/TODO.md`); the control toggles, the cookie reads `side-by-side`, a reload keeps it; the
+two columns sit beside each other (the after column starts past the before column's right
+edge, same top); at 320 with the side-by-side cookie the row has one column, the control
+still pressed; and `expectNoHorizontalOverflow` holds on every screenshot. Screenshots
+`fb-diff-page-{unified,side-by-side}-1280-{light,dark}.png`,
+`fb-diff-page-{unified,side-by-side}-320-light.png`,
+`fb-diff-book-{unified,side-by-side}-1280-{light,dark}.png`,
+`fb-diff-book-unified-320-light.png` in the session scratchpad.
+
+**Findings against my own work, fixed before review:** the layout control was drawn with
+`UButtonGroup`, a tag Nuxt UI 4 does not have (`UFieldGroup` is its name) — it rendered its
+children on the client and nothing on the server, so every server-rendered screenshot lacked
+it while every test passed. Now `UFieldGroup`, asserted on the server's DOM.
+
+**Known before review, not fixed**
+
+- Whitespace-only changes inside a block (a doubled space) mark the space itself, which
+  reads as an empty mark; a visible-space glyph is a follow-up.
+- Side by side on a block that only moved shows the same text in both columns; a "moved from
+  here" ghost at the old position (the audit's direction (c)) is still the owner's call, as
+  is direction (a), the diff as `doc-body` prose (`docs/TODO.md` Open Questions).
+- The two-icon-pack requirement (§4.3) remains untested; everything the 2026-09-16 entries
+  carried forward and this batch did not touch stands.
+
+---
+
 *The next entry goes below this one.*

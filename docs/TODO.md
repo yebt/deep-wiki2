@@ -534,6 +534,111 @@ makes conventions portable across projects.
 
 Discoveries and constraints. Newest first.
 
+### 2026-09-17 — "Sometimes an empty history entry is saved": a byte-identical save minted a revision, and the editor called an unchanged document dirty
+
+**What happened.** Reproduced against the real API (`createPageRoutes` + `createDiffRoutes`
+over a provisioned Postgres, a scratch script): `PUT /pages/:id` with the very bytes already
+stored answered 200 and wrote a `page_revision` whose diff against its predecessor classified
+every block `unchanged`. Five paths were tried — byte-identical save (**empty revision**),
+whitespace-only changes (a trailing newline or a doubled blank line is refused `409 not
+canonical`; a doubled space inside a paragraph is canonical and a real `modified` — not this
+defect), a save after a failed stale save (fine), two quick saves inside the changeset window
+(**the second, unchanged, minted an empty revision** in the same changeset), take-over then
+save (**empty revision**). The history screen showed such a row like any other — author, time,
+"Compare with previous" — and the link opened onto "No differences".
+
+**Cause, two halves.** `savePage()` (`packages/db/src/content/save-page.ts`) wrote the
+revision unconditionally after the `content_hash`-guarded `UPDATE`, which happily updated a
+row to its own bytes. And `pages/pages/[id]/edit.vue` set `isDirty = true` on *every* editor
+transaction, so a character typed and deleted, or an Undo back to the start, left Save live
+and sending the stored bytes back. Neither half alone produces the row; both were there.
+
+**Decision, from the spec's wording.** The revision-history spec pairs a revision with "the
+corresponding `page_content` change" and says a save "MUST NOT commit a revision without the
+corresponding `page_content` change"; its success scenario is "a page save request with
+changed Markdown". A save that changes nothing has no corresponding change, so it earns no
+revision — even if the owner pressed Save on purpose: a revision is a *version*, and an
+identical version is not one (design.md Decision 7 rejects "revision-on-changeset-close"
+because it "loses intermediate versions"; an identical snapshot is no version to lose).
+`savePage()` now returns early with `unchanged: true` once the `FOR UPDATE` row already holds
+the canonical text: no `page_content` update (so `updated_by`/`updated_at` keep naming the last
+real edit), no revision, no changeset activity, no derived rebuild. The stale check still runs
+first — an identical save against an outdated hash is a stale save, refused as before. The
+route carries `unchanged` in `SavePageResponseSchema`; `useSavePage` confirms "Nothing
+changed since the last save." and clears no cached reads; the edit screen's dirty flag is now
+"differs from the saved text". Tests: `save-page.test.ts` (three), `pages.test.ts`,
+`pages.test.ts` (contracts), `useSavePage.test.ts`, `edit.test.ts`. The chain-compression
+tests in `rebuild-derived.test.ts` had used an identical re-save as their reconciliation
+trigger; they save a real edit now.
+
+**The rows already written.** Revisions are immutable, so the empty ones stay. The history
+summary now carries `contentHash` (db query, `RevisionSummarySchema`, route), and
+`history.vue` names a row whose hash equals its older neighbour's — "Same content as the
+previous revision" — with "Compare with previous" `aria-disabled` and the reason in its
+tooltip ("Nothing to compare: …"), rather than a link onto an empty diff (docs/UI-CHECKLIST.md
+§3 "Disabled — explains why", §5 `aria-disabled`).
+
+### 2026-09-17 — "A diff like GitHub's": word-level marks inside an edited block, and a side-by-side layout (owner review of gates 10.4/10.6)
+
+Branch `feat/word-level-diff`; the Review Log entry of this date in `docs/UI-CHECKLIST.md`
+carries the measurements and the screenshots.
+
+- **Where the differ lives.** `packages/core/src/content/inline-diff.ts` — pure, zero
+  imports, so `core-purity` holds: `tokenizeInline()` (words in any script, whitespace runs,
+  single punctuation marks; the tokens concatenate back to the input) and `diffInline()`
+  (Myers' O(ND) over the tokens, deletions before insertions within a run). The block-diff
+  spec's ban on a line differ is about *classification* — it exists so "moved" survives —
+  and is untouched: `diffBlocks()` still decides the four classes, and the word differ runs
+  only inside a block it has already matched on both sides.
+- **The whitespace fold.** Exact word LCS marks "with no edits yet" → "now with one small
+  edit" as `[no→one] [edits→small] [yet→edit]` — three marks per side around three shared
+  spaces, correct and unreadable. Whitespace-only equal runs between two changes are folded
+  into both sides whenever the neighbours carry both a deletion and an insertion, so the
+  phrase is one mark per side and neither side ever gets a mark that is only a space.
+  `inline-diff.test.ts` holds the reassembly invariant on both sides.
+- **The contract is extended, not replaced.** `ModifiedChangeSchema` gains `segments`
+  (`InlineSegmentSchema`); `text` stays the after text; no other kind carries segments (an
+  `unchanged` one that arrives with them is stripped by `z.object`). `attachBlockText()`
+  diffs a modified block between its own `fromSlot` and `toSlot`, so a block that moved and
+  changed is compared with itself and not with whatever now stands in its old slot
+  (`attach-block-text.test.ts`).
+- **One renderer for two screens.** `BookDiffBlockChanges` became `DiffBlockChanges` and the
+  page diff renders it too; the page screen's full-row accent wash (the 2026-09-14 audit's
+  "highlighter pass") is gone — a word mark on a `warning-container` row would have been a
+  container on a container. The page-diff test that proved "moved is distinct" by background
+  class now proves it by the accent border, as the book's already did. The audit's (b) —
+  "the before-text under a modified block" — is closed by the marks themselves; (a) and (c)
+  stay in Open Questions.
+- **`tertiary-container` is `success` here.** The owner named M3's `tertiary-container` for
+  insertions; this project has no `tertiary` alias (Nuxt UI's set is closed at seven), and
+  `success` already names "Added" on the badge beside the mark. Recorded in
+  `docs/DESIGN-SYSTEM.md` §14; the alternative is a seventh palette to author and measure.
+- **The 3:1 boundary is measured, not assumed.** Each mark carries the 1px inset accent ring
+  (`TONAL_BOUNDARY` by hand); `e2e/diff.spec.ts` runs `boundaryContrast()` on an `<ins>` and
+  a `<del>` in both themes and prints and asserts ≥ 3:1: 6.19:1 / 7.08:1 light, 12.13:1 /
+  11.46:1 dark. The audit's 1.00:1 badge is the reason.
+- **`UButtonGroup` does not exist in Nuxt UI 4; the group is `UFieldGroup`.** The control's
+  first cut used the old name: an unresolved tag renders its children on the client and
+  nothing on the server, so the control was missing from every server-rendered screenshot
+  and present after hydration — and both the component test (client-side) and the e2e's
+  post-hydration clicks passed. `vue-tsc` did not flag the unknown tag either. Caught by
+  looking at the screenshots; the e2e now asserts the control on the server's DOM.
+- **Side by side is honoured as one column below `md`.** The grid needs two readable 14px
+  columns; at 320 it has 288px. The preference survives (cookie `dw-diff-layout`, the control
+  still pressed) and the segment's tooltip says so, so the control never looks inert. The
+  width is read from `matchMedia` on mount with `true` as the server's assumption — a phone
+  with a side-by-side cookie collapses one frame after hydration rather than mismatching it.
+- **`<pre>` and a Vue template do not mix.** `DiffInlineText` is a render function: inside a
+  `<pre>`, the template's own line breaks between `<ins>` and `<del>` would be preserved as
+  content. Its tests read `textContent`, since test-utils' `text()` trims what a `<pre>`
+  keeps.
+- **`e2e/diff.spec.ts` is serial, and its first test is a click-through on a cold dev
+  server.** Under a load average of 13–19 (other worktrees' suites) that test outran its 30s
+  timeout in two of three runs at the on-demand compiles of `/history` and `/diff`, taking
+  the thirteen tests behind it down as "did not run"; the run between passed at 26.6s. It now
+  takes the same `test.setTimeout` allowance the skeleton test in the same file already
+  takes for the same reason — a harness trade, not a retry into passing.
+
 ### 2026-09-16 — `e2e/editor.spec.ts`'s "flake" was one race, and it is the harness's: a key sent within the frame after a click is handled at the caret ProseMirror still holds
 
 **What happened.** The v0.5.0 verification saw `:754` (`/table`) time out waiting for "Saved"
@@ -4709,8 +4814,9 @@ in Findings.
 - **Page diff directions (a) and (c).** The audit's (a) — render each diff block as
   `doc-body` prose with a left rule and a badge, so the diff reads as a document — and (c) —
   a "moved from here" ghost at the block's old position — are unimplemented and are the
-  owner's call; (b) is what shipped. Recorded in `apps/web/app/pages/pages/[id]/diff.vue`'s
-  header comment and in Findings 2026-09-14 ("Seen on the way").
+  owner's call; (b) is what shipped, and its "before-text under a modified block" half
+  closed on 2026-09-17 with the word-level marks. Recorded in Findings 2026-09-14 ("Seen on
+  the way") and 2026-09-17.
 - **Registration answers the question password reset refuses.** `POST /auth/register`
   returns `409 "an account already exists for this email address"`, while
   `POST /auth/password-reset` goes to deliberate lengths — an identical body and now an

@@ -6,7 +6,10 @@
  * `DiffBlockChanges` so neither screen carries a copy.
  *
  * M3's segmented button (`docs/DESIGN-SYSTEM.md` §9.1's hierarchy, §5.2's
- * selected state): an outlined group, the selected segment on the opaque
+ * selected state): `UFieldGroup` — Nuxt UI 4's name for the button group;
+ * an unknown tag renders its children on the client and nothing on the
+ * server, which is how the control first shipped invisible until
+ * hydration — an outlined group, the selected segment on the opaque
  * `secondary-container` pair — `UButton` `soft` `secondary`, the same
  * treatment the editor's selection toolbar gives a pressed control — and
  * `aria-pressed` beside it so the state is never colour alone (§5). Each
@@ -44,7 +47,7 @@ function choose(value: DiffLayout): void {
 
 <template>
   <div role="group" aria-label="Diff layout">
-    <UButtonGroup size="sm">
+    <UFieldGroup size="sm">
       <UTooltip v-for="segment in SEGMENTS" :key="segment.value" :text="segment.tooltip">
         <UButton
           :icon="segment.icon"
@@ -56,6 +59,6 @@ function choose(value: DiffLayout): void {
           {{ segment.label }}
         </UButton>
       </UTooltip>
-    </UButtonGroup>
+    </UFieldGroup>
   </div>
 </template>
