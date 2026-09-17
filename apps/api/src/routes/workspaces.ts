@@ -69,13 +69,13 @@ import {
 import { Hono, type Context } from 'hono';
 import type postgres from 'postgres';
 import { sessionMiddleware, type SessionVariables } from '../middleware/session';
+import { resolveWorkspaceId } from './workspace-ref';
 
 export interface WorkspaceRouteDeps {
   readonly sql: postgres.Sql;
   readonly sessionIdleTimeoutMinutes?: number;
 }
 
-const UUID_SHAPE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** Postgres's unique-violation SQLSTATE, the only error `workspaces_slug_key` raises. */
 const UNIQUE_VIOLATION = '23505';
@@ -141,10 +141,12 @@ export function createWorkspaceRoutes(deps: WorkspaceRouteDeps): Hono<{ Variable
   });
 
   app.get('/workspaces/:id/members', auth, async (c) => {
-    const workspaceId = c.req.param('id');
-    // A non-uuid id would make the cast below throw; it names nothing and
-    // gets the same answer as an id that names nothing.
-    if (!UUID_SHAPE.test(workspaceId)) return notFound(c);
+    // By id or by slug (`workspace-ref.ts`): the members screen asks by the
+    // slug its address carries. A ref that is neither shape names nothing
+    // and gets the same answer as an id that names nothing — and never
+    // reaches the uuid cast below.
+    const workspaceId = await resolveWorkspaceId(deps.sql, c.req.param('id'));
+    if (!workspaceId) return notFound(c);
     const session = c.get('session');
 
     const [workspace] = await deps.sql<{ id: string; name: string; slug: string; root_id: string }[]>`

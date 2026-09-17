@@ -16,7 +16,7 @@ describe('useCreateWorkspace', () => {
     await create({ name: 'Acme Handbook', slug: 'acme-handbook' });
 
     expect(status.value).toBe('success');
-    expect(workspace.value).toEqual(created);
+    expect(workspace.value).toEqual({ ...created, slug: 'acme-handbook' });
     expect(post).toHaveBeenCalledWith({ name: 'Acme Handbook', slug: 'acme-handbook' });
   });
 

@@ -16,6 +16,28 @@ export default defineNuxtConfig({
 
   devtools: { enabled: true },
 
+  hooks: {
+    // The addresses every link had before 2026-09-17 — `/pages/<id>`,
+    // `/books/<id>/history`, `/workspaces/<id>` — stay real routes so a
+    // bookmark or a mailed link never lands on a bare 404. All of them
+    // render one placeholder (`LegacyRedirect.vue`) behind one middleware
+    // (`legacy-routes.ts`) that asks the API where the thing lives now and
+    // answers a 301. Declared here rather than as eight page files whose
+    // only content would be that placeholder; the shapes themselves are
+    // read by `utils/routes.ts`, the one place a route is spelled.
+    'pages:extend'(pages) {
+      const file = '~/components/LegacyRedirect.vue';
+      const meta = { middleware: ['legacy-routes'] };
+      pages.push(
+        { name: 'legacy-page', path: '/pages/:id/:view(edit|history|diff)?', file, meta },
+        { name: 'legacy-book', path: '/books/:id/:view(history|diff)', file, meta },
+        // `/workspaces/new` is a screen of its own and must win over this
+        // pattern: an id is a uuid, and `new` is not one.
+        { name: 'legacy-workspace', path: '/workspaces/:id([0-9a-fA-F-]{36})/:screen(members|settings|ai)?', file, meta },
+      );
+    },
+  },
+
   devServer: {
     // Where apps/web listens in development, declared rather than left to
     // Nuxt's default. Two reasons, and both of them have already cost time:

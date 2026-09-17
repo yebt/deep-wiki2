@@ -81,7 +81,7 @@ describe('instance registration screen', () => {
   // for one screen. The eyebrow stays: neither the h1 nor a breadcrumb
   // that starts with the workspace's name says "the instance's".
   test('with a workspace remembered: the workspace frame, its sidebar in management mode, the eyebrow kept', async () => {
-    document.cookie = `${LAST_WORKSPACE_COOKIE}=ws-1; path=/`;
+    document.cookie = `${LAST_WORKSPACE_COOKIE}=${encodeURIComponent('ws-1:acme')}; path=/`;
     mockSettings({ status: 'success', settings: unverified });
     const component = await mountSuspended(PageInApp, { global: { stubs: { WorkspaceSidebar: true } }, route: '/admin/registration' });
 

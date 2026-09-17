@@ -28,6 +28,7 @@
  *   before it to compare against.
  */
 import { formatRevisionDate } from '~/utils/format-revision-date';
+import { pageDiffUrl, pageEditUrl, pageUrl, workspacesUrl } from '~/utils/routes';
 
 // Inside the workspace layout: the frame is mounted once and this screen
 // renders only its pane, so the sidebar's tree keeps its scroll and its
@@ -37,6 +38,9 @@ definePageMeta({ layout: 'workspace' });
 
 const route = useRoute();
 const nodeId = route.params.id as string;
+/** The workspace slug the address carries (`/w/<slug>/p/<id>/history`): what every link this screen emits is built from. */
+const workspaceSlug = route.params.workspace as string;
+const allWorkspacesUrl = workspacesUrl();
 
 const { status, revisions, message, load } = usePageHistory(nodeId);
 // A signed-out visit leaves for sign-in and comes back (`useSignInRedirect`).
@@ -69,7 +73,7 @@ const CARD_BODY_INSET = 'p-2 sm:p-2';
 
 function diffHref(index: number): string {
   const revision = revisions.value[index]!;
-  return `/pages/${nodeId}/diff?from=${previousRevisionId(index)}&to=${revision.id}`;
+  return pageDiffUrl(workspaceSlug, nodeId, { from: previousRevisionId(index), to: revision.id });
 }
 
 /**
@@ -101,7 +105,7 @@ useSeoMeta({ title: 'Revision history — deep-wiki' });
       <!-- The same control edit mode carries for the same destination:
            "Read page" with the eye, never a second chrome for `/pages/:id`
            (checklist §4.1). -->
-      <UButton icon="i-lucide-eye" variant="ghost" color="neutral" size="sm" :to="`/pages/${nodeId}`">
+      <UButton icon="i-lucide-eye" variant="ghost" color="neutral" size="sm" :to="pageUrl(workspaceSlug, nodeId)">
         Read page
       </UButton>
     </template>
@@ -163,7 +167,7 @@ useSeoMeta({ title: 'Revision history — deep-wiki' });
     >
       It may have been moved or deleted, or it may be somewhere you don't have access to — deep-wiki deliberately doesn't say which, so that a page you can't see is indistinguishable from one that was never there.
       <template #actions>
-        <UButton icon="i-lucide-library-big" variant="solid" color="primary" to="/workspaces">Your workspaces</UButton>
+        <UButton icon="i-lucide-library-big" variant="solid" color="primary" :to="allWorkspacesUrl">Your workspaces</UButton>
         <UButton icon="i-lucide-log-in" variant="ghost" color="neutral" to="/login">Sign in</UButton>
       </template>
     </PageNotice>
@@ -196,7 +200,7 @@ useSeoMeta({ title: 'Revision history — deep-wiki' });
     >
       This page hasn't been saved yet. Its first save creates the first revision.
       <template #actions>
-        <UButton :to="`/pages/${nodeId}/edit`" variant="soft" color="primary" icon="i-lucide-pencil">
+        <UButton :to="pageEditUrl(workspaceSlug, nodeId)" variant="soft" color="primary" icon="i-lucide-pencil">
           Start editing
         </UButton>
       </template>

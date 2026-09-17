@@ -21,8 +21,8 @@
  * every visit after the first, the cookie names the workspace before the
  * frame renders and the two values are the same from the start.
  */
-export function useSidebarWorkspace(live: Readonly<Ref<string | null>>): ComputedRef<string | null> {
-  const renderedWith = useState<string | null>('dw-frame-sidebar-workspace-rendered', () => live.value);
+export function useSidebarWorkspace<T>(live: Readonly<Ref<T | null>>): ComputedRef<T | null> {
+  const renderedWith = useState<T | null>('dw-frame-sidebar-workspace-rendered', () => live.value);
   const mounted = ref(false);
   if (getCurrentInstance()) {
     onMounted(() => {

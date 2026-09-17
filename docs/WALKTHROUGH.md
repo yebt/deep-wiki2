@@ -56,7 +56,7 @@ dashboard, not a list. The seed's first sign-in has nothing remembered yet, so y
   appears. It names the plan and the number, removes the form, and links back. That is a real
   state, not an error.
 
-## 3. Invite a colleague — `/workspaces/:id/members`
+## 3. Invite a colleague — `/w/<slug>/members`
 
 **Do:** "Members" in the sidebar's footer — it stands beside Registration settings and the
 theme toggle, and is reachable from any screen inside the workspace, not only the dashboard.
@@ -70,12 +70,12 @@ window, set a password, land on the workspace's dashboard signed in as the new u
 **Provoke:**
 - Follow the same link twice → "already used", with a way out.
 - Open `/invite/accept` with no token → not a blank page: an explanation and a link to sign in.
-- As the **second user**, open `/workspaces/<id>/members` by address → the same 404 a
+- As the **second user**, open `/w/<slug>/members` by address → the same 404 a
   nonexistent workspace gives. Absence and denial are one answer here, on purpose.
 
-## 4. The dashboard, and the tree in the sidebar — `/workspaces/:id`
+## 4. The dashboard, and the tree in the sidebar — `/w/<slug>`
 
-**Do:** as the operator. `/workspaces/:id` is the workspace's dashboard, not the tree — the
+**Do:** as the operator. `/w/<slug>` is the workspace's dashboard, not the tree — the
 tree moved into the sidebar, mounted once by `layouts/workspace.vue` and present on every
 screen inside the workspace, not just this one. In the sidebar: "New…" → shelf → book (under
 the shelf) → chapter → page. Rename one. Click a row to select it (the fill shows which);
@@ -100,9 +100,13 @@ progress — survives the navigation.
 - As the second user with `read` only, "New…" and "Rename…" explain why they are unavailable
   instead of being greyed out with no reason.
 
-## 5. Read a page — `/pages/:id`
+## 5. Read a page — `/w/<slug>/p/<id>`
 
-**Do:** open any page. This is the cached, sanitised HTML — no editor code loads here.
+**Do:** open any page. This is the cached, sanitised HTML — no editor code loads here. The
+address carries the workspace's slug and the page's id (2026-09-17): the id is what stays
+stable when the page is renamed or moved, the slug is the name the team chose, and the
+hierarchy is the breadcrumb's, not the address's. An old `/pages/<id>` address still lands —
+type one and watch it become the new shape, permanently (a 301).
 
 **See:** the measure column, the heading block, and the workspace frame's contextual bar:
 from `lg` up, the sidebar toggle at its edge, then the breadcrumb, then — screen-specific —
@@ -124,7 +128,7 @@ the comments toggle (only when there are threads to hide), **history** (clock ic
   never means you stop hearing about them. The choice survives a reload (`dw-comments`
   cookie); a reader with `read` but not `comment` sees no toggle and no marks either way.
 
-## 6. Edit and save — `/pages/:id/edit`
+## 6. Edit and save — `/w/<slug>/p/<id>/edit`
 
 **Do:** Edit. Type. Put a word in **bold with Ctrl+B inside an italic phrase**. Type `/` for
 the slash menu, `@` for mentions; use the arrow keys **and** the mouse on both. Save.
@@ -149,14 +153,14 @@ as `_x&#x20;____y____&#x20;z_` and the page could never be reopened.)
   its anchor, Save → refused with the corrected document offered, not a silent resurrection of
   a retired block.
 
-## 7. Revision history — `/pages/:id/history`
+## 7. Revision history — `/w/<slug>/p/<id>/history`
 
 **Do:** the clock icon from read mode.
 
 **See:** every save, newest first, author and time in your zone. "Compare with previous" on all
 but the oldest. Empty state on a never-saved page explains why and offers "Start editing".
 
-## 8. Page diff — `/pages/:id/diff`
+## 8. Page diff — `/w/<slug>/p/<id>/diff`
 
 **Do:** "Compare with previous". Make a revision that adds a paragraph, edits one, deletes one,
 and **moves** one, then compare.
@@ -208,7 +212,7 @@ visibly, without a reload.
 **Provoke:** revoke the operator's `read` on that page mid-stream (members screen) → the chip
 stops updating on the next event; presence never tells you about a page you can no longer see.
 
-## 11. Book history and diff — `/books/:id/history`, `/books/:id/diff`
+## 11. Book history and diff — `/w/<slug>/b/<id>/history`, `/w/<slug>/b/<id>/diff`
 
 **Do:** "Book history" from a book row's own action in the sidebar tree. History groups saves
 into **changesets** — same author, same book, within thirty minutes — and its bar offers
@@ -239,11 +243,17 @@ server's refusal verbatim if you try without one.
 
 ## 13. Not-found, denied, and the chrome
 
-**Do:** type `/workspaces/nope/settings`.
+**Do:** type `/w/nope/nowhere`.
 
-**See:** "This link doesn't lead anywhere", the address in its own box, and **"Your
-workspaces"** as the primary way out — sign-in demoted to second. A page you cannot read
-answers identically to one that does not exist, everywhere.
+**See:** "This link doesn't lead anywhere", the address in its own box, and **"Open this
+workspace"** as the primary way out — the address named one — with sign-in demoted to
+second. A page you cannot read answers identically to one that does not exist, everywhere.
+
+**Provoke:** take a real page's address and change the slug to another workspace's — one you
+can open — keeping the page id. "There is nothing at this address", in the pane, with the
+sidebar standing on the workspace the address named and no row marked: the address's two
+names disagree, and the screen does not say which one was wrong. Then type the old shape,
+`/pages/<that id>`, and land on the page through its real workspace.
 
 ---
 

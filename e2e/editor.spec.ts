@@ -5,6 +5,7 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 import { DEFAULT_HEARTBEAT_INTERVAL_MS } from '../apps/web/app/composables/useLockHeartbeat';
 import { API_URL } from './ports';
 import { expectNoHorizontalOverflow } from './overflow';
+import { pageEditUrl, pageUrl } from '../apps/web/app/utils/routes';
 
 /**
  * Edit mode (document-editor spec: live preview renders in place;
@@ -41,9 +42,12 @@ import { expectNoHorizontalOverflow } from './overflow';
 test.describe.configure({ mode: 'serial' });
 
 const PAGE_ID = '33333333-3333-3333-3333-333333333333';
+/** The mocked-route tests below never seed a real workspace — any well-formed slug works, since these screens read the page by id from the mocked API, not the slug from a real backend. */
+const WORKSPACE_SLUG = 'e2e-editor-mock';
 
 interface SeedFixtures {
   readonly workspaceId: string;
+  readonly workspaceSlug: string;
 }
 
 interface EditorFixtures {
@@ -145,7 +149,7 @@ test('saving an already-saved page persists the edit and reads back for real, wi
   test.setTimeout(60000);
   await signInAs(page, editorFixtures.writerSessionToken);
 
-  await page.goto(`/pages/${editorFixtures.editablePageId}/edit`);
+  await page.goto(pageEditUrl(seed.workspaceSlug, editorFixtures.editablePageId));
   const editor = page.getByTestId('editor-surface');
   await expect(editor).toBeVisible({ timeout: 30000 });
   await expect(editor).toContainText(editorFixtures.editablePageMarkdown.trim(), { timeout: 30000 });
@@ -183,7 +187,7 @@ test('leaving a dirty editor by clicking a tree row asks in the product\'s dialo
   test.setTimeout(90000);
   await signInAs(page, editorFixtures.writerSessionToken);
 
-  await page.goto(`/pages/${editorFixtures.editablePageId}/edit`);
+  await page.goto(pageEditUrl(seed.workspaceSlug, editorFixtures.editablePageId));
   const editor = page.getByTestId('editor-surface');
   await expect(editor).toContainText(editorFixtures.editablePageMarkdown.trim(), { timeout: 30000 });
   // The writer can read one page — this one — so its own row is the tree
@@ -208,7 +212,7 @@ test('leaving a dirty editor by clicking a tree row asks in the product\'s dialo
   await expect(dialog).toContainText(/unsaved changes in this tab will be lost/i);
   await page.keyboard.press('Escape');
   await expect(dialog).toBeHidden();
-  await expect(page).toHaveURL(new RegExp(`/pages/${editorFixtures.editablePageId}/edit$`));
+  await expect(page).toHaveURL(new RegExp(`${pageEditUrl(seed.workspaceSlug, editorFixtures.editablePageId)}$`));
   await expect(editor).toContainText('Not saved yet.');
 
   await otherRow.getByText(editorFixtures.editablePageTitle).click();
@@ -216,7 +220,7 @@ test('leaving a dirty editor by clicking a tree row asks in the product\'s dialo
   await shotShell(page, 'edit-confirm-1280-light');
   await dialog.getByRole('button', { name: 'Keep editing' }).click();
   await expect(dialog).toBeHidden();
-  await expect(page).toHaveURL(new RegExp(`/pages/${editorFixtures.editablePageId}/edit$`));
+  await expect(page).toHaveURL(new RegExp(`${pageEditUrl(seed.workspaceSlug, editorFixtures.editablePageId)}$`));
   await expect(editor).toContainText('Not saved yet.');
   // Focus came back to the control that asked (§5).
   await expect(otherRow).toBeFocused();
@@ -224,7 +228,7 @@ test('leaving a dirty editor by clicking a tree row asks in the product\'s dialo
   await otherRow.getByText(editorFixtures.editablePageTitle).click();
   await expect(dialog).toBeVisible();
   await dialog.getByRole('button', { name: 'Leave' }).click();
-  await expect(page).toHaveURL(new RegExp(`/pages/${editorFixtures.editablePageId}$`), { timeout: 30000 });
+  await expect(page).toHaveURL(new RegExp(`${pageUrl(seed.workspaceSlug, editorFixtures.editablePageId)}$`), { timeout: 30000 });
   await expect(page.locator('article')).toContainText(editorFixtures.editablePageMarkdown.trim(), { timeout: 30000 });
 });
 
@@ -247,7 +251,7 @@ test('typing markdown syntax renders the formatted result inline, with no separa
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ status: 'ok' }) }),
   );
 
-  await page.goto(`/pages/${PAGE_ID}/edit`);
+  await page.goto(pageEditUrl(WORKSPACE_SLUG, PAGE_ID));
 
   const editor = page.getByTestId('editor-surface');
   await expect(editor).toBeVisible({ timeout: 30000 });
@@ -285,7 +289,7 @@ test('entering edit mode while another holder is active offers both "Take over" 
     }),
   );
 
-  await page.goto(`/pages/${PAGE_ID}/edit`);
+  await page.goto(pageEditUrl(WORKSPACE_SLUG, PAGE_ID));
 
   await expect(page.getByRole('heading', { name: 'Someone else is editing this page' })).toBeVisible({ timeout: 30000 });
   await expect(page.getByRole('link', { name: 'Open read-only' })).toBeVisible();
@@ -341,7 +345,7 @@ test('a save refused as "not canonical" offers the canonical document back, and 
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ contentHash: 'hash-2' }) });
   });
 
-  await page.goto(`/pages/${PAGE_ID}/edit`);
+  await page.goto(pageEditUrl(WORKSPACE_SLUG, PAGE_ID));
   const editor = page.getByTestId('editor-surface');
   await expect(editor).toBeVisible({ timeout: 30000 });
   await expect(editor).toContainText('Not canonical', { timeout: 30000 });
@@ -391,7 +395,7 @@ test('clicking the second slash command runs it, closes the menu and leaves the 
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ status: 'ok' }) }),
   );
 
-  await page.goto(`/pages/${PAGE_ID}/edit`);
+  await page.goto(pageEditUrl(WORKSPACE_SLUG, PAGE_ID));
   const editor = page.getByTestId('editor-surface');
   await expect(editor).toContainText('Start.', { timeout: 30000 });
   await caretToEnd(editor);
@@ -435,7 +439,7 @@ async function openMockedEditor(page: Page, markdown: string, title = 'Block UI 
   await page.route(`${apiOrigin()}/pages/${PAGE_ID}/lock`, (route) =>
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ status: 'ok' }) }),
   );
-  await page.goto(`/pages/${PAGE_ID}/edit`);
+  await page.goto(pageEditUrl(WORKSPACE_SLUG, PAGE_ID));
   const editor = page.getByTestId('editor-surface');
   await expect(editor).toBeVisible({ timeout: 30000 });
   return editor;
@@ -527,7 +531,7 @@ async function savedMarkdown(page: Page, pageId: string): Promise<string> {
 }
 
 async function openBlockPage(page: Page, block: BlockPage, firstWords: string): Promise<ReturnType<Page['getByTestId']>> {
-  await page.goto(`/pages/${block.pageId}/edit`);
+  await page.goto(pageEditUrl(seed.workspaceSlug, block.pageId));
   const editor = page.getByTestId('editor-surface');
   await expect(editor).toContainText(firstWords, { timeout: 30000 });
   return editor;
@@ -917,6 +921,12 @@ async function shotShell(page: Page, name: string): Promise<void> {
   await page.screenshot({ path: `${SHOTS}/fb-shell-${name}.png`, fullPage: false });
 }
 
+/** The 2026-09-17 batch's review material: the confirm dialog above the drawer. */
+async function shotRoutes(page: Page, name: string): Promise<void> {
+  if (!SHOTS) return;
+  await page.screenshot({ path: `${SHOTS}/fb-routes-${name}.png`, fullPage: false });
+}
+
 async function useTheme(page: Page, theme: 'light' | 'dark'): Promise<void> {
   await page.addInitScript((value) => localStorage.setItem('nuxt-color-mode', value), theme);
 }
@@ -939,7 +949,7 @@ for (const theme of ['light', 'dark'] as const) {
       await useTheme(page, theme);
 
       // Read mode first: where the title and the first paragraph stand.
-      await page.goto(`/pages/${editorFixtures.editablePageId}`);
+      await page.goto(pageUrl(seed.workspaceSlug, editorFixtures.editablePageId));
       const readTitle = page.getByRole('heading', { level: 1, name: editorFixtures.editablePageTitle });
       await expect(readTitle).toBeVisible({ timeout: 30000 });
       const readTitleBox = (await readTitle.boundingBox())!;
@@ -948,7 +958,7 @@ for (const theme of ['light', 'dark'] as const) {
       // Edit mode, by the control read mode offers — the transition a
       // person actually makes (docs/UI-CHECKLIST.md §4.5).
       await page.getByRole('link', { name: 'Edit', exact: true }).click();
-      await expect(page).toHaveURL(new RegExp(`/pages/${editorFixtures.editablePageId}/edit$`));
+      await expect(page).toHaveURL(new RegExp(`${pageEditUrl(seed.workspaceSlug, editorFixtures.editablePageId)}$`));
       const editor = page.getByTestId('editor-surface');
       await expect(editor).toContainText(editorFixtures.editablePageMarkdown.trim(), { timeout: 30000 });
       await expect(page.locator('html')).toHaveClass(theme === 'dark' ? /dark/ : /light/);
@@ -1048,7 +1058,7 @@ test.describe('inside the workspace frame, focus mode', () => {
     await signInAs(page, editorFixtures.writerSessionToken);
     await useTheme(page, 'light');
 
-    await page.goto(`/pages/${editorFixtures.editablePageId}/edit`);
+    await page.goto(pageEditUrl(seed.workspaceSlug, editorFixtures.editablePageId));
     const editor = page.getByTestId('editor-surface');
     await expect(editor).toContainText(editorFixtures.editablePageMarkdown.trim(), { timeout: 30000 });
     const sidebar = page.getByRole('navigation', { name: 'Workspace' });
@@ -1106,7 +1116,7 @@ test.describe('inside the workspace frame, the skeleton', () => {
       await route.continue();
     });
 
-    await page.goto(`/pages/${editorFixtures.editablePageId}/edit`);
+    await page.goto(pageEditUrl(seed.workspaceSlug, editorFixtures.editablePageId));
     const skeleton = page.getByTestId('edit-skeleton');
     await expect(skeleton).toBeVisible({ timeout: 30000 });
     const skeletonTitle = (await skeleton.getByTestId('edit-skeleton-title').boundingBox())!;
@@ -1164,7 +1174,7 @@ test.describe('inside the workspace frame, 320x900 light', () => {
     );
     await page.clock.install();
 
-    await page.goto(`/pages/${PAGE_ID}/edit`);
+    await page.goto(pageEditUrl(WORKSPACE_SLUG, PAGE_ID));
     const editor = page.getByTestId('editor-surface');
     await expect(editor).toContainText('about to be lost', { timeout: 30000 });
     await page.clock.fastForward(DEFAULT_HEARTBEAT_INTERVAL_MS);
@@ -1205,7 +1215,7 @@ test.describe('inside the workspace frame, 320x900 light', () => {
     await signInAs(page, editorFixtures.writerSessionToken);
     await useTheme(page, 'light');
 
-    await page.goto(`/pages/${editorFixtures.editablePageId}/edit`);
+    await page.goto(pageEditUrl(seed.workspaceSlug, editorFixtures.editablePageId));
     await expect(page.getByTestId('editor-surface')).toContainText(editorFixtures.editablePageMarkdown.trim(), { timeout: 30000 });
 
     await page.getByRole('button', { name: 'Open sidebar' }).click();
@@ -1250,7 +1260,7 @@ for (const { theme, width } of [
       await signInAs(page, editorFixtures.writerSessionToken);
       await useTheme(page, theme);
 
-      await page.goto(`/pages/${editorFixtures.editablePageId}/edit`);
+      await page.goto(pageEditUrl(seed.workspaceSlug, editorFixtures.editablePageId));
       const editor = page.getByTestId('editor-surface');
       await expect(editor).toContainText(editorFixtures.editablePageMarkdown.trim(), { timeout: 30000 });
       await caretToEnd(editor);
@@ -1272,5 +1282,90 @@ for (const { theme, width } of [
       await expect(dialog).toBeHidden();
       await expect(editor).toContainText('Not saved yet.');
     });
+
+    /**
+     * The question outranks the drawer it was asked from (owner decision,
+     * 2026-09-17; docs/DESIGN-SYSTEM.md §4.5). Recorded on 2026-09-16 as
+     * known-and-not-fixed: at 320 the drawer — a Reka dialog portalled into
+     * the body when opened — stood *above* "Leave without saving?", both
+     * at `z-index: auto`, so Escape could answer it and a pointer could
+     * not. What this measures is the pointer's view: the element at the
+     * centre of Cancel is Cancel, the scrim covers the drawer's row, and —
+     * focus being Reka's own stack, untouched by the rung — focus is in
+     * the dialog while the drawer waits behind it, and back on the row
+     * that asked once it closes.
+     */
+    if (width === 320) {
+      test('asked from a row in the open drawer, the dialog stands above the drawer: the pointer reaches Cancel, focus is inside, and returns to the row', async ({ page }) => {
+        test.setTimeout(90000);
+        await signInAs(page, editorFixtures.writerSessionToken);
+        await useTheme(page, theme);
+
+        await page.goto(pageEditUrl(seed.workspaceSlug, editorFixtures.editablePageId));
+        const editor = page.getByTestId('editor-surface');
+        await expect(editor).toContainText(editorFixtures.editablePageMarkdown.trim(), { timeout: 30000 });
+        await caretToEnd(editor);
+        await page.keyboard.type(' Not saved yet.');
+        await expect(page.locator('#content-bar').getByRole('button', { name: /^Save/ })).not.toHaveAttribute('aria-disabled');
+
+        await page.getByRole('button', { name: 'Open sidebar' }).click();
+        // The drawer is the dialog that slides in from a side. By CSS rather
+        // than by role: once the question opens, Reka hides everything else
+        // from assistive technology, and a role query would find nothing —
+        // which is the point of the measurement, not an obstacle to it.
+        const drawer = page.locator('[role="dialog"][data-side]');
+        const row = drawer.locator('[role="treeitem"]', { hasText: editorFixtures.editablePageTitle }).first();
+        await expect(row).toBeVisible({ timeout: 30000 });
+        await row.getByText(editorFixtures.editablePageTitle).click();
+
+        const dialog = page.getByRole('dialog', { name: 'Leave without saving?' });
+        await expect(dialog).toBeVisible();
+        await expect(drawer).toBeVisible();
+        const cancel = dialog.getByRole('button', { name: 'Keep editing' });
+        await expect(cancel).toBeFocused();
+
+        // The dialog is on the rung above the drawer, scrim and content.
+        const stacking = await page.evaluate(() => {
+          const question = document.querySelector<HTMLElement>('[role="dialog"]:not([data-side])')!;
+          const overlay = document.querySelector<HTMLElement>('[data-slot="overlay"].z-70')!;
+          const drawerPane = document.querySelector<HTMLElement>('[role="dialog"][data-side]')!;
+          return { content: getComputedStyle(question).zIndex, overlay: getComputedStyle(overlay).zIndex, drawer: getComputedStyle(drawerPane).zIndex };
+        });
+        expect(stacking).toEqual({ content: '70', overlay: '70', drawer: 'auto' });
+
+        // What the pointer would hit: Cancel, at its own centre, and the
+        // scrim — never the drawer's row — at the row's centre.
+        const cancelBox = (await cancel.boundingBox())!;
+        const rowBox = (await row.boundingBox())!;
+        const hit = await page.evaluate(
+          ({ cancelAt, rowAt }) => {
+            const describe = (element: Element | null) => {
+              if (!element) return null;
+              const dialog = element.closest('[role="dialog"]');
+              return { text: element.textContent?.trim() ?? '', inDialog: dialog !== null && !dialog.hasAttribute('data-side'), inDrawer: dialog !== null && dialog.hasAttribute('data-side') };
+            };
+            return {
+              cancel: describe(document.elementFromPoint(cancelAt.x, cancelAt.y)?.closest('button') ?? document.elementFromPoint(cancelAt.x, cancelAt.y)),
+              row: describe(document.elementFromPoint(rowAt.x, rowAt.y)),
+            };
+          },
+          { cancelAt: { x: cancelBox.x + cancelBox.width / 2, y: cancelBox.y + cancelBox.height / 2 }, rowAt: { x: rowBox.x + rowBox.width / 2, y: rowBox.y + rowBox.height / 2 } },
+        );
+        expect(hit.cancel).toEqual({ text: 'Keep editing', inDialog: true, inDrawer: false });
+        expect(hit.row?.inDrawer, 'the scrim covers the drawer').toBe(false);
+        await shotRoutes(page, `edit-confirm-drawer-${width}-${theme}`);
+
+        // Focus is trapped in the dialog while the drawer waits behind it.
+        await page.keyboard.press('Tab');
+        await expect(dialog.getByRole('button', { name: 'Leave' })).toBeFocused();
+        await page.keyboard.press('Tab');
+        await expect(cancel).toBeFocused();
+
+        await cancel.click();
+        await expect(dialog).toBeHidden();
+        await expect(row).toBeFocused();
+        await expect(editor).toContainText('Not saved yet.');
+      });
+    }
   });
 }

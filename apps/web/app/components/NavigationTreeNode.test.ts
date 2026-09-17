@@ -60,6 +60,7 @@ const SHELF: TreeNode = node({
 
 interface NodeProps {
   node: TreeNode;
+  workspaceSlug: string;
   depth: number;
   parentId: string;
   index: number;
@@ -82,6 +83,7 @@ async function mountNode(
 ) {
   const props: NodeProps = {
     node: SHELF,
+    workspaceSlug: 'acme',
     depth: 0,
     parentId: 'root-1',
     index: 2,
@@ -315,7 +317,7 @@ describe('NavigationTreeNode', () => {
 
       const link = itemOf(component.dom, 'page-1').querySelector<HTMLAnchorElement>('a[href]')!;
       expect(link).not.toBeNull();
-      expect(link.getAttribute('href')).toBe('/pages/page-1');
+      expect(link.getAttribute('href')).toBe('/w/acme/p/page-1');
       expect(link.getAttribute('tabindex')).toBe('-1');
       expect(link.textContent).toContain('First page');
       // A container is a place to fold, not a place to go: no link.
@@ -432,7 +434,7 @@ describe('NavigationTreeNode', () => {
       await nextTick();
 
       expect(preloadRouteComponentsMock).toHaveBeenCalledTimes(1);
-      expect(preloadRouteComponentsMock).toHaveBeenCalledWith('/pages/page-1');
+      expect(preloadRouteComponentsMock).toHaveBeenCalledWith('/w/acme/p/page-1');
     });
 
     test('a container row has no route to warm', async () => {

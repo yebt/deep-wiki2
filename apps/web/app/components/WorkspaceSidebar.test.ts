@@ -41,6 +41,8 @@ function mockCollaborators() {
     ensure: vi.fn(async () => {}),
     refresh: vi.fn(async () => {}),
     nameOf: (id: string) => (id === 'ws-1' ? 'Acme' : null),
+    slugOf: (id: string) => (id === 'ws-1' ? 'acme' : null),
+    idOf: (slug: string) => (slug === 'acme' ? 'ws-1' : null),
   });
 }
 
@@ -56,7 +58,8 @@ afterEach(() => {
 });
 
 /** `UDashboardSidebar` reads its context from `UDashboardGroup`, so the pane is mounted inside one, as it ships — with the frame's own storage key, so the cookie asserted below is the one the product writes. */
-async function mount(props: { workspaceId: string | null; currentNodeId?: string | null; mode?: 'tree' | 'management' }) {
+async function mount(given: { workspaceId: string | null; workspaceSlug?: string | null; currentNodeId?: string | null; mode?: 'tree' | 'management' }) {
+  const props = { workspaceSlug: given.workspaceId ? 'acme' : null, ...given };
   mockCollaborators();
   useFocusMode().collapsed.value = false;
   const wrapper = await mountSuspended(
@@ -81,9 +84,10 @@ describe('WorkspaceSidebar', () => {
     expect(switcher.exists()).toBe(true);
     expect(tree.exists()).toBe(true);
     expect(tree.props('workspaceId')).toBe('ws-1');
+    expect(tree.props('workspaceSlug')).toBe('acme');
     expect(tree.props('currentNodeId')).toBe('page-1');
 
-    const members = component.get('a[href="/workspaces/ws-1/members"]');
+    const members = component.get('a[href="/w/acme/members"]');
     expect(members.text()).toContain('Members');
     expect(component.get('a[href="/admin/registration"]').attributes('aria-label')).toBe('Registration settings');
     expect(component.get('button[aria-label="Toggle color theme"]').attributes('type')).toBe('button');
@@ -108,10 +112,10 @@ describe('WorkspaceSidebar', () => {
     expect(component.findComponent(NavigationTree).exists()).toBe(false);
     const management = component.findComponent(ManagementSidebar);
     expect(management.exists()).toBe(true);
-    expect(management.props('workspaceId')).toBe('ws-1');
+    expect(management.props('workspaceSlug')).toBe('acme');
 
     // Each door once: the sections hold them, the footer no longer does.
-    expect(component.findAll('a[href="/workspaces/ws-1/members"]')).toHaveLength(1);
+    expect(component.findAll('a[href="/w/acme/members"]')).toHaveLength(1);
     expect(component.findAll('a[href="/admin/registration"]')).toHaveLength(1);
     expect(component.find('a[aria-label="Registration settings"]').exists()).toBe(false);
     expect(component.get('button[aria-label="Toggle color theme"]').attributes('type')).toBe('button');
@@ -142,7 +146,7 @@ describe('WorkspaceSidebar', () => {
     expect(drawer.querySelector('[data-testid="management-sidebar"]'), 'the management region is in the drawer').not.toBeNull();
     expect(drawer.querySelector('[role="tree"]')).toBeNull();
     expect(drawer.querySelector('[data-testid="tree-create-open"]')).toBeNull();
-    expect(drawer.querySelector('a[href="/workspaces/ws-1/members"]')).not.toBeNull();
+    expect(drawer.querySelector('a[href="/w/acme/members"]')).not.toBeNull();
 
     await nuxtApp.hooks.callHook('dashboard:sidebar:toggle');
     await nextTick();
@@ -155,7 +159,7 @@ describe('WorkspaceSidebar', () => {
     const component = await mount({ workspaceId: null });
 
     expect(component.findComponent(NavigationTree).exists()).toBe(false);
-    expect(component.find('a[href^="/workspaces/"][href$="/members"]').exists()).toBe(false);
+    expect(component.find('a[href^="/w/"][href$="/members"]').exists()).toBe(false);
     expect(component.get('[data-testid="sidebar-no-workspace"]').text()).toMatch(/pick a workspace/i);
     expect(component.get('a[href="/workspaces"]').text()).toContain('All workspaces');
     // The operator door and the theme toggle do not depend on a workspace.

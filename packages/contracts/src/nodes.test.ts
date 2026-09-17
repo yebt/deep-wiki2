@@ -6,6 +6,7 @@ import {
   LEGAL_PARENT_TYPES,
   legalChildTypes,
   NODE_TITLE_MAX_LENGTH,
+  NodeLocationResponseSchema,
   NodeTypeSchema,
   RenameNodeRequestSchema,
 } from './nodes';
@@ -91,5 +92,23 @@ describe('node contracts', () => {
       position: 3,
     });
     expect(parsed.success).toBe(true);
+  });
+
+  /**
+   * `GET /nodes/:id/location` answers "which workspace does this node
+   * live in", by both keys a URL can carry — the id the API is keyed by
+   * and the slug the address bar shows (`/w/<slug>/p/<id>`).
+   */
+  test('the location response names the node, its type and its workspace by id and by slug', () => {
+    const parsed = NodeLocationResponseSchema.parse({
+      id: 'node-1',
+      type: 'page',
+      workspaceId: 'ws-1',
+      workspaceSlug: 'acme',
+      extra: 'stripped',
+    });
+    expect(parsed).toEqual({ id: 'node-1', type: 'page', workspaceId: 'ws-1', workspaceSlug: 'acme' });
+    expect(NodeLocationResponseSchema.safeParse({ id: 'node-1', type: 'page', workspaceId: 'ws-1' }).success).toBe(false);
+    expect(NodeLocationResponseSchema.safeParse({ id: 'node-1', type: 'folder', workspaceId: 'ws-1', workspaceSlug: 'acme' }).success).toBe(false);
   });
 });

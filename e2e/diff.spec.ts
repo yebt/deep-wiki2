@@ -3,6 +3,8 @@ import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 import { boundaryContrast } from './contrast';
 import { waitForHydration } from './hydration';
 import { expectNoHorizontalOverflow } from './overflow';
+import { pageDiffUrl, pageHistoryUrl } from '../apps/web/app/utils/routes';
+import { rememberWorkspaceCookieValue } from '../apps/web/app/utils/workspace-cookie';
 
 /**
  * Page-level diff (block-diff spec: "Diff Reports Added, Removed,
@@ -24,6 +26,7 @@ interface Fixtures {
   readonly workspaceId: string;
   readonly bookHistoryBookId: string;
   readonly bookDiffSinceIso: string;
+  readonly workspaceSlug: string;
   readonly readerSessionToken: string;
   readonly outsiderSessionToken: string;
 }
@@ -58,7 +61,7 @@ test('a reader reaches the diff by clicking from history, and sees all four clas
   test.setTimeout(120_000);
   await signInAs(context, fixtures.readerSessionToken);
 
-  await page.goto(`/pages/${fixtures.historyPageId}/history`);
+  await page.goto(pageHistoryUrl(fixtures.workspaceSlug, fixtures.historyPageId));
   await expect(page.getByRole('heading', { level: 1, name: 'Revision history' })).toBeAttached();
 
   const rows = page.getByRole('main').getByRole('listitem');
@@ -74,7 +77,10 @@ test('a reader reaches the diff by clicking from history, and sees all four clas
   // under load — the same class of flakiness e2e/history.spec.ts already
   // documents and fixes the same way.
   await expect(page).toHaveURL(
-    `/pages/${fixtures.historyPageId}/diff?from=${fixtures.historyFirstRevisionId}&to=${fixtures.historySecondRevisionId}`,
+    pageDiffUrl(fixtures.workspaceSlug, fixtures.historyPageId, {
+      from: fixtures.historyFirstRevisionId,
+      to: fixtures.historySecondRevisionId,
+    }),
     { timeout: 30000 },
   );
   await expect(page.getByRole('heading', { level: 1, name: 'Compare revisions' })).toBeAttached();
@@ -112,7 +118,10 @@ test('an outsider with no read grant sees the same not-found state a nonexistent
   await signInAs(context, fixtures.outsiderSessionToken);
 
   await page.goto(
-    `/pages/${fixtures.historyPageId}/diff?from=${fixtures.historyFirstRevisionId}&to=${fixtures.historySecondRevisionId}`,
+    pageDiffUrl(fixtures.workspaceSlug, fixtures.historyPageId, {
+      from: fixtures.historyFirstRevisionId,
+      to: fixtures.historySecondRevisionId,
+    }),
   );
   await expect(page.getByRole('heading', { name: 'This page does not exist' })).toBeVisible({ timeout: 30000 });
 
@@ -121,7 +130,10 @@ test('an outsider with no read grant sees the same not-found state a nonexistent
   expect(deniedHtml).not.toContain('E2E Owner');
 
   await page.goto(
-    `/pages/${crypto.randomUUID()}/diff?from=${fixtures.historyFirstRevisionId}&to=${fixtures.historySecondRevisionId}`,
+    pageDiffUrl(fixtures.workspaceSlug, crypto.randomUUID(), {
+      from: fixtures.historyFirstRevisionId,
+      to: fixtures.historySecondRevisionId,
+    }),
   );
   await expect(page.getByRole('heading', { name: 'This page does not exist' })).toBeVisible({ timeout: 30000 });
 });
@@ -158,14 +170,24 @@ function expectedIn(iso: string, timeZone: string): string {
   }).format(new Date(iso));
 }
 
-const DIFF_URL = `/pages/${fixtures.historyPageId}/diff?from=${fixtures.historyFirstRevisionId}&to=${fixtures.historySecondRevisionId}`;
+const DIFF_URL = pageDiffUrl(fixtures.workspaceSlug, fixtures.historyPageId, {
+  from: fixtures.historyFirstRevisionId,
+  to: fixtures.historySecondRevisionId,
+});
 
 /** The pane's inset from the bar to its first block (`UDashboardPanel` body `p-4 sm:p-6`). */
 const PANE_INSET = 24;
 
 /** The diff response names no workspace; the frame stands on the last one the person was in (see e2e/history.spec.ts). */
 async function inWorkspace(context: BrowserContext): Promise<void> {
-  await context.addCookies([{ name: 'dw-workspace', value: fixtures.workspaceId, domain: 'localhost', path: '/' }]);
+  await context.addCookies([
+    {
+      name: 'dw-workspace',
+      value: rememberWorkspaceCookieValue({ id: fixtures.workspaceId, slug: fixtures.workspaceSlug }),
+      domain: 'localhost',
+      path: '/',
+    },
+  ]);
 }
 
 /** Two viewers in two zones (§4.11): the same pair of instants reads differently in each. */
@@ -194,7 +216,10 @@ for (const theme of ['light', 'dark'] as const) {
 
       const crumbs = page.getByRole('navigation', { name: 'Where you are' });
       await expect(crumbs.getByRole('link', { name: 'E2E History Page' })).toBeVisible();
-      await expect(crumbs.getByRole('link', { name: 'History', exact: true })).toHaveAttribute('href', `/pages/${fixtures.historyPageId}/history`);
+      await expect(crumbs.getByRole('link', { name: 'History', exact: true })).toHaveAttribute(
+        'href',
+        pageHistoryUrl(fixtures.workspaceSlug, fixtures.historyPageId),
+      );
       await expect(crumbs.getByRole('listitem').last()).toHaveText('Compare');
 
       const bar = page.locator('#content-bar');
@@ -304,7 +329,7 @@ test.describe('inside the workspace frame, the skeleton', () => {
     // load is answered on the server since the data layer (`useApiRead`),
     // with no skeleton to measure — the skeleton is for a diff the browser
     // has not seen yet (see e2e/data-layer.spec.ts).
-    await page.goto(`/pages/${fixtures.historyPageId}/history`);
+    await page.goto(pageHistoryUrl(fixtures.workspaceSlug, fixtures.historyPageId));
     await waitForHydration(page);
     await page.getByRole('link', { name: 'Compare with previous' }).first().click({ timeout: 30000 });
     await expect(page).toHaveURL(DIFF_URL);

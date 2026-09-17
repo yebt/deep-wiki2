@@ -28,6 +28,7 @@
 import { adoptMintedAnchor, blockIdOf, blockSelector, commentableBlockOf } from '~/utils/block-element';
 import type { NewThreadTarget } from '~/composables/useNewThread';
 import { loadEditorMount } from '~/utils/editor-mount';
+import { pageEditUrl, pageHistoryUrl, workspacesUrl } from '~/utils/routes';
 
 // Inside the workspace layout: the frame is mounted once and this screen
 // renders only its pane, so the sidebar's tree keeps its scroll and its
@@ -36,6 +37,9 @@ definePageMeta({ layout: 'workspace' });
 
 const route = useRoute();
 const nodeId = route.params.id as string;
+/** The workspace slug the address carries (`/w/<slug>/p/<id>`): what every link this screen emits is built from. */
+const workspaceSlug = route.params.workspace as string;
+const allWorkspacesUrl = workspacesUrl();
 
 /**
  * Warms edit mode on intent (docs/TODO.md Findings 2026-09-16, "edit-mode
@@ -53,7 +57,7 @@ const nodeId = route.params.id as string;
  * surface it where it belongs.
  */
 function warmEditMode(): void {
-  void preloadRouteComponents(`/pages/${nodeId}/edit`).catch(() => {});
+  void preloadRouteComponents(pageEditUrl(workspaceSlug, nodeId)).catch(() => {});
   void loadEditorMount().catch(() => {});
 }
 
@@ -499,7 +503,7 @@ useSeoMeta({ title: () => (title.value ? `${title.value} — deep-wiki` : 'deep-
           color="neutral"
           size="sm"
           aria-label="Revision history"
-          :to="`/pages/${nodeId}/history`"
+          :to="pageHistoryUrl(workspaceSlug, nodeId)"
         />
       </UTooltip>
 
@@ -515,7 +519,7 @@ useSeoMeta({ title: () => (title.value ? `${title.value} — deep-wiki` : 'deep-
         variant="soft"
         color="primary"
         size="sm"
-        :to="`/pages/${nodeId}/edit`"
+        :to="pageEditUrl(workspaceSlug, nodeId)"
         @pointerenter="warmEditMode"
         @focus="warmEditMode"
       >
@@ -567,7 +571,7 @@ useSeoMeta({ title: () => (title.value ? `${title.value} — deep-wiki` : 'deep-
     >
       Ask a workspace admin to grant you access, or go back to a page you can already read.
       <template #actions>
-        <UButton icon="i-lucide-library-big" variant="solid" color="primary" to="/workspaces">Your workspaces</UButton>
+        <UButton icon="i-lucide-library-big" variant="solid" color="primary" :to="allWorkspacesUrl">Your workspaces</UButton>
         <UButton icon="i-lucide-log-in" variant="ghost" color="neutral" to="/login">Sign in</UButton>
       </template>
     </PageNotice>
@@ -575,7 +579,7 @@ useSeoMeta({ title: () => (title.value ? `${title.value} — deep-wiki` : 'deep-
     <PageNotice v-else-if="status === 'not-found'" icon="i-lucide-file-question" heading="This page does not exist">
       It may have been moved or deleted, or it may be somewhere you don't have access to — deep-wiki deliberately doesn't say which, so that a page you can't see is indistinguishable from one that was never there.
       <template #actions>
-        <UButton icon="i-lucide-library-big" variant="solid" color="primary" to="/workspaces">Your workspaces</UButton>
+        <UButton icon="i-lucide-library-big" variant="solid" color="primary" :to="allWorkspacesUrl">Your workspaces</UButton>
         <UButton icon="i-lucide-log-in" variant="ghost" color="neutral" to="/login">Sign in</UButton>
       </template>
     </PageNotice>

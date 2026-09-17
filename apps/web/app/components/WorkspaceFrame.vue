@@ -29,12 +29,13 @@ defineProps<{
   nodeId: string | null;
 }>();
 
-const { workspaceId } = useCurrentWorkspace();
+const { workspace } = useCurrentWorkspace();
 /** The sidebar's region for the current screen — the tree, or everything that is management (`definePageMeta({ sidebar })`). */
 const sidebarMode = useSidebarMode();
 // Hydrates with the workspace the server rendered the sidebar with, then
-// stands on the live one — see `useSidebarWorkspace`'s note.
-const sidebarWorkspaceId = useSidebarWorkspace(workspaceId);
+// stands on the live one — see `useSidebarWorkspace`'s note. Both names
+// travel together: the id fetches the tree, the slug builds its links.
+const sidebarWorkspace = useSidebarWorkspace(workspace);
 
 /**
  * Moves focus to the content pane's top bar, so the next Tab lands on
@@ -63,7 +64,12 @@ function skipToContent(): void {
     >
       Skip to content
     </a>
-    <WorkspaceSidebar :workspace-id="sidebarWorkspaceId" :current-node-id="nodeId" :mode="sidebarMode" />
+    <WorkspaceSidebar
+      :workspace-id="sidebarWorkspace?.id ?? null"
+      :workspace-slug="sidebarWorkspace?.slug ?? null"
+      :current-node-id="nodeId"
+      :mode="sidebarMode"
+    />
     <slot />
   </UDashboardGroup>
 </template>

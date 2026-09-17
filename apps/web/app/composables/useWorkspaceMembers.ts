@@ -37,7 +37,8 @@ export interface InviteInput {
   readonly action: ActionValue;
 }
 
-export type FetchWorkspaceMembers = (workspaceId: string) => Promise<WorkspaceMembersResponse>;
+/** Asked by the workspace's id or, as the members screen does from its address, by its slug (`apps/api/src/routes/workspace-ref.ts`). */
+export type FetchWorkspaceMembers = (workspaceRef: string) => Promise<WorkspaceMembersResponse>;
 export type PostInvitation = (input: CreateInvitationRequest) => Promise<CreateInvitationResponse>;
 
 export interface UseWorkspaceMembersDeps {
@@ -65,13 +66,13 @@ const InviteEmailSchema = z.string().trim().toLowerCase().email();
  * kept — after every invitation, which is the proof the invitation was
  * recorded (see above).
  */
-export function useWorkspaceMembers(workspaceId: string, deps: UseWorkspaceMembersDeps = {}): UseWorkspaceMembersResult {
+export function useWorkspaceMembers(workspaceRef: string, deps: UseWorkspaceMembersDeps = {}): UseWorkspaceMembersResult {
   const api = useApiClient();
-  const fetchMembers: FetchWorkspaceMembers = deps.fetchMembers ?? ((id) => api<WorkspaceMembersResponse>(`/workspaces/${id}/members`));
+  const fetchMembers: FetchWorkspaceMembers = deps.fetchMembers ?? ((ref) => api<WorkspaceMembersResponse>(`/workspaces/${ref}/members`));
   const postInvitation: PostInvitation =
     deps.postInvitation ?? ((input) => api<CreateInvitationResponse>('/invitations', { method: 'POST', body: input }));
 
-  const read = useApiRead<WorkspaceMembersResponse>(workspaceMembersKey(workspaceId), () => fetchMembers(workspaceId));
+  const read = useApiRead<WorkspaceMembersResponse>(workspaceMembersKey(workspaceRef), () => fetchMembers(workspaceRef));
   const status = useReadStatus(read, (code) => {
     if (code === 401) return 'unauthenticated';
     if (code === 404) return 'not-found';
@@ -94,7 +95,10 @@ export function useWorkspaceMembers(workspaceId: string, deps: UseWorkspaceMembe
   async function invite(input: InviteInput): Promise<void> {
     const email = InviteEmailSchema.safeParse(input.email);
     const rootNodeId = listing.value?.rootNodeId;
-    if (!email.success || !rootNodeId) {
+    // The invitation names the workspace by id, which the listing carries:
+    // the address's slug is not what the API keys a grant by.
+    const workspaceId = listing.value?.workspace.id;
+    if (!email.success || !rootNodeId || !workspaceId) {
       inviteStatus.value = 'invalid';
       inviteMessage.value = 'Enter the email address of the person to invite.';
       return;

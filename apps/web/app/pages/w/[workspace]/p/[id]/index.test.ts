@@ -12,7 +12,7 @@ const { usePageReadMock, usePresenceStreamMock, usePageCommentsMock, usePageMent
     usePresenceStreamMock: vi.fn(),
     usePageCommentsMock: vi.fn(),
     usePageMentionsMock: vi.fn(),
-    useRouteMock: vi.fn(() => ({ params: { id: 'page-1' } })),
+    useRouteMock: vi.fn(() => ({ params: { workspace: 'acme', id: 'page-1' } })),
     useWorkspaceTreeMock: vi.fn(),
     useWorkspaceDirectoryMock: vi.fn(),
   }));
@@ -70,6 +70,8 @@ function mockFrame() {
     ensure: vi.fn(async () => {}),
     refresh: vi.fn(async () => {}),
     nameOf: (id: string) => (id === 'ws-1' ? 'Acme' : null),
+    slugOf: (id: string) => (id === 'ws-1' ? 'acme' : null),
+    idOf: (slug: string) => (slug === 'acme' ? 'ws-1' : null),
   });
 }
 
@@ -197,7 +199,7 @@ describe('read-mode page', () => {
     await mount();
     const { useRouter } = await import('#imports');
 
-    expect(useRouter().getRoutes().find((route) => route.path === '/pages/:id()')?.meta.layout).toBe('workspace');
+    expect(useRouter().getRoutes().find((route) => route.path === '/w/:workspace()/p/:id()')?.meta.layout).toBe('workspace');
   });
 
   // Presence only. The §3 guarantee that the skeleton occupies the loaded
@@ -318,13 +320,13 @@ describe('read-mode page', () => {
         loadEditorMountMock.mockClear();
         mockRead({ status: 'success', title: 'A Page', html: '<p>Hello from cache</p>' });
         const component = await mount();
-        const edit = component.get('header a[href="/pages/page-1/edit"]');
+        const edit = component.get('header a[href="/w/acme/p/page-1/edit"]');
 
         expect(preloadRouteComponentsMock).not.toHaveBeenCalled();
         expect(loadEditorMountMock).not.toHaveBeenCalled();
         await edit.trigger(event);
 
-        expect(preloadRouteComponentsMock).toHaveBeenCalledWith('/pages/page-1/edit');
+        expect(preloadRouteComponentsMock).toHaveBeenCalledWith('/w/acme/p/page-1/edit');
         expect(loadEditorMountMock).toHaveBeenCalledTimes(1);
       });
     }
@@ -333,12 +335,12 @@ describe('read-mode page', () => {
       loadEditorMountMock.mockRejectedValueOnce(new Error('Failed to fetch dynamically imported module'));
       mockRead({ status: 'success', title: 'A Page', html: '<p>Hello from cache</p>' });
       const component = await mount();
-      const edit = component.get('header a[href="/pages/page-1/edit"]');
+      const edit = component.get('header a[href="/w/acme/p/page-1/edit"]');
 
       await edit.trigger('pointerenter');
       await component.vm.$nextTick();
 
-      expect(edit.attributes('href')).toBe('/pages/page-1/edit');
+      expect(edit.attributes('href')).toBe('/w/acme/p/page-1/edit');
     });
   });
 
@@ -346,14 +348,14 @@ describe('read-mode page', () => {
     mockRead({ status: 'success', title: 'A Page', html: '<p>Hello from cache</p>' });
     const component = await mount();
 
-    expect(component.find('header a[href="/pages/page-1/history"]').exists()).toBe(true);
+    expect(component.find('header a[href="/w/acme/p/page-1/history"]').exists()).toBe(true);
   });
 
   test('the icon-only history control carries both an accessible name and a tooltip, and the name says what it is for', async () => {
     mockRead({ status: 'success', title: 'A Page', html: '<p>Hello from cache</p>' });
     const component = await mount();
 
-    const history = component.get('header a[href="/pages/page-1/history"]');
+    const history = component.get('header a[href="/w/acme/p/page-1/history"]');
     // "History" alone is ambiguous out of context — history of what?
     // The name matches the `<h1>` the link lands on.
     expect(history.attributes('aria-label')).toBe('Revision history');
@@ -392,10 +394,10 @@ describe('read-mode page', () => {
     // breadcrumb's links are counted separately below. Enumerated in
     // full on purpose: this is what catches a control silently dropping
     // out of the sequence.
-    expect(links).toEqual(['/pages/page-1/history', '/pages/page-1/edit']);
+    expect(links).toEqual(['/w/acme/p/page-1/history', '/w/acme/p/page-1/edit']);
     // A link, not a click handler: reachable and operable by keyboard
     // with no JavaScript of its own (checklist §5).
-    expect(component.get('header a[href="/pages/page-1/history"]').element.tagName).toBe('A');
+    expect(component.get('header a[href="/w/acme/p/page-1/history"]').element.tagName).toBe('A');
   });
 
   test('the history control is kept while the page is still loading, and withheld only where its route is a dead end', async () => {

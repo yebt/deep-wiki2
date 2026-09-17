@@ -92,6 +92,30 @@ describe('ConfirmDialog', () => {
     expect(buttonNamed(/^Take over$/).className).toMatch(/\bbg-error\b/);
   });
 
+  /**
+   * A question outranks every other overlay (owner decision, 2026-09-17).
+   * At 320 the sidebar drawer — a Reka dialog portalled into the body when
+   * opened — stacked *above* "Leave without saving?": both at `z-index:
+   * auto`, so the later portal won, and a pointer could not reach Cancel.
+   * The stacking ladder now lives in `docs/DESIGN-SYSTEM.md` §4.5: modals
+   * one rung above the drawer and the menus (`z-60`), and this dialog one
+   * rung above every modal (`z-70`), scrim and content alike, so the scrim
+   * covers what it must cover. happy-dom lays nothing out, so the rung is
+   * what this holds; `e2e/editor.spec.ts` measures the drawer case.
+   */
+  test('stands on the highest overlay rung, scrim and content both, above the modal rung every other dialog takes', async () => {
+    await mount();
+    void useConfirm().confirm({ title: 'Leave without saving?', confirmLabel: 'Leave' });
+    await settle();
+
+    const content = dialog()!;
+    expect(content.className).toMatch(/\bz-70\b/);
+    expect(content.className).not.toMatch(/\bz-60\b/);
+    const overlay = document.querySelector('[data-slot="overlay"]')!;
+    expect(overlay).not.toBeNull();
+    expect(overlay.className).toMatch(/\bz-70\b/);
+  });
+
   test('confirming answers true and closes; cancelling answers false and closes', async () => {
     await mount();
     const yes = useConfirm().confirm({ title: 'Go?', confirmLabel: 'Go' });

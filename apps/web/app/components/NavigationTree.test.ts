@@ -69,7 +69,8 @@ afterEach(() => {
   mounted = null;
 });
 
-async function mount(props: { workspaceId: string | null; currentNodeId?: string | null } = { workspaceId: 'ws-1' }) {
+async function mount(given: { workspaceId: string | null; workspaceSlug?: string | null; currentNodeId?: string | null } = { workspaceId: 'ws-1' }) {
+  const props = { workspaceSlug: given.workspaceId ? 'acme' : null, ...given };
   const wrapper = await mountSuspended(
     defineComponent({
       name: 'TreeInApp',
@@ -204,7 +205,7 @@ describe('NavigationTree', () => {
       const component = await mount();
 
       await component.findAll('[role="treeitem"]')[2]!.trigger('keydown', { key: 'Enter' });
-      expect(navigateToMock).toHaveBeenCalledWith('/pages/page-1');
+      expect(navigateToMock).toHaveBeenCalledWith('/w/acme/p/page-1');
     });
 
     test('Enter on a shelf row folds it and Enter again unfolds it', async () => {

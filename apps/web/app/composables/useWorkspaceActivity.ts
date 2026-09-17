@@ -5,11 +5,14 @@ export type { WorkspaceActivityResponse } from '@deep-wiki/contracts';
 
 export type WorkspaceActivityStatus = 'idle' | 'loading' | 'success' | 'not-found' | 'unauthenticated' | 'network-error';
 
-export type WorkspaceActivityFetcher = (workspaceId: string) => Promise<WorkspaceActivityResponse>;
+/** Asked by the workspace's id or, as the dashboard does from its address, by its slug (`apps/api/src/routes/workspace-ref.ts`). */
+export type WorkspaceActivityFetcher = (workspaceRef: string) => Promise<WorkspaceActivityResponse>;
 
 export interface UseWorkspaceActivityResult {
   readonly status: Ref<WorkspaceActivityStatus>;
   readonly workspaceName: ComputedRef<string>;
+  /** The workspace as the response names it — id, name and slug — once known. */
+  readonly workspace: ComputedRef<WorkspaceActivityResponse['workspace'] | null>;
   readonly recent: ComputedRef<WorkspaceActivityResponse['recent']>;
   readonly mine: ComputedRef<WorkspaceActivityResponse['mine']>;
   readonly threads: ComputedRef<WorkspaceActivityResponse['threads']>;
@@ -19,7 +22,7 @@ export interface UseWorkspaceActivityResult {
 }
 
 /**
- * `GET /workspaces/:id/activity` — the dashboard's "what changed" and
+ * `GET /workspaces/:ref/activity` — the dashboard's "what changed" and
  * "threads for you"; "who is here" is `usePresenceStream(null)`, the same
  * stream read and edit mode already open.
  *
@@ -34,15 +37,15 @@ export interface UseWorkspaceActivityResult {
  * renders the lists from memory and refreshes behind them, and cleared by
  * `useSavePage` — a save is the newest "what changed".
  */
-export function useWorkspaceActivity(workspaceId: string, fetcher?: WorkspaceActivityFetcher): UseWorkspaceActivityResult {
+export function useWorkspaceActivity(workspaceRef: string, fetcher?: WorkspaceActivityFetcher): UseWorkspaceActivityResult {
   const get =
     fetcher ??
-    ((id: string) => {
+    ((ref: string) => {
       const api = useApiClient();
-      return api<WorkspaceActivityResponse>(`/workspaces/${id}/activity`);
+      return api<WorkspaceActivityResponse>(`/workspaces/${ref}/activity`);
     });
 
-  const read = useApiRead<WorkspaceActivityResponse>(workspaceActivityKey(workspaceId), () => get(workspaceId));
+  const read = useApiRead<WorkspaceActivityResponse>(workspaceActivityKey(workspaceRef), () => get(workspaceRef));
   const status = useReadStatus(read, (code) => {
     // Signed out: the screen's next move is sign-in, not a retry
     // (`useSignInRedirect`). Only the browser ever sees it — a 401 during
@@ -52,7 +55,8 @@ export function useWorkspaceActivity(workspaceId: string, fetcher?: WorkspaceAct
   });
 
   const value = computed(() => (read.outcome.value?.ok ? read.outcome.value.value : null));
-  const workspaceName = computed(() => value.value?.workspace.name ?? '');
+  const workspace = computed(() => value.value?.workspace ?? null);
+  const workspaceName = computed(() => workspace.value?.name ?? '');
   const recent = computed(() => value.value?.recent ?? []);
   const mine = computed(() => value.value?.mine ?? []);
   const threads = computed(() => value.value?.threads ?? []);
@@ -63,5 +67,5 @@ export function useWorkspaceActivity(workspaceId: string, fetcher?: WorkspaceAct
     return '';
   });
 
-  return { status, workspaceName, recent, mine, threads, message, load: read.load };
+  return { status, workspaceName, workspace, recent, mine, threads, message, load: read.load };
 }

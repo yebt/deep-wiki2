@@ -71,6 +71,7 @@
  * second; neither is told which they are.
  */
 import type { NuxtError } from '#app';
+import { pageUrl, parseAppPath, workspaceUrl, workspacesUrl } from '~/utils/routes';
 
 const props = defineProps<{ error: NuxtError }>();
 
@@ -99,10 +100,14 @@ const path = computed(() => route.fullPath);
  * trying to go. So the screen reads the address for the most specific
  * place it names, and offers that:
  *
- *   /workspaces/<id>/…  that workspace's tree
- *   /pages/<id>/…       that page
+ *   /w/<slug>/p/<id>/…  that page
+ *   /w/<slug>/…         that workspace's dashboard
  *   anything else       the list of workspaces, which is where every
- *                       signed-in subject's content starts
+ *                       signed-in subject's content starts — including
+ *                       the pre-2026-09-17 shapes (`/pages/<id>`,
+ *                       `/workspaces/<id>`), which land here only when
+ *                       `middleware/legacy-routes.ts` could not place
+ *                       them, so offering them again would loop
  *
  * Every id above comes out of the URL the user typed — the screen learns
  * nothing from the server and therefore cannot leak anything — and none of
@@ -113,8 +118,6 @@ const path = computed(() => route.fullPath);
  * part of the product and no particular workspace, and it used to fall
  * past both patterns into sign-in.
  */
-const UUID = '[0-9a-fA-F-]{36}';
-
 interface Recovery {
   readonly to: string;
   readonly label: string;
@@ -122,21 +125,14 @@ interface Recovery {
 }
 
 const recovery = computed<Recovery>(() => {
-  const workspace = new RegExp(`^/workspaces/(${UUID})(?:/|$)`).exec(route.path);
-  if (workspace) {
-    return {
-      to: `/workspaces/${workspace[1]}`,
-      label: 'Open this workspace',
-      icon: 'i-lucide-house',
-    };
+  const place = parseAppPath(route.path);
+  if (place?.kind === 'page') {
+    return { to: pageUrl(place.slug, place.id), label: 'Open this page', icon: 'i-lucide-file-text' };
   }
-
-  const page = new RegExp(`^/pages/(${UUID})(?:/|$)`).exec(route.path);
-  if (page) {
-    return { to: `/pages/${page[1]}`, label: 'Open this page', icon: 'i-lucide-file-text' };
+  if (place) {
+    return { to: workspaceUrl(place.slug), label: 'Open this workspace', icon: 'i-lucide-house' };
   }
-
-  return { to: '/workspaces', label: 'Your workspaces', icon: 'i-lucide-library-big' };
+  return { to: workspacesUrl(), label: 'Your workspaces', icon: 'i-lucide-library-big' };
 });
 
 /**

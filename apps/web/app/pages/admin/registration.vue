@@ -67,13 +67,15 @@ import type { FormSubmitEvent } from '@nuxt/ui';
 import { RegistrationModeSchema, type RegistrationModeValue } from '@deep-wiki/contracts';
 import { z } from 'zod';
 import { formatRevisionDate } from '~/utils/format-revision-date';
+import { workspacesUrl } from '~/utils/routes';
 
 // A management screen (`useSidebarMode`), in whichever frame the
 // middleware chose; the pane reads the same cookie so the two agree.
 definePageMeta({ middleware: ['management-frame'], sidebar: 'management' });
 
-/** The workspace the frame stands on, or `undefined` for the document frame. */
-const remembered = rememberedWorkspaceId() ?? undefined;
+/** The workspace the frame stands on — both its names — or `null` for the document frame. */
+const remembered = rememberedWorkspace();
+const allWorkspacesUrl = workspacesUrl();
 
 const {
   status,
@@ -148,7 +150,7 @@ useSeoMeta({ title: 'Registration — deep-wiki' });
 </script>
 
 <template>
-  <AppShell :workspace-id="remembered" title="Registration">
+  <AppShell :workspace-id="remembered?.id" :workspace-slug="remembered?.slug ?? null" title="Registration">
     <!-- The eyebrow adds what the h1 lacks: this is the instance's
          setting, not a workspace's (§4.4). -->
     <PageHeading
@@ -166,7 +168,7 @@ useSeoMeta({ title: 'Registration — deep-wiki' });
     <PageNotice v-else-if="status === 'forbidden'" icon="i-lucide-lock" heading="This is the instance operator's" :level="2">
       {{ message }} If that should be you, ask whoever set this deep-wiki up.
       <template #actions>
-        <UButton to="/workspaces" variant="outline" color="neutral" icon="i-lucide-library-big">Your workspaces</UButton>
+        <UButton :to="allWorkspacesUrl" variant="outline" color="neutral" icon="i-lucide-library-big">Your workspaces</UButton>
       </template>
     </PageNotice>
 

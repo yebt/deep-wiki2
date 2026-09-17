@@ -35,10 +35,15 @@ export interface PlanLimit {
 
 export type CreateWorkspaceFetcher = (input: CreateWorkspaceRequest) => Promise<CreateWorkspaceResponse>;
 
+/** What was created, plus the slug it answers to — the one submitted, which every address to it now carries (`utils/routes.ts`). */
+export interface CreatedWorkspace extends CreateWorkspaceResponse {
+  readonly slug: string;
+}
+
 export interface UseCreateWorkspaceResult {
   readonly status: Ref<CreateWorkspaceStatus>;
   readonly message: Ref<string>;
-  readonly workspace: Ref<CreateWorkspaceResponse | null>;
+  readonly workspace: Ref<CreatedWorkspace | null>;
   readonly limit: Ref<PlanLimit | null>;
   readonly create: (input: CreateWorkspaceRequest) => Promise<void>;
 }
@@ -57,7 +62,7 @@ export function useCreateWorkspace(fetcher?: CreateWorkspaceFetcher): UseCreateW
 
   const status = ref<CreateWorkspaceStatus>('idle');
   const message = ref('');
-  const workspace = ref<CreateWorkspaceResponse | null>(null);
+  const workspace = ref<CreatedWorkspace | null>(null);
   const limit = ref<PlanLimit | null>(null);
 
   async function create(input: CreateWorkspaceRequest): Promise<void> {
@@ -73,7 +78,7 @@ export function useCreateWorkspace(fetcher?: CreateWorkspaceFetcher): UseCreateW
     limit.value = null;
 
     try {
-      workspace.value = await post(parsed.data);
+      workspace.value = { ...(await post(parsed.data)), slug: parsed.data.slug };
       status.value = 'success';
       message.value = `Created ${parsed.data.name}.`;
     } catch (error) {

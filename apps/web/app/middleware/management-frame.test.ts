@@ -21,7 +21,7 @@ describe('management-frame middleware', () => {
   beforeEach(() => setPageLayoutMock.mockClear());
 
   test('with a remembered workspace, the screen takes the workspace layout', () => {
-    document.cookie = `${LAST_WORKSPACE_COOKIE}=ws-remembered; path=/`;
+    document.cookie = `${LAST_WORKSPACE_COOKIE}=${encodeURIComponent('ws-remembered:remembered')}; path=/`;
 
     managementFrame(to, to);
 

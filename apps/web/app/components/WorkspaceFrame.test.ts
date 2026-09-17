@@ -31,6 +31,8 @@ useWorkspaceDirectoryMock.mockReturnValue({
   ensure: vi.fn(async () => {}),
   refresh: vi.fn(async () => {}),
   nameOf: (id: string) => (id === 'ws-1' ? 'Acme' : null),
+  slugOf: (id: string) => (id === 'ws-1' ? 'acme' : null),
+  idOf: (slug: string) => (slug === 'acme' ? 'ws-1' : null),
 });
 
 /**
@@ -44,7 +46,7 @@ useWorkspaceDirectoryMock.mockReturnValue({
  * can make: `e2e/frame.spec.ts`, "the sidebar survives a navigation".
  */
 function mount(nodeId: string | null = null, route = '/') {
-  useCurrentWorkspace().enter('ws-1');
+  useCurrentWorkspace().enter({ id: 'ws-1', slug: 'acme' });
   return mountSuspended(
     defineComponent({
       name: 'FrameInApp',
@@ -60,14 +62,15 @@ describe('WorkspaceFrame', () => {
 
     const sidebar = component.findComponent(WorkspaceSidebar);
     expect(sidebar.props('workspaceId')).toBe('ws-1');
+    expect(sidebar.props('workspaceSlug')).toBe('acme');
     expect(sidebar.props('currentNodeId')).toBe('page-1');
   });
 
   test('hands the sidebar the region the route asks for: the tree by default, management on a management screen', async () => {
-    const dashboard = await mount(null, '/workspaces/ws-1');
+    const dashboard = await mount(null, '/w/acme');
     expect(dashboard.findComponent(WorkspaceSidebar).props('mode')).toBe('tree');
 
-    const members = await mount(null, '/workspaces/ws-1/members');
+    const members = await mount(null, '/w/acme/members');
     expect(members.findComponent(WorkspaceSidebar).props('mode')).toBe('management');
   });
 

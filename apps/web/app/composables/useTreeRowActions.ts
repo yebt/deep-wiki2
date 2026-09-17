@@ -1,5 +1,6 @@
 import { legalChildTypes, type NodeType } from '@deep-wiki/contracts';
 import type { TreeNode } from './useTree';
+import { bookHistoryUrl, pageHistoryUrl, pageUrl } from '~/utils/routes';
 
 /**
  * What a row of the navigation tree can have done to it — the item set
@@ -67,6 +68,8 @@ export interface TreeRowActionContext {
   /** The row's position among its siblings. */
   readonly index: number;
   readonly siblingCount: number;
+  /** The workspace the row belongs to, by the slug its destinations' addresses carry. */
+  readonly workspaceSlug: string;
 }
 
 export const NODE_TYPE_LABELS: Record<NodeType, string> = {
@@ -111,10 +114,10 @@ export function treeRowActions(node: TreeNode, ctx: TreeRowActionContext): reado
 
   const destinations: TreeRowAction[] = [];
   if (type === 'page') {
-    destinations.push({ kind: 'open', label: 'Open', icon: 'i-lucide-arrow-right', disabled: false, to: `/pages/${node.id}` });
-    destinations.push({ kind: 'history', label: 'Page history', icon: 'i-lucide-history', disabled: false, to: `/pages/${node.id}/history` });
+    destinations.push({ kind: 'open', label: 'Open', icon: 'i-lucide-arrow-right', disabled: false, to: pageUrl(ctx.workspaceSlug, node.id) });
+    destinations.push({ kind: 'history', label: 'Page history', icon: 'i-lucide-history', disabled: false, to: pageHistoryUrl(ctx.workspaceSlug, node.id) });
   } else if (type === 'book') {
-    destinations.push({ kind: 'history', label: 'Book history', icon: 'i-lucide-history', disabled: false, to: `/books/${node.id}/history` });
+    destinations.push({ kind: 'history', label: 'Book history', icon: 'i-lucide-history', disabled: false, to: bookHistoryUrl(ctx.workspaceSlug, node.id) });
   }
 
   const copy: TreeRowAction =

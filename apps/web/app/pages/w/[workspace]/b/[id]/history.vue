@@ -44,11 +44,14 @@
  *   flattening.
  */
 import { formatRevisionDate } from '~/utils/format-revision-date';
+import { bookDiffUrl, pageUrl, workspaceUrl } from '~/utils/routes';
 
 definePageMeta({ layout: 'workspace' });
 
 const route = useRoute();
 const bookId = route.params.id as string;
+/** The workspace slug the address carries (`/w/<slug>/b/<id>/history`): what every link this screen emits is built from. */
+const workspaceSlug = route.params.workspace as string;
 
 const { status, title, workspaceId, changesets, message, load } = useBookHistory(bookId);
 // A signed-out visit leaves for sign-in and comes back (`useSignInRedirect`).
@@ -81,7 +84,7 @@ function pagesIn(changeset: { revisions: readonly { pageId: string }[] }): strin
  */
 function diffHref(changeset: { windowStart: string }): string {
   const sinceMs = new Date(changeset.windowStart).getTime() - 1;
-  return `/books/${bookId}/diff?since=${encodeURIComponent(new Date(sinceMs).toISOString())}`;
+  return bookDiffUrl(workspaceSlug, bookId, { since: new Date(sinceMs).toISOString() });
 }
 
 /**
@@ -169,7 +172,7 @@ useSeoMeta({ title: () => `${heading.value} — deep-wiki` });
       This book hasn't been saved into yet. Once a page inside it is saved, its changesets will
       appear here, grouped by author and time.
       <template v-if="workspaceId" #actions>
-        <UButton variant="outline" color="neutral" icon="i-lucide-house" :to="`/workspaces/${workspaceId}`">
+        <UButton variant="outline" color="neutral" icon="i-lucide-house" :to="workspaceUrl(workspaceSlug)">
           Open the workspace
         </UButton>
       </template>
@@ -197,7 +200,7 @@ useSeoMeta({ title: () => `${heading.value} — deep-wiki` });
               <NuxtLink
                 v-for="(pageId, index) in pagesIn(changeset)"
                 :key="pageId"
-                :to="`/pages/${pageId}`"
+                :to="pageUrl(workspaceSlug, pageId)"
                 class="text-primary underline-offset-2 hover:underline"
               >
                 {{ pageId.slice(0, 8) }}<span v-if="index < pagesIn(changeset).length - 1">, </span>

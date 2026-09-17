@@ -62,11 +62,14 @@
  * order on its own (`useBookDiffNavigator.ts`'s own note).
  */
 import { buildTreeOrderIndex } from '~/utils/tree-order';
+import { bookHistoryUrl, pageHistoryUrl, pageUrl } from '~/utils/routes';
 
 definePageMeta({ layout: 'workspace' });
 
 const route = useRoute();
 const bookId = route.params.id as string;
+/** The workspace slug the address carries (`/w/<slug>/b/<id>/diff`): what every link this screen emits is built from. */
+const workspaceSlug = route.params.workspace as string;
 const since = (route.query.since as string | undefined) ?? '';
 const sinceIsValid = since.length > 0 && !Number.isNaN(new Date(since).getTime());
 
@@ -122,7 +125,7 @@ const heading = computed(() => (nav?.title.value ? `${nav.title.value} — book 
  * being this screen's own place.
  */
 const trail = computed(() => [
-  { label: 'History', to: `/books/${bookId}/history` },
+  { label: 'History', to: bookHistoryUrl(workspaceSlug, bookId) },
   { label: sinceIsValid ? `Changes since ${sinceLabel.value}` : 'Book changes' },
 ]);
 
@@ -167,7 +170,7 @@ useSeoMeta({ title: () => `${heading.value} — deep-wiki` });
             trailing-icon="i-lucide-external-link"
             class="min-w-0"
             :ui="{ label: 'min-w-0 truncate' }"
-            :to="`/pages/${nav.currentPage.value.pageId}`"
+            :to="pageUrl(workspaceSlug, nav.currentPage.value.pageId)"
           >
             {{ switcherLabel(nav.currentPage.value.pageTitle, nav.currentIndex.value, nav.pageIds.value.length) }}
           </UButton>
@@ -252,7 +255,7 @@ useSeoMeta({ title: () => `${heading.value} — deep-wiki` });
           There is no earlier revision to compare it against — created during this window, not
           edited from an earlier point.
           <template #actions>
-            <UButton variant="outline" color="neutral" icon="i-lucide-history" :to="`/pages/${nav!.currentPage.value.pageId}/history`">
+            <UButton variant="outline" color="neutral" icon="i-lucide-history" :to="pageHistoryUrl(workspaceSlug, nav!.currentPage.value.pageId)">
               View this page's full history
             </UButton>
           </template>

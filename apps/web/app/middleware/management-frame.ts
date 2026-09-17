@@ -22,5 +22,5 @@
  * layout and the pane cannot disagree either.
  */
 export default defineNuxtRouteMiddleware(() => {
-  if (rememberedWorkspaceId()) setPageLayout('workspace');
+  if (rememberedWorkspace()) setPageLayout('workspace');
 });

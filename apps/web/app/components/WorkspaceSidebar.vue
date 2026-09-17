@@ -45,14 +45,21 @@
  * theme toggle are the same in both modes: the person is still in the
  * workspace, and the pane keeps its shape.
  */
+import { membersUrl, registrationSettingsUrl, workspacesUrl } from '~/utils/routes';
+
 defineProps<{
   workspaceId: string | null;
+  /** The same workspace's slug — what every door and row here links through (`utils/routes.ts`). */
+  workspaceSlug: string | null;
   currentNodeId?: string | null;
   /** Which region stands in the middle: the tree (default), or everything that is management (`useSidebarMode`). */
   mode?: SidebarMode;
 }>();
 
 const { collapsed } = useFocusMode();
+
+const allWorkspacesUrl = workspacesUrl();
+const registrationUrl = registrationSettingsUrl();
 
 /** `UDashboardSidebar`'s own id for the pane: the group's storage key, then the `id` prop below. */
 const SIDEBAR_ELEMENT_ID = 'dw-frame-sidebar-workspace';
@@ -79,7 +86,7 @@ const SIDEBAR_ELEMENT_ID = 'dw-frame-sidebar-workspace';
     }"
   >
     <template #header>
-      <WorkspaceSwitcher :workspace-id="workspaceId" />
+      <WorkspaceSwitcher :workspace-id="workspaceId" :workspace-slug="workspaceSlug" />
     </template>
 
     <!-- Hidden with the pane rather than removed: a slot that renders
@@ -94,13 +101,13 @@ const SIDEBAR_ELEMENT_ID = 'dw-frame-sidebar-workspace';
       />
     </template>
 
-    <ManagementSidebar v-if="workspaceId && mode === 'management'" :workspace-id="workspaceId" />
-    <NavigationTree v-else-if="workspaceId" :workspace-id="workspaceId" :current-node-id="currentNodeId" />
+    <ManagementSidebar v-if="workspaceId && workspaceSlug && mode === 'management'" :workspace-slug="workspaceSlug" />
+    <NavigationTree v-else-if="workspaceId && workspaceSlug" :workspace-id="workspaceId" :workspace-slug="workspaceSlug" :current-node-id="currentNodeId" />
     <!-- No workspace yet: a real state with a way forward, in the
          product's words, rather than an empty pane (checklist §3). -->
     <div v-else data-testid="sidebar-no-workspace" class="space-y-3 px-2 py-2">
       <p class="text-body-medium text-muted">Pick a workspace from the menu above to see its shelves, books, chapters and pages.</p>
-      <UButton to="/workspaces" size="sm" variant="outline" color="neutral" icon="i-lucide-list">All workspaces</UButton>
+      <UButton :to="allWorkspacesUrl" size="sm" variant="outline" color="neutral" icon="i-lucide-list">All workspaces</UButton>
     </div>
 
     <template #footer>
@@ -108,8 +115,8 @@ const SIDEBAR_ELEMENT_ID = 'dw-frame-sidebar-workspace';
            its label: it is a door people open. The two icon-only controls
            carry a name and a tooltip both (§4.3). -->
       <UButton
-        v-if="workspaceId && mode !== 'management'"
-        :to="`/workspaces/${workspaceId}/members`"
+        v-if="workspaceSlug && mode !== 'management'"
+        :to="membersUrl(workspaceSlug)"
         size="sm"
         variant="ghost"
         color="neutral"
@@ -119,7 +126,7 @@ const SIDEBAR_ELEMENT_ID = 'dw-frame-sidebar-workspace';
       </UButton>
       <span class="ms-auto flex items-center gap-1">
         <UTooltip v-if="mode !== 'management'" text="Registration settings">
-          <UButton size="sm" variant="ghost" color="neutral" icon="i-lucide-shield" square aria-label="Registration settings" to="/admin/registration" />
+          <UButton size="sm" variant="ghost" color="neutral" icon="i-lucide-shield" square aria-label="Registration settings" :to="registrationUrl" />
         </UTooltip>
         <UTooltip text="Toggle color theme">
           <UColorModeButton size="sm" aria-label="Toggle color theme" />

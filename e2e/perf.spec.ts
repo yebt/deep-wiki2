@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import { API_URL } from './ports';
+import { pageEditUrl, pageUrl, workspaceUrl } from '../apps/web/app/utils/routes';
 
 /**
  * Edit-mode latency, measured in the browser the way the 2026-09-16
@@ -27,6 +28,7 @@ test.describe.configure({ mode: 'serial' });
 
 interface SeedFixtures {
   readonly workspaceId: string;
+  readonly workspaceSlug: string;
 }
 
 interface EditorFixtures {
@@ -60,7 +62,7 @@ async function signInAs(page: Page, token: string): Promise<void> {
  * `isHydrating` is what says the listeners are attached.
  */
 async function openReadScreenHydrated(page: Page): Promise<void> {
-  await page.goto(`/pages/${fixtures.editablePageId}`);
+  await page.goto(pageUrl(seed.workspaceSlug, fixtures.editablePageId));
   await expect(page.getByRole('main').getByRole('heading', { level: 1, name: fixtures.editablePageTitle })).toBeVisible({ timeout: 120_000 });
   await page.waitForFunction(
     () => {
@@ -80,14 +82,14 @@ async function expectEditorLive(page: Page): Promise<void> {
 /** The `"./mount"` entry of packages/editor, as the dev server names it. */
 const MOUNT_CHUNK = /packages\/editor\/src\/mount\/index\.ts/;
 /** The edit route's component chunk, as the dev server names it. */
-const EDIT_ROUTE_CHUNK = /pages\/pages\/\[id\]\/edit\.vue/;
+const EDIT_ROUTE_CHUNK = /pages\/w\/\[workspace\]\/p\/\[id\]\/edit\.vue/;
 /**
  * The read route's component chunk, as the dev server names it. Not the
  * `?macro=true` request, which is Nuxt's route table reading every page's
  * `definePageMeta` at boot — that one is on every screen and carries no
  * component.
  */
-const READ_ROUTE_CHUNK = /pages\/pages\/\[id\]\/index\.vue(?!\?macro)/;
+const READ_ROUTE_CHUNK = /pages\/w\/\[workspace\]\/p\/\[id\]\/index\.vue(?!\?macro)/;
 
 /**
  * Fix A — prebundle reka-ui (apps/web/modules/perf-prebundle.ts).
@@ -107,10 +109,10 @@ test('the edit route loads in fewer than 500 requests: reka-ui is prebundled, no
   // Once, so the count below is a steady-state load of the route and not
   // the dev server's first compile of it — on a cold optimizer cache Vite
   // discovers the editor's dependencies mid-navigation and reloads.
-  await page.goto(`/pages/${fixtures.editablePageId}/edit`);
+  await page.goto(pageEditUrl(seed.workspaceSlug, fixtures.editablePageId));
   await expectEditorLive(page);
 
-  await page.goto(`/pages/${fixtures.editablePageId}/edit`);
+  await page.goto(pageEditUrl(seed.workspaceSlug, fixtures.editablePageId));
   await expectEditorLive(page);
   const resources = await page.evaluate(() => performance.getEntriesByType('resource').map((entry) => entry.name));
   const rekaUi = resources.filter((name) => name.includes('reka-ui')).length;
@@ -144,7 +146,7 @@ test('the editor chunk is requested while the edit-session request is still in f
     if (MOUNT_CHUNK.test(request.url())) mountRequestedAt.push(Date.now());
   });
 
-  await page.goto(`/pages/${fixtures.editablePageId}/edit`);
+  await page.goto(pageEditUrl(seed.workspaceSlug, fixtures.editablePageId));
   await expect(page.getByTestId('edit-skeleton')).toBeVisible({ timeout: 120_000 });
   // The session is still held. The chunk must be on the wire already.
   await expect
@@ -189,7 +191,7 @@ test('hovering "Edit" on the read screen requests the edit route and the editor 
 
   // And the hop still lands where it should.
   await edit.click();
-  await expect(page).toHaveURL(new RegExp(`/pages/${fixtures.editablePageId}/edit$`));
+  await expect(page).toHaveURL(new RegExp(`${pageEditUrl(seed.workspaceSlug, fixtures.editablePageId)}$`));
   await expectEditorLive(page);
 });
 
@@ -296,7 +298,7 @@ test('opening the editor sends no lock heartbeat: the session that acquired the 
     if (request.method() === 'PATCH' && /\/pages\/[^/]+\/lock$/.test(request.url())) heartbeats.push(request.url());
   });
 
-  await page.goto(`/pages/${fixtures.editablePageId}/edit`);
+  await page.goto(pageEditUrl(seed.workspaceSlug, fixtures.editablePageId));
   await expectEditorLive(page);
   // Long enough for a heartbeat fired "immediately" to have been seen;
   // far shorter than the 20 s interval.
@@ -319,7 +321,7 @@ test('hovering a page row in the tree requests the read route before the click, 
   const seen: { url: string; at: number }[] = [];
   page.on('request', (request) => seen.push({ url: request.url(), at: Date.now() }));
 
-  await page.goto(`/workspaces/${seed.workspaceId}`);
+  await page.goto(workspaceUrl(seed.workspaceSlug));
   const row = page.getByRole('treeitem', { name: new RegExp(fixtures.editablePageTitle) });
   await expect(row).toBeVisible({ timeout: 120_000 });
   // The row is server-rendered; the hover must reach a hydrated listener.
@@ -339,7 +341,7 @@ test('hovering a page row in the tree requests the read route before the click, 
 
   const clickedAt = Date.now();
   await row.locator('[draggable="true"]').first().click();
-  await expect(page).toHaveURL(new RegExp(`/pages/${fixtures.editablePageId}$`));
+  await expect(page).toHaveURL(new RegExp(`${pageUrl(seed.workspaceSlug, fixtures.editablePageId)}$`));
   await expect(page.getByRole('main').getByRole('heading', { level: 1, name: fixtures.editablePageTitle })).toBeVisible({ timeout: 120_000 });
 
   const afterClick = seen.filter((r) => r.at >= clickedAt && READ_ROUTE_CHUNK.test(r.url));
@@ -354,11 +356,11 @@ test('hovering a page row in the tree requests the read route before the click, 
 test('a page row carries a real href and stays out of the tab order', async ({ page }) => {
   test.setTimeout(300_000);
   await signInAs(page, fixtures.writerSessionToken);
-  await page.goto(`/workspaces/${seed.workspaceId}`);
+  await page.goto(workspaceUrl(seed.workspaceSlug));
   const row = page.getByRole('treeitem', { name: new RegExp(fixtures.editablePageTitle) });
   await expect(row).toBeVisible({ timeout: 120_000 });
 
   const link = row.getByRole('link', { name: new RegExp(fixtures.editablePageTitle) });
-  await expect(link).toHaveAttribute('href', `/pages/${fixtures.editablePageId}`);
+  await expect(link).toHaveAttribute('href', pageUrl(seed.workspaceSlug, fixtures.editablePageId));
   await expect(link).toHaveAttribute('tabindex', '-1');
 });

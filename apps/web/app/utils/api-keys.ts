@@ -8,6 +8,11 @@ export function pageReadKey(nodeId: string): string {
   return `page:${nodeId}`;
 }
 
+/** Where a node lives — its workspace by id and slug. Never staled: a node's workspace does not change. */
+export function nodeLocationKey(nodeId: string): string {
+  return `node-location:${nodeId}`;
+}
+
 export function pageHistoryKey(nodeId: string): string {
   return `page-history:${nodeId}`;
 }

@@ -49,11 +49,11 @@ a working URL rather than hunt for one:
 ```
 seed: ready
   sign in at /login with  owner@deep-wiki.local  /  deep-wiki-dev
-  workspace "Demo workspace" (<uuid>), manage granted at its root
-  open:  /workspaces/<uuid>
+  workspace "Demo workspace" (<uuid>, slug "demo"), manage granted at its root
+  open:  /w/demo
   page "Local Development Setup" (<uuid>):
-    read:  /pages/<uuid>
-    edit:  /pages/<uuid>/edit
+    read:  /w/demo/p/<uuid>
+    edit:  /w/demo/p/<uuid>/edit
 ```
 
 The `open:` line is the workspace's dashboard; the tree is in its sidebar.
@@ -69,6 +69,13 @@ the port is a fact in the repository rather than a flag in your shell history.
 Every screen this branch has. All of them need a session except `/login` and the two
 token-bearing screens, because this product has no public pages.
 
+Since 2026-09-17 (owner decision, option b) every address inside a workspace carries the
+workspace's **slug** and the node's **id**: `/w/<slug>/p/<uuid>`. The id is what stays stable
+when a page is renamed or moved; the slug is the name the team chose; the hierarchy (shelf ›
+book › chapter) is the breadcrumb's job, not the address's. Every link the app emits is built
+by one helper, `apps/web/app/utils/routes.ts` — `pageUrl(slug, id)`, `bookHistoryUrl(slug, id)`,
+… — and `routes.test.ts` fails on a route spelled by hand anywhere else under `apps/web/app`.
+
 | Route | What it is | Needs |
 | --- | --- | --- |
 | `/` | Signed out: `/login`. Signed in: the last workspace's dashboard if one is remembered (`dw-workspace` cookie, `middleware/last-workspace.ts`), else `/workspaces` — the way in, not a screen of its own | nothing |
@@ -78,21 +85,30 @@ token-bearing screens, because this product has no public pages.
 | `/invite/accept?token=…` | Accept a workspace invitation | a token from the mail in Mailpit |
 | `/workspaces` | The workspaces chooser — reached only when `/` has none remembered, or by choice from the sidebar switcher's "All workspaces" | a session |
 | `/workspaces/new` | Create a workspace — the way in from the chooser | a session **and an account with a plan**: the seed user has one, an account created by registration or invitation does not (`403 no_plan`; `docs/TODO.md` Open Questions, "Default plan policy") |
-| `/workspaces/:workspaceId` | The workspace's dashboard — what changed and who is here (`GET /workspaces/:id/activity` + the presence stream). The navigation tree — shelves, books, chapters, pages; create, rename, drag-reorder — is not a route: it is the sidebar, mounted once by `layouts/workspace.vue` and present on every screen below, including this one. `/workspaces/:workspaceId/tree` no longer exists (`docs/TODO.md` Findings, 2026-09-15) | a session with read on the workspace |
-| `/workspaces/:workspaceId/members` | Members and invitations — the list, and the form that sends an invite | `manage` on the workspace root; anyone else gets the not-found state, deliberately (the API answers "no such workspace" and "not yours to manage" identically). The link to it, in the sidebar's footer, renders for everyone — see Open Questions, "Which signal tells the client `manage`" |
+| `/w/:workspace` | The workspace's dashboard — what changed and who is here (`GET /workspaces/:slug/activity` + the presence stream). The navigation tree — shelves, books, chapters, pages; create, rename, drag-reorder — is not a route: it is the sidebar, mounted once by `layouts/workspace.vue` and present on every screen below, including this one. `/workspaces/:workspaceId/tree` no longer exists (`docs/TODO.md` Findings, 2026-09-15) | a session with read on the workspace |
+| `/w/:workspace/members` | Members and invitations — the list, and the form that sends an invite | `manage` on the workspace root; anyone else gets the not-found state, deliberately (the API answers "no such workspace" and "not yours to manage" identically). The link to it, in the sidebar's footer, renders for everyone — see Open Questions, "Which signal tells the client `manage`" |
+| `/w/:workspace/settings`, `/w/:workspace/ai` | The workspace's settings and its AI providers — "Not built yet" screens behind real doors in the management sidebar (2026-09-16) | a session |
 | `/admin/registration` | Instance registration mode, allowed domains, SMTP test. Deliberately stays in the document frame, not the workspace one — an instance setting, and its heaviest user (the Super Root) may hold no workspace at all | Super Root (`users.is_super_root`); anyone else gets the forbidden state. Linked from both the document chrome's icon button and, when inside a workspace, the sidebar's footer — for everyone, for the same reason as Members |
-| `/pages/:id` | Read mode — pre-rendered HTML, no editor loaded; comment gutter and thread panel; who is editing | a session with read on the page (`comment` to see threads) |
-| `/pages/:id/edit` | Edit mode — ProseMirror, `@` mentions, `/` commands, soft lock, who else is here | a session with write on the page |
-| `/pages/:id/history` | Revision history for a page | a session with read on the page |
-| `/pages/:id/diff?from=<revisionId>&to=<revisionId>` | Block diff between two revisions — added, removed, modified, moved | a session with read on the page |
-| `/books/:id/history` | Changeset history for a book — who changed what, grouped by the changeset window | a session with read on the book |
-| `/books/:id/diff?since=<ISO date>[&page=<pageId>]` | Everything that changed in a book since a moment, navigable page to page without returning to the list | a session with read on the book |
+| `/w/:workspace/p/:id` | Read mode — pre-rendered HTML, no editor loaded; comment gutter and thread panel; who is editing | a session with read on the page (`comment` to see threads) |
+| `/w/:workspace/p/:id/edit` | Edit mode — ProseMirror, `@` mentions, `/` commands, soft lock, who else is here | a session with write on the page |
+| `/w/:workspace/p/:id/history` | Revision history for a page | a session with read on the page |
+| `/w/:workspace/p/:id/diff?from=<revisionId>&to=<revisionId>` | Block diff between two revisions — added, removed, modified, moved | a session with read on the page |
+| `/w/:workspace/b/:id/history` | Changeset history for a book — who changed what, grouped by the changeset window | a session with read on the book |
+| `/w/:workspace/b/:id/diff?since=<ISO date>[&page=<pageId>]` | Everything that changed in a book since a moment, navigable page to page without returning to the list | a session with read on the book |
+| `/account` | The person's own profile — "Not built yet", in the workspace frame when one is remembered | a session |
+| `/pages/:id[/edit\|/history\|/diff]`, `/books/:id/history\|/diff`, `/workspaces/:id[/members\|/settings\|/ai]` | **The shapes every link had before 2026-09-17.** Real routes (`nuxt.config.ts`, `pages:extend`) behind `middleware/legacy-routes.ts`, which asks the API where the thing lives — `GET /nodes/:id/location`, or the caller's `GET /workspaces` — and answers a `301` to the new address with any query kept. Signed out, sign-in first and the old address as the return. A node the API will not locate (absent or denied — it does not say) is the not-found screen | the same session the destination needs |
+
+On a node screen the address's two names must agree: `AppShell` asks `GET /nodes/:id/location`
+beside the screen's own read, and a located node whose workspace slug is not the address's is
+**not found** — in the pane, with the sidebar standing on the workspace the address named and
+no row marked, and without saying which name was wrong. A node the API refuses to locate is
+left to the screen's own answer (read mode tells denial from absence for a direct request).
 
 Anything else lands on `apps/web/app/error.vue` — the product's own error screen, not Nuxt's.
 It distinguishes *not found* from *the server failed*, and its recovery action comes out of
-the address you typed: a workspace id in the URL offers that workspace, a page id offers that
-page, and anything else offers `/workspaces`. It never claims to know whether you are signed
-in, because it cannot — see §6.
+the address you typed: `/w/<slug>/p/<id>` offers that page, `/w/<slug>/…` offers that
+workspace, and anything else offers `/workspaces`. It never claims to know whether you are
+signed in, because it cannot — see §6.
 
 ### The API
 
@@ -120,7 +136,9 @@ no route answers whether a thing exists.
 | POST | `/uploads/avatar` | Validated, resized, scoped to the caller's workspace |
 | GET | `/workspaces` | The workspaces you can open |
 | POST | `/workspaces` | Create one; the creator gets `manage` on its root in the same transaction. `403 no_plan` for an account without a plan, `403` with the plan's name and limit when it is full |
-| GET | `/workspaces/:id/members` | `manage` on the root, else not found |
+| GET | `/workspaces/:ref/members` | `manage` on the root, else not found. `:ref` is the workspace's id or its slug (`routes/workspace-ref.ts`; the slug is tried first) |
+| GET | `/workspaces/:ref/activity` | The dashboard's three lists, and the workspace by id, name and slug. `:ref` as above |
+| GET | `/nodes/:id/location` | Which workspace a node lives in, by id and by slug — what an old `/pages/<id>` address is redirected through. A node the caller may not read is the same 404 as one that does not exist |
 | GET | `/workspaces/:id/tree` | Permission-filtered node tree |
 | POST | `/nodes` | Create a shelf, book, chapter or page under a parent |
 | PATCH | `/nodes/:id` | Rename |

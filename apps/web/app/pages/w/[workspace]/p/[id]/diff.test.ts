@@ -7,7 +7,7 @@ import DiffPage from './diff.vue';
 const { usePageDiffMock, useRouteMock, useCurrentWorkspaceMock, useWorkspaceTreeMock, useWorkspaceDirectoryMock, navigateToMock } = vi.hoisted(() => ({
   navigateToMock: vi.fn(async () => {}),
   usePageDiffMock: vi.fn(),
-  useRouteMock: vi.fn(() => ({ params: { id: 'page-1' }, query: { from: 'rev-1', to: 'rev-2' } })),
+  useRouteMock: vi.fn(() => ({ params: { workspace: 'acme', id: 'page-1' }, query: { from: 'rev-1', to: 'rev-2' } })),
   useCurrentWorkspaceMock: vi.fn(),
   useWorkspaceTreeMock: vi.fn(),
   useWorkspaceDirectoryMock: vi.fn(),
@@ -28,7 +28,7 @@ mockNuxtImport('navigateTo', () => navigateToMock);
  * breadcrumb test pass with the ancestors never rendered.
  */
 function mockFrame() {
-  useCurrentWorkspaceMock.mockReturnValue({ workspaceId: ref('ws-1'), enter: vi.fn() });
+  useCurrentWorkspaceMock.mockReturnValue({ workspace: ref({ id: 'ws-1', slug: 'acme' }), workspaceId: ref('ws-1'), workspaceSlug: ref('acme'), enter: vi.fn() });
   useWorkspaceTreeMock.mockReturnValue({
     status: ref('success'),
     nodes: ref([]),
@@ -55,6 +55,8 @@ function mockFrame() {
     ensure: vi.fn(async () => {}),
     refresh: vi.fn(async () => {}),
     nameOf: (id: string) => (id === 'ws-1' ? 'Acme' : null),
+    slugOf: (id: string) => (id === 'ws-1' ? 'acme' : null),
+    idOf: (slug: string) => (slug === 'acme' ? 'ws-1' : null),
   });
 }
 
@@ -363,7 +365,7 @@ describe('page-diff screen', () => {
     await mountSuspended(PageInApp, FRAME_STUBS);
     const { useRouter } = await import('#imports');
 
-    expect(useRouter().getRoutes().find((route) => route.path === '/pages/:id()/diff')?.meta.layout).toBe('workspace');
+    expect(useRouter().getRoutes().find((route) => route.path === '/w/:workspace()/p/:id()/diff')?.meta.layout).toBe('workspace');
   });
 
   // Where the person is: workspace › shelf › book › page through the
@@ -375,8 +377,8 @@ describe('page-diff screen', () => {
     const nav = component.get('nav[aria-label="Where you are"]');
     const crumbs = nav.findAll('li').map((li) => li.text()).filter(Boolean);
     expect(crumbs).toEqual(['Acme', 'Engineering', 'Handbook', 'A Page', 'History', 'Compare']);
-    expect(nav.find('a[href="/pages/page-1/history"]').exists()).toBe(true);
-    expect(nav.find('a[href="/pages/page-1"]').exists()).toBe(true);
+    expect(nav.find('a[href="/w/acme/p/page-1/history"]').exists()).toBe(true);
+    expect(nav.find('a[href="/w/acme/p/page-1"]').exists()).toBe(true);
   });
 
   // The bar's action is the way back; the two revisions being compared
@@ -394,8 +396,8 @@ describe('page-diff screen', () => {
     const inNewYork = await mountSuspended(PageInApp, FRAME_STUBS);
 
     const actions = inNewYork.get('header [data-slot="right"]');
-    expect(actions.findAll('a').map((a) => a.attributes('href'))).toEqual(['/pages/page-1/history']);
-    expect(actions.get('a[href="/pages/page-1/history"]').text()).toBe('Back to history');
+    expect(actions.findAll('a').map((a) => a.attributes('href'))).toEqual(['/w/acme/p/page-1/history']);
+    expect(actions.get('a[href="/w/acme/p/page-1/history"]').text()).toBe('Back to history');
     expect(actions.findAll('time')).toHaveLength(0);
 
     const pair = inNewYork.get('main [data-testid="diff-pair"]');
@@ -434,7 +436,7 @@ describe('page-diff screen', () => {
       const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
       expect(component.findAll('time'), status).toHaveLength(0);
-      expect(component.get('header [data-slot="right"] a[href="/pages/page-1/history"]').text()).toBe('Back to history');
+      expect(component.get('header [data-slot="right"] a[href="/w/acme/p/page-1/history"]').text()).toBe('Back to history');
       component.unmount();
     }
   });

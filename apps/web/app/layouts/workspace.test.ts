@@ -32,6 +32,8 @@ useWorkspaceDirectoryMock.mockReturnValue({
   ensure: vi.fn(async () => {}),
   refresh: vi.fn(async () => {}),
   nameOf: (id: string) => (id === 'ws-1' ? 'Acme' : null),
+  slugOf: (id: string) => (id === 'ws-1' ? 'acme' : null),
+  idOf: (slug: string) => (slug === 'acme' ? 'ws-1' : null),
 });
 
 /**
@@ -55,7 +57,7 @@ describe('workspace layout', () => {
         return () => h('p', { 'data-testid': 'screen' }, 'the screen');
       },
     });
-    useCurrentWorkspace().enter('ws-1');
+    useCurrentWorkspace().enter({ id: 'ws-1', slug: 'acme' });
     const component = await mountSuspended(
       defineComponent({
         name: 'LayoutInApp',

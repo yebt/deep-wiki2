@@ -52,7 +52,7 @@ export interface UseApiReadResult<T> {
  * that host, never reaches the Nuxt server, and this is `false`: the read
  * then waits for the browser, exactly as before the data layer existed.
  */
-function ssrCanAuthenticate(): boolean {
+export function ssrCanAuthenticate(): boolean {
   if (!import.meta.server) return true;
   const cookie = useRequestHeaders(['cookie']).cookie ?? '';
   return /(^|;\s*)session=[^;]+/.test(cookie);

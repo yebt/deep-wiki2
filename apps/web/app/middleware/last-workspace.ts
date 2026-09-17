@@ -18,7 +18,9 @@
  * "does not exist" state with the list one click away — a real state, and
  * one that discloses nothing (docs/UI-CHECKLIST.md §3).
  */
+import { workspaceUrl, workspacesUrl } from '~/utils/routes';
+
 export default defineNuxtRouteMiddleware(() => {
-  const remembered = rememberedWorkspaceId();
-  return navigateTo(remembered ? `/workspaces/${remembered}` : '/workspaces', { replace: true });
+  const remembered = rememberedWorkspace();
+  return navigateTo(remembered ? workspaceUrl(remembered.slug) : workspacesUrl(), { replace: true });
 });

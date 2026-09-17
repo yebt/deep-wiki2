@@ -991,6 +991,103 @@ outline, radius and caret colour in both themes).
 
 **Where it is recorded.** `docs/DESIGN-SYSTEM.md` §14 (the deviation from §5.1's uniform ring),
 `docs/UI-CHECKLIST.md` Review Log, 2026-09-17.
+### 2026-09-16 — Workspace-scoped addresses (`/w/<slug>/p/<id>`), the old shapes redirected, and the confirm dialog above the drawer (branch `feat/workspace-routes`)
+
+**The decision (owner, 2026-09-17, option b).** A page lives at `/w/<workspace-slug>/p/<uuid>`:
+the workspace's slug in the address, the node's id stable underneath, the hierarchy left to the
+breadcrumb. The whole family moved: `/w/<slug>` (dashboard), `/w/<slug>/p/<id>[/edit|/history|
+/diff]`, `/w/<slug>/b/<id>/history|diff`, `/w/<slug>/members|settings|ai`. `/workspaces`,
+`/workspaces/new`, `/admin/*`, `/account` and the sign-in family stay. Four commits on the
+branch: the API's two additions, the web move with its docs, the e2e migration with the two
+`AppShell` fixes the run found, and the stacking ruling; `docs/RUNNING.md` §2 is the route table.
+
+**What was built, and the reasoning that is not obvious from the diff.**
+
+- **One helper spells every route** — `apps/web/app/utils/routes.ts` — and `routes.test.ts`
+  walks `apps/web/app` for a route-shaped string outside it (API paths exempt: `api(…)`,
+  `$fetch(…)`, `apiBaseUrl`) and fails on any. Nineteen files spelled `/pages/<id>` by hand
+  before it. Dependency-free, so the e2e suite drives the same addresses through the same
+  functions.
+- **A workspace is two names.** `useCurrentWorkspace` holds `{ id, slug }` and the
+  `dw-workspace` cookie carries `<id>:<slug>` (`utils/workspace-cookie.ts`, shared with e2e), because
+  `/` builds `/w/<slug>` on the server from the cookie alone while the sidebar fetches the tree
+  by id. **A cookie from before this change (id alone) remembers nothing** — `/` goes to the
+  chooser once, and the next workspace opened writes the pair. Recorded, not migrated: a
+  one-time click.
+- **The API takes a slug where a screen has one.** `GET /workspaces/:ref/activity` and
+  `/members` accept the slug as well as the id (`apps/api/src/routes/workspace-ref.ts`; the slug
+  is tried first, so a uuid-shaped slug is still found as a slug), and the activity response
+  names the workspace by slug beside id and name. So the dashboard and members keep their
+  server render with no resolver round trip in front of them. The tree and the presence stream
+  stay by id — the sidebar always has one.
+- **The old shapes redirect, from the server, permanently.** They are real routes
+  (`nuxt.config.ts`, `pages:extend`, one placeholder component `LegacyRedirect.vue`) behind
+  `middleware/legacy-routes.ts`: `GET /nodes/:id/location` (new; a node the caller may not read
+  is the same 404 as one that does not exist — a redirect resolver has no caller to be honest
+  with, and a 403 would confirm ids) or the caller's `GET /workspaces` says where the thing
+  lives, and the answer is a `301` with the query kept. Signed out: sign-in first, the old
+  address as the return. On a deployment where the API's cookie never reaches the Nuxt server,
+  the server renders the placeholder and the browser resolves on hydration.
+  `e2e/legacy-routes.spec.ts` proves each shape's 301 and that denial and absence land on the
+  same not-found screen at the old address.
+- **The address is held to its word, in one place.** `AppShell` asks `useNodeLocation` beside a
+  node screen's own read (parallel, in the read layer, cached across screens; one extra ~100-byte
+  request per node screen — see below). A located node whose workspace slug is not the
+  address's is **not found**: the notice in place of the screen, its `header-end` actions
+  withheld, the frame standing on the workspace the address named (or the remembered one) with
+  no row marked, and no `enter`. A node the API refuses to locate is left to the screen's own
+  answer, which for a direct request tells denial from absence on purpose (`usePageRead`).
+  Considered and rejected: folding the check into the tree (a stale tree says "not here" for a
+  page created a minute ago), a route middleware in front of every node screen (a serial request
+  before the screen's own), and `workspaceSlug` in all six node responses (four API routes and
+  two composables another branch owns).
+
+**Found on the way, fixed.**
+
+- `enter` during the server render wrote the address's word into the cookie before the location
+  that might dispute it had answered (watchers with `immediate` run at setup, before
+  `onServerPrefetch`). Entering now waits for the location to settle — which on the server means
+  never; the browser enters on hydration.
+- A management screen the API refused — the reader on `/w/<slug>/members` — stood in no room:
+  its response names no workspace. The address's workspace is entered when the directory
+  confirms it is one the caller can open (`AppShell.test.ts` holds both).
+- `e2e/read.spec.ts` clicked `getByRole('link', { name: 'Read page' })`, which since the tree's
+  rows became links matches "E2E Read Page" in the tree and the breadcrumb as well
+  (case-insensitive substring); `exact: true`. `e2e/book-history.spec.ts` had the same
+  ambiguity with the page-switcher link; scoped to the bar.
+
+**Seen on the way, not fixed.**
+
+- **The dashboard's panels lose their accessible names in a production build — and they do on
+  `main` too.** `getByRole('region', { name: 'Recent changes' })` finds nothing after hydration:
+  the `<section aria-labelledby>` keeps the server's `useId()` (`v-0-6-1`) while its `<h2 id>`
+  is re-rendered with the client's (`v-0-0-1`), so the pair no longer matches. Two SSR requests
+  in a row answered `v-0-5-*` and `v-0-6-*` for the same page — the server's async-boundary
+  count is not stable across requests — and the hydrated `h2` sits under boundary `0-`.
+  Measured on this branch's build **and on a build of `2128ebe` (v0.5.1) served on the same
+  port**, identical; so it is not this batch's. `e2e/frame.spec.ts` "the dashboard stands
+  beside a 280px sidebar…" and `e2e/data-layer.spec.ts` "back to the dashboard…" fail against a
+  production build for this reason (they pass against the dev server, which is what
+  `bun run e2e` starts). The 2026-09-16 `useSidebarWorkspace` fix closed the sidebar's half of
+  this; the panels' half is open. Worth a `useId`-free labelling (`aria-label` from the title)
+  on `DashboardPanel`, which needs no id at all.
+- `e2e/perf.spec.ts` matches the dev server's module URLs (`packages/editor/src/mount/index.ts`);
+  against a production build those chunks are hashed and "the editor chunk is requested while
+  the edit-session request is still in flight" fails by construction. Dev-only by nature; not a
+  regression.
+- **One more request per node screen.** `GET /nodes/:id/location` runs beside the page read on
+  every read, edit, history and diff view (cached across hops; server-side on a full load).
+  Folding `workspaceSlug` into the six node responses would remove it; deferred because two of
+  those composables and the diff API route are another branch's this week.
+- The placeholder screen the old address shows when the server cannot resolve it is rendered in
+  the document frame — the workspace is exactly what is not yet known — and is never seen in
+  development or e2e (the cookie is forwarded and the server answers the 301).
+- The host ran at load average 18–21 throughout (three other worktrees running e2e). `bun run
+  e2e`'s dev `webServer` timed out twice inside its 120 s start; every e2e result below is
+  against a production build of this branch served on the harness's web port
+  (`bun run -F @deep-wiki/web build`, `node apps/web/.output/server/index.mjs` with
+  `PORT` and `NUXT_PUBLIC_API_BASE_URL`, `bunx playwright test` directly with
+  `reuseExistingServer`) — the documented workaround, not the command.
 
 ### 2026-09-16 — `e2e/editor.spec.ts`'s "flake" was one race, and it is the harness's: a key sent within the frame after a click is handled at the caret ProseMirror still holds
 

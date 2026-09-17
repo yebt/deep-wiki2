@@ -65,7 +65,8 @@ export const ThreadForYouSchema = z.object({
 export type ThreadForYou = z.infer<typeof ThreadForYouSchema>;
 
 export const WorkspaceActivityResponseSchema = z.object({
-  workspace: z.object({ id: z.string(), name: z.string() }),
+  /** Named by id, name and slug: the dashboard stands at `/w/<slug>` and its links carry the slug, while the API is keyed by id. */
+  workspace: z.object({ id: z.string(), name: z.string(), slug: z.string() }),
   recent: z.array(RecentChangeSchema),
   mine: z.array(OwnEditSchema),
   threads: z.array(ThreadForYouSchema),

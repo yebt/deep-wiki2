@@ -39,7 +39,7 @@
  * `UNavigationMenu` is the library's drawer list (§4.1: no hand-rolled
  * equivalent): one tab stop per door, `aria-current="page"` on the one
  * whose screen is open — `exact`, so the dashboard's "Back to workspace"
- * is not marked current on every screen under `/workspaces/:id/` — and a
+ * is not marked current on every screen under `/w/<slug>/` — and a
  * `before:` state layer on hover and focus. Two things the library gets
  * wrong on this pane are corrected in `app.config.ts`, centrally: its
  * active fill is `bg-elevated`, the pane's own rung and therefore
@@ -56,9 +56,11 @@
  * `authForm.description`).
  */
 import type { NavigationMenuItem } from '@nuxt/ui';
+import { accountUrl, aiUrl, membersUrl, registrationSettingsUrl, settingsUrl, workspaceUrl } from '~/utils/routes';
 
 const props = defineProps<{
-  workspaceId: string;
+  /** The workspace whose doors these are, by the slug its addresses carry. */
+  workspaceSlug: string;
 }>();
 
 /** A section headline — a labelled row that is not a door — rendered through the `section` slot so its type role is this component's own. */
@@ -72,17 +74,17 @@ function section(label: string): Section {
 }
 
 const items = computed<(NavigationMenuItem | Section)[][]>(() => {
-  const base = `/workspaces/${props.workspaceId}`;
+  const slug = props.workspaceSlug;
   return [
-    [{ label: 'Back to workspace', icon: 'i-lucide-arrow-left', to: base, exact: true }],
+    [{ label: 'Back to workspace', icon: 'i-lucide-arrow-left', to: workspaceUrl(slug), exact: true }],
     [
       section('Workspace'),
-      { label: 'Members', icon: 'i-lucide-users', to: `${base}/members`, exact: true },
-      { label: 'Settings', icon: 'i-lucide-settings-2', to: `${base}/settings`, exact: true },
-      { label: 'AI & models', icon: 'i-lucide-sparkles', to: `${base}/ai`, exact: true },
+      { label: 'Members', icon: 'i-lucide-users', to: membersUrl(slug), exact: true },
+      { label: 'Settings', icon: 'i-lucide-settings-2', to: settingsUrl(slug), exact: true },
+      { label: 'AI & models', icon: 'i-lucide-sparkles', to: aiUrl(slug), exact: true },
     ],
-    [section('Instance'), { label: 'Registration settings', icon: 'i-lucide-shield', to: '/admin/registration', exact: true }],
-    [section('You'), { label: 'Profile', icon: 'i-lucide-user', to: '/account', exact: true }],
+    [section('Instance'), { label: 'Registration settings', icon: 'i-lucide-shield', to: registrationSettingsUrl(), exact: true }],
+    [section('You'), { label: 'Profile', icon: 'i-lucide-user', to: accountUrl(), exact: true }],
   ];
 });
 </script>

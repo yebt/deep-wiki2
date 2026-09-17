@@ -11,7 +11,7 @@ import { WorkspaceActivityResponseSchema } from './activity';
 describe('WorkspaceActivityResponseSchema', () => {
   test('parses a response with a change, a thread and a personal edit', () => {
     const parsed = WorkspaceActivityResponseSchema.parse({
-      workspace: { id: 'ws-1', name: 'Acme' },
+      workspace: { id: 'ws-1', name: 'Acme', slug: 'acme' },
       recent: [
         {
           revisionId: 'rev-1',
@@ -45,7 +45,7 @@ describe('WorkspaceActivityResponseSchema', () => {
 
   test('strips revision content: the dashboard is a list, never a bulk content dump', () => {
     const parsed = WorkspaceActivityResponseSchema.parse({
-      workspace: { id: 'ws-1', name: 'Acme' },
+      workspace: { id: 'ws-1', name: 'Acme', slug: 'acme' },
       recent: [
         {
           revisionId: 'rev-1',
@@ -66,11 +66,26 @@ describe('WorkspaceActivityResponseSchema', () => {
 
   test('rejects a change whose class counts are missing', () => {
     const result = WorkspaceActivityResponseSchema.safeParse({
-      workspace: { id: 'ws-1', name: 'Acme' },
+      workspace: { id: 'ws-1', name: 'Acme', slug: 'acme' },
       recent: [{ revisionId: 'rev-1', pageId: 'page-1', pageTitle: 'Roadmap', author: { id: null, displayName: null }, createdAt: 'x' }],
       mine: [],
       threads: [],
     });
     expect(result.success).toBe(false);
+  });
+
+  /**
+   * The dashboard stands at `/w/<slug>` and every link it emits carries the
+   * slug, while the API is keyed by id: the response names the workspace
+   * both ways so the screen builds no link from a guess.
+   */
+  test('the workspace is named by id, name and slug', () => {
+    const base = { recent: [], mine: [], threads: [] };
+    expect(WorkspaceActivityResponseSchema.parse({ ...base, workspace: { id: 'ws-1', name: 'Acme', slug: 'acme' } }).workspace).toEqual({
+      id: 'ws-1',
+      name: 'Acme',
+      slug: 'acme',
+    });
+    expect(WorkspaceActivityResponseSchema.safeParse({ ...base, workspace: { id: 'ws-1', name: 'Acme' } }).success).toBe(false);
   });
 });

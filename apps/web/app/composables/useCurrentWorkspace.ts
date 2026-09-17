@@ -1,14 +1,22 @@
+import {
+  LAST_WORKSPACE_COOKIE,
+  parseWorkspaceCookieValue,
+  rememberWorkspaceCookieValue,
+  type RememberedWorkspace,
+} from '~/utils/workspace-cookie';
+
+/** A workspace as this app names it: the id the API is keyed by, and the slug every address carries. */
+export type CurrentWorkspace = RememberedWorkspace;
+
 export interface UseCurrentWorkspaceResult {
   /** The workspace the person is in; `null` before any screen has named one. */
-  readonly workspaceId: Ref<string | null>;
-  readonly enter: (workspaceId: string) => void;
+  readonly workspace: Ref<CurrentWorkspace | null>;
+  readonly workspaceId: ComputedRef<string | null>;
+  readonly workspaceSlug: ComputedRef<string | null>;
+  readonly enter: (workspace: CurrentWorkspace) => void;
 }
 
-/** The cookie that remembers the last workspace the person was in — what `/` reads. */
-export const LAST_WORKSPACE_COOKIE = 'dw-workspace';
-
-/** A workspace id as the database mints them — anything else in the cookie is ignored, never routed to. */
-const WORKSPACE_ID = /^[A-Za-z0-9-]{1,64}$/;
+export { LAST_WORKSPACE_COOKIE, rememberWorkspaceCookieValue };
 
 const ONE_YEAR_IN_SECONDS = 60 * 60 * 24 * 365;
 
@@ -25,12 +33,11 @@ function lastWorkspaceCookie() {
  * The workspace the cookie remembers, read fresh — what `/` routes on.
  * Read from the cookie rather than the shared state because the state is
  * initialised once per app, possibly before the cookie was there, and a
- * value that is not a workspace id as the database mints them is ignored,
- * never routed to.
+ * value that is not an id and a slug as the database mints them is
+ * ignored, never routed to (`utils/workspace-cookie.ts` owns the format).
  */
-export function rememberedWorkspaceId(): string | null {
-  const remembered = lastWorkspaceCookie().value;
-  return remembered && WORKSPACE_ID.test(remembered) ? remembered : null;
+export function rememberedWorkspace(): CurrentWorkspace | null {
+  return parseWorkspaceCookieValue(lastWorkspaceCookie().value);
 }
 
 /**
@@ -51,15 +58,26 @@ export function rememberedWorkspaceId(): string | null {
  * way, and a workspace the next person at this browser may not open lands
  * on the dashboard's own "does not exist" state with the list one click
  * away, never on a leak.
+ *
+ * Two names, held together: the **id** the API is keyed by (the sidebar's
+ * tree, the presence stream) and the **slug** every address carries
+ * (`utils/routes.ts`). `/` needs the slug to build `/w/<slug>`, and it is
+ * decided on the server from the cookie alone, so the cookie carries both.
  */
 export function useCurrentWorkspace(): UseCurrentWorkspaceResult {
-  const workspaceId = useState<string | null>('dw-current-workspace', rememberedWorkspaceId);
+  const workspace = useState<CurrentWorkspace | null>('dw-current-workspace', rememberedWorkspace);
 
-  function enter(id: string): void {
-    if (workspaceId.value === id) return;
-    workspaceId.value = id;
-    lastWorkspaceCookie().value = id;
+  function enter(next: CurrentWorkspace): void {
+    const current = workspace.value;
+    if (current && current.id === next.id && current.slug === next.slug) return;
+    workspace.value = { id: next.id, slug: next.slug };
+    lastWorkspaceCookie().value = rememberWorkspaceCookieValue(next);
   }
 
-  return { workspaceId, enter };
+  return {
+    workspace,
+    workspaceId: computed(() => workspace.value?.id ?? null),
+    workspaceSlug: computed(() => workspace.value?.slug ?? null),
+    enter,
+  };
 }

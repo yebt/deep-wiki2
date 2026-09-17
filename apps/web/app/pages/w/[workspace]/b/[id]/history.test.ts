@@ -7,7 +7,7 @@ import HistoryPage from './history.vue';
 const { useBookHistoryMock, useRouteMock, navigateToMock } = vi.hoisted(() => ({
   navigateToMock: vi.fn(async () => {}),
   useBookHistoryMock: vi.fn(),
-  useRouteMock: vi.fn(() => ({ params: { id: 'book-1' } })),
+  useRouteMock: vi.fn(() => ({ params: { workspace: 'acme', id: 'book-1' } })),
 }));
 
 mockNuxtImport('useBookHistory', () => useBookHistoryMock);
@@ -103,8 +103,8 @@ describe('book-history screen', () => {
     expect(items[0]!.text()).not.toContain('Initial draft');
     expect(items[1]!.text()).toContain('Initial draft of the handbook');
     // Grouping is real: the second changeset touched two distinct pages.
-    expect(items[1]!.findAll('a[href="/pages/page-1"]')).toHaveLength(1);
-    expect(items[1]!.findAll('a[href="/pages/page-2"]')).toHaveLength(1);
+    expect(items[1]!.findAll('a[href="/w/acme/p/page-1"]')).toHaveLength(1);
+    expect(items[1]!.findAll('a[href="/w/acme/p/page-2"]')).toHaveLength(1);
   });
 
   test("renders each changeset's timestamp in the viewer's own timezone, not UTC", async () => {
@@ -134,7 +134,7 @@ describe('book-history screen', () => {
     const link = component.findAll('a').find((a) => /view diff since/i.test(a.text()));
     expect(link).toBeTruthy();
     const href = link!.attributes('href')!;
-    expect(href).toBe(`/books/book-1/diff?since=${encodeURIComponent('2026-01-01T23:59:59.999Z')}`);
+    expect(href).toBe(`/w/acme/b/book-1/diff?since=${encodeURIComponent('2026-01-01T23:59:59.999Z')}`);
   });
 
   test('renders a single not-found state — absence and denial are indistinguishable here', async () => {
@@ -195,7 +195,7 @@ describe('book-history screen', () => {
     const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
     expect(component.get('h1').text()).toContain('E2E Handbook');
-    expect(component.find('a[href="/workspaces/ws-1"]').exists()).toBe(true);
+    expect(component.find('a[href="/w/acme"]').exists()).toBe(true);
   });
 
   test('the empty state has a way forward: the tree the book lives in', async () => {
@@ -206,7 +206,7 @@ describe('book-history screen', () => {
     // Scoped to `main`: the contextual bar carries the sidebar toggle's own
     // live region since 2026-09-15; the notice is the screen's, in the column.
     const notice = component.get('main [role="status"]');
-    expect(notice.find('a[href="/workspaces/ws-1"]').exists()).toBe(true);
+    expect(notice.find('a[href="/w/acme"]').exists()).toBe(true);
   });
 
   /*
@@ -220,7 +220,7 @@ describe('book-history screen', () => {
     await mountSuspended(PageInApp, FRAME_STUBS);
     const { useRouter } = await import('#imports');
 
-    expect(useRouter().getRoutes().find((route) => route.path === '/books/:id()/history')?.meta.layout).toBe('workspace');
+    expect(useRouter().getRoutes().find((route) => route.path === '/w/:workspace()/b/:id()/history')?.meta.layout).toBe('workspace');
   });
 
   /*
@@ -247,15 +247,15 @@ describe('book-history screen', () => {
     mockHistory({ status: 'success', changesets: TWO_CHANGESETS });
     const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
-    const compare = component.get('header a[href^="/books/book-1/diff?since="]');
+    const compare = component.get('header a[href^="/w/acme/b/book-1/diff?since="]');
     expect(compare.text()).toMatch(/compare since/i);
-    expect(compare.attributes('href')).toBe(`/books/book-1/diff?since=${encodeURIComponent('2026-01-01T23:59:59.999Z')}`);
+    expect(compare.attributes('href')).toBe(`/w/acme/b/book-1/diff?since=${encodeURIComponent('2026-01-01T23:59:59.999Z')}`);
   });
 
   test('offers no "Compare since…" control when there is nothing to compare', async () => {
     mockHistory({ status: 'success', changesets: [] });
     const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
-    expect(component.find('header a[href^="/books/book-1/diff?since="]').exists()).toBe(false);
+    expect(component.find('header a[href^="/w/acme/b/book-1/diff?since="]').exists()).toBe(false);
   });
 });

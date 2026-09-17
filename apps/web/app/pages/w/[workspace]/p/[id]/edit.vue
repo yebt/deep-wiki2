@@ -22,6 +22,7 @@
 import { loadEditorMount } from '~/utils/editor-mount';
 import { EDITOR_VIEWS, requestView, type EditorViewMode, type SourceRefusal } from '~/utils/editor-view';
 import { formatRevisionDate } from '~/utils/format-revision-date';
+import { pageUrl, workspacesUrl } from '~/utils/routes';
 
 // Inside the workspace layout: the frame is mounted once and this screen
 // renders only its pane, so the room does not change when the mode does —
@@ -31,6 +32,10 @@ definePageMeta({ layout: 'workspace' });
 
 const route = useRoute();
 const nodeId = route.params.id as string;
+/** The workspace slug the address carries (`/w/<slug>/p/<id>/edit`): what every link this screen emits is built from. */
+const workspaceSlug = route.params.workspace as string;
+const readUrl = pageUrl(workspaceSlug, nodeId);
+const allWorkspacesUrl = workspacesUrl();
 
 const { status, session, refusal, message, load, takeOver } = useEditSession(nodeId);
 // A signed-out visit leaves for sign-in and comes back (`useSignInRedirect`).
@@ -436,7 +441,7 @@ useSeoMeta({ title: () => (session.value?.title ? `Editing ${session.value.title
         />
       </UTooltip>
       <UTooltip v-if="status === 'ready'" text="Read page">
-        <UButton icon="i-lucide-eye" variant="ghost" color="neutral" size="sm" :to="`/pages/${nodeId}`" label="Read page" :ui="{ label: 'max-sm:sr-only' }" />
+        <UButton icon="i-lucide-eye" variant="ghost" color="neutral" size="sm" :to="readUrl" label="Read page" :ui="{ label: 'max-sm:sr-only' }" />
       </UTooltip>
       <!-- Undo and Redo, beside Save: icon-only, so a name and a tooltip
            that also shows the keys (§4.3); `aria-disabled` with the reason
@@ -537,8 +542,8 @@ useSeoMeta({ title: () => (session.value?.title ? `Editing ${session.value.title
     <PageNotice v-else-if="status === 'forbidden'" icon="i-lucide-lock" heading="You don't have access to edit this page">
       Ask a workspace admin for write access, or open it read-only.
       <template #actions>
-        <UButton variant="outline" icon="i-lucide-eye" :to="`/pages/${nodeId}`">Open read-only</UButton>
-        <UButton icon="i-lucide-library-big" variant="ghost" color="neutral" to="/workspaces">Your workspaces</UButton>
+        <UButton variant="outline" icon="i-lucide-eye" :to="readUrl">Open read-only</UButton>
+        <UButton icon="i-lucide-library-big" variant="ghost" color="neutral" :to="allWorkspacesUrl">Your workspaces</UButton>
         <UButton icon="i-lucide-log-in" variant="ghost" color="neutral" to="/login">Sign in</UButton>
       </template>
     </PageNotice>
@@ -546,7 +551,7 @@ useSeoMeta({ title: () => (session.value?.title ? `Editing ${session.value.title
     <PageNotice v-else-if="status === 'not-found'" icon="i-lucide-file-question" heading="This page does not exist">
       It may have been moved or deleted, or it may be somewhere you don't have access to — deep-wiki deliberately doesn't say which, so that a page you can't see is indistinguishable from one that was never there.
       <template #actions>
-        <UButton icon="i-lucide-library-big" variant="solid" color="primary" to="/workspaces">Your workspaces</UButton>
+        <UButton icon="i-lucide-library-big" variant="solid" color="primary" :to="allWorkspacesUrl">Your workspaces</UButton>
         <UButton icon="i-lucide-log-in" variant="ghost" color="neutral" to="/login">Sign in</UButton>
       </template>
     </PageNotice>
@@ -566,7 +571,7 @@ useSeoMeta({ title: () => (session.value?.title ? `Editing ${session.value.title
       <span v-else>Locked a moment ago. </span>
       Taking over will immediately end their editing session — their unsaved changes, if any, will be lost.
       <template #actions>
-        <UButton variant="outline" icon="i-lucide-eye" :to="`/pages/${nodeId}`">Open read-only</UButton>
+        <UButton variant="outline" icon="i-lucide-eye" :to="readUrl">Open read-only</UButton>
         <UButton color="error" variant="solid" icon="i-lucide-log-in" @click="confirmTakeOver">Take over editing</UButton>
       </template>
     </PageNotice>
@@ -585,7 +590,7 @@ useSeoMeta({ title: () => (session.value?.title ? `Editing ${session.value.title
       <span v-if="refusal?.construct || refusal?.line">, which this editor does not support yet.</span>
       <span v-else>This document is not in a form the editor can safely round-trip.</span>
       <template #actions>
-        <UButton variant="outline" color="error" icon="i-lucide-eye" :to="`/pages/${nodeId}`">Open read-only</UButton>
+        <UButton variant="outline" color="error" icon="i-lucide-eye" :to="readUrl">Open read-only</UButton>
         <!-- `aria-disabled`, not `disabled`. The attribute takes the
              control out of the tab order, which put the one sentence
              explaining why this exit is not available yet behind a
@@ -687,7 +692,7 @@ useSeoMeta({ title: () => (session.value?.title ? `Editing ${session.value.title
       <InlineNotice v-else-if="saveStatus === 'forbidden'" tier="chip" tone="error" role="alert" class="mb-4">
         {{ saveMessage }} Nothing was saved, but your edits are still here in this tab — copy them out before leaving if you need them.
         <template #actions>
-          <UButton size="xs" variant="outline" color="error" icon="i-lucide-eye" :to="`/pages/${nodeId}`">Open read-only</UButton>
+          <UButton size="xs" variant="outline" color="error" icon="i-lucide-eye" :to="readUrl">Open read-only</UButton>
         </template>
       </InlineNotice>
       <!-- `network-error`: recoverable — `saveMessage` already states the

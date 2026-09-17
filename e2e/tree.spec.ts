@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 import { expectNoHorizontalOverflow } from './overflow';
+import { workspaceUrl } from '../apps/web/app/utils/routes';
 
 /**
  * The navigation tree's two 2026-09-16 additions, driven in a real
@@ -23,6 +24,7 @@ import { expectNoHorizontalOverflow } from './overflow';
 
 interface SeedFixtures {
   readonly workspaceId: string;
+  readonly workspaceSlug: string;
   readonly readerSessionToken: string;
   readonly bookHistoryShelfTitle: string;
   readonly bookHistoryBookTitle: string;
@@ -93,7 +95,7 @@ test.describe('the row context menu', () => {
 
   test('right-click → Rename… on a page renames it through the toolbar’s own dialog', async ({ page, context }) => {
     await signInAs(context, writer.writerSessionToken);
-    await page.goto(`/workspaces/${seed.workspaceId}`);
+    await page.goto(workspaceUrl(seed.workspaceSlug));
 
     const row = page.getByRole('treeitem', { name: new RegExp(writer.editablePageTitle) });
     await expect(row).toBeVisible({ timeout: FIRST_ROW_TIMEOUT });
@@ -135,7 +137,7 @@ test.describe('the row context menu', () => {
     context,
   }) => {
     await signInAs(context, seed.readerSessionToken);
-    await page.goto(`/workspaces/${seed.workspaceId}`);
+    await page.goto(workspaceUrl(seed.workspaceSlug));
 
     const book = page.getByRole('treeitem', { name: new RegExp(seed.bookHistoryBookTitle) });
     await expect(book).toBeVisible({ timeout: FIRST_ROW_TIMEOUT });
@@ -168,7 +170,7 @@ test.describe('the row context menu', () => {
 
   test('the ⋯ button opens the same menu, and the menu is inside the viewport', async ({ page, context }) => {
     await signInAs(context, seed.readerSessionToken);
-    await page.goto(`/workspaces/${seed.workspaceId}`);
+    await page.goto(workspaceUrl(seed.workspaceSlug));
 
     const shelf = page.getByRole('treeitem', { name: new RegExp(seed.bookHistoryShelfTitle) });
     await expect(shelf).toBeVisible({ timeout: FIRST_ROW_TIMEOUT });
@@ -201,7 +203,7 @@ test.describe('the filter', () => {
     context,
   }) => {
     await signInAs(context, seed.readerSessionToken);
-    await page.goto(`/workspaces/${seed.workspaceId}`);
+    await page.goto(workspaceUrl(seed.workspaceSlug));
 
     const shelf = page.getByRole('treeitem', { name: new RegExp(seed.bookHistoryShelfTitle) });
     await expect(shelf).toBeVisible({ timeout: FIRST_ROW_TIMEOUT });
@@ -251,7 +253,7 @@ test.describe('the filter', () => {
 
   test('the person’s folds survive the filter, and Ctrl+Shift+F opens it from the sidebar only', async ({ page, context }) => {
     await signInAs(context, seed.readerSessionToken);
-    await page.goto(`/workspaces/${seed.workspaceId}`);
+    await page.goto(workspaceUrl(seed.workspaceSlug));
 
     const shelf = page.getByRole('treeitem', { name: new RegExp(seed.bookHistoryShelfTitle) });
     await expect(shelf).toBeVisible({ timeout: FIRST_ROW_TIMEOUT });
@@ -297,7 +299,7 @@ for (const [width, theme] of [
     test('the open menu, screenshotted, with no sideways scroll', async ({ page, context }) => {
       await signInAs(context, seed.readerSessionToken);
       await useTheme(page, theme);
-      await page.goto(`/workspaces/${seed.workspaceId}`);
+      await page.goto(workspaceUrl(seed.workspaceSlug));
       await expect(page.getByRole('heading', { level: 1, name: 'E2E Workspace' })).toBeVisible({ timeout: FIRST_ROW_TIMEOUT });
       await openDrawerIfNarrow(page);
 
@@ -324,7 +326,7 @@ for (const [width, theme] of [
     test('the active filter, screenshotted, with no sideways scroll', async ({ page, context }) => {
       await signInAs(context, seed.readerSessionToken);
       await useTheme(page, theme);
-      await page.goto(`/workspaces/${seed.workspaceId}`);
+      await page.goto(workspaceUrl(seed.workspaceSlug));
       await expect(page.getByRole('heading', { level: 1, name: 'E2E Workspace' })).toBeVisible({ timeout: FIRST_ROW_TIMEOUT });
       await openDrawerIfNarrow(page);
 
