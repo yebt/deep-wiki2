@@ -40,6 +40,7 @@ import { diffBlocks } from '@deep-wiki/markdown';
 import { Hono, type Context } from 'hono';
 import type postgres from 'postgres';
 import { sessionMiddleware, type SessionVariables } from '../middleware/session';
+import { resolveWorkspaceId } from './workspace-ref';
 
 export interface ActivityRouteDeps {
   readonly sql: postgres.Sql;
@@ -55,6 +56,7 @@ const OVERFETCH = 3;
 
 interface WorkspaceRow {
   name: string;
+  slug: string;
 }
 
 interface UserRow {
@@ -80,14 +82,17 @@ export function createActivityRoutes(deps: ActivityRouteDeps): Hono<{ Variables:
   const auth = sessionMiddleware(deps.sql, { idleTimeoutMinutes: deps.sessionIdleTimeoutMinutes });
 
   app.get('/workspaces/:id/activity', auth, async (c) => {
-    const workspaceId = c.req.param('id');
+    // By id or by slug (`workspace-ref.ts`): the dashboard asks by the slug
+    // its address carries. Identity first, then the same gate as by id.
+    const workspaceId = await resolveWorkspaceId(deps.sql, c.req.param('id'));
+    if (!workspaceId) return notFound(c);
     const session = c.get('session');
     const subject = { subjectType: 'user' as const, subjectId: session.userId };
 
     const readableWorkspaces = await readableWorkspaceIds(deps.sql, subject);
     if (!readableWorkspaces.has(workspaceId)) return notFound(c);
 
-    const [workspace] = await deps.sql<WorkspaceRow[]>`SELECT name FROM workspaces WHERE id = ${workspaceId}`;
+    const [workspace] = await deps.sql<WorkspaceRow[]>`SELECT name, slug FROM workspaces WHERE id = ${workspaceId}`;
     if (!workspace) return notFound(c);
     const [user] = await deps.sql<UserRow[]>`SELECT display_name FROM users WHERE id = ${session.userId}`;
 
@@ -151,7 +156,7 @@ export function createActivityRoutes(deps: ActivityRouteDeps): Hono<{ Variables:
 
     return c.json(
       WorkspaceActivityResponseSchema.parse({
-        workspace: { id: workspaceId, name: workspace.name },
+        workspace: { id: workspaceId, name: workspace.name, slug: workspace.slug },
         recent,
         mine,
         threads,

@@ -335,6 +335,33 @@ describe('GET /workspaces/:id/members', () => {
     expect(body.truncated).toBe(false);
   });
 
+  /**
+   * The members screen stands at `/w/<slug>/members` and asks by the slug
+   * the address bar carries; the API stays keyed by id underneath.
+   */
+  test('the workspace may be named by its slug, and answers the same as by id', async () => {
+    const fixture = await buildMembersFixture();
+
+    const bySlug = await buildApp().request(`/workspaces/${fixture.workspace.slug}/members`, { headers: { cookie: fixture.managerCookie } });
+    const byId = await buildApp().request(`/workspaces/${fixture.workspace.id}/members`, { headers: { cookie: fixture.managerCookie } });
+
+    expect(bySlug.status).toBe(200);
+    expect(await bySlug.json()).toEqual(await byId.json());
+  });
+
+  test('a slug nobody owns, and the slug of a workspace the caller may not manage, are the same 404', async () => {
+    const fixture = await buildMembersFixture();
+
+    const denied = await buildApp().request(`/workspaces/${fixture.workspace.slug}/members`, { headers: { cookie: fixture.readerCookie } });
+    const absent = await buildApp().request(`/workspaces/never-minted-${crypto.randomUUID()}/members`, { headers: { cookie: fixture.readerCookie } });
+
+    expect(denied.status).toBe(404);
+    expect(absent.status).toBe(404);
+    const deniedText = await denied.text();
+    expect(deniedText).toBe(await absent.text());
+    expectNoDisclosure(deniedText, { id: fixture.workspace.id, slug: fixture.workspace.slug, title: fixture.workspace.name }, denied.headers);
+  });
+
   test('a member without manage gets the same 404 as a workspace that does not exist, and learns nothing', async () => {
     const fixture = await buildMembersFixture();
 

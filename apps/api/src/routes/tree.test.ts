@@ -57,6 +57,7 @@ async function deny(workspaceId: string, userId: string, resourceId: string, act
 
 interface Fixture {
   workspaceId: string;
+  workspaceSlug: string;
   root: Node;
   shelf: Node;
   visibleBook: Node;
@@ -84,8 +85,9 @@ async function buildFixture(): Promise<Fixture> {
   const [outsider] = await sql<{ id: string }[]>`
     INSERT INTO users (email, password_hash, display_name) VALUES (${`outsider-${crypto.randomUUID()}@example.com`}, 'hash', 'Outsider') RETURNING id
   `;
+  const workspaceSlug = `ws-${crypto.randomUUID()}`;
   const [ws] = await sql<{ id: string }[]>`
-    INSERT INTO workspaces (owner_id, name, slug) VALUES (${owner!.id}, 'WS', ${`ws-${crypto.randomUUID()}`}) RETURNING id
+    INSERT INTO workspaces (owner_id, name, slug) VALUES (${owner!.id}, 'WS', ${workspaceSlug}) RETURNING id
   `;
   const root = await insertNode(ws!.id, null, 'workspace', 'root');
   const shelf = await insertNode(ws!.id, root.id, 'shelf', 'shelf');
@@ -107,6 +109,7 @@ async function buildFixture(): Promise<Fixture> {
 
   return {
     workspaceId: ws!.id,
+    workspaceSlug,
     root,
     shelf,
     visibleBook,
@@ -187,6 +190,59 @@ describe('GET /workspaces/:id/tree — an outsider cannot tell it apart from not
 
     expect(res.status).toBe(200);
     expect(((await res.json()) as { rootId: string }).rootId).toBe(fixture.root.id);
+  });
+});
+
+/*
+ * `GET /nodes/:id/location` — the locator behind the old `/pages/<id>`
+ * and `/books/<id>` addresses: which workspace a node lives in, by id and
+ * by slug, so the web app can redirect a bare node id to
+ * `/w/<slug>/p/<id>`. It answers only what `can(read)` allows, and a node
+ * the caller may not read is byte-identical to one that never existed —
+ * the locator must not become the oracle the page route deliberately is
+ * not (`pages.ts` returns a real 403 to a direct request; a redirect
+ * resolver has no such caller to be honest with).
+ */
+describe('GET /nodes/:id/location', () => {
+  test('a readable node is located in its workspace by id and by slug', async () => {
+    const fixture = await buildFixture();
+    const app = buildApp();
+
+    const res = await app.request(`/nodes/${fixture.visibleBook.id}/location`, { headers: { cookie: fixture.readerCookie } });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      id: fixture.visibleBook.id,
+      type: 'book',
+      workspaceId: fixture.workspaceId,
+      workspaceSlug: fixture.workspaceSlug,
+    });
+  });
+
+  test('a node the caller may not read, a node that does not exist and an id that is not one all get the same 404', async () => {
+    const fixture = await buildFixture();
+    const app = buildApp();
+
+    const denied = await app.request(`/nodes/${fixture.hiddenChapterPage.id}/location`, { headers: { cookie: fixture.readerCookie } });
+    const outsider = await app.request(`/nodes/${fixture.visibleBook.id}/location`, { headers: { cookie: fixture.outsiderCookie } });
+    const absent = await app.request(`/nodes/${crypto.randomUUID()}/location`, { headers: { cookie: fixture.readerCookie } });
+    const malformed = await app.request('/nodes/not-a-uuid/location', { headers: { cookie: fixture.readerCookie } });
+
+    const deniedText = await denied.text();
+    expect(denied.status).toBe(404);
+    expect(outsider.status).toBe(404);
+    expect(absent.status).toBe(404);
+    expect(malformed.status).toBe(404);
+    expect(deniedText).toBe(await absent.text());
+    expect(deniedText).toBe(await outsider.text());
+    expect(deniedText).toBe(await malformed.text());
+    expectNoDisclosure(deniedText, { id: fixture.hiddenChapterPage.id, slug: 'page-under-hidden', values: [fixture.workspaceSlug] }, denied.headers);
+  });
+
+  test('an unauthenticated request is refused', async () => {
+    const fixture = await buildFixture();
+    const res = await buildApp().request(`/nodes/${fixture.visibleBook.id}/location`);
+    expect(res.status).toBe(401);
   });
 });
 

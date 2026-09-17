@@ -69,3 +69,20 @@ export const RenameNodeResponseSchema = z.object({
   title: z.string(),
 });
 export type RenameNodeResponse = z.infer<typeof RenameNodeResponseSchema>;
+
+/**
+ * `GET /nodes/:id/location` — which workspace a node lives in, named by
+ * the id the API is keyed by and by the slug the address bar carries
+ * (`/w/<slug>/p/<id>`). The one thing a client needs to turn a bare node
+ * id — an old `/pages/<id>` bookmark, a link pasted without its workspace
+ * — into the page's real address. Nothing about the node's content or
+ * title: this is a locator, and a caller who may not read the node gets
+ * the same 404 as one asking about a node that does not exist.
+ */
+export const NodeLocationResponseSchema = z.object({
+  id: z.string(),
+  type: NodeTypeSchema,
+  workspaceId: z.string(),
+  workspaceSlug: z.string(),
+});
+export type NodeLocationResponse = z.infer<typeof NodeLocationResponseSchema>;

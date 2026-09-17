@@ -142,11 +142,12 @@ export {
   LEGAL_PARENT_TYPES,
   legalChildTypes,
   NODE_TITLE_MAX_LENGTH,
+  NodeLocationResponseSchema,
   NodeTypeSchema,
   RenameNodeRequestSchema,
   RenameNodeResponseSchema,
 } from './nodes';
-export type { CreateNodeRequest, CreateNodeResponse, NodeType, RenameNodeRequest, RenameNodeResponse } from './nodes';
+export type { CreateNodeRequest, CreateNodeResponse, NodeLocationResponse, NodeType, RenameNodeRequest, RenameNodeResponse } from './nodes';
 
 export {
   CreateWorkspaceRefusalSchema,

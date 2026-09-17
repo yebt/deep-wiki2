@@ -30,6 +30,7 @@ afterAll(async () => {
 
 interface Fixture {
   readonly workspaceId: string;
+  readonly workspaceSlug: string;
   readonly readablePageId: string;
   readonly hiddenPageId: string;
   readonly ownerId: string;
@@ -64,8 +65,9 @@ async function buildFixture(): Promise<Fixture> {
   const reader = await seedUser('Ana Ruiz');
   const outsider = await seedUser('Outsider');
 
+  const workspaceSlug = `ws-${crypto.randomUUID()}`;
   const [ws] = await sql<{ id: string }[]>`
-    INSERT INTO workspaces (owner_id, name, slug) VALUES (${owner}, 'Acme Wiki', ${`ws-${crypto.randomUUID()}`}) RETURNING id
+    INSERT INTO workspaces (owner_id, name, slug) VALUES (${owner}, 'Acme Wiki', ${workspaceSlug}) RETURNING id
   `;
   const [root] = await sql<{ id: string }[]>`
     INSERT INTO nodes (workspace_id, parent_id, type, path, position, slug, title)
@@ -83,6 +85,7 @@ async function buildFixture(): Promise<Fixture> {
 
   return {
     workspaceId: ws!.id,
+    workspaceSlug,
     readablePageId: readable!.id,
     hiddenPageId: hidden!.id,
     ownerId: owner,
@@ -97,7 +100,7 @@ function buildApp() {
 }
 
 interface ActivityBody {
-  workspace: { id: string; name: string };
+  workspace: { id: string; name: string; slug: string };
   recent: { revisionId: string; pageId: string; pageTitle: string; author: { displayName: string | null }; changes: { added: number; removed: number; modified: number; moved: number } }[];
   mine: { pageId: string; pageTitle: string }[];
   threads: { id: string; pageTitle: string; quote: string; replyCount: number; mentionsYou: boolean; awaitsYou: boolean }[];
@@ -114,7 +117,7 @@ describe('GET /workspaces/:id/activity', () => {
 
     expect(res.status).toBe(200);
     const body = (await res.json()) as ActivityBody;
-    expect(body.workspace).toEqual({ id: f.workspaceId, name: 'Acme Wiki' });
+    expect(body.workspace).toEqual({ id: f.workspaceId, name: 'Acme Wiki', slug: f.workspaceSlug });
     expect(body.recent.map((change) => change.pageTitle)).toEqual(['Roadmap', 'Roadmap']);
     expect(body.recent[0]!.author.displayName).toBe('Owner');
     // The second save changed one block and added one; the first save
@@ -184,6 +187,38 @@ describe('GET /workspaces/:id/activity', () => {
     const deniedText = await denied.text();
     expect(JSON.parse(deniedText)).toEqual(await missing.json());
     expectNoDisclosure(deniedText, { id: f.readablePageId, title: 'Roadmap', values: ['Acme Wiki'] }, denied.headers);
+  });
+
+  /**
+   * The dashboard stands at `/w/<slug>` and asks by the slug the address
+   * bar carries; the answer names the workspace by id, name and slug so
+   * the screen builds every link it emits from the response.
+   */
+  test('the workspace may be named by its slug, and the answer names it by id, name and slug', async () => {
+    const f = await buildFixture();
+    const app = buildApp();
+
+    const bySlug = await app.request(`/workspaces/${f.workspaceSlug}/activity`, { headers: { cookie: f.readerCookie } });
+    const byId = await app.request(`/workspaces/${f.workspaceId}/activity`, { headers: { cookie: f.readerCookie } });
+
+    expect(bySlug.status).toBe(200);
+    const body = (await bySlug.json()) as ActivityBody;
+    expect(body.workspace).toEqual({ id: f.workspaceId, name: 'Acme Wiki', slug: f.workspaceSlug });
+    expect(body).toEqual((await byId.json()) as ActivityBody);
+  });
+
+  test('a slug nobody owns, and the slug of a workspace the caller cannot read, are the same 404', async () => {
+    const f = await buildFixture();
+    const app = buildApp();
+
+    const denied = await app.request(`/workspaces/${f.workspaceSlug}/activity`, { headers: { cookie: f.outsiderCookie } });
+    const absent = await app.request(`/workspaces/never-minted-${crypto.randomUUID()}/activity`, { headers: { cookie: f.outsiderCookie } });
+
+    expect(denied.status).toBe(404);
+    expect(absent.status).toBe(404);
+    const deniedText = await denied.text();
+    expect(deniedText).toBe(await absent.text());
+    expectNoDisclosure(deniedText, { id: f.workspaceId, slug: f.workspaceSlug, values: ['Acme Wiki'] }, denied.headers);
   });
 
   test('an unauthenticated request is refused', async () => {

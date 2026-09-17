@@ -35,6 +35,7 @@ import {
   CreateNodeRequestSchema,
   CreateNodeResponseSchema,
   ErrorResponseSchema,
+  NodeLocationResponseSchema,
   RenameNodeRequestSchema,
   RenameNodeResponseSchema,
 } from '@deep-wiki/contracts';
@@ -130,6 +131,8 @@ async function readJsonBody(request: Request): Promise<Record<string, unknown>> 
 function notFound(c: Context): Response {
   return c.json(ErrorResponseSchema.parse({ error: 'not found' }), 404);
 }
+
+const UUID_SHAPE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
  * The one place a write to the tree resolves its target's permission.
@@ -230,6 +233,44 @@ export function createTreeRoutes(deps: TreeRouteDeps): Hono<{ Variables: Session
     // target as `newParentId` — without it, the client has no legal
     // parent id to send when reordering a shelf among its siblings.
     return c.json({ rootId: root.id, nodes });
+  });
+
+  /**
+   * `GET /nodes/:id/location` — which workspace a node lives in, by id and
+   * by slug. The web app's addresses carry the workspace's slug
+   * (`/w/<slug>/p/<id>`); an address that carries only a node id — the
+   * `/pages/<id>` and `/books/<id>` shapes every link used to have, a bare
+   * id pasted from somewhere — is turned into the real one by asking here
+   * first. A locator and nothing more: no title, no content, no parent.
+   *
+   * **Absence and denial are the same answer.** `pages.ts` returns a real
+   * 403 to a caller who asks for a page they may not read, because that
+   * caller asked and is owed a coherent refusal (docs/UI-CHECKLIST.md
+   * §3). Nobody asks this route; a redirect does, on the person's behalf,
+   * and a 403 here would let anyone confirm that an id exists by watching
+   * where an old link bounces. So a node the caller may not read, a node
+   * that does not exist and an id that is not one are one 404, from the
+   * one call site every other refusal in this file uses.
+   */
+  app.get('/nodes/:id/location', auth, async (c) => {
+    const nodeId = c.req.param('id');
+    // A non-uuid id would make the comparison below throw; it names
+    // nothing and gets the same answer as an id that names nothing.
+    if (!UUID_SHAPE.test(nodeId)) return notFound(c);
+    const session = c.get('session');
+
+    const [node] = await deps.sql<{ type: string; workspace_id: string; workspace_slug: string }[]>`
+      SELECT n.type, n.workspace_id, w.slug AS workspace_slug
+        FROM nodes n
+        JOIN workspaces w ON w.id = n.workspace_id
+       WHERE n.id = ${nodeId}
+    `;
+    const canRead = node !== undefined && (await can(deps.sql, { subjectType: 'user', subjectId: session.userId, resourceId: nodeId, action: 'read' }));
+    if (!node || !canRead) return notFound(c);
+
+    return c.json(
+      NodeLocationResponseSchema.parse({ id: nodeId, type: node.type, workspaceId: node.workspace_id, workspaceSlug: node.workspace_slug }),
+    );
   });
 
   /**
