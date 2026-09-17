@@ -796,6 +796,16 @@ call (Novita, DekaLLM, CoreWeave, StreamLake, DeepInfra) — the route's behavio
 behaviour of whichever host OpenRouter picked, which is one more reason `verifiedAt` is a date
 and not a promise.
 
+**Nothing in `bun run test` reaches the network — confirmed and now enforced.** The CLIs are
+the only network path, they read one env var each, and their tests spawn them with an
+environment of exactly `PATH` and `HOME`; every probe and adapter test injects a fixture
+`fetch`. Run with `AI_CONFORMANCE_OPENROUTER_KEY` and `AI_PROBE_OPENROUTER_KEY` deliberately
+set to invalid values in the test process: 143/143 of the `src/ai` suites pass and the CLI tests still see "skipped"
+and "unknown". The enforcement is `apps/api/testing/no-network.ts`, preloaded by
+`apps/api/bunfig.toml` under `bun test`: the global `fetch` refuses any host that is not
+loopback, so a test that forgets its fixture fails at the call with a message naming the fix,
+rather than spending money and passing.
+
 ### 2026-09-17 — `bun run test` lost 85 suites to one race: two processes creating `deepwiki_test_template`
 
 **What happened.** `bun run test` runs every package's suite at once (`--filter '*'`), and
