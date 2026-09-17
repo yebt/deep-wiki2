@@ -52,7 +52,9 @@ async function main(): Promise<void> {
 
   let allMatched = true;
   for (const result of results) {
-    console.log(`ai:conformance: ${result.modelId} (declared "${result.declaredLevel}") — matched=${result.matched} (${result.detail})`);
+    console.log(
+      `ai:conformance: ${result.modelId} (declared "${result.declaredLevel}") — matched=${result.matched} (${result.detail}) — rungs=${result.rungs} tokens=${result.usage.inputTokens}/${result.usage.outputTokens} cost=${result.costMicroUsd}µ$ elapsed=${result.elapsedMs}ms`,
+    );
     if (!result.matched) allMatched = false;
   }
 

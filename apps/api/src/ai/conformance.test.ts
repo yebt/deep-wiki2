@@ -54,6 +54,29 @@ describe('runConformanceCase', () => {
     expect(result.detail.includes('sk-fake')).toBe(false);
   });
 
+  test('reports the tokens every rung spent, their cost at the registry price, the rung count and the elapsed time', async () => {
+    // Fails at "tool-call", validates at "prompted": two rungs, each 10 in / 5 out
+    // at claude-3-5-sonnet's 3_000_000 / 15_000_000 µ$ per MTok = 105 µ$ a rung.
+    const chatModel = new ScriptedChatModel(['not json', '{"answer":"ok"}']);
+
+    const result = await runConformanceCase(chatModel, new Secret('sk-fake'), 'anthropic:claude-3-5-sonnet-20241022');
+
+    expect(result.matched).toBe(false);
+    expect(result.rungs).toBe(2);
+    expect(result.usage).toEqual({ inputTokens: 20, cachedInputTokens: 0, outputTokens: 10 });
+    expect(result.costMicroUsd).toBe(210);
+    expect(result.elapsedMs).toBeGreaterThanOrEqual(0);
+  });
+
+  test('a case that never reached the provider reports zero rungs and zero cost', async () => {
+    const chatModel = new ScriptedChatModel(['{"answer":"ok"}']);
+
+    const result = await runConformanceCase(chatModel, new Secret('sk-fake'), 'anthropic:no-such-model');
+
+    expect(result.rungs).toBe(0);
+    expect(result.costMicroUsd).toBe(0);
+  });
+
   test('an unregistered model is reported as a mismatch rather than throwing', async () => {
     const chatModel = new ScriptedChatModel(['{"answer":"ok"}']);
 
