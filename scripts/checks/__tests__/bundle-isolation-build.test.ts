@@ -1,8 +1,11 @@
 import { describe, expect, test } from 'bun:test';
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { checkBuildOutputIsolation } from '../bundle-isolation-build';
+import { pageUrl } from '../../../apps/web/app/utils/routes';
+import { checkBuildOutputIsolation, readRouteSource } from '../bundle-isolation-build';
 
 const FIXTURES_DIR = join(import.meta.dir, '..', '__fixtures__', 'bundle-isolation-build');
+const REAL_WEB_ROOT = join(import.meta.dir, '..', '..', '..', 'apps', 'web');
 
 // document-modes: ProseMirror Bundle Isolation Is Verified By Build
 // Output, both scenarios (design.md "Read mode never reaches the
@@ -22,11 +25,24 @@ describe('checkBuildOutputIsolation', () => {
     expect(result.errors.some((e) => e.includes('prosemirror-model'))).toBe(true);
   });
 
-  test('fails loudly, naming the missing route, when the build has no entry for the expected read route', async () => {
+  test('fails loudly, naming the route, when the pages directory has the read route but the build has no entry for it', async () => {
     const result = await checkBuildOutputIsolation(join(FIXTURES_DIR, 'missing-route'));
 
     expect(result.ok).toBe(false);
-    expect(result.errors.some((e) => e.includes('pages/pages/[id]/index.vue'))).toBe(true);
+    expect(result.errors.some((e) => e.includes('pages/w/[workspace]/p/[id]/index.vue'))).toBe(true);
+  });
+
+  // The read route's source path was a string constant here, and the
+  // routes batch (2026-09-17) moved the file from `pages/pages/[id]/` to
+  // `pages/w/[workspace]/p/[id]/` without the constant following: the
+  // check then failed as "no entry … has the read route moved?" against
+  // every build. The path is now derived: `utils/routes.ts` says what a
+  // page's address is, the pages directory says which file serves it.
+  test('fails, naming the address, when no file under app/pages serves the page address routes.ts emits', async () => {
+    const result = await checkBuildOutputIsolation(join(FIXTURES_DIR, 'stale-read-route'));
+
+    expect(result.ok).toBe(false);
+    expect(result.errors.some((e) => e.includes(pageUrl('<slug>', '<id>')) && e.includes('routes.ts'))).toBe(true);
   });
 
   test('skips gracefully — not a failure — when no build output exists yet', async () => {
@@ -52,5 +68,22 @@ describe('checkBuildOutputIsolation', () => {
 
     expect(result.ok).toBe(true);
     expect(result.scannedClientChunks).toBe(1);
+  });
+});
+
+describe('readRouteSource', () => {
+  test('names the pages file whose Nuxt route serves pageUrl(), as the chunk graph keys it', () => {
+    expect(readRouteSource(join(FIXTURES_DIR, 'clean', 'app', 'pages'))).toBe('pages/w/[workspace]/p/[id]/index.vue');
+  });
+
+  test('finds nothing in the pre-2026-09-17 layout, where no file serves /w/<slug>/p/<id>', () => {
+    expect(readRouteSource(join(FIXTURES_DIR, 'stale-read-route', 'app', 'pages'))).toBeNull();
+  });
+
+  test('the real apps/web has exactly one file serving the page address, and it exists', () => {
+    const source = readRouteSource(join(REAL_WEB_ROOT, 'app', 'pages'));
+
+    expect(source).not.toBeNull();
+    expect(existsSync(join(REAL_WEB_ROOT, 'app', source!))).toBe(true);
   });
 });
