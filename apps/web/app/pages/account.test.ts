@@ -3,7 +3,7 @@ import { mountSuspended } from '@nuxt/test-utils/runtime';
 import { describe, expect, test } from 'vitest';
 import { defineComponent, h } from 'vue';
 import WorkspaceSidebar from '~/components/WorkspaceSidebar.vue';
-import { LAST_WORKSPACE_COOKIE } from '~/composables/useCurrentWorkspace';
+import { LAST_WORKSPACE_COOKIE } from '~/utils/workspace-cookie';
 import AccountPage from './account.vue';
 
 const FRAME_STUBS = { global: { stubs: { WorkspaceSidebar: true } } };

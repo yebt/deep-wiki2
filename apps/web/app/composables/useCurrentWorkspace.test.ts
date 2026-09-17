@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'vitest';
 import { nextTick } from 'vue';
-import { LAST_WORKSPACE_COOKIE, rememberedWorkspace, rememberWorkspaceCookieValue, useCurrentWorkspace } from './useCurrentWorkspace';
+import { LAST_WORKSPACE_COOKIE, rememberWorkspaceCookieValue } from '~/utils/workspace-cookie';
+import * as composable from './useCurrentWorkspace';
+import { rememberedWorkspace, useCurrentWorkspace } from './useCurrentWorkspace';
 
 /**
  * The workspace the person is *in* — one at a time, the way a person is in
@@ -21,6 +23,16 @@ import { LAST_WORKSPACE_COOKIE, rememberedWorkspace, rememberWorkspaceCookieValu
  * address and the sidebar needs the id to fetch the tree.
  */
 describe('useCurrentWorkspace', () => {
+  // Nuxt auto-imports every export of a composable and of a util, and a
+  // name exported by both is a collision it warns about on every
+  // typecheck (`Duplicated imports "rememberWorkspaceCookieValue"`, the
+  // composable's copy ignored). The cookie's name and format have one
+  // owner, `utils/workspace-cookie.ts`; this module re-exports nothing.
+  test('re-exports nothing of the cookie module — one owner, no auto-import collision', () => {
+    expect(Object.keys(composable)).not.toContain('LAST_WORKSPACE_COOKIE');
+    expect(Object.keys(composable)).not.toContain('rememberWorkspaceCookieValue');
+  });
+
   test('is shared: a workspace entered from one call site is read from another, by id and by slug', () => {
     const a = useCurrentWorkspace();
     const b = useCurrentWorkspace();

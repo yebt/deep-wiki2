@@ -1,7 +1,7 @@
 import { mockNuxtImport } from '@nuxt/test-utils/runtime';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import type { RouteLocationNormalized } from 'vue-router';
-import { LAST_WORKSPACE_COOKIE } from '~/composables/useCurrentWorkspace';
+import { LAST_WORKSPACE_COOKIE } from '~/utils/workspace-cookie';
 import lastWorkspace from './last-workspace';
 
 const { navigateToMock } = vi.hoisted(() => ({ navigateToMock: vi.fn((to: unknown) => to) }));

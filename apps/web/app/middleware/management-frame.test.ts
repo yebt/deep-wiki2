@@ -1,7 +1,7 @@
 import { mockNuxtImport } from '@nuxt/test-utils/runtime';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import type { RouteLocationNormalized } from 'vue-router';
-import { LAST_WORKSPACE_COOKIE } from '~/composables/useCurrentWorkspace';
+import { LAST_WORKSPACE_COOKIE } from '~/utils/workspace-cookie';
 import managementFrame from './management-frame';
 
 const { setPageLayoutMock } = vi.hoisted(() => ({ setPageLayoutMock: vi.fn() }));
