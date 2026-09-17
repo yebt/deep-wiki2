@@ -73,6 +73,19 @@ describe('listPageRevisions', () => {
     expect(revisions).toHaveLength(0);
   });
 
+  // revision-history spec: "History denied for a trashed page without
+  // manage" — identically to no `read` at all, which for this query means
+  // an empty list, matching the "no saves" case above byte-for-byte.
+  test('history for a now-trashed page is denied identically to no read (revision-history spec)', async () => {
+    const { workspaceId, pageId, authorId } = await seedPage();
+    await savePage(sql, { nodeId: pageId, workspaceId, markdown: '# One\n', expectedContentHash: null, updatedBy: authorId, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
+    await sql`UPDATE nodes SET trashed_at = now(), trash_operation_id = ${crypto.randomUUID()} WHERE id = ${pageId}`;
+
+    const revisions = await listPageRevisions(sql, { pageId, workspaceId });
+
+    expect(revisions).toHaveLength(0);
+  });
+
   // The history screen names a revision that stores the same bytes as the
   // one before it — rows minted before `savePage()` refused no-op saves
   // (docs/TODO.md Findings, 2026-09-17) — from the hash alone, without
@@ -193,5 +206,23 @@ describe('listWorkspaceRevisions', () => {
     const { workspaceId } = await seedPage();
 
     expect(await listWorkspaceRevisions(sql, { workspaceId, limit: 10 })).toEqual([]);
+  });
+
+  // trash-non-disclosure spec: "Every read surface … activity … MUST
+  // resolve through these views" — the dashboard's "what changed" feed is
+  // one such surface.
+  test('excludes a trashed page’s saves from the workspace-wide feed', async () => {
+    const { workspaceId, pageId, authorId } = await seedPage();
+    const [otherPage] = await sql<{ id: string }[]>`
+      INSERT INTO nodes (workspace_id, parent_id, type, path, position, slug, title)
+      SELECT workspace_id, parent_id, 'page', '', 1, ${`page-${crypto.randomUUID()}`}, 'Other Page' FROM nodes WHERE id = ${pageId} RETURNING id
+    `;
+    await savePage(sql, { nodeId: pageId, workspaceId, markdown: '# One\n', expectedContentHash: null, updatedBy: authorId, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
+    await savePage(sql, { nodeId: otherPage!.id, workspaceId, markdown: '# Other\n', expectedContentHash: null, updatedBy: authorId, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
+    await sql`UPDATE nodes SET trashed_at = now(), trash_operation_id = ${crypto.randomUUID()} WHERE id = ${pageId}`;
+
+    const rows = await listWorkspaceRevisions(sql, { workspaceId, limit: 10 });
+
+    expect(rows.map((row) => row.pageId)).toEqual([otherPage!.id]);
   });
 });

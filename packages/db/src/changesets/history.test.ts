@@ -213,4 +213,57 @@ describe('listBookHistory', () => {
 
     expect(history).toEqual([]);
   });
+
+  // changesets spec: "A trashed page's revisions are excluded for a
+  // non-manager" — though other pages' revisions in the same changeset
+  // still appear.
+  test('a trashed page’s revisions are excluded, but the same changeset’s other page still appears', async () => {
+    const { workspaceId, rootId } = await seedWorkspace();
+    const bookId = await seedBook(workspaceId, rootId);
+    const trashedPageId = await seedPageUnder(workspaceId, bookId);
+    const otherPageId = await seedPageUnder(workspaceId, bookId);
+    const authorId = await seedUser('Author');
+    await savePage(sql, {
+      nodeId: trashedPageId,
+      workspaceId,
+      markdown: '# Trashed page\n',
+      expectedContentHash: null,
+      updatedBy: authorId,
+      changesetWindowMinutes: WINDOW_MINUTES,
+    });
+    await savePage(sql, {
+      nodeId: otherPageId,
+      workspaceId,
+      markdown: '# Other page\n',
+      expectedContentHash: null,
+      updatedBy: authorId,
+      changesetWindowMinutes: WINDOW_MINUTES,
+    });
+    await sql`UPDATE nodes SET trashed_at = now(), trash_operation_id = ${crypto.randomUUID()} WHERE id = ${trashedPageId}`;
+
+    const history = await listBookHistory(sql, { bookId, workspaceId });
+
+    expect(history).toHaveLength(1);
+    expect(history[0]!.revisions.map((r) => r.pageId)).toEqual([otherPageId]);
+  });
+
+  test('a changeset entirely about a trashed page is absent from the history', async () => {
+    const { workspaceId, rootId } = await seedWorkspace();
+    const bookId = await seedBook(workspaceId, rootId);
+    const pageId = await seedPageUnder(workspaceId, bookId);
+    const authorId = await seedUser('Author');
+    await savePage(sql, {
+      nodeId: pageId,
+      workspaceId,
+      markdown: '# One\n',
+      expectedContentHash: null,
+      updatedBy: authorId,
+      changesetWindowMinutes: WINDOW_MINUTES,
+    });
+    await sql`UPDATE nodes SET trashed_at = now(), trash_operation_id = ${crypto.randomUUID()} WHERE id = ${pageId}`;
+
+    const history = await listBookHistory(sql, { bookId, workspaceId });
+
+    expect(history).toEqual([]);
+  });
 });

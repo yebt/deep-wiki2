@@ -10,12 +10,16 @@
  * through the ordinary `changeset.book_id = <this book>` predicate — no
  * extra ancestor walk is needed at read time.
  *
- * Per-page non-disclosure (a reader who can read the book but not one page
- * in it must not see that page's revisions) is deliberately not this
- * function's job: it returns every revision in the book's changesets,
- * unfiltered, and `apps/api/src/routes/revisions.ts` filters by
+ * Per-page non-disclosure by explicit grant (a reader who can read the book
+ * but not one page in it must not see that page's revisions) is
+ * deliberately not this function's job: it returns every revision in the
+ * book's live changesets, and `apps/api/src/routes/revisions.ts` filters by
  * `readableResourceIds` before shaping the response — the same split
- * `book-diff.ts` already uses for its own book-level route.
+ * `book-diff.ts` already uses for its own book-level route. Trash is the
+ * one exclusion this function *does* own: the `live_nodes` join drops a
+ * trashed page's revisions from every changeset (changesets spec — "A
+ * trashed page's revisions are excluded for a non-manager"), while a
+ * changeset's other, still-live pages keep appearing.
  */
 import type postgres from 'postgres';
 
@@ -67,6 +71,7 @@ export async function listBookHistory(sql: SqlExecutor, input: ListBookHistoryIn
            r.id AS revision_id, r.page_id, r.created_at AS revision_created_at
       FROM changeset c
       JOIN page_revision r ON r.changeset_id = c.id AND r.workspace_id = c.workspace_id
+      JOIN live_nodes ln ON ln.id = r.page_id
       LEFT JOIN users u ON u.id = c.author_id
      WHERE c.workspace_id = ${input.workspaceId} AND c.book_id = ${input.bookId}
      ORDER BY r.created_at DESC

@@ -41,12 +41,16 @@ export interface ListPageRevisionsInput {
  * Revisions Newest First"). The page-history screen renders "who changed
  * it" from a display name, not a raw id, so the author's `users` row is
  * joined here — `LEFT JOIN` because a revision's `author_id` is itself
- * nullable (`insert-revision.ts`: a save with no `updatedBy`).
+ * nullable (`insert-revision.ts`: a save with no `updatedBy`). The
+ * `live_nodes` join denies a trashed page's history identically to a page
+ * with no `read` grant (revision-history spec — "History denied for a
+ * trashed page without manage").
  */
 export async function listPageRevisions(sql: SqlExecutor, input: ListPageRevisionsInput): Promise<RevisionSummary[]> {
   const rows = await sql<RevisionSummaryRow[]>`
     SELECT r.id, r.author_id, u.display_name AS author_display_name, r.created_at, r.changeset_id, r.content_hash
       FROM page_revision r
+      JOIN live_nodes ln ON ln.id = r.page_id
       LEFT JOIN users u ON u.id = r.author_id
      WHERE r.page_id = ${input.pageId} AND r.workspace_id = ${input.workspaceId}
      ORDER BY r.created_at DESC
@@ -139,7 +143,7 @@ export async function listWorkspaceRevisions(sql: SqlExecutor, input: ListWorksp
     SELECT r.id, r.page_id, n.title AS page_title, r.author_id, u.display_name AS author_display_name,
            r.created_at, r.content, prev.content AS previous_content
       FROM page_revision r
-      JOIN nodes n ON n.id = r.page_id AND n.workspace_id = r.workspace_id
+      JOIN live_nodes n ON n.id = r.page_id AND n.workspace_id = r.workspace_id
       LEFT JOIN users u ON u.id = r.author_id
       LEFT JOIN LATERAL (
         SELECT p.content

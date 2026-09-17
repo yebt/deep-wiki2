@@ -27,6 +27,7 @@ export async function listCommentIndicators(sql: SqlExecutor, input: ListComment
   const rows = await sql<{ block_id: string; count: string }[]>`
     SELECT root.block_id, (1 + COUNT(reply.id))::text AS count
       FROM comments root
+      JOIN live_nodes ln ON ln.id = root.page_id
       LEFT JOIN comments reply ON reply.parent_id = root.id
      WHERE root.page_id = ${input.pageId} AND root.parent_id IS NULL AND root.status = 'anchored'
      GROUP BY root.id, root.block_id
@@ -166,6 +167,7 @@ export async function listCommentThreads(sql: SqlExecutor, input: ListCommentThr
     SELECT c.id, c.body, c.author_id, u.display_name AS author_display_name, c.created_at,
            c.block_id, c.offset_start, c.offset_end, c.quote, c.status, c.resolved_at
       FROM comments c
+      JOIN live_nodes ln ON ln.id = c.page_id
       LEFT JOIN users u ON u.id = c.author_id
      WHERE c.page_id = ${input.pageId} AND c.parent_id IS NULL
      ORDER BY c.created_at ASC
@@ -304,7 +306,7 @@ export async function listOpenThreadsForUser(sql: SqlExecutor, input: ListOpenTh
            (c.author_id = ${input.userId} OR activity.replied) AS participating,
            (strpos(c.body, ${mention}) > 0 OR activity.mentioned) AS mentioned
       FROM comments c
-      JOIN nodes n ON n.id = c.page_id AND n.workspace_id = c.workspace_id
+      JOIN live_nodes n ON n.id = c.page_id AND n.workspace_id = c.workspace_id
       LEFT JOIN users u ON u.id = c.author_id
       CROSS JOIN LATERAL (
         SELECT count(*)::int AS reply_count,

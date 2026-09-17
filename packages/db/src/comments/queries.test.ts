@@ -143,6 +143,31 @@ describe('comment queries', () => {
     expect(indicators).toEqual([]);
   });
 
+  // comment-threads spec: "Former reader sees no evidence after the page is
+  // trashed" — a count is exactly the kind of evidence that must vanish.
+  test('listCommentIndicators is empty for a now-trashed page (comment-threads spec)', async () => {
+    const { workspaceId, rootId } = await seedWorkspace();
+    const pageId = await seedPage(workspaceId, rootId);
+    await savePage(sql, { nodeId: pageId, workspaceId, markdown: 'Some text. ^blocka\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
+    const authorId = await seedUser();
+    await createRootComment(sql, {
+      workspaceId,
+      pageId,
+      authorId,
+      body: 'first',
+      blockId: 'blocka',
+      offsetStart: 0,
+      offsetEnd: 4,
+      quote: 'Some',
+      quoteHash: 'h',
+    });
+    await sql`UPDATE nodes SET trashed_at = now(), trash_operation_id = ${crypto.randomUUID()} WHERE id = ${pageId}`;
+
+    const indicators = await listCommentIndicators(sql, { pageId });
+
+    expect(indicators).toEqual([]);
+  });
+
   test('setThreadResolved marks and unmarks a root thread only', async () => {
     const { workspaceId, rootId } = await seedWorkspace();
     const pageId = await seedPage(workspaceId, rootId);
@@ -388,6 +413,31 @@ describe('listCommentThreads', () => {
 
     expect(threads).toEqual([]);
   });
+
+  // comment-threads spec: "Former reader sees no evidence after the page is
+  // trashed" — identical to a page with zero comments.
+  test('is empty for a now-trashed page, identically to a page with zero comments (comment-threads spec)', async () => {
+    const { workspaceId, rootId } = await seedWorkspace();
+    const pageId = await seedPage(workspaceId, rootId);
+    await savePage(sql, { nodeId: pageId, workspaceId, markdown: 'Some text. ^blocka\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
+    const authorId = await seedUser();
+    await createRootComment(sql, {
+      workspaceId,
+      pageId,
+      authorId,
+      body: 'first',
+      blockId: 'blocka',
+      offsetStart: 0,
+      offsetEnd: 4,
+      quote: 'Some',
+      quoteHash: 'h',
+    });
+    await sql`UPDATE nodes SET trashed_at = now(), trash_operation_id = ${crypto.randomUUID()} WHERE id = ${pageId}`;
+
+    const threads = await listCommentThreads(sql, { pageId });
+
+    expect(threads).toEqual([]);
+  });
 });
 
 /**
@@ -456,5 +506,20 @@ describe('listOpenThreadsForUser', () => {
 
     const capped = await listOpenThreadsForUser(sql, { workspaceId, userId: ana, displayName: 'Ana', limit: 1 });
     expect(capped.map((thread) => thread.id)).toEqual([older]);
+  });
+
+  // trash-non-disclosure spec: every read surface — including this
+  // workspace-wide "threads for you" feed — resolves through live_nodes.
+  test('excludes a thread on a now-trashed page', async () => {
+    const { workspaceId, rootId } = await seedWorkspace();
+    const pageId = await seedPage(workspaceId, rootId);
+    await savePage(sql, { nodeId: pageId, workspaceId, markdown: 'Some text. ^blocka\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
+    const ana = await seedNamedUser('Ana');
+    const started = await seedThread(workspaceId, pageId, ana, 'I started this');
+    await sql`UPDATE nodes SET trashed_at = now(), trash_operation_id = ${crypto.randomUUID()} WHERE id = ${pageId}`;
+
+    const threads = await listOpenThreadsForUser(sql, { workspaceId, userId: ana, displayName: 'Ana', limit: 10 });
+
+    expect(threads.map((thread) => thread.id)).not.toContain(started);
   });
 });
