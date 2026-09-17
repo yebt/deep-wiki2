@@ -41,6 +41,13 @@ async function cookieFor(userId: string): Promise<string> {
   return `${SESSION_COOKIE_NAME}=${token}`;
 }
 
+
+/** The slug the fixture's workspace was minted with — what every node response must name beside the id (2026-09-17). */
+async function workspaceSlugOf(workspaceId: string): Promise<string> {
+  const [row] = await sql<{ slug: string }[]>`SELECT slug FROM workspaces WHERE id = ${workspaceId}`;
+  return row!.slug;
+}
+
 function buildApp() {
   return createDiffRoutes({ sql, sessionIdleTimeoutMinutes: 30 });
 }
@@ -118,6 +125,8 @@ describe('GET /pages/:id/diff', () => {
     };
     expect(body.diff.from.id).toBe(fixture.fromRevisionId);
     expect(body.diff.to.id).toBe(fixture.toRevisionId);
+    // The frame holds `/w/<slug>/p/<id>` to its word from this response, not a second request (2026-09-17).
+    expect((body as { workspace?: { id: string; slug: string } }).workspace).toEqual({ id: fixture.workspaceId, slug: await workspaceSlugOf(fixture.workspaceId) });
     const added = body.diff.changes.find((change) => change.kind === 'added');
     expect(added?.text).toContain('brand new paragraph');
   });
@@ -321,6 +330,7 @@ describe('GET /books/:id/diff', () => {
 
     expect(body.title).toBe('Operations Handbook');
     expect(body.workspaceId).toBe(fixture.workspaceId);
+    expect((body as { workspace?: { id: string; slug: string } }).workspace).toEqual({ id: fixture.workspaceId, slug: await workspaceSlugOf(fixture.workspaceId) });
 
     const page = body.pages[0]!;
     expect(page.pageTitle).toBe('Runbook');

@@ -57,7 +57,7 @@ const allWorkspacesUrl = workspacesUrl();
 const fromId = (route.query.from as string | undefined) ?? '';
 const toId = (route.query.to as string | undefined) ?? '';
 
-const { status, diff, message, load } = usePageDiff(nodeId, fromId, toId);
+const { status, diff, location, message, load } = usePageDiff(nodeId, fromId, toId);
 // A signed-out visit leaves for sign-in and comes back (`useSignInRedirect`).
 useSignInRedirect().redirectWhenSignedOut(status);
 
@@ -85,7 +85,7 @@ useSeoMeta({ title: 'Page diff — deep-wiki' });
 </script>
 
 <template>
-  <AppShell :workspace-id="null" :node-id="nodeId" :trail="[{ label: 'History', to: historyUrl }, { label: 'Compare' }]">
+  <AppShell :workspace-id="null" :node-id="nodeId" :location="location" :trail="[{ label: 'History', to: historyUrl }, { label: 'Compare' }]">
     <template #header-end>
       <!-- The bar's one action. The pair being compared is NOT here:
            measured at 1280×900 with the 280px sidebar, two timestamps with

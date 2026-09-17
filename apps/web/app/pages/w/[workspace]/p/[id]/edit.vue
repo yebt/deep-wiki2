@@ -37,7 +37,7 @@ const workspaceSlug = route.params.workspace as string;
 const readUrl = pageUrl(workspaceSlug, nodeId);
 const allWorkspacesUrl = workspacesUrl();
 
-const { status, session, refusal, message, load, takeOver } = useEditSession(nodeId);
+const { status, session, refusal, location, message, load, takeOver } = useEditSession(nodeId);
 // A signed-out visit leaves for sign-in and comes back (`useSignInRedirect`).
 useSignInRedirect().redirectWhenSignedOut(status);
 const heartbeat = useLockHeartbeat(nodeId);
@@ -364,7 +364,7 @@ useSeoMeta({ title: () => (session.value?.title ? `Editing ${session.value.title
 </script>
 
 <template>
-  <AppShell :workspace-id="session?.workspaceId ?? null" :node-id="nodeId" :title="session?.title || undefined" :trail="[{ label: 'Editing' }]" condensed>
+  <AppShell :workspace-id="session?.workspaceId ?? null" :node-id="nodeId" :location="location" :title="session?.title || undefined" :trail="[{ label: 'Editing' }]" condensed>
     <!-- `condensed`: the lighter bar, because here the document must
          outrank the chrome — the breadcrumb keeps the page and "Editing"
          and folds the path above them into an overflow menu; the tree

@@ -16,13 +16,18 @@ export interface RevisionRouteDeps {
   readonly sessionIdleTimeoutMinutes: number;
 }
 
+/** A node with its workspace's slug — what every response here names beside the id (`NodeWorkspaceSchema`). */
 interface NodeRow {
   workspace_id: string;
+  workspace_slug: string;
 }
 
-interface NodeWithTitleRow {
-  workspace_id: string;
+interface NodeWithTitleRow extends NodeRow {
   title: string;
+}
+
+function workspaceOf(node: NodeRow): { id: string; slug: string } {
+  return { id: node.workspace_id, slug: node.workspace_slug };
 }
 
 function notFound(c: Context): Response {
@@ -37,7 +42,9 @@ export function createRevisionRoutes(deps: RevisionRouteDeps): Hono<{ Variables:
     const pageId = c.req.param('id');
     const session = c.get('session');
 
-    const [node] = await deps.sql<NodeRow[]>`SELECT workspace_id FROM nodes WHERE id = ${pageId}`;
+    const [node] = await deps.sql<NodeRow[]>`
+      SELECT n.workspace_id, w.slug AS workspace_slug FROM nodes n JOIN workspaces w ON w.id = n.workspace_id WHERE n.id = ${pageId}
+    `;
     const canRead =
       node !== undefined &&
       (await can(deps.sql, { subjectType: 'user', subjectId: session.userId, resourceId: pageId, action: 'read' }));
@@ -47,6 +54,7 @@ export function createRevisionRoutes(deps: RevisionRouteDeps): Hono<{ Variables:
 
     return c.json(
       PageHistoryResponseSchema.parse({
+        workspace: workspaceOf(node),
         revisions: revisions.map((revision) => ({
           id: revision.id,
           authorId: revision.authorId,
@@ -73,7 +81,9 @@ export function createRevisionRoutes(deps: RevisionRouteDeps): Hono<{ Variables:
     const bookId = c.req.param('id');
     const session = c.get('session');
 
-    const [node] = await deps.sql<NodeWithTitleRow[]>`SELECT workspace_id, title FROM nodes WHERE id = ${bookId}`;
+    const [node] = await deps.sql<NodeWithTitleRow[]>`
+      SELECT n.workspace_id, n.title, w.slug AS workspace_slug FROM nodes n JOIN workspaces w ON w.id = n.workspace_id WHERE n.id = ${bookId}
+    `;
     const canRead =
       node !== undefined &&
       (await can(deps.sql, { subjectType: 'user', subjectId: session.userId, resourceId: bookId, action: 'read' }));
@@ -99,6 +109,7 @@ export function createRevisionRoutes(deps: RevisionRouteDeps): Hono<{ Variables:
       BookHistoryResponseSchema.parse({
         title: node.title,
         workspaceId: node.workspace_id,
+        workspace: workspaceOf(node),
         changesets: visible.map((changeset) => ({
           id: changeset.id,
           authorId: changeset.authorId,

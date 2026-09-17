@@ -1,9 +1,15 @@
+import type { NodeWorkspace } from '@deep-wiki/contracts';
+import type { NodeLocation } from './useNodeLocation';
+import { nodeLocationOf } from './useNodeLocation';
+
 export type EditSessionStatus = 'idle' | 'loading' | 'ready' | 'refused' | 'locked' | 'forbidden' | 'not-found' | 'unauthenticated' | 'network-error';
 
 export interface EditSessionReady {
   readonly markdown: string;
   readonly title: string;
   readonly workspaceId: string;
+  /** The same workspace with the slug the address carries (`NodeWorkspaceSchema`). */
+  readonly workspace: NodeWorkspace;
   /**
    * The row's `content_hash` (page-content spec, D16). edit.vue seeds
    * `useSavePage`'s `contentHash` from this on the ready transition, so the
@@ -21,6 +27,8 @@ export interface EditSessionRefusal {
   readonly line?: number;
   readonly holder?: { readonly userId: string; readonly acquiredAt: string; readonly heartbeatAt: string };
   readonly offeredExits: readonly ('read_only' | 'normalise' | 'take_over')[];
+  /** A refused session is still about a page on an address the shell holds to its word. */
+  readonly workspace: NodeWorkspace;
 }
 
 export type EditSessionFetcher = (nodeId: string) => Promise<EditSessionReady>;
@@ -29,6 +37,8 @@ export interface UseEditSessionResult {
   readonly status: Ref<EditSessionStatus>;
   readonly session: Ref<EditSessionReady | null>;
   readonly refusal: Ref<EditSessionRefusal | null>;
+  /** Where the page lives, as the session — or the refusal, which names it too — says (`NodeLocation`). */
+  readonly location: ComputedRef<NodeLocation>;
   readonly message: Ref<string>;
   readonly load: () => Promise<void>;
   readonly takeOver: () => Promise<void>;
@@ -57,6 +67,7 @@ export function useEditSession(nodeId: string, fetcher?: EditSessionFetcher, tak
   const session = ref<EditSessionReady | null>(null);
   const refusal = ref<EditSessionRefusal | null>(null);
   const message = ref('');
+  const location = computed(() => nodeLocationOf(status.value, session.value?.workspace ?? refusal.value?.workspace));
 
   function applyResult(result: EditSessionReady): void {
     session.value = result;
@@ -108,5 +119,5 @@ export function useEditSession(nodeId: string, fetcher?: EditSessionFetcher, tak
     }
   }
 
-  return { status, session, refusal, message, load, takeOver };
+  return { status, session, refusal, location, message, load, takeOver };
 }

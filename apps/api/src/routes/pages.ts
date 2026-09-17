@@ -46,6 +46,24 @@ interface NodeRow {
   title: string;
 }
 
+/** The same row with its workspace's slug — what a node response names beside the id (`NodeWorkspaceSchema`). */
+interface LocatedNodeRow extends NodeRow {
+  workspace_slug: string;
+}
+
+function locateNode(sql: postgres.Sql, nodeId: string): Promise<LocatedNodeRow[]> {
+  return sql<LocatedNodeRow[]>`
+    SELECT n.workspace_id, n.title, w.slug AS workspace_slug
+      FROM nodes n
+      JOIN workspaces w ON w.id = n.workspace_id
+     WHERE n.id = ${nodeId}
+  `;
+}
+
+function workspaceOf(node: LocatedNodeRow): { id: string; slug: string } {
+  return { id: node.workspace_id, slug: node.workspace_slug };
+}
+
 export function createPageRoutes(deps: PageRouteDeps): Hono<{ Variables: SessionVariables }> {
   const app = new Hono<{ Variables: SessionVariables }>();
   const auth = sessionMiddleware(deps.sql, { idleTimeoutMinutes: deps.sessionIdleTimeoutMinutes });
@@ -54,7 +72,7 @@ export function createPageRoutes(deps: PageRouteDeps): Hono<{ Variables: Session
     const nodeId = c.req.param('id');
     const session = c.get('session');
 
-    const [node] = await deps.sql<NodeRow[]>`SELECT workspace_id, title FROM nodes WHERE id = ${nodeId}`;
+    const [node] = await locateNode(deps.sql, nodeId);
     if (!node) return c.json(ErrorResponseSchema.parse({ error: 'not found' }), 404);
 
     const authorized = await can(deps.sql, { subjectType: 'user', subjectId: session.userId, resourceId: nodeId, action: 'read' });
@@ -63,7 +81,7 @@ export function createPageRoutes(deps: PageRouteDeps): Hono<{ Variables: Session
     const content = await readPageHtml(deps.sql, { nodeId, workspaceId: node.workspace_id });
     if (!content) return c.json(ErrorResponseSchema.parse({ error: 'not found' }), 404);
 
-    return c.json({ html: content.renderedHtml, title: node.title, workspaceId: node.workspace_id });
+    return c.json({ html: content.renderedHtml, title: node.title, workspaceId: node.workspace_id, workspace: workspaceOf(node) });
   });
 
   app.put('/pages/:id', auth, async (c) => {
@@ -108,7 +126,7 @@ export function createPageRoutes(deps: PageRouteDeps): Hono<{ Variables: Session
     const nodeId = c.req.param('id');
     const session = c.get('session');
 
-    const [node] = await deps.sql<NodeRow[]>`SELECT workspace_id, title FROM nodes WHERE id = ${nodeId}`;
+    const [node] = await locateNode(deps.sql, nodeId);
     if (!node) return c.json(ErrorResponseSchema.parse({ error: 'not found' }), 404);
 
     const authorized = await can(deps.sql, { subjectType: 'user', subjectId: session.userId, resourceId: nodeId, action: 'write' });
@@ -131,6 +149,7 @@ export function createPageRoutes(deps: PageRouteDeps): Hono<{ Variables: Session
           ...(result.reason === 'unsupported_construct' ? { construct: result.construct } : {}),
           line: result.line,
           offeredExits: ['read_only', 'normalise'],
+          workspace: workspaceOf(node),
         },
         409,
       );
@@ -149,6 +168,7 @@ export function createPageRoutes(deps: PageRouteDeps): Hono<{ Variables: Session
           reason: 'locked',
           holder: { userId: lock.holderUserId, acquiredAt: lock.acquiredAt.toISOString(), heartbeatAt: lock.heartbeatAt.toISOString() },
           offeredExits: ['read_only', 'take_over'],
+          workspace: workspaceOf(node),
         },
         409,
       );
@@ -158,6 +178,7 @@ export function createPageRoutes(deps: PageRouteDeps): Hono<{ Variables: Session
       markdown: content.markdown,
       title: node.title,
       workspaceId: node.workspace_id,
+      workspace: workspaceOf(node),
       contentHash: content.contentHash,
       lock: { holderUserId: lock.holderUserId, acquiredAt: lock.acquiredAt.toISOString(), heartbeatAt: lock.heartbeatAt.toISOString() },
     });
@@ -194,7 +215,7 @@ export function createPageRoutes(deps: PageRouteDeps): Hono<{ Variables: Session
     const nodeId = c.req.param('id');
     const session = c.get('session');
 
-    const [node] = await deps.sql<NodeRow[]>`SELECT workspace_id, title FROM nodes WHERE id = ${nodeId}`;
+    const [node] = await locateNode(deps.sql, nodeId);
     if (!node) return c.json(ErrorResponseSchema.parse({ error: 'not found' }), 404);
 
     const authorized = await can(deps.sql, { subjectType: 'user', subjectId: session.userId, resourceId: nodeId, action: 'write' });
@@ -209,6 +230,7 @@ export function createPageRoutes(deps: PageRouteDeps): Hono<{ Variables: Session
       markdown: content.markdown,
       title: node.title,
       workspaceId: node.workspace_id,
+      workspace: workspaceOf(node),
       contentHash: content.contentHash,
       lock: { holderUserId: lock.holderUserId, acquiredAt: lock.acquiredAt.toISOString(), heartbeatAt: lock.heartbeatAt.toISOString() },
     });

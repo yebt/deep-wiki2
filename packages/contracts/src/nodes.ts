@@ -86,3 +86,20 @@ export const NodeLocationResponseSchema = z.object({
   workspaceSlug: z.string(),
 });
 export type NodeLocationResponse = z.infer<typeof NodeLocationResponseSchema>;
+
+/**
+ * The workspace a node's own responses name beside their content —
+ * `GET /pages/:id`, `/pages/:id/edit-session` (and its 409 refusal),
+ * `/pages/:id/history`, `/pages/:id/diff`, `/books/:id/history`,
+ * `/books/:id/diff` — by the id the API is keyed by and the slug the
+ * address carries. The frame holds `/w/<slug>/p/<id>` to its word from
+ * this (2026-09-17); before, it asked `GET /nodes/:id/location` beside
+ * every node screen's own read, one request more per screen, and the
+ * edit route's budget of 500 measured 501. That route stays for the
+ * legacy redirect, which has no screen response to read this from.
+ */
+export const NodeWorkspaceSchema = z.object({
+  id: z.string(),
+  slug: z.string(),
+});
+export type NodeWorkspace = z.infer<typeof NodeWorkspaceSchema>;

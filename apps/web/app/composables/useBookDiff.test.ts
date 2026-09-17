@@ -28,12 +28,24 @@ beforeAll(() => {
 });
 
 describe('useBookDiff', () => {
+  // The shell holds `/w/<slug>/b/<id>` to its word from this read, not a
+  // second request (`useNodeLocation`, 2026-09-17).
+  test('exposes where the book lives — pending, then located by the response’s own workspace pair', async () => {
+    const fetcher = vi.fn(async () => ({ title: 'Handbook', workspaceId: 'ws-1', workspace: { id: 'ws-1', slug: 'acme' }, pages: [] }));
+    const { location, load } = useBookDiff(nextId('book'), '2026-01-01T00:00:00.000Z', fetcher);
+
+    expect(location.value).toEqual({ state: 'pending' });
+    await load();
+
+    expect(location.value).toEqual({ state: 'located', workspace: { id: 'ws-1', slug: 'acme' } });
+  });
+
   test('starts idle and moves through loading to success with the book, and the changed pages, as the server sent them', async () => {
     const pages: ChangedPageDiffPayload[] = [
       { pageId: 'page-1', pageTitle: 'Alpha', baselineRevisionId: 'r1', latestRevisionId: 'r2', diff: { changes: [{ kind: 'added', id: 'b1', slot: 0, text: 'New.' }] } },
       { pageId: 'page-2', pageTitle: 'Beta', baselineRevisionId: null, latestRevisionId: 'r3', diff: { changes: [] } },
     ];
-    const fetcher = vi.fn(async () => ({ title: 'Handbook', workspaceId: 'ws-1', pages }));
+    const fetcher = vi.fn(async () => ({ title: 'Handbook', workspaceId: 'ws-1', workspace: { id: 'ws-1', slug: 'acme' }, pages }));
     const { status, title, workspaceId, pages: result, load } = useBookDiff(nextId('book'), '2026-01-01T00:00:00.000Z', fetcher);
 
     expect(status.value).toBe('idle');
@@ -51,7 +63,7 @@ describe('useBookDiff', () => {
   });
 
   test('no pages changed since the given date resolves to success with an empty list, not an error', async () => {
-    const fetcher = vi.fn(async () => ({ title: 'Handbook', workspaceId: 'ws-1', pages: [] }));
+    const fetcher = vi.fn(async () => ({ title: 'Handbook', workspaceId: 'ws-1', workspace: { id: 'ws-1', slug: 'acme' }, pages: [] }));
     const { status, pages: result, load } = useBookDiff(nextId('book'), '2026-01-01T00:00:00.000Z', fetcher);
 
     await load();
@@ -109,7 +121,7 @@ describe('useBookDiff', () => {
     const fetcher = vi.fn(async () => {
       attempt += 1;
       if (attempt === 1) throw new Error('fetch failed');
-      return { title: 'Handbook', workspaceId: 'ws-1', pages: [] };
+      return { title: 'Handbook', workspaceId: 'ws-1', workspace: { id: 'ws-1', slug: 'acme' }, pages: [] };
     });
     const { status, load } = useBookDiff(nextId('book'), '2026-01-01T00:00:00.000Z', fetcher);
 

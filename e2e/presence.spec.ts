@@ -123,6 +123,7 @@ test('a displaced editor is shown, by name and since when, who now holds the pag
         markdown: 'Held by A.\n',
         title: 'Presence E2E Page',
         workspaceId: WORKSPACE_ID,
+        workspace: { id: WORKSPACE_ID, slug: WORKSPACE_SLUG },
         lock: { holderUserId: 'user-a', acquiredAt: new Date().toISOString(), heartbeatAt: new Date().toISOString() },
       }),
     }),
@@ -165,6 +166,7 @@ test('a displaced editor is shown, by name and since when, who now holds the pag
         markdown: 'Held by A.\n',
         title: 'Presence E2E Page',
         workspaceId: WORKSPACE_ID,
+        workspace: { id: WORKSPACE_ID, slug: WORKSPACE_SLUG },
         lock: { holderUserId: 'user-b', acquiredAt: takeOverSince, heartbeatAt: takeOverSince },
       }),
     }),
@@ -231,6 +233,7 @@ test('stale presence expires visibly once its heartbeat window lapses, tied to t
         markdown: 'Held by A.\n',
         title: 'Presence E2E Page',
         workspaceId: WORKSPACE_ID,
+        workspace: { id: WORKSPACE_ID, slug: WORKSPACE_SLUG },
         lock: { holderUserId: 'user-a', acquiredAt: new Date().toISOString(), heartbeatAt: new Date().toISOString() },
       }),
     }),
@@ -270,7 +273,7 @@ test('a reader sees who is editing the page, and since when, without acquiring a
     return route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({ html: '<p>Read by many.</p>', title: 'Presence E2E Page', workspaceId: WORKSPACE_ID }),
+      body: JSON.stringify({ html: '<p>Read by many.</p>', title: 'Presence E2E Page', workspaceId: WORKSPACE_ID, workspace: { id: WORKSPACE_ID, slug: WORKSPACE_SLUG } }),
     });
   });
 

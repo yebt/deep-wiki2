@@ -8,6 +8,7 @@ import {
   NODE_TITLE_MAX_LENGTH,
   NodeLocationResponseSchema,
   NodeTypeSchema,
+  NodeWorkspaceSchema,
   RenameNodeRequestSchema,
 } from './nodes';
 
@@ -110,5 +111,18 @@ describe('node contracts', () => {
     expect(parsed).toEqual({ id: 'node-1', type: 'page', workspaceId: 'ws-1', workspaceSlug: 'acme' });
     expect(NodeLocationResponseSchema.safeParse({ id: 'node-1', type: 'page', workspaceId: 'ws-1' }).success).toBe(false);
     expect(NodeLocationResponseSchema.safeParse({ id: 'node-1', type: 'folder', workspaceId: 'ws-1', workspaceSlug: 'acme' }).success).toBe(false);
+  });
+
+  /**
+   * The workspace a node's own responses name beside their content —
+   * `GET /pages/:id`, `/edit-session`, `/history`, `/diff`, and the book
+   * pair — so the frame can hold the address to its word without a
+   * second request per screen (`GET /nodes/:id/location` stays for the
+   * redirect resolver, which has no screen response to read it from).
+   */
+  test('a node response names its workspace by id and by slug, both required', () => {
+    expect(NodeWorkspaceSchema.parse({ id: 'ws-1', slug: 'acme', extra: 'stripped' })).toEqual({ id: 'ws-1', slug: 'acme' });
+    expect(NodeWorkspaceSchema.safeParse({ id: 'ws-1' }).success).toBe(false);
+    expect(NodeWorkspaceSchema.safeParse({ slug: 'acme' }).success).toBe(false);
   });
 });

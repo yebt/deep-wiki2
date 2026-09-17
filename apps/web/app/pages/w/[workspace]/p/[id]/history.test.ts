@@ -87,6 +87,7 @@ function mockHistory(overrides: Partial<{ status: string; revisions: Revision[];
   usePageHistoryMock.mockReturnValue({
     status: ref(overrides.status ?? 'idle'),
     revisions: ref(overrides.revisions ?? []),
+    location: ref(overrides.status === 'success' ? { state: 'located', workspace: { id: 'ws-1', slug: 'acme' } } : { state: 'pending' }),
     message: ref(overrides.message ?? ''),
     load,
   });

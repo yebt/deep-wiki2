@@ -7,11 +7,41 @@ function responseError(status: number, body: unknown) {
 }
 
 describe('useEditSession', () => {
+  // The shell holds `/w/<slug>/p/<id>/edit` to its word from this read,
+  // not a second request (`useNodeLocation`, 2026-09-17) — and a refused
+  // session names the workspace too, so a locked page under the wrong
+  // slug is still not found rather than offered for take-over.
+  test('exposes where the page lives — pending, then located by the session, or by a refusal that names it', async () => {
+    const ready = useEditSession('page-located', vi.fn(async () => ({
+      markdown: '# Hi\n',
+      title: 'Hi',
+      workspaceId: 'ws-1',
+      workspace: { id: 'ws-1', slug: 'acme' },
+      contentHash: 'server-hash',
+      lock: { holderUserId: 'me', acquiredAt: '2026-01-01T00:00:00Z', heartbeatAt: '2026-01-01T00:00:00Z' },
+    })));
+    expect(ready.location.value).toEqual({ state: 'pending' });
+    await ready.load();
+    expect(ready.location.value).toEqual({ state: 'located', workspace: { id: 'ws-1', slug: 'acme' } });
+
+    const locked = useEditSession('page-locked', vi.fn(async () => {
+      throw responseError(409, { reason: 'locked', holder: { userId: 'other', acquiredAt: 'x', heartbeatAt: 'y' }, offeredExits: ['read_only', 'take_over'], workspace: { id: 'ws-1', slug: 'acme' } });
+    }));
+    await locked.load();
+    expect(locked.status.value).toBe('locked');
+    expect(locked.location.value).toEqual({ state: 'located', workspace: { id: 'ws-1', slug: 'acme' } });
+
+    const denied = useEditSession('page-denied', vi.fn(async () => { throw responseError(403, {}); }));
+    await denied.load();
+    expect(denied.location.value).toEqual({ state: 'unknown' });
+  });
+
   test('starts idle and moves to ready with the markdown, title, content hash and lock', async () => {
     const fetcher = vi.fn(async () => ({
       markdown: '# Hi\n',
       title: 'Hi',
       workspaceId: 'ws-1',
+      workspace: { id: 'ws-1', slug: 'acme' },
       contentHash: 'server-hash',
       lock: { holderUserId: 'me', acquiredAt: '2026-01-01T00:00:00Z', heartbeatAt: '2026-01-01T00:00:00Z' },
     }));
@@ -101,6 +131,7 @@ describe('useEditSession', () => {
       markdown: '# Hi\n',
       title: 'Hi',
       workspaceId: 'ws-1',
+      workspace: { id: 'ws-1', slug: 'acme' },
       contentHash: 'server-hash',
       lock: { holderUserId: 'me', acquiredAt: 'z', heartbeatAt: 'z' },
     }));

@@ -51,7 +51,7 @@ describe('useBookDiffNavigator', () => {
   }
 
   function makeDeps(pages: readonly ChangedPageDiffPayload[] = [page('page-1'), page('page-2')]) {
-    const response: BookDiffResponse = { title: 'Handbook', workspaceId: 'ws-1', pages: [...pages] };
+    const response: BookDiffResponse = { title: 'Handbook', workspaceId: 'ws-1', workspace: { id: 'ws-1', slug: 'acme' }, pages: [...pages] };
     const bookDiffFetcher = vi.fn(async () => response);
     return { bookDiffFetcher };
   }
@@ -75,6 +75,7 @@ describe('useBookDiffNavigator', () => {
     expect(nav.status.value).toBe('success');
     expect(nav.title.value).toBe('Handbook');
     expect(nav.workspaceId.value).toBe('ws-1');
+    expect(nav.location.value).toEqual({ state: 'located', workspace: { id: 'ws-1', slug: 'acme' } });
     expect(nav.pageIds.value).toEqual(['page-1', 'page-2']);
     expect(nav.currentIndex.value).toBe(0);
     expect(nav.currentPage.value?.pageTitle).toBe('Title of page-1');

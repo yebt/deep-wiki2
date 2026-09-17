@@ -61,7 +61,7 @@ function warmEditMode(): void {
   void loadEditorMount().catch(() => {});
 }
 
-const { status, html, title, workspaceId, message, load } = usePageRead(nodeId);
+const { status, html, title, workspaceId, location, message, load } = usePageRead(nodeId);
 // A signed-out visit leaves for sign-in and comes back (`useSignInRedirect`).
 useSignInRedirect().redirectWhenSignedOut(status);
 
@@ -427,13 +427,15 @@ useSeoMeta({ title: () => (title.value ? `${title.value} — deep-wiki` : 'deep-
 </script>
 
 <template>
-  <AppShell :workspace-id="workspaceId" :node-id="nodeId" :title="title || undefined">
+  <AppShell :workspace-id="workspaceId" :node-id="nodeId" :location="location" :title="title || undefined">
     <!-- Inside the workspace frame: the sidebar's tree beside the article,
          the breadcrumb above it (shelf › book › chapter › page — placed
          through the tree once the response names the workspace, the title
          alone until then), and this screen's actions in the contextual bar.
          `workspaceId` is `null` until the page response names it; the frame
-         stands on the last workspace the person was in meanwhile. -->
+         stands on the last workspace the person was in meanwhile. `location`
+         is the same response's word on where the page lives, so the frame
+         holds the address to it without a request of its own. -->
     <template #header-end>
       <!-- editing-presence spec: who is editing this page right now, and
            since when — informational only, never a lock of any kind on

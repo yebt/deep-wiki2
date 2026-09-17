@@ -87,6 +87,7 @@ function mockNavigator(pagesContent: Record<string, PageContent>, overrides: Nav
     message: ref(overrides.message ?? ''),
     title: ref(overrides.title ?? 'E2E Handbook'),
     workspaceId: ref(overrides.workspaceId === undefined ? 'ws-1' : overrides.workspaceId),
+    location: computed(() => (status.value === 'success' ? { state: 'located', workspace: { id: 'ws-1', slug: 'acme' } } : { state: 'pending' })),
     pages,
     pageIds: computed(() => pageIds),
     currentIndex,

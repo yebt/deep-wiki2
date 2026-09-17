@@ -101,6 +101,7 @@ function mockDiff(overrides: Partial<{ status: string; changes: Change[]; messag
   usePageDiffMock.mockReturnValue({
     status: ref(overrides.status ?? 'idle'),
     diff: ref(diffValue),
+    location: ref(overrides.status === 'success' ? { state: 'located', workspace: { id: 'ws-1', slug: 'acme' } } : { state: 'pending' }),
     message: ref(overrides.message ?? ''),
     load,
   });

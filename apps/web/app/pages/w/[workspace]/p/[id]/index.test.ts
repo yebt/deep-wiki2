@@ -5,9 +5,10 @@ import { computed, defineComponent, h, nextTick, ref, type Ref } from 'vue';
 import type { CommentThread } from '@deep-wiki/contracts';
 import ReadPage from './index.vue';
 
-const { usePageReadMock, usePresenceStreamMock, usePageCommentsMock, usePageMentionsMock, useRouteMock, useWorkspaceTreeMock, useWorkspaceDirectoryMock, navigateToMock } =
+const { usePageReadMock, usePresenceStreamMock, usePageCommentsMock, usePageMentionsMock, useRouteMock, useWorkspaceTreeMock, useWorkspaceDirectoryMock, useNodeLocationMock, navigateToMock } =
   vi.hoisted(() => ({
   navigateToMock: vi.fn(async () => {}),
+    useNodeLocationMock: vi.fn(),
     usePageReadMock: vi.fn(),
     usePresenceStreamMock: vi.fn(),
     usePageCommentsMock: vi.fn(),
@@ -35,6 +36,7 @@ mockNuxtImport('usePageMentions', () => usePageMentionsMock);
 mockNuxtImport('useRoute', () => useRouteMock);
 mockNuxtImport('useWorkspaceTree', () => useWorkspaceTreeMock);
 mockNuxtImport('useWorkspaceDirectory', () => useWorkspaceDirectoryMock);
+mockNuxtImport('useNodeLocation', () => useNodeLocationMock);
 mockNuxtImport('navigateTo', () => navigateToMock);
 
 /**
@@ -102,8 +104,11 @@ function mockRead(overrides: Partial<{ status: string; html: string; title: stri
     title: ref(overrides.title ?? ''),
     message: ref(overrides.message ?? ''),
     workspaceId: ref(overrides.workspaceId ?? null),
+    // The response's own word on where the page lives: located beside the id once it answers.
+    location: ref(overrides.workspaceId ? { state: 'located', workspace: { id: overrides.workspaceId, slug: 'acme' } } : { state: 'pending' }),
     load,
   });
+  useNodeLocationMock.mockReturnValue({ status: computed(() => 'idle'), location: computed(() => null), load: vi.fn(async () => {}) });
   mockPresence();
   mockComments();
   mockMentions();
@@ -200,6 +205,19 @@ describe('read-mode page', () => {
     const { useRouter } = await import('#imports');
 
     expect(useRouter().getRoutes().find((route) => route.path === '/w/:workspace()/p/:id()')?.meta.layout).toBe('workspace');
+  });
+
+  // 2026-09-17: the page response names its workspace by id and slug, and
+  // that is the frame's word on the address — the shell asks
+  // `GET /nodes/:id/location` for nothing here. One request fewer per
+  // node screen; the edit route's budget of 500 had measured 501.
+  test('asks no node location of its own — the page response is the frame’s word on where the page lives', async () => {
+    mockRead({ status: 'success', title: 'A Page', html: '<p>Hello</p>', workspaceId: 'ws-1' });
+    useNodeLocationMock.mockClear();
+    await mount();
+
+    for (const call of useNodeLocationMock.mock.calls) expect(call[0]).toBeNull();
+    expect(usePageReadMock).toHaveBeenCalled();
   });
 
   // Presence only. The §3 guarantee that the skeleton occupies the loaded

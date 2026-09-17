@@ -116,6 +116,7 @@ function mockSession(overrides: {
     status: ref(overrides.status ?? 'idle'),
     session: ref(overrides.session ?? null),
     refusal: ref(overrides.refusal ?? null),
+    location: ref(overrides.session ? { state: 'located', workspace: { id: 'ws-1', slug: 'acme' } } : { state: 'pending' }),
     message: ref(overrides.message ?? ''),
     load,
     takeOver,

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { NodeWorkspaceSchema } from './nodes';
 
 /**
  * Request/response schemas for `apps/api/src/routes/pages.ts`
@@ -25,6 +26,8 @@ export const ReadPageResponseSchema = z.object({
   title: z.string(),
   /** The read screen opens the workspace-scoped presence stream with this (editing-presence spec). The only other route that carries it, `GET /pages/:id/edit-session`, acquires the edit lock as a side effect and must never be called just to read a field off it. */
   workspaceId: z.string(),
+  /** The same workspace, with the slug the address carries — what the frame checks `/w/<slug>/p/<id>` against (`NodeWorkspaceSchema`). */
+  workspace: NodeWorkspaceSchema,
 });
 export type ReadPageResponse = z.infer<typeof ReadPageResponseSchema>;
 
@@ -37,6 +40,8 @@ export const EditSessionRefusalSchema = z.object({
   line: z.number().optional(),
   holder: z.object({ userId: z.string(), acquiredAt: z.string(), heartbeatAt: z.string() }).optional(),
   offeredExits: z.array(OfferedExitSchema),
+  /** A refused session is still about a page the caller may write, on an address the frame holds to its word (`NodeWorkspaceSchema`). */
+  workspace: NodeWorkspaceSchema,
 });
 export type EditSessionRefusal = z.infer<typeof EditSessionRefusalSchema>;
 
@@ -45,6 +50,8 @@ export const EditSessionResponseSchema = z.object({
   title: z.string(),
   /** Needed client-side for the `@` mention endpoints, which are scoped by workspace. */
   workspaceId: z.string(),
+  /** The same workspace, with the slug the address carries (`NodeWorkspaceSchema`). */
+  workspace: NodeWorkspaceSchema,
   /**
    * The `content_hash` of the row this response just read (D16 — optimistic
    * concurrency). Without it, the first `PUT /pages/:id` from this session

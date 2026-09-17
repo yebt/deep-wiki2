@@ -1,4 +1,7 @@
+import type { NodeWorkspace } from '@deep-wiki/contracts';
 import { pageHistoryKey } from '~/utils/api-keys';
+import type { NodeLocation } from './useNodeLocation';
+import { nodeLocationOf } from './useNodeLocation';
 
 export type PageHistoryStatus = 'idle' | 'loading' | 'success' | 'not-found' | 'unauthenticated' | 'network-error';
 
@@ -13,6 +16,8 @@ export interface RevisionSummary {
 }
 
 export interface PageHistoryResponse {
+  /** The page's workspace, by id and by the slug the address carries (`NodeWorkspaceSchema`). */
+  readonly workspace: NodeWorkspace;
   readonly revisions: readonly RevisionSummary[];
 }
 
@@ -21,6 +26,8 @@ export type PageHistoryFetcher = (nodeId: string) => Promise<PageHistoryResponse
 export interface UsePageHistoryResult {
   readonly status: Ref<PageHistoryStatus>;
   readonly revisions: ComputedRef<readonly RevisionSummary[]>;
+  /** Where the page lives, as this read says (`NodeLocation`) — what the shell holds the address to its word with, in place of a second request. */
+  readonly location: ComputedRef<NodeLocation>;
   readonly message: ComputedRef<string>;
   /** Fetch, or — with the list already on screen — refresh behind it. */
   readonly load: () => Promise<void>;
@@ -62,6 +69,7 @@ export function usePageHistory(nodeId: string, fetcher?: PageHistoryFetcher): Us
   });
 
   const revisions = computed(() => (read.outcome.value?.ok ? read.outcome.value.value.revisions : []));
+  const location = computed(() => nodeLocationOf(status.value, read.outcome.value?.ok ? read.outcome.value.value.workspace : null));
   const MESSAGES: Record<PageHistoryStatus, string> = {
     'idle': '',
     'loading': 'Loading revision history…',
@@ -72,5 +80,5 @@ export function usePageHistory(nodeId: string, fetcher?: PageHistoryFetcher): Us
   };
   const message = computed(() => MESSAGES[status.value]);
 
-  return { status, revisions, message, load: read.load };
+  return { status, revisions, location, message, load: read.load };
 }

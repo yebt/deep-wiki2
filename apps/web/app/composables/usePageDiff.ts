@@ -1,4 +1,7 @@
+import type { NodeWorkspace } from '@deep-wiki/contracts';
 import { pageDiffKey } from '~/utils/api-keys';
+import type { NodeLocation } from './useNodeLocation';
+import { nodeLocationOf } from './useNodeLocation';
 
 export type PageDiffStatus = 'idle' | 'loading' | 'success' | 'not-found' | 'unauthenticated' | 'network-error';
 
@@ -36,6 +39,8 @@ export interface PageDiff {
 }
 
 export interface PageDiffResponse {
+  /** The page's workspace, by id and by the slug the address carries (`NodeWorkspaceSchema`). */
+  readonly workspace: NodeWorkspace;
   readonly diff: PageDiff;
 }
 
@@ -44,6 +49,8 @@ export type PageDiffFetcher = (nodeId: string, from: string, to: string) => Prom
 export interface UsePageDiffResult {
   readonly status: Ref<PageDiffStatus>;
   readonly diff: ComputedRef<PageDiff | null>;
+  /** Where the page lives, as this read says (`NodeLocation`) — what the shell holds the address to its word with, in place of a second request. */
+  readonly location: ComputedRef<NodeLocation>;
   readonly message: ComputedRef<string>;
   /** Fetch, or — with the diff already on screen — refresh behind it. */
   readonly load: () => Promise<void>;
@@ -88,6 +95,7 @@ export function usePageDiff(nodeId: string, from: string, to: string, fetcher?: 
   });
 
   const diff = computed(() => (read.outcome.value?.ok ? read.outcome.value.value.diff : null));
+  const location = computed(() => nodeLocationOf(status.value, read.outcome.value?.ok ? read.outcome.value.value.workspace : null));
   const MESSAGES: Record<PageDiffStatus, string> = {
     'idle': '',
     'loading': 'Loading diff…',
@@ -98,5 +106,5 @@ export function usePageDiff(nodeId: string, from: string, to: string, fetcher?: 
   };
   const message = computed(() => MESSAGES[status.value]);
 
-  return { status, diff, message, load: read.load };
+  return { status, diff, location, message, load: read.load };
 }

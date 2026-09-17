@@ -89,6 +89,13 @@ async function buildFixture(): Promise<Fixture> {
   };
 }
 
+
+/** The slug the fixture's workspace was minted with — what every node response must name beside the id (2026-09-17). */
+async function workspaceSlugOf(workspaceId: string): Promise<string> {
+  const [row] = await sql<{ slug: string }[]>`SELECT slug FROM workspaces WHERE id = ${workspaceId}`;
+  return row!.slug;
+}
+
 function buildApp() {
   return createPageRoutes({ sql, sessionIdleTimeoutMinutes: 30, pageLockTtlSeconds: 120, changesetWindowMinutes: 30 });
 }
@@ -134,6 +141,21 @@ describe('GET /pages/:id', () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as { workspaceId?: string };
     expect(body.workspaceId).toBe(fixture.workspaceId);
+  });
+
+  // The frame holds `/w/<slug>/p/<id>` to its word from this response
+  // rather than a second request (`GET /nodes/:id/location`), which was
+  // one more per node screen and put the edit route at 501 of its 500.
+  test('the read response names the workspace by id and slug together', async () => {
+    const fixture = await buildFixture();
+    await savePage(sql, { nodeId: fixture.pageId, workspaceId: fixture.workspaceId, markdown: '# Hello\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
+    const app = buildApp();
+
+    const res = await app.request(`/pages/${fixture.pageId}`, { headers: { cookie: fixture.readerCookie } });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { workspace?: { id: string; slug: string } };
+    expect(body.workspace).toEqual({ id: fixture.workspaceId, slug: await workspaceSlugOf(fixture.workspaceId) });
   });
 });
 
@@ -320,9 +342,10 @@ describe('GET /pages/:id/edit-session', () => {
     const res = await app.request(`/pages/${fixture.pageId}/edit-session`, { headers: { cookie: fixture.writerCookie } });
 
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { markdown: string; workspaceId: string; lock: { holderUserId: string } };
+    const body = (await res.json()) as { markdown: string; workspaceId: string; workspace: { id: string; slug: string }; lock: { holderUserId: string } };
     expect(body.markdown).toBe('# Hello\n');
     expect(body.workspaceId).toBe(fixture.workspaceId);
+    expect(body.workspace).toEqual({ id: fixture.workspaceId, slug: await workspaceSlugOf(fixture.workspaceId) });
     expect(body.lock.holderUserId).toBeDefined();
 
     const [lockRow] = await sql`SELECT holder_user_id FROM page_locks WHERE node_id = ${fixture.pageId}`;
@@ -362,11 +385,13 @@ describe('GET /pages/:id/edit-session', () => {
     const res = await app.request(`/pages/${fixture.pageId}/edit-session`, { headers: { cookie: fixture.writerCookie } });
 
     expect(res.status).toBe(409);
-    const body = (await res.json()) as { reason?: string; line?: number; offeredExits: string[] };
+    const body = (await res.json()) as { reason?: string; line?: number; offeredExits: string[]; workspace?: { id: string; slug: string } };
     expect(body.reason).toBe('not_byte_identical');
     // edit.vue points the author at this line; a refusal without it cannot explain itself.
     expect(body.line).toBe(1);
     expect(body.offeredExits).toEqual(expect.arrayContaining(['read_only', 'normalise']));
+    // A refused session is still about a page on an address the frame holds to its word.
+    expect(body.workspace).toEqual({ id: fixture.workspaceId, slug: await workspaceSlugOf(fixture.workspaceId) });
 
     const [lockRow] = await sql`SELECT 1 AS x FROM page_locks WHERE node_id = ${fixture.pageId}`;
     expect(lockRow).toBeUndefined();
@@ -406,9 +431,10 @@ describe('GET /pages/:id/edit-session', () => {
     const res = await app.request(`/pages/${fixture.pageId}/edit-session`, { headers: { cookie: secondCookie } });
 
     expect(res.status).toBe(409);
-    const body = (await res.json()) as { reason: string; offeredExits: string[] };
+    const body = (await res.json()) as { reason: string; offeredExits: string[]; workspace?: { id: string; slug: string } };
     expect(body.reason).toBe('locked');
     expect(body.offeredExits).toEqual(expect.arrayContaining(['read_only', 'take_over']));
+    expect(body.workspace).toEqual({ id: fixture.workspaceId, slug: await workspaceSlugOf(fixture.workspaceId) });
   });
 });
 
@@ -497,8 +523,9 @@ describe('POST /pages/:id/lock/take-over', () => {
     const res = await app.request(`/pages/${fixture.pageId}/lock/take-over`, { method: 'POST', headers: { cookie: secondCookie } });
 
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { markdown: string; lock: { holderUserId: string } };
+    const body = (await res.json()) as { markdown: string; workspace: { id: string; slug: string }; lock: { holderUserId: string } };
     expect(body.markdown).toBe('# Hello\n');
+    expect(body.workspace).toEqual({ id: fixture.workspaceId, slug: await workspaceSlugOf(fixture.workspaceId) });
     expect(body.lock.holderUserId).toBe(secondWriter!.id);
 
     const [lockRow] = await sql`SELECT holder_user_id FROM page_locks WHERE node_id = ${fixture.pageId}`;
