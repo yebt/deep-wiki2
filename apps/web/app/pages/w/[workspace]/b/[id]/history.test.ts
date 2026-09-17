@@ -48,6 +48,7 @@ function mockHistory(overrides: Partial<{ status: string; changesets: Changeset[
     message: ref(overrides.message ?? ''),
     title: ref(overrides.title ?? 'E2E Handbook'),
     workspaceId: ref(overrides.workspaceId === undefined ? 'ws-1' : overrides.workspaceId),
+    location: ref(overrides.status === 'success' ? { state: 'located', workspace: { id: 'ws-1', slug: 'acme' } } : { state: 'pending' }),
     load,
   });
   return load;

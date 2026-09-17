@@ -21,7 +21,7 @@ describe('usePageRead', () => {
   });
 
   test('starts idle and moves through loading to success with the cached HTML and title', async () => {
-    const fetcher = vi.fn(async () => ({ html: '<p>Hello</p>', title: 'Hello', workspaceId: 'ws-1' }));
+    const fetcher = vi.fn(async () => ({ html: '<p>Hello</p>', title: 'Hello', workspaceId: 'ws-1', workspace: { id: 'ws-1', slug: 'acme' } }));
     const { status, html, title, load } = usePageRead('page-1', fetcher);
 
     expect(status.value).toBe('idle');
@@ -39,13 +39,31 @@ describe('usePageRead', () => {
   // value, and nothing else on a read-only screen can supply it without a
   // side effect (the edit-session route acquires the lock).
   test('exposes the workspace id the read response carries', async () => {
-    const fetcher = vi.fn(async () => ({ html: '<p>Hello</p>', title: 'Hello', workspaceId: 'ws-1' }));
+    const fetcher = vi.fn(async () => ({ html: '<p>Hello</p>', title: 'Hello', workspaceId: 'ws-1', workspace: { id: 'ws-1', slug: 'acme' } }));
     const { workspaceId, load } = usePageRead('page-2', fetcher);
 
     expect(workspaceId.value).toBeNull();
     await load();
 
     expect(workspaceId.value).toBe('ws-1');
+  });
+
+  // The shell holds `/w/<slug>/p/<id>` to its word from this read, not a
+  // second request (`useNodeLocation`, 2026-09-17).
+  test('exposes where the page lives — pending, then located by the response’s own workspace pair', async () => {
+    const fetcher = vi.fn(async () => ({ html: '<p>Hello</p>', title: 'Hello', workspaceId: 'ws-1', workspace: { id: 'ws-1', slug: 'acme' } }));
+    const { location, load } = usePageRead('page-located', fetcher);
+
+    expect(location.value).toEqual({ state: 'pending' });
+    await load();
+
+    expect(location.value).toEqual({ state: 'located', workspace: { id: 'ws-1', slug: 'acme' } });
+  });
+
+  test('a page the API refused has no location the screen can vouch for', async () => {
+    const { location, load } = usePageRead('page-403-location', vi.fn(async () => { throw { response: { status: 403 } }; }));
+    await load();
+    expect(location.value).toEqual({ state: 'unknown' });
   });
 
   // A 401 is neither denial nor a dead connection: the person is signed
@@ -97,7 +115,7 @@ describe('usePageRead', () => {
     const fetcher = vi.fn(async () => {
       attempt += 1;
       if (attempt === 1) throw new Error('fetch failed');
-      return { html: '<p>Recovered</p>', title: 'Recovered', workspaceId: 'ws-1' };
+      return { html: '<p>Recovered</p>', title: 'Recovered', workspaceId: 'ws-1', workspace: { id: 'ws-1', slug: 'acme' } };
     });
     const { status, html, load } = usePageRead('page-6', fetcher);
 
@@ -113,12 +131,12 @@ describe('usePageRead', () => {
   // screen for the same page has the HTML before it asks for anything, and
   // does not ask — the skeleton is for a page never seen, not for every hop.
   test('a second screen for a page already read has its content at once, without fetching', async () => {
-    const first = vi.fn(async () => ({ html: '<p>Kept</p>', title: 'Kept', workspaceId: 'ws-1' }));
+    const first = vi.fn(async () => ({ html: '<p>Kept</p>', title: 'Kept', workspaceId: 'ws-1', workspace: { id: 'ws-1', slug: 'acme' } }));
     const before = open('page-7', first);
     await before.read.load();
     before.leave();
 
-    const second = vi.fn(async () => ({ html: '<p>Never</p>', title: 'Never', workspaceId: 'ws-1' }));
+    const second = vi.fn(async () => ({ html: '<p>Never</p>', title: 'Never', workspaceId: 'ws-1', workspace: { id: 'ws-1', slug: 'acme' } }));
     const { read } = open('page-7', second);
 
     expect(read.status.value).toBe('success');
@@ -138,9 +156,9 @@ describe('usePageRead', () => {
     let calls = 0;
     const fetcher = vi.fn(async () => {
       calls += 1;
-      if (calls === 1) return { html: '<p>Old</p>', title: 'Old', workspaceId: 'ws-1' };
+      if (calls === 1) return { html: '<p>Old</p>', title: 'Old', workspaceId: 'ws-1', workspace: { id: 'ws-1', slug: 'acme' } };
       await held;
-      return { html: '<p>New</p>', title: 'New', workspaceId: 'ws-1' };
+      return { html: '<p>New</p>', title: 'New', workspaceId: 'ws-1', workspace: { id: 'ws-1', slug: 'acme' } };
     });
     const { status, html, load } = usePageRead('page-8', fetcher);
     await load();
@@ -171,7 +189,7 @@ describe('usePageRead', () => {
       await failed.read.load();
       failed.leave();
 
-      const again = vi.fn(async () => ({ html: '<p>Now</p>', title: 'Now', workspaceId: 'ws-1' }));
+      const again = vi.fn(async () => ({ html: '<p>Now</p>', title: 'Now', workspaceId: 'ws-1', workspace: { id: 'ws-1', slug: 'acme' } }));
       const { read } = open(nodeId, again);
       expect(read.status.value).toBe('idle');
       expect(read.html.value).toBe('');

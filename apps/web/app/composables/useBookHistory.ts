@@ -1,4 +1,7 @@
+import type { NodeWorkspace } from '@deep-wiki/contracts';
 import { bookHistoryKey } from '~/utils/api-keys';
+import type { NodeLocation } from './useNodeLocation';
+import { nodeLocationOf } from './useNodeLocation';
 
 export type BookHistoryStatus = 'idle' | 'loading' | 'success' | 'not-found' | 'unauthenticated' | 'network-error';
 
@@ -22,6 +25,8 @@ export interface BookHistoryResponse {
   /** The book node's own title and workspace — what the screen names itself by, and where "back to the tree" goes. */
   readonly title: string;
   readonly workspaceId: string;
+  /** The same workspace with the slug the address carries (`NodeWorkspaceSchema`). */
+  readonly workspace: NodeWorkspace;
   readonly changesets: readonly BookChangesetSummary[];
 }
 
@@ -33,6 +38,8 @@ export interface UseBookHistoryResult {
   /** `null` until a successful response names it. */
   readonly workspaceId: ComputedRef<string | null>;
   readonly changesets: ComputedRef<readonly BookChangesetSummary[]>;
+  /** Where the book lives, as this read says (`NodeLocation`) — what the shell holds the address to its word with, in place of a second request. */
+  readonly location: ComputedRef<NodeLocation>;
   readonly message: ComputedRef<string>;
   /** Fetch, or — with the list already on screen — refresh behind it. */
   readonly load: () => Promise<void>;
@@ -72,6 +79,7 @@ export function useBookHistory(bookId: string, fetcher?: BookHistoryFetcher): Us
   const value = computed(() => (read.outcome.value?.ok ? read.outcome.value.value : null));
   const title = computed(() => value.value?.title ?? '');
   const workspaceId = computed(() => value.value?.workspaceId ?? null);
+  const location = computed(() => nodeLocationOf(status.value, value.value?.workspace));
   const changesets = computed(() => value.value?.changesets ?? []);
   const MESSAGES: Record<BookHistoryStatus, string> = {
     'idle': '',
@@ -83,5 +91,5 @@ export function useBookHistory(bookId: string, fetcher?: BookHistoryFetcher): Us
   };
   const message = computed(() => MESSAGES[status.value]);
 
-  return { status, title, workspaceId, changesets, message, load: read.load };
+  return { status, title, workspaceId, location, changesets, message, load: read.load };
 }

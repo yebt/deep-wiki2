@@ -2,6 +2,7 @@ import { UApp } from '#components';
 import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { computed, defineComponent, h, ref } from 'vue';
+import { pageDiffUrl, pageUrl } from '~/utils/routes';
 import HistoryPage from './history.vue';
 
 const { usePageHistoryMock, useRouteMock, useCurrentWorkspaceMock, useWorkspaceTreeMock, useWorkspaceDirectoryMock, navigateToMock } = vi.hoisted(() => ({
@@ -86,6 +87,7 @@ function mockHistory(overrides: Partial<{ status: string; revisions: Revision[];
   usePageHistoryMock.mockReturnValue({
     status: ref(overrides.status ?? 'idle'),
     revisions: ref(overrides.revisions ?? []),
+    location: ref(overrides.status === 'success' ? { state: 'located', workspace: { id: 'ws-1', slug: 'acme' } } : { state: 'pending' }),
     message: ref(overrides.message ?? ''),
     load,
   });
@@ -181,7 +183,7 @@ describe('page-history screen', () => {
     expect(compare.text()).toMatch(/compare with previous/i);
     // Newest-first: row 0 is rev-2, and "previous" is rev-1, the row right
     // after it — never the oldest revision on a longer list.
-    expect(compare.attributes('href')).toBe(`/w/acme/p/page-1/diff?from=rev-1&to=rev-2`);
+    expect(compare.attributes('href')).toBe(pageDiffUrl('acme', 'page-1', { from: 'rev-1', to: 'rev-2' }));
     expect(compare.attributes('aria-disabled')).toBeUndefined();
   });
 
@@ -244,7 +246,7 @@ describe('page-history screen', () => {
     expect(tooltipTexts.some((text) => /nothing to compare/i.test(text))).toBe(true);
     // The genuinely different neighbour below keeps its link.
     expect(items[1]!.text()).not.toMatch(/same content as the previous revision/i);
-    expect(items[1]!.find('a[href="/pages/page-1/diff?from=rev-1&to=rev-2"]').exists()).toBe(true);
+    expect(items[1]!.find(`a[href="${pageDiffUrl('acme', 'page-1', { from: 'rev-1', to: 'rev-2' })}"]`).exists()).toBe(true);
   });
 
   test('the app bar’s way to the page is "Read page" with the eye, the same chrome edit mode uses', async () => {
@@ -253,7 +255,7 @@ describe('page-history screen', () => {
 
     // In the bar's actions, not its breadcrumb — the page crumb links to
     // the same address, and is the frame's, not this screen's.
-    const back = component.get('header [data-slot="right"] a[href="/w/acme/p/page-1"]');
+    const back = component.get(`header [data-slot="right"] a[href="${pageUrl('acme', 'page-1')}"]`);
     expect(back.text()).toBe('Read page');
   });
 

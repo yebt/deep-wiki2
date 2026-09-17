@@ -4,7 +4,7 @@ import { flushPromises } from '@vue/test-utils';
 import { describe, expect, test, vi } from 'vitest';
 import { defineComponent, h, ref } from 'vue';
 import WorkspaceSidebar from '~/components/WorkspaceSidebar.vue';
-import { LAST_WORKSPACE_COOKIE } from '~/composables/useCurrentWorkspace';
+import { LAST_WORKSPACE_COOKIE } from '~/utils/workspace-cookie';
 import RegistrationPage from './registration.vue';
 
 const { useInstanceSettingsMock, navigateToMock } = vi.hoisted(() => ({

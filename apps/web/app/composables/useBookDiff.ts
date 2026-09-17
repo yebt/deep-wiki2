@@ -1,5 +1,7 @@
 import type { BookDiffResponse, ChangedPageDiffPayload } from '@deep-wiki/contracts';
 import { bookDiffKey } from '~/utils/api-keys';
+import type { NodeLocation } from './useNodeLocation';
+import { nodeLocationOf } from './useNodeLocation';
 
 export type BookDiffStatus = 'idle' | 'loading' | 'success' | 'not-found' | 'unauthenticated' | 'network-error';
 
@@ -15,6 +17,8 @@ export interface UseBookDiffResult {
   /** `null` until a successful response names it — where "back to the tree" goes. */
   readonly workspaceId: ComputedRef<string | null>;
   readonly pages: ComputedRef<readonly ChangedPageDiff[]>;
+  /** Where the book lives, as this read says (`NodeLocation`) — what the shell holds the address to its word with, in place of a second request. */
+  readonly location: ComputedRef<NodeLocation>;
   readonly message: ComputedRef<string>;
   /** Fetch, or — with the diff already on screen — refresh behind it. */
   readonly load: () => Promise<void>;
@@ -61,6 +65,7 @@ export function useBookDiff(bookId: string, since: string, fetcher?: BookDiffFet
   const value = computed(() => (read.outcome.value?.ok ? read.outcome.value.value : null));
   const title = computed(() => value.value?.title ?? '');
   const workspaceId = computed(() => value.value?.workspaceId ?? null);
+  const location = computed(() => nodeLocationOf(status.value, value.value?.workspace));
   const pages = computed(() => value.value?.pages ?? []);
   const MESSAGES: Record<BookDiffStatus, string> = {
     'idle': '',
@@ -72,5 +77,5 @@ export function useBookDiff(bookId: string, since: string, fetcher?: BookDiffFet
   };
   const message = computed(() => MESSAGES[status.value]);
 
-  return { status, title, workspaceId, pages, message, load: read.load };
+  return { status, title, workspaceId, location, pages, message, load: read.load };
 }

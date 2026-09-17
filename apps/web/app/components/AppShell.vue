@@ -50,14 +50,18 @@
  * the id its response names. This component is where the two are
  * reconciled, once, for every screen:
  *
- * - **A node screen** (`node-id` set, `/w/<slug>/p|b/<id>`) asks
- *   `useNodeLocation` beside its own read. A located node whose workspace
- *   slug is not the address's is **not found** — the pane shows the
- *   not-found notice in place of the screen, the frame does not stand on
- *   the node's real workspace, and nothing says which half of the address
- *   was wrong (docs/UI-CHECKLIST.md §3, no oracle). A node the API will
- *   not locate is left to the screen's own answer: it has a more honest
- *   one for a direct request (`usePageRead` tells denial from absence).
+ * - **A node screen** (`node-id` set, `/w/<slug>/p|b/<id>`) says where
+ *   its node lives from its own response (`location`, a `NodeLocation`:
+ *   the six node responses name their workspace by id and slug), and
+ *   the shell asks nothing more; a screen that cannot say leaves the
+ *   prop out and the shell asks `useNodeLocation` beside the read, one
+ *   request more. A located node whose workspace slug is not the
+ *   address's is **not found** — the pane shows the not-found notice in
+ *   place of the screen, the frame does not stand on the node's real
+ *   workspace, and nothing says which half of the address was wrong
+ *   (docs/UI-CHECKLIST.md §3, no oracle). A node the API will not locate
+ *   is left to the screen's own answer: it has a more honest one for a
+ *   direct request (`usePageRead` tells denial from absence).
  * - **A workspace screen** (`/w/<slug>`, `/members`) asked its API by the
  *   slug and got the id back; it passes both, and the pair is entered.
  * - The slug an entered workspace is remembered under comes from the
@@ -106,6 +110,8 @@
  * `e2e/editor.spec.ts` measures against read mode.
  */
 import type { BreadcrumbItem, DropdownMenuItem } from '@nuxt/ui';
+import type { NodeWorkspace } from '@deep-wiki/contracts';
+import type { NodeLocation } from '~/composables/useNodeLocation';
 import { pageUrl, registrationSettingsUrl, workspaceUrl, workspacesUrl } from '~/utils/routes';
 import WorkspaceFrame from './WorkspaceFrame.vue';
 
@@ -130,6 +136,8 @@ const props = withDefaults(
     workspaceSlug?: string | null;
     /** The node the screen is about, for the breadcrumb. */
     nodeId?: string | null;
+    /** Where that node lives, as the screen's own response says (`NodeLocation`). Leave out for a screen whose response cannot say, and the shell asks `useNodeLocation` itself. */
+    location?: NodeLocation;
     /** Crumbs after the node the tree can place — "History", "Editing". */
     trail?: readonly BreadcrumbItem[];
     /** What the last crumb says when the tree cannot place `nodeId` yet — the screen's own name for itself. */
@@ -137,7 +145,7 @@ const props = withDefaults(
     /** The lighter bar: the breadcrumb keeps its last two crumbs and folds the rest into an overflow menu. Edit mode. */
     condensed?: boolean;
   }>(),
-  { column: 'measure', center: false, workspaceId: undefined, workspaceSlug: null, nodeId: null, trail: () => [], title: undefined, condensed: false },
+  { column: 'measure', center: false, workspaceId: undefined, workspaceSlug: null, nodeId: null, location: undefined, trail: () => [], title: undefined, condensed: false },
 );
 
 const COLUMNS = {
@@ -162,13 +170,23 @@ const current = useCurrentWorkspace();
 const directory = useWorkspaceDirectory();
 
 /**
- * Where the screen's node lives, asked beside the screen's own read
- * (`useNodeLocation`'s note). Only a screen about a node on an address
- * that names a workspace has anything to reconcile.
+ * Where the screen's node lives. Only a screen about a node on an address
+ * that names a workspace has anything to reconcile; it says so itself
+ * through `location` when its response names the workspace, and only a
+ * screen that cannot has the shell ask `useNodeLocation` beside its read
+ * (a screen's prop is fixed at setup, as `workspace-id`'s presence is).
  */
-const location = useNodeLocation(inWorkspace.value && routeSlug.value ? (props.nodeId ?? null) : null);
+const asksLocation = props.location === undefined;
+const asked = useNodeLocation(asksLocation && inWorkspace.value && routeSlug.value ? (props.nodeId ?? null) : null);
 onMounted(() => {
-  void location.load();
+  void asked.load();
+});
+
+/** The node's workspace, by id and slug, once either source has it; `null` before, and for a node neither will locate. */
+const located = computed<NodeWorkspace | null>(() => {
+  if (!asksLocation) return props.location?.state === 'located' ? props.location.workspace : null;
+  const answer = asked.location.value;
+  return answer ? { id: answer.workspaceId, slug: answer.workspaceSlug } : null;
 });
 
 /**
@@ -176,10 +194,7 @@ onMounted(() => {
  * workspace's slug is not the one in the address. A location the API
  * refused is not a verdict — the screen answers that itself.
  */
-const scopeMismatch = computed(() => {
-  const located = location.location.value;
-  return located !== null && routeSlug.value !== null && located.workspaceSlug !== routeSlug.value;
-});
+const scopeMismatch = computed(() => located.value !== null && routeSlug.value !== null && located.value.slug !== routeSlug.value);
 
 /**
  * The workspace the frame stands on, by id: the screen's own, unless the
@@ -204,8 +219,7 @@ const frameWorkspaceSlug = computed(() => {
   const id = frameWorkspaceId.value;
   if (!id) return null;
   if (props.workspaceSlug && props.workspaceId === id) return props.workspaceSlug;
-  const located = location.location.value;
-  if (located && located.workspaceId === id) return located.workspaceSlug;
+  if (located.value && located.value.id === id) return located.value.slug;
   const known = directory.slugOf(id);
   if (known) return known;
   if (routeSlug.value && props.workspaceId === id && !scopeMismatch.value) return routeSlug.value;
@@ -219,7 +233,7 @@ const frameWorkspaceSlug = computed(() => {
  * on the address's word there would write a pair the answer may dispute
  * into the cookie `/` reopens on.
  */
-const scopeSettled = computed(() => location.status.value !== 'loading');
+const scopeSettled = computed(() => (asksLocation ? asked.status.value !== 'loading' : props.location?.state !== 'pending'));
 
 /**
  * Whether the person is *in* the frame's workspace — the screen's response

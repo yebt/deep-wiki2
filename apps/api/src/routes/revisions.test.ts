@@ -73,11 +73,31 @@ async function buildFixture(): Promise<Fixture> {
   return { workspaceId: ws!.id, pageId: page!.id, authorId: owner, readerCookie: await cookieFor(reader), outsiderCookie: await cookieFor(outsider) };
 }
 
+
+/** The slug the fixture's workspace was minted with — what every node response must name beside the id (2026-09-17). */
+async function workspaceSlugOf(workspaceId: string): Promise<string> {
+  const [row] = await sql<{ slug: string }[]>`SELECT slug FROM workspaces WHERE id = ${workspaceId}`;
+  return row!.slug;
+}
+
 function buildApp() {
   return createRevisionRoutes({ sql, sessionIdleTimeoutMinutes: 30 });
 }
 
 describe('GET /pages/:id/history', () => {
+  // The frame holds `/w/<slug>/p/<id>` to its word from this response
+  // rather than a second request (`GET /nodes/:id/location`, 2026-09-17).
+  test('names the workspace by id and slug', async () => {
+    const fixture = await buildFixture();
+    const app = buildApp();
+
+    const res = await app.request(`/pages/${fixture.pageId}/history`, { headers: { cookie: fixture.readerCookie } });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { workspace?: { id: string; slug: string } };
+    expect(body.workspace).toEqual({ id: fixture.workspaceId, slug: await workspaceSlugOf(fixture.workspaceId) });
+  });
+
   test('returns a page\'s revisions newest first for a subject with read', async () => {
     const fixture = await buildFixture();
     const first = await savePage(sql, {
@@ -243,9 +263,10 @@ describe('GET /books/:id/history', () => {
     const res = await app.request(`/books/${fixture.bookId}/history`, { headers: { cookie: fixture.readerCookie } });
 
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { title: string; workspaceId: string; changesets: unknown[] };
+    const body = (await res.json()) as { title: string; workspaceId: string; workspace: { id: string; slug: string }; changesets: unknown[] };
     expect(body.title).toBe('Operations Handbook');
     expect(body.workspaceId).toBe(fixture.workspaceId);
+    expect(body.workspace).toEqual({ id: fixture.workspaceId, slug: await workspaceSlugOf(fixture.workspaceId) });
     expect(body.changesets).toEqual([]);
   });
 

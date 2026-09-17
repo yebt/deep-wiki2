@@ -1,4 +1,7 @@
+import type { NodeWorkspace } from '@deep-wiki/contracts';
 import { pageReadKey } from '~/utils/api-keys';
+import type { NodeLocation } from './useNodeLocation';
+import { nodeLocationOf } from './useNodeLocation';
 
 export type PageReadStatus = 'idle' | 'loading' | 'success' | 'not-found' | 'forbidden' | 'unauthenticated' | 'network-error';
 
@@ -7,6 +10,8 @@ export interface PageReadResponse {
   readonly title: string;
   /** The workspace the page belongs to — what the read screen opens the workspace-scoped presence stream with (editing-presence spec). */
   readonly workspaceId: string;
+  /** The same workspace with the slug the address carries (`NodeWorkspaceSchema`). */
+  readonly workspace: NodeWorkspace;
 }
 
 export type PageReadFetcher = (nodeId: string) => Promise<PageReadResponse>;
@@ -17,6 +22,8 @@ export interface UsePageReadResult {
   readonly title: ComputedRef<string>;
   /** `null` until a successful response names it. */
   readonly workspaceId: ComputedRef<string | null>;
+  /** Where the page lives, as this read says (`NodeLocation`) — what the shell holds the address to its word with, in place of a second request. */
+  readonly location: ComputedRef<NodeLocation>;
   readonly message: ComputedRef<string>;
   /** Fetch, or — with the page already on screen — refresh behind it. */
   readonly load: () => Promise<void>;
@@ -76,6 +83,7 @@ export function usePageRead(nodeId: string, fetcher?: PageReadFetcher): UsePageR
   const html = computed(() => value.value?.html ?? '');
   const title = computed(() => value.value?.title ?? '');
   const workspaceId = computed(() => value.value?.workspaceId ?? null);
+  const location = computed(() => nodeLocationOf(status.value, value.value?.workspace));
 
   const MESSAGES: Record<PageReadStatus, string> = {
     'idle': '',
@@ -88,5 +96,5 @@ export function usePageRead(nodeId: string, fetcher?: PageReadFetcher): UsePageR
   };
   const message = computed(() => MESSAGES[status.value]);
 
-  return { status, html, title, workspaceId, message, load: read.load };
+  return { status, html, title, workspaceId, location, message, load: read.load };
 }

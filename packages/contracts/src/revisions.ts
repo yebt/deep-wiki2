@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { NodeWorkspaceSchema } from './nodes';
 
 /**
  * `GET /pages/:id/history` response (revision-history spec: "Page History
@@ -19,6 +20,8 @@ export const RevisionSummarySchema = z.object({
 export type RevisionSummaryPayload = z.infer<typeof RevisionSummarySchema>;
 
 export const PageHistoryResponseSchema = z.object({
+  /** The page's workspace, by id and by the slug the address carries (`NodeWorkspaceSchema`). */
+  workspace: NodeWorkspaceSchema,
   revisions: z.array(RevisionSummarySchema),
 });
 export type PageHistoryResponse = z.infer<typeof PageHistoryResponseSchema>;
@@ -53,6 +56,8 @@ export const BookHistoryResponseSchema = z.object({
   /** The book node's own title/workspace — so the screen can name the book and link back to its tree. */
   title: z.string(),
   workspaceId: z.string(),
+  /** The same workspace, with the slug the address carries (`NodeWorkspaceSchema`). */
+  workspace: NodeWorkspaceSchema,
   changesets: z.array(BookChangesetSchema),
 });
 export type BookHistoryResponse = z.infer<typeof BookHistoryResponseSchema>;

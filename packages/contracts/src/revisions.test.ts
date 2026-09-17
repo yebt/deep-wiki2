@@ -62,6 +62,7 @@ describe('PageHistoryResponseSchema', () => {
   // it received it, rather than reordering or deduplicating.
   test('parses a revision list, handing it back in the order it arrived', () => {
     const parsed = PageHistoryResponseSchema.parse({
+      workspace: { id: 'ws-1', slug: 'acme' },
       revisions: [
         { id: 'rev-2', authorId: 'user-1', authorDisplayName: 'Owner', createdAt: '2026-01-02T00:00:00.000Z', changesetId: 'cs-1', contentHash: 'b'.repeat(64) },
         { id: 'rev-1', authorId: 'user-1', authorDisplayName: 'Owner', createdAt: '2026-01-01T00:00:00.000Z', changesetId: null, contentHash: 'a'.repeat(64) },
@@ -80,7 +81,7 @@ describe('PageHistoryResponseSchema', () => {
   });
 
   test('rejects a revision missing required fields, naming each one and its position', () => {
-    const result = PageHistoryResponseSchema.safeParse({ revisions: [{ id: 'rev-1' }] });
+    const result = PageHistoryResponseSchema.safeParse({ workspace: { id: 'ws-1', slug: 'acme' }, revisions: [{ id: 'rev-1' }] });
 
     expect(result.success).toBe(false);
     if (result.success) return;
@@ -93,6 +94,16 @@ describe('PageHistoryResponseSchema', () => {
       ['revisions', 0, 'contentHash'],
     ]);
   });
+
+  // The history screen's frame holds `/w/<slug>/p/<id>` to its word from
+  // this response, not from a second request (2026-09-17).
+  test('names the workspace by id and slug, and a response without the pair is rejected', () => {
+    expect(PageHistoryResponseSchema.parse({ workspace: { id: 'ws-1', slug: 'acme' }, revisions: [] }).workspace).toEqual({ id: 'ws-1', slug: 'acme' });
+    const result = PageHistoryResponseSchema.safeParse({ revisions: [] });
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.path)).toEqual([['workspace']]);
+  });
 });
 
 describe('BookHistoryResponseSchema', () => {
@@ -103,6 +114,7 @@ describe('BookHistoryResponseSchema', () => {
     const parsed = BookHistoryResponseSchema.parse({
       title: 'Operations Handbook',
       workspaceId: 'ws-1',
+      workspace: { id: 'ws-1', slug: 'acme' },
       changesets: [
         {
           id: 'cs-1',
@@ -124,6 +136,7 @@ describe('BookHistoryResponseSchema', () => {
     const result = BookHistoryResponseSchema.safeParse({
       title: 'Operations Handbook',
       workspaceId: 'ws-1',
+      workspace: { id: 'ws-1', slug: 'acme' },
       changesets: [
         {
           id: 'cs-1',
@@ -146,16 +159,16 @@ describe('BookHistoryResponseSchema', () => {
   // existed on this response at all. A fixture using '' here would let a
   // schema that merely checks "is a string" pass without proving anything,
   // so this uses a distinctive non-empty title instead.
-  test('rejects a response missing the book title or workspaceId', () => {
+  test('rejects a response missing the book title, workspaceId or workspace pair', () => {
     const result = BookHistoryResponseSchema.safeParse({ changesets: [] });
 
     expect(result.success).toBe(false);
     if (result.success) return;
-    expect(result.error.issues.map((issue) => issue.path)).toEqual([['title'], ['workspaceId']]);
+    expect(result.error.issues.map((issue) => issue.path)).toEqual([['title'], ['workspaceId'], ['workspace']]);
   });
 
   test('a book with an empty-string title still parses — the schema enforces presence, not non-emptiness', () => {
-    const parsed = BookHistoryResponseSchema.parse({ title: '', workspaceId: 'ws-1', changesets: [] });
+    const parsed = BookHistoryResponseSchema.parse({ title: '', workspaceId: 'ws-1', workspace: { id: 'ws-1', slug: 'acme' }, changesets: [] });
 
     expect(parsed.title).toBe('');
   });

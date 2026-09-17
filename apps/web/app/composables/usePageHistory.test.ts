@@ -29,12 +29,24 @@ beforeAll(() => {
 });
 
 describe('usePageHistory', () => {
+  // The shell holds `/w/<slug>/p/<id>` to its word from this read, not a
+  // second request (`useNodeLocation`, 2026-09-17).
+  test('exposes where the page lives — pending, then located by the response’s own workspace pair', async () => {
+    const fetcher = vi.fn(async () => ({ workspace: { id: 'ws-1', slug: 'acme' }, revisions: [] }));
+    const { location, load } = usePageHistory(nextId('page'), fetcher);
+
+    expect(location.value).toEqual({ state: 'pending' });
+    await load();
+
+    expect(location.value).toEqual({ state: 'located', workspace: { id: 'ws-1', slug: 'acme' } });
+  });
+
   test('starts idle and moves through loading to success with the revisions, newest first as the server sent them', async () => {
     const revisions = [
       { id: 'rev-2', authorId: 'user-1', authorDisplayName: 'Ada', createdAt: '2026-01-02T00:00:00.000Z', changesetId: null, contentHash: 'hash-2' },
       { id: 'rev-1', authorId: 'user-1', authorDisplayName: 'Ada', createdAt: '2026-01-01T00:00:00.000Z', changesetId: null, contentHash: 'hash-1' },
     ];
-    const fetcher = vi.fn(async () => ({ revisions }));
+    const fetcher = vi.fn(async () => ({ workspace: { id: 'ws-1', slug: 'acme' }, revisions }));
     const { status, revisions: result, load } = usePageHistory(nextId('page'), fetcher);
 
     expect(status.value).toBe('idle');
@@ -48,7 +60,7 @@ describe('usePageHistory', () => {
   });
 
   test('a page that exists but has never been saved resolves to success with an empty list, not an error', async () => {
-    const fetcher = vi.fn(async () => ({ revisions: [] }));
+    const fetcher = vi.fn(async () => ({ workspace: { id: 'ws-1', slug: 'acme' }, revisions: [] }));
     const { status, revisions: result, load } = usePageHistory(nextId('page'), fetcher);
 
     await load();
@@ -106,7 +118,7 @@ describe('usePageHistory', () => {
     const fetcher = vi.fn(async () => {
       attempt += 1;
       if (attempt === 1) throw new Error('fetch failed');
-      return { revisions: [] };
+      return { workspace: { id: 'ws-1', slug: 'acme' }, revisions: [] };
     });
     const { status, load } = usePageHistory(nextId('page'), fetcher);
 

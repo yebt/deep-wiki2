@@ -404,6 +404,43 @@ describe('AppShell', () => {
       expect(useCurrentWorkspace().workspace.value).toEqual({ id: 'ws-0', slug: 'before' });
     });
 
+    /*
+     * 2026-09-17: the six node responses name their workspace by id and
+     * slug, so a node screen hands the shell its own word (`location`)
+     * and the shell asks `useNodeLocation` nothing — one request fewer
+     * per node screen; the edit route's budget of 500 measured 501.
+     */
+    test('a screen whose response locates its node asks no location, and the address is checked against that word', async () => {
+      useNodeLocationMock.mockClear();
+      const component = await mountAt('/w/acme/p/page-1', { workspaceId: 'ws-1', nodeId: 'page-1', location: { state: 'located', workspace: { id: 'ws-1', slug: 'acme' } } });
+
+      for (const call of useNodeLocationMock.mock.calls) expect(call[0]).toBeNull();
+      expect(component.find('[data-testid="shell-slot"]').exists()).toBe(true);
+      expect(component.find('[data-testid="scope-not-found"]').exists()).toBe(false);
+      expect(useCurrentWorkspace().workspace.value).toEqual({ id: 'ws-1', slug: 'acme' });
+    });
+
+    test('a screen whose response places its node in another workspace than the address names is not found, on the screen’s word alone', async () => {
+      useCurrentWorkspace().enter({ id: 'ws-0', slug: 'before' });
+      useNodeLocationMock.mockClear();
+      const component = await mountAt('/w/other/p/page-1', { workspaceId: 'ws-1', nodeId: 'page-1', location: { state: 'located', workspace: { id: 'ws-1', slug: 'acme' } } });
+
+      for (const call of useNodeLocationMock.mock.calls) expect(call[0]).toBeNull();
+      expect(component.find('[data-testid="scope-not-found"]').exists()).toBe(true);
+      expect(component.find('[data-testid="shell-slot"]').exists()).toBe(false);
+      expect(useCurrentWorkspace().workspace.value).toEqual({ id: 'ws-0', slug: 'before' });
+      expect(component.findComponent(WorkspaceFrame).props('nodeId')).toBeNull();
+    });
+
+    test('while the screen’s own read is still pending nothing is entered; a read that will not locate the node settles the address on the directory’s word', async () => {
+      useCurrentWorkspace().enter({ id: 'ws-0', slug: 'before' });
+      await mountAt('/w/acme/p/page-1', { workspaceId: null, nodeId: 'page-1', location: { state: 'pending' } });
+      expect(useCurrentWorkspace().workspace.value).toEqual({ id: 'ws-0', slug: 'before' });
+
+      await mountAt('/w/acme/p/page-1', { workspaceId: null, nodeId: 'page-1', location: { state: 'unknown' } });
+      expect(useCurrentWorkspace().workspace.value).toEqual({ id: 'ws-1', slug: 'acme' });
+    });
+
     test('a screen about no node, or an address outside the family, asks no location', async () => {
       useNodeLocationMock.mockClear();
       await mountAt('/w/acme', { workspaceId: 'ws-1', workspaceSlug: 'acme' });

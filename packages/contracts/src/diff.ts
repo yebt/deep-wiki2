@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { NodeWorkspaceSchema } from './nodes';
 
 /**
  * `GET /pages/:id/diff?from=&to=` response (block-diff spec). Mirrors
@@ -77,6 +78,8 @@ export const RevisionMetaSchema = z.object({
 export type RevisionMetaPayload = z.infer<typeof RevisionMetaSchema>;
 
 export const PageDiffResponseSchema = z.object({
+  /** The page's workspace, by id and by the slug the address carries (`NodeWorkspaceSchema`). */
+  workspace: NodeWorkspaceSchema,
   diff: z.object({
     from: RevisionMetaSchema,
     to: RevisionMetaSchema,
@@ -109,6 +112,8 @@ export type ChangedPageDiffPayload = z.infer<typeof ChangedPageDiffSchema>;
 export const BookDiffResponseSchema = z.object({
   title: z.string(),
   workspaceId: z.string(),
+  /** The same workspace, with the slug the address carries (`NodeWorkspaceSchema`). */
+  workspace: NodeWorkspaceSchema,
   pages: z.array(ChangedPageDiffSchema),
 });
 export type BookDiffResponse = z.infer<typeof BookDiffResponseSchema>;

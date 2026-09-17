@@ -95,3 +95,43 @@ for (const { theme, width } of [
     }
   });
 }
+
+/**
+ * The address is held to its word from the screen's own response since
+ * 2026-09-17: the six node responses name their workspace by id and slug
+ * (`NodeWorkspaceSchema`), so no node screen asks `GET /nodes/:id/location`
+ * beside its read. That request was one more per node screen — the edit
+ * route's budget of 500 (`e2e/perf.spec.ts`) had measured 501 — and it
+ * stays only behind the legacy redirect (`e2e/legacy-routes.spec.ts`).
+ * Counted from the browser, across the load and the hydration that
+ * follows it, and again across a client-side hop between two node
+ * screens, where the shell is re-set up for the next screen.
+ */
+test.describe('no location request', () => {
+  test.use({ viewport: { width: 1280, height: 900 } });
+
+  test('the read, history and book-history screens ask nothing at /nodes/:id/location', async ({ page, context }) => {
+    await signInAs(context, fixtures.readerSessionToken);
+    const locationRequests: string[] = [];
+    page.on('request', (request) => {
+      if (/\/nodes\/[^/]+\/location(\?|$)/.test(request.url())) locationRequests.push(request.url());
+    });
+
+    for (const name of ['read', 'book-history', 'history'] as const) {
+      const screen = SCREENS.find((candidate) => candidate.name === name)!;
+      await page.goto(screen.to());
+      await expect(screen.ready(page)).toBeVisible({ timeout: 60_000 });
+      await waitForHydration(page);
+      await expectLinksInTheNewShape(page, screen.name);
+    }
+
+    // A client-side hop, last: the history screen's way to the page it is about.
+    const readAddress = pageUrl(fixtures.workspaceSlug, fixtures.historyPageId);
+    await page.locator(`a[href="${readAddress}"]`).first().click();
+    await expect(page).toHaveURL(readAddress, { timeout: 60_000 });
+    await expect(page.getByRole('main').getByRole('heading', { level: 1 })).toBeVisible({ timeout: 60_000 });
+    await waitForHydration(page);
+
+    expect(locationRequests).toEqual([]);
+  });
+});

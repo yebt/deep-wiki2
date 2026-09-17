@@ -53,7 +53,7 @@ const bookId = route.params.id as string;
 /** The workspace slug the address carries (`/w/<slug>/b/<id>/history`): what every link this screen emits is built from. */
 const workspaceSlug = route.params.workspace as string;
 
-const { status, title, workspaceId, changesets, message, load } = useBookHistory(bookId);
+const { status, title, workspaceId, location, changesets, message, load } = useBookHistory(bookId);
 // A signed-out visit leaves for sign-in and comes back (`useSignInRedirect`).
 useSignInRedirect().redirectWhenSignedOut(status);
 
@@ -101,10 +101,11 @@ useSeoMeta({ title: () => `${heading.value} — deep-wiki` });
 </script>
 
 <template>
-  <AppShell :workspace-id="workspaceId" :node-id="bookId" :title="title || undefined" :trail="[{ label: 'History' }]">
+  <AppShell :workspace-id="workspaceId" :node-id="bookId" :location="location" :title="title || undefined" :trail="[{ label: 'History' }]">
     <!-- The history response names no workspace until it resolves; the
          frame stands on the last one the person was in meanwhile
-         (`AppShell`'s own contract for `workspace-id`). -->
+         (`AppShell`'s own contract for `workspace-id`), and holds the
+         address to the response's word once it is in (`location`). -->
     <template #header-end>
       <UTooltip v-if="compareHref" text="Compare the most recent change with everything before it">
         <UButton icon="i-lucide-git-compare" variant="ghost" color="neutral" size="sm" :to="compareHref">

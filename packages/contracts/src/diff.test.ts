@@ -18,6 +18,7 @@ import { BookDiffResponseSchema, PageDiffResponseSchema } from './diff';
 describe('PageDiffResponseSchema', () => {
   test('parses one of each change kind, each carrying text', () => {
     const parsed = PageDiffResponseSchema.parse({
+      workspace: { id: 'ws-1', slug: 'acme' },
       diff: {
         from: { id: 'rev-1', createdAt: '2026-01-01T00:00:00.000Z' },
         to: { id: 'rev-2', createdAt: '2026-01-02T00:00:00.000Z' },
@@ -48,6 +49,7 @@ describe('PageDiffResponseSchema', () => {
   test('a modified block carries its own moved flag, in both states', () => {
     function modifiedWith(moved: boolean): unknown {
       return PageDiffResponseSchema.parse({
+        workspace: { id: 'ws-1', slug: 'acme' },
         diff: {
           from: { id: 'rev-1', createdAt: '2026-01-01T00:00:00.000Z' },
           to: { id: 'rev-2', createdAt: '2026-01-02T00:00:00.000Z' },
@@ -78,6 +80,7 @@ describe('PageDiffResponseSchema', () => {
 
   test('rejects a change missing its text', () => {
     const result = PageDiffResponseSchema.safeParse({
+      workspace: { id: 'ws-1', slug: 'acme' },
       diff: {
         from: { id: 'rev-1', createdAt: '2026-01-01T00:00:00.000Z' },
         to: { id: 'rev-2', createdAt: '2026-01-02T00:00:00.000Z' },
@@ -97,19 +100,20 @@ describe('PageDiffResponseSchema', () => {
   test('only a modified block carries inline segments, and it must', () => {
     const base = { from: { id: 'rev-1', createdAt: '2026-01-01T00:00:00.000Z' }, to: { id: 'rev-2', createdAt: '2026-01-02T00:00:00.000Z' } };
 
-    const missing = PageDiffResponseSchema.safeParse({ diff: { ...base, changes: [{ kind: 'modified', id: 'b3', fromSlot: 0, toSlot: 0, moved: false, text: 'x' }] } });
+    const missing = PageDiffResponseSchema.safeParse({ workspace: { id: 'ws-1', slug: 'acme' }, diff: { ...base, changes: [{ kind: 'modified', id: 'b3', fromSlot: 0, toSlot: 0, moved: false, text: 'x' }] } });
     expect(missing.success).toBe(false);
     if (!missing.success) expect(missing.error.issues.map((issue) => issue.path)).toEqual([['diff', 'changes', 0, 'segments']]);
 
-    const badKind = PageDiffResponseSchema.safeParse({ diff: { ...base, changes: [{ kind: 'modified', id: 'b3', fromSlot: 0, toSlot: 0, moved: false, text: 'x', segments: [{ kind: 'changed', text: 'x' }] }] } });
+    const badKind = PageDiffResponseSchema.safeParse({ workspace: { id: 'ws-1', slug: 'acme' }, diff: { ...base, changes: [{ kind: 'modified', id: 'b3', fromSlot: 0, toSlot: 0, moved: false, text: 'x', segments: [{ kind: 'changed', text: 'x' }] }] } });
     expect(badKind.success).toBe(false);
 
-    const onUnchanged = PageDiffResponseSchema.parse({ diff: { ...base, changes: [{ kind: 'unchanged', id: 'b5', slot: 0, text: 'x', segments: [{ kind: 'equal', text: 'x' }] }] } });
+    const onUnchanged = PageDiffResponseSchema.parse({ workspace: { id: 'ws-1', slug: 'acme' }, diff: { ...base, changes: [{ kind: 'unchanged', id: 'b5', slot: 0, text: 'x', segments: [{ kind: 'equal', text: 'x' }] }] } });
     expect(onUnchanged.diff.changes[0]).toEqual({ kind: 'unchanged', id: 'b5', slot: 0, text: 'x' });
   });
 
   test('rejects an unknown change kind', () => {
     const result = PageDiffResponseSchema.safeParse({
+      workspace: { id: 'ws-1', slug: 'acme' },
       diff: {
         from: { id: 'rev-1', createdAt: '2026-01-01T00:00:00.000Z' },
         to: { id: 'rev-2', createdAt: '2026-01-02T00:00:00.000Z' },
@@ -124,6 +128,16 @@ describe('PageDiffResponseSchema', () => {
     // whichever member the union happened to try first.
     expect(result.error.issues.map((issue) => issue.path)).toEqual([['diff', 'changes', 0, 'kind']]);
     expect(result.error.issues[0]?.code).toBe('invalid_union_discriminator');
+  });
+  // The diff screen's frame holds `/w/<slug>/p/<id>` to its word from
+  // this response, not from a second request (2026-09-17).
+  test('names the workspace by id and slug, and a response without the pair is rejected', () => {
+    const diff = { from: { id: 'rev-1', createdAt: '2026-01-01T00:00:00.000Z' }, to: { id: 'rev-2', createdAt: '2026-01-02T00:00:00.000Z' }, changes: [] };
+    expect(PageDiffResponseSchema.parse({ workspace: { id: 'ws-1', slug: 'acme' }, diff }).workspace).toEqual({ id: 'ws-1', slug: 'acme' });
+    const result = PageDiffResponseSchema.safeParse({ diff });
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.path)).toEqual([['workspace']]);
   });
 });
 
@@ -142,6 +156,7 @@ describe('BookDiffResponseSchema', () => {
     const parsed = BookDiffResponseSchema.parse({
       title: 'Operations Handbook',
       workspaceId: 'ws-1',
+      workspace: { id: 'ws-1', slug: 'acme' },
       pages: [
         {
           pageId: 'page-1',
@@ -171,6 +186,7 @@ describe('BookDiffResponseSchema', () => {
     const parsed = BookDiffResponseSchema.parse({
       title: 'Operations Handbook',
       workspaceId: 'ws-1',
+      workspace: { id: 'ws-1', slug: 'acme' },
       pages: [
         {
           pageId: 'page-1',
@@ -192,6 +208,7 @@ describe('BookDiffResponseSchema', () => {
     const result = BookDiffResponseSchema.safeParse({
       title: 'Operations Handbook',
       workspaceId: 'ws-1',
+      workspace: { id: 'ws-1', slug: 'acme' },
       pages: [
         {
           pageId: 'page-1',
@@ -208,8 +225,16 @@ describe('BookDiffResponseSchema', () => {
     expect(result.error.issues.map((issue) => issue.path)).toEqual([['pages', 0, 'diff', 'changes', 0, 'text']]);
   });
 
+  test('names the workspace by id and slug, and a response without the pair is rejected', () => {
+    expect(BookDiffResponseSchema.parse({ title: 'Ops', workspaceId: 'ws-1', workspace: { id: 'ws-1', slug: 'acme' }, pages: [] }).workspace).toEqual({ id: 'ws-1', slug: 'acme' });
+    const result = BookDiffResponseSchema.safeParse({ title: 'Ops', workspaceId: 'ws-1', pages: [] });
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.path)).toEqual([['workspace']]);
+  });
+
   test('rejects a response missing the book title', () => {
-    const result = BookDiffResponseSchema.safeParse({ workspaceId: 'ws-1', pages: [] });
+    const result = BookDiffResponseSchema.safeParse({ workspaceId: 'ws-1', workspace: { id: 'ws-1', slug: 'acme' }, pages: [] });
 
     expect(result.success).toBe(false);
     if (result.success) return;

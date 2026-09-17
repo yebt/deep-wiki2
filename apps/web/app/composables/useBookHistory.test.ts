@@ -27,6 +27,18 @@ beforeAll(() => {
 });
 
 describe('useBookHistory', () => {
+  // The shell holds `/w/<slug>/b/<id>` to its word from this read, not a
+  // second request (`useNodeLocation`, 2026-09-17).
+  test('exposes where the book lives — pending, then located by the response’s own workspace pair', async () => {
+    const fetcher = vi.fn(async () => ({ title: 'Handbook', workspaceId: 'ws-1', workspace: { id: 'ws-1', slug: 'acme' }, changesets: [] }));
+    const { location, load } = useBookHistory(nextId('book'), fetcher);
+
+    expect(location.value).toEqual({ state: 'pending' });
+    await load();
+
+    expect(location.value).toEqual({ state: 'located', workspace: { id: 'ws-1', slug: 'acme' } });
+  });
+
   test('starts idle and moves through loading to success with the changesets as the server sent them', async () => {
     const changesets = [
       {
@@ -51,7 +63,7 @@ describe('useBookHistory', () => {
         ],
       },
     ];
-    const fetcher = vi.fn(async () => ({ title: 'Handbook', workspaceId: 'ws-1', changesets }));
+    const fetcher = vi.fn(async () => ({ title: 'Handbook', workspaceId: 'ws-1', workspace: { id: 'ws-1', slug: 'acme' }, changesets }));
     const { status, title, workspaceId, changesets: result, load } = useBookHistory(nextId('book'), fetcher);
 
     expect(status.value).toBe('idle');
@@ -69,7 +81,7 @@ describe('useBookHistory', () => {
   });
 
   test('a book that exists but has no changesets yet resolves to success with an empty list, not an error', async () => {
-    const fetcher = vi.fn(async () => ({ title: 'Handbook', workspaceId: 'ws-1', changesets: [] }));
+    const fetcher = vi.fn(async () => ({ title: 'Handbook', workspaceId: 'ws-1', workspace: { id: 'ws-1', slug: 'acme' }, changesets: [] }));
     const { status, changesets: result, load } = useBookHistory(nextId('book'), fetcher);
 
     await load();
@@ -127,7 +139,7 @@ describe('useBookHistory', () => {
     const fetcher = vi.fn(async () => {
       attempt += 1;
       if (attempt === 1) throw new Error('fetch failed');
-      return { title: 'Handbook', workspaceId: 'ws-1', changesets: [] };
+      return { title: 'Handbook', workspaceId: 'ws-1', workspace: { id: 'ws-1', slug: 'acme' }, changesets: [] };
     });
     const { status, load } = useBookHistory(nextId('book'), fetcher);
 

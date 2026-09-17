@@ -61,6 +61,7 @@
  * has not placed every one of them yet, the navigator falls back to title
  * order on its own (`useBookDiffNavigator.ts`'s own note).
  */
+import type { NodeLocation } from '~/composables/useNodeLocation';
 import { buildTreeOrderIndex } from '~/utils/tree-order';
 import { bookHistoryUrl, pageHistoryUrl, pageUrl } from '~/utils/routes';
 
@@ -86,6 +87,10 @@ const nav = sinceIsValid
 
 // A signed-out visit leaves for sign-in and comes back (`useSignInRedirect`).
 if (nav) useSignInRedirect().redirectWhenSignedOut(nav.status);
+
+/** Where the book lives, as the one request says; a broken link asks nothing, so it has no word to give. */
+const UNLOCATED: NodeLocation = { state: 'unknown' };
+const location = computed<NodeLocation>(() => nav?.location.value ?? UNLOCATED);
 
 onMounted(() => {
   // A link with no (or an unparsable) `since` is a broken link, not a
@@ -139,7 +144,7 @@ useSeoMeta({ title: () => `${heading.value} — deep-wiki` });
 </script>
 
 <template>
-  <AppShell :workspace-id="nav?.workspaceId.value ?? null" :node-id="bookId" :title="nav?.title.value || undefined" :trail="trail">
+  <AppShell :workspace-id="nav?.workspaceId.value ?? null" :node-id="bookId" :location="location" :title="nav?.title.value || undefined" :trail="trail">
     <template #header-end>
       <!-- The page switcher: this screen's own control, in the contextual
            bar rather than the pane, so the pane below is the diff alone

@@ -440,28 +440,82 @@ async function withMaintenanceConnection<T>(adminUrl: string, fn: (sql: postgres
   }
 }
 
+/**
+ * The lock every provisioner holds while it touches a template, on the
+ * maintenance connection: exclusive to create or migrate it, shared to
+ * copy it. `bun run test` runs every package's suite at once, and
+ * `packages/db` and `apps/api` each provision the template from their
+ * own process; with no lock both saw no template and both created it,
+ * and the loser failed with `duplicate key value violates unique
+ * constraint "pg_database_datname_index"` — 85 suites red that pass
+ * alone (2026-09-17). Behind that race stood a second: `CREATE DATABASE
+ * … TEMPLATE` refuses while anyone is connected to the template, and
+ * the other process is connected exactly then, migrating. Copies share
+ * the lock so they wait for a migration and not for each other.
+ *
+ * A session-level advisory lock keyed on the template's name, so two
+ * templates never wait on one another, and released with the
+ * connection if the holder dies mid-way — `withMaintenanceConnection`
+ * ends it either way.
+ */
+async function withTemplateLock<T>(sql: postgres.Sql, templateName: string, mode: 'exclusive' | 'shared', fn: () => Promise<T>): Promise<T> {
+  if (mode === 'exclusive') await sql`select pg_advisory_lock(hashtext(${templateName}::text))`;
+  else await sql`select pg_advisory_lock_shared(hashtext(${templateName}::text))`;
+  try {
+    return await fn();
+  } finally {
+    if (mode === 'exclusive') await sql`select pg_advisory_unlock(hashtext(${templateName}::text))`;
+    else await sql`select pg_advisory_unlock_shared(hashtext(${templateName}::text))`;
+  }
+}
+
 let templateReady: Promise<void> | undefined;
 
 /**
- * Migrates `deepwiki_test_template` exactly once per process. Every
- * suite's database is then a cheap `CREATE DATABASE ... TEMPLATE` copy
- * instead of re-running every migration per suite.
+ * Migrates `deepwiki_test_template` exactly once per process, under the
+ * template's exclusive lock — a second process arriving at the same
+ * moment waits, finds the template, and runs the migrator over nothing.
+ * Every suite's database is then a cheap `CREATE DATABASE ... TEMPLATE`
+ * copy instead of re-running every migration per suite. `templateName`
+ * is for a test that needs a template of its own to race for.
  */
-export async function ensureTemplateDatabase(adminUrl: string, migrationsFolder: string = DEFAULT_MIGRATIONS_FOLDER): Promise<void> {
-  await withMaintenanceConnection(adminUrl, async (sql) => {
-    const rows = await sql`select 1 from pg_database where datname = ${TEMPLATE_DB_NAME}`;
-    if (rows.length === 0) {
-      await sql.unsafe(`CREATE DATABASE "${TEMPLATE_DB_NAME}"`);
-    }
-  });
+export async function ensureTemplateDatabase(
+  adminUrl: string,
+  migrationsFolder: string = DEFAULT_MIGRATIONS_FOLDER,
+  templateName: string = TEMPLATE_DB_NAME,
+): Promise<void> {
+  assertTemplateName(templateName);
+  await withMaintenanceConnection(adminUrl, (sql) =>
+    withTemplateLock(sql, templateName, 'exclusive', async () => {
+      const rows = await sql`select 1 from pg_database where datname = ${templateName}`;
+      if (rows.length === 0) {
+        await sql.unsafe(`CREATE DATABASE "${templateName}"`);
+      }
 
-  const templateUrl = withDatabase(adminUrl, TEMPLATE_DB_NAME);
-  const client = postgres(templateUrl, { max: 1, onnotice: () => {} });
-  try {
-    await migrate(drizzle(client), { migrationsFolder });
-  } finally {
-    await client.end({ timeout: 1 }).catch(() => {});
-  }
+      // Migrated, and disconnected from, before the lock is released: a
+      // copy waiting on the lock must find nobody connected to the template.
+      const client = postgres(withDatabase(adminUrl, templateName), { max: 1, onnotice: () => {} });
+      try {
+        await migrate(drizzle(client), { migrationsFolder });
+      } finally {
+        await client.end({ timeout: 1 }).catch(() => {});
+      }
+    }),
+  );
+}
+
+/** A template is the shared one, or a test's own under the test prefix — never anything else, since its name reaches `CREATE DATABASE`. */
+function assertTemplateName(name: string): void {
+  if (name !== TEMPLATE_DB_NAME) assertTestDatabaseName(name);
+}
+
+/** Creates `name` as a copy of the template, under the template's shared lock — never while it is being migrated. */
+export async function createTestDatabase(adminUrl: string, name: string, templateName: string = TEMPLATE_DB_NAME): Promise<void> {
+  assertTestDatabaseName(name);
+  assertTemplateName(templateName);
+  await withMaintenanceConnection(adminUrl, (sql) =>
+    withTemplateLock(sql, templateName, 'shared', () => sql.unsafe(`CREATE DATABASE "${name}" TEMPLATE "${templateName}"`)),
+  );
 }
 
 function randomTestDatabaseName(): string {
@@ -503,9 +557,7 @@ export async function provisionTestDatabase(
   await templateReady;
 
   const name = randomTestDatabaseName();
-  assertTestDatabaseName(name);
-
-  await withMaintenanceConnection(adminUrl, (sql) => sql.unsafe(`CREATE DATABASE "${name}" TEMPLATE "${TEMPLATE_DB_NAME}"`));
+  await createTestDatabase(adminUrl, name);
 
   return {
     url: withDatabase(adminUrl, name),

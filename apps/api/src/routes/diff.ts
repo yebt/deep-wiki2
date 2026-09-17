@@ -18,13 +18,18 @@ export interface DiffRouteDeps {
   readonly sessionIdleTimeoutMinutes: number;
 }
 
+/** A node with its workspace's slug — what every response here names beside the id (`NodeWorkspaceSchema`). */
 interface NodeRow {
   workspace_id: string;
+  workspace_slug: string;
 }
 
-interface NodeWithTitleRow {
-  workspace_id: string;
+interface NodeWithTitleRow extends NodeRow {
   title: string;
+}
+
+function workspaceOf(node: NodeRow): { id: string; slug: string } {
+  return { id: node.workspace_id, slug: node.workspace_slug };
 }
 
 interface TitleRow {
@@ -47,7 +52,9 @@ export function createDiffRoutes(deps: DiffRouteDeps): Hono<{ Variables: Session
     const to = c.req.query('to');
     if (!from || !to) return c.json(ErrorResponseSchema.parse({ error: 'from and to are required' }), 400);
 
-    const [node] = await deps.sql<NodeRow[]>`SELECT workspace_id FROM nodes WHERE id = ${pageId}`;
+    const [node] = await deps.sql<NodeRow[]>`
+      SELECT n.workspace_id, w.slug AS workspace_slug FROM nodes n JOIN workspaces w ON w.id = n.workspace_id WHERE n.id = ${pageId}
+    `;
     const canRead =
       node !== undefined &&
       (await can(deps.sql, { subjectType: 'user', subjectId: session.userId, resourceId: pageId, action: 'read' }));
@@ -69,6 +76,7 @@ export function createDiffRoutes(deps: DiffRouteDeps): Hono<{ Variables: Session
 
     return c.json(
       PageDiffResponseSchema.parse({
+        workspace: workspaceOf(node),
         diff: {
           from: { id: fromRevision.id, createdAt: fromRevision.createdAt.toISOString() },
           to: { id: toRevision.id, createdAt: toRevision.createdAt.toISOString() },
@@ -90,7 +98,9 @@ export function createDiffRoutes(deps: DiffRouteDeps): Hono<{ Variables: Session
     const sinceDate = new Date(since);
     if (Number.isNaN(sinceDate.getTime())) return c.json(ErrorResponseSchema.parse({ error: 'since must be a valid date' }), 400);
 
-    const [node] = await deps.sql<NodeWithTitleRow[]>`SELECT workspace_id, title FROM nodes WHERE id = ${bookId}`;
+    const [node] = await deps.sql<NodeWithTitleRow[]>`
+      SELECT n.workspace_id, n.title, w.slug AS workspace_slug FROM nodes n JOIN workspaces w ON w.id = n.workspace_id WHERE n.id = ${bookId}
+    `;
     const canRead =
       node !== undefined &&
       (await can(deps.sql, { subjectType: 'user', subjectId: session.userId, resourceId: bookId, action: 'read' }));
@@ -144,7 +154,7 @@ export function createDiffRoutes(deps: DiffRouteDeps): Hono<{ Variables: Session
       });
     }
 
-    return c.json(BookDiffResponseSchema.parse({ title: node.title, workspaceId: node.workspace_id, pages }));
+    return c.json(BookDiffResponseSchema.parse({ title: node.title, workspaceId: node.workspace_id, workspace: workspaceOf(node), pages }));
   });
 
   return app;

@@ -26,13 +26,26 @@ beforeAll(() => {
 });
 
 describe('usePageDiff', () => {
+  // The shell holds `/w/<slug>/p/<id>` to its word from this read, not a
+  // second request (`useNodeLocation`, 2026-09-17).
+  test('exposes where the page lives — pending, then located by the response’s own workspace pair', async () => {
+    const diff = { from: { id: 'rev-1', createdAt: '2026-01-01T00:00:00.000Z' }, to: { id: 'rev-2', createdAt: '2026-01-02T00:00:00.000Z' }, changes: [] };
+    const fetcher = vi.fn(async () => ({ workspace: { id: 'ws-1', slug: 'acme' }, diff }));
+    const { location, load } = usePageDiff(nextId('page'), 'rev-1', 'rev-2', fetcher);
+
+    expect(location.value).toEqual({ state: 'pending' });
+    await load();
+
+    expect(location.value).toEqual({ state: 'located', workspace: { id: 'ws-1', slug: 'acme' } });
+  });
+
   test('starts idle and moves through loading to success with the diff as the server sent it', async () => {
     const diff = {
       from: { id: 'rev-1', createdAt: '2026-01-01T00:00:00.000Z' },
       to: { id: 'rev-2', createdAt: '2026-01-02T00:00:00.000Z' },
       changes: [{ kind: 'added' as const, id: 'b1', slot: 0, text: 'New paragraph.' }],
     };
-    const fetcher = vi.fn(async () => ({ diff }));
+    const fetcher = vi.fn(async () => ({ workspace: { id: 'ws-1', slug: 'acme' }, diff }));
     const { status, diff: result, load } = usePageDiff(nextId('page'), 'rev-1', 'rev-2', fetcher);
 
     expect(status.value).toBe('idle');
@@ -51,7 +64,7 @@ describe('usePageDiff', () => {
       to: { id: 'rev-2', createdAt: '2026-01-02T00:00:00.000Z' },
       changes: [{ kind: 'unchanged' as const, id: 'b1', slot: 0, text: 'Same paragraph.' }],
     };
-    const fetcher = vi.fn(async () => ({ diff }));
+    const fetcher = vi.fn(async () => ({ workspace: { id: 'ws-1', slug: 'acme' }, diff }));
     const { status, diff: result, load } = usePageDiff(nextId('page'), 'rev-1', 'rev-2', fetcher);
 
     await load();
@@ -110,7 +123,7 @@ describe('usePageDiff', () => {
     const fetcher = vi.fn(async () => {
       attempt += 1;
       if (attempt === 1) throw new Error('fetch failed');
-      return { diff };
+      return { workspace: { id: 'ws-1', slug: 'acme' }, diff };
     });
     const { status, load } = usePageDiff(nextId('page'), 'rev-1', 'rev-2', fetcher);
 

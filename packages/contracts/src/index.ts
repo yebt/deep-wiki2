@@ -144,10 +144,11 @@ export {
   NODE_TITLE_MAX_LENGTH,
   NodeLocationResponseSchema,
   NodeTypeSchema,
+  NodeWorkspaceSchema,
   RenameNodeRequestSchema,
   RenameNodeResponseSchema,
 } from './nodes';
-export type { CreateNodeRequest, CreateNodeResponse, NodeLocationResponse, NodeType, RenameNodeRequest, RenameNodeResponse } from './nodes';
+export type { CreateNodeRequest, CreateNodeResponse, NodeLocationResponse, NodeType, NodeWorkspace, RenameNodeRequest, RenameNodeResponse } from './nodes';
 
 export {
   CreateWorkspaceRefusalSchema,

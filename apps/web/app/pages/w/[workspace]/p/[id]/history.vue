@@ -42,7 +42,7 @@ const nodeId = route.params.id as string;
 const workspaceSlug = route.params.workspace as string;
 const allWorkspacesUrl = workspacesUrl();
 
-const { status, revisions, message, load } = usePageHistory(nodeId);
+const { status, revisions, location, message, load } = usePageHistory(nodeId);
 // A signed-out visit leaves for sign-in and comes back (`useSignInRedirect`).
 useSignInRedirect().redirectWhenSignedOut(status);
 
@@ -98,9 +98,10 @@ useSeoMeta({ title: 'Revision history — deep-wiki' });
 </script>
 
 <template>
-  <AppShell :workspace-id="null" :node-id="nodeId" :trail="[{ label: 'History' }]">
-    <!-- The history response names no workspace, so the frame stands on the
-         last one the person was in (`AppShell`, `workspace-id="null"`). -->
+  <AppShell :workspace-id="null" :node-id="nodeId" :location="location" :trail="[{ label: 'History' }]">
+    <!-- The history response names the page's workspace (`location`), which
+         is what the frame holds the address to; until it answers the frame
+         stands on the last workspace the person was in (`workspace-id="null"`). -->
     <template #header-end>
       <!-- The same control edit mode carries for the same destination:
            "Read page" with the eye, never a second chrome for `/pages/:id`

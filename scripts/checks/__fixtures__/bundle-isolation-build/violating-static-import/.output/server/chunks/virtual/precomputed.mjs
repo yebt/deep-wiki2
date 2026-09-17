@@ -6,11 +6,11 @@
  */
 const client_precomputed = {
   dependencies: {
-    'pages/pages/[id]/index.vue': {
+    'pages/w/[workspace]/p/[id]/index.vue': {
       preload: {
-        'pages/pages/[id]/index.vue': {
+        'pages/w/[workspace]/p/[id]/index.vue': {
           name: '_id_',
-          src: 'pages/pages/[id]/index.vue',
+          src: 'pages/w/[workspace]/p/[id]/index.vue',
           file: 'read-route.js',
           imports: ['_shared.js'],
           dynamicImports: [],

@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, test, vi } from 'vitest';
 import { useNuxtApp } from '#imports';
-import { useNodeLocation } from './useNodeLocation';
+import { nodeLocationOf, useNodeLocation } from './useNodeLocation';
 
 let ids = 0;
 function nextId(): string {
@@ -48,5 +48,28 @@ describe('useNodeLocation', () => {
     await load();
     expect(status.value).toBe('idle');
     expect(fetcher).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * The six node responses name their workspace by id and slug
+ * (`NodeWorkspaceSchema`, 2026-09-17), so a node screen tells the shell
+ * where its node lives from its own read and the shell asks nothing
+ * more. What the screen says has three shapes: the read is still on its
+ * way, it located the node, or it will not — refused, absent, failed —
+ * and the screen answers that itself.
+ */
+describe('nodeLocationOf', () => {
+  test('pending while the read is idle or loading, located once the response names the workspace, unknown otherwise', () => {
+    expect(nodeLocationOf('idle', null)).toEqual({ state: 'pending' });
+    expect(nodeLocationOf('loading', null)).toEqual({ state: 'pending' });
+    expect(nodeLocationOf('success', { id: 'ws-1', slug: 'acme' })).toEqual({ state: 'located', workspace: { id: 'ws-1', slug: 'acme' } });
+    expect(nodeLocationOf('not-found', null)).toEqual({ state: 'unknown' });
+    expect(nodeLocationOf('forbidden', null)).toEqual({ state: 'unknown' });
+    expect(nodeLocationOf('network-error', null)).toEqual({ state: 'unknown' });
+  });
+
+  test('a refused edit session that still names the workspace is located — the address is checked even when the document is not opened', () => {
+    expect(nodeLocationOf('locked', { id: 'ws-1', slug: 'acme' })).toEqual({ state: 'located', workspace: { id: 'ws-1', slug: 'acme' } });
   });
 });

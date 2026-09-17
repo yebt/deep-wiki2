@@ -1,5 +1,6 @@
 import type { BookDiffFetcher, BookDiffStatus, ChangedPageDiff } from './useBookDiff';
 import { useBookDiff } from './useBookDiff';
+import type { NodeLocation } from './useNodeLocation';
 
 export interface UseBookDiffNavigatorDeps {
   readonly bookDiffFetcher?: BookDiffFetcher;
@@ -34,6 +35,8 @@ export interface UseBookDiffNavigatorResult {
   readonly message: Ref<string>;
   readonly title: Ref<string>;
   readonly workspaceId: Ref<string | null>;
+  /** Where the book lives, as the one request says (`NodeLocation`). */
+  readonly location: ComputedRef<NodeLocation>;
   /** The changed pages, ordered per `pageOrder`'s own rule above. */
   readonly pages: ComputedRef<readonly ChangedPageDiff[]>;
   readonly pageIds: ComputedRef<readonly string[]>;
@@ -125,6 +128,7 @@ export function useBookDiffNavigator(bookId: string, since: string, deps: UseBoo
     message: list.message,
     title: list.title,
     workspaceId: list.workspaceId,
+    location: list.location,
     pages,
     pageIds,
     currentIndex,
