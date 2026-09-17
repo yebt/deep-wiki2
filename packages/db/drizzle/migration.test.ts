@@ -290,6 +290,156 @@ describe('after migrate: hand-written objects exist', () => {
     `;
     expect(definition[0]!.definition).toContain('page_locks');
   });
+
+  // Deletion and Trash (0022), design.md Decision 1.
+  test('nodes gains trashed_at/trash_operation_id/trashed_by with the paired-nullability CHECK', async () => {
+    const columns = await sql<{ column_name: string }[]>`
+      SELECT column_name FROM information_schema.columns
+      WHERE table_name = 'nodes' AND column_name IN ('trashed_at', 'trash_operation_id', 'trashed_by')
+      ORDER BY column_name
+    `;
+    expect(columns.map((c) => c.column_name)).toEqual(['trash_operation_id', 'trashed_at', 'trashed_by']);
+
+    const check = await sql<{ conname: string }[]>`
+      SELECT conname FROM pg_constraint
+      WHERE conrelid = 'nodes'::regclass AND conname = 'nodes_trash_pair_chk' AND contype = 'c'
+    `;
+    expect(check).toHaveLength(1);
+  });
+
+  test('nodes_parent_slug_unique is replaced by the live-only nodes_parent_slug_live_idx', async () => {
+    const oldConstraint = await sql<{ conname: string }[]>`
+      SELECT conname FROM pg_constraint WHERE conrelid = 'nodes'::regclass AND conname = 'nodes_parent_slug_unique'
+    `;
+    expect(oldConstraint).toHaveLength(0);
+
+    const rows = await sql<{ indexdef: string }[]>`
+      SELECT indexdef FROM pg_indexes WHERE tablename = 'nodes' AND indexname = 'nodes_parent_slug_live_idx'
+    `;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.indexdef).toContain('WHERE');
+    expect(rows[0]!.indexdef.toLowerCase()).toContain('trashed_at is null');
+  });
+
+  test('live_nodes and live_page_content views exist and filter on trashed_at', async () => {
+    const views = await sql<{ table_name: string }[]>`
+      SELECT table_name FROM information_schema.views WHERE table_name IN ('live_nodes', 'live_page_content') ORDER BY table_name
+    `;
+    expect(views.map((v) => v.table_name)).toEqual(['live_nodes', 'live_page_content']);
+
+    const liveNodesDef = await sql<{ definition: string }[]>`SELECT pg_get_viewdef('live_nodes'::regclass, true) AS definition`;
+    expect(liveNodesDef[0]!.definition.toLowerCase()).toContain('trashed_at');
+
+    const livePageContentDef = await sql<{ definition: string }[]>`
+      SELECT pg_get_viewdef('live_page_content'::regclass, true) AS definition
+    `;
+    expect(livePageContentDef[0]!.definition.toLowerCase()).toContain('trashed_at');
+  });
+
+  test('node_deletions and trash_purge_runs exist with node_deletions carrying the book foreign key and its immutability trigger', async () => {
+    const tables = await sql<{ tablename: string }[]>`
+      SELECT tablename FROM pg_tables WHERE tablename IN ('node_deletions', 'trash_purge_runs') ORDER BY tablename
+    `;
+    expect(tables.map((t) => t.tablename)).toEqual(['node_deletions', 'trash_purge_runs']);
+
+    const bookFk = await sql<{ conname: string }[]>`
+      SELECT conname FROM pg_constraint
+      WHERE conrelid = 'node_deletions'::regclass AND conname = 'node_deletions_book_fk' AND contype = 'f'
+    `;
+    expect(bookFk).toHaveLength(1);
+
+    const trigger = await sql<{ tgname: string }[]>`
+      SELECT tgname FROM pg_trigger
+      WHERE tgrelid = 'node_deletions'::regclass AND tgname = 'node_deletions_forbid_update_trigger'
+    `;
+    expect(trigger).toHaveLength(1);
+  });
+
+  describe('nodes_trash_guard — live ⇒ parent live', () => {
+    async function seedTrashTree() {
+      const [plan] = await sql`
+        INSERT INTO plans (name, max_workspaces, max_seats, max_storage_bytes, max_ai_tokens_monthly)
+        VALUES (${`plan-${crypto.randomUUID()}`}, 10, 5, '1000000', '1000') RETURNING id
+      `;
+      const [user] = await sql`
+        INSERT INTO users (email, password_hash, display_name, plan_id)
+        VALUES (${`owner-${crypto.randomUUID()}@example.com`}, 'hash', 'Owner', ${plan!.id}) RETURNING id
+      `;
+      const [workspace] = await sql`
+        INSERT INTO workspaces (owner_id, name, slug) VALUES (${user!.id}, 'Acme', ${`acme-${crypto.randomUUID()}`}) RETURNING id
+      `;
+      const workspaceId = workspace!.id as string;
+
+      async function insertNode(parentId: string | null, type: string, slug: string): Promise<string> {
+        const [row] = await sql<{ id: string }[]>`
+          INSERT INTO nodes (workspace_id, parent_id, type, path, position, slug, title)
+          VALUES (${workspaceId}, ${parentId}, ${type}::node_type, '', 0, ${slug}, ${slug})
+          RETURNING id
+        `;
+        return row!.id;
+      }
+
+      const rootId = await insertNode(null, 'workspace', 'root');
+      const shelfId = await insertNode(rootId, 'shelf', 'shelf');
+      const bookId = await insertNode(shelfId, 'book', 'book');
+      const chapterId = await insertNode(bookId, 'chapter', 'chapter');
+      const pageId = await insertNode(chapterId, 'page', 'page');
+
+      return { workspaceId, rootId, shelfId, bookId, chapterId, pageId };
+    }
+
+    test('a live INSERT under a trashed parent is refused', async () => {
+      const tree = await seedTrashTree();
+      const opId = crypto.randomUUID();
+      await sql`UPDATE nodes SET trashed_at = now(), trash_operation_id = ${opId} WHERE id = ${tree.chapterId}`;
+
+      const error = await sql`
+        INSERT INTO nodes (workspace_id, parent_id, type, path, position, slug, title)
+        VALUES (${tree.workspaceId}, ${tree.chapterId}, 'page'::node_type, '', 1, 'new-page', 'New Page')
+      `.catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toMatch(/trashed parent/i);
+
+      const rows = await sql<{ id: string }[]>`SELECT id FROM nodes WHERE parent_id = ${tree.chapterId} AND slug = 'new-page'`;
+      expect(rows).toHaveLength(0);
+    });
+
+    test('moving a live node under a trashed parent outside its own trash_operation_id is refused', async () => {
+      const tree = await seedTrashTree();
+      const opId = crypto.randomUUID();
+      await sql`UPDATE nodes SET trashed_at = now(), trash_operation_id = ${opId} WHERE id = ${tree.chapterId}`;
+
+      // pageId is live and was never part of the chapter's trash operation.
+      const error = await sql`UPDATE nodes SET parent_id = ${tree.chapterId} WHERE id = ${tree.pageId}`.catch(
+        (e: unknown) => e,
+      );
+
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toMatch(/trashed parent/i);
+    });
+
+    test('a same-operation restore is allowed regardless of row order', async () => {
+      const tree = await seedTrashTree();
+      const opId = crypto.randomUUID();
+      // Trash the chapter and its page together, under one operation id —
+      // exactly what trashNode() does in one transaction.
+      await sql`
+        UPDATE nodes SET trashed_at = now(), trash_operation_id = ${opId}
+         WHERE id IN (${tree.chapterId}, ${tree.pageId})
+      `;
+
+      // Restore the child first, while the parent is still trashed: allowed
+      // because it shares the exact operation the parent is also leaving —
+      // the case a single `UPDATE ... WHERE trash_operation_id = $op`
+      // depends on, since Postgres visits that statement's rows in no
+      // guaranteed order.
+      await sql`UPDATE nodes SET trashed_at = NULL, trash_operation_id = NULL WHERE id = ${tree.pageId}`;
+
+      const [row] = await sql<{ trashed_at: Date | null }[]>`SELECT trashed_at FROM nodes WHERE id = ${tree.pageId}`;
+      expect(row!.trashed_at).toBeNull();
+    });
+  });
 });
 
 /**
@@ -486,6 +636,13 @@ describe('0008_page_content down migration', () => {
       // newer one's down runs first — only the full suite catches it, a
       // filtered run will not, because a filtered run never executes this
       // shared ordering.
+      //
+      // 0022's live_page_content view selects from page_content, so its
+      // down must run before this one too — the same trap, one migration
+      // further out.
+      const trashDown = await Bun.file(new URL('./down/0022_trash.down.sql', import.meta.url)).text();
+      await rollbackSql.unsafe(trashDown);
+
       const presenceViewDown = await Bun.file(new URL('./down/0014_presence_view.down.sql', import.meta.url)).text();
       await rollbackSql.unsafe(presenceViewDown);
 
@@ -568,4 +725,114 @@ describe('0016_page_blocks_no_resurrection down migration', () => {
       await rollback.drop();
     }
   });
+});
+
+/**
+ * 0022 only adds columns, indexes, a trigger, two views and two tables. It
+ * creates no foreign key into an earlier migration's table and nothing
+ * later references it, so — like 0015/0016 — it adds no new
+ * rollback-ordering dependency of its own. Its down path carries a real
+ * decision instead (design.md Decision 1): it refuses rather than
+ * guessing when dropping the trashed_at column would silently make two
+ * same-slug siblings both live.
+ */
+describe('0022_trash down migration', () => {
+  async function seedTrashTree(rollbackSql: postgres.Sql) {
+    const [plan] = await rollbackSql`
+      INSERT INTO plans (name, max_workspaces, max_seats, max_storage_bytes, max_ai_tokens_monthly)
+      VALUES (${`plan-${crypto.randomUUID()}`}, 10, 5, '1000000', '1000') RETURNING id
+    `;
+    const [user] = await rollbackSql`
+      INSERT INTO users (email, password_hash, display_name, plan_id)
+      VALUES (${`owner-${crypto.randomUUID()}@example.com`}, 'hash', 'Owner', ${plan!.id}) RETURNING id
+    `;
+    const [workspace] = await rollbackSql`
+      INSERT INTO workspaces (owner_id, name, slug) VALUES (${user!.id}, 'Acme', ${`acme-${crypto.randomUUID()}`}) RETURNING id
+    `;
+    const workspaceId = workspace!.id as string;
+
+    async function insertNode(parentId: string | null, type: string, slug: string): Promise<string> {
+      const [row] = await rollbackSql<{ id: string }[]>`
+        INSERT INTO nodes (workspace_id, parent_id, type, path, position, slug, title)
+        VALUES (${workspaceId}, ${parentId}, ${type}::node_type, '', 0, ${slug}, ${slug})
+        RETURNING id
+      `;
+      return row!.id;
+    }
+
+    const rootId = await insertNode(null, 'workspace', 'root');
+    const shelfId = await insertNode(rootId, 'shelf', 'shelf');
+    const bookId = await insertNode(shelfId, 'book', 'book');
+    const chapterId = await insertNode(bookId, 'chapter', 'chapter');
+    const pageId = await insertNode(chapterId, 'page', 'page');
+
+    return { workspaceId, rootId, shelfId, bookId, chapterId, pageId };
+  }
+
+  test('refuses when a trashed row shares (parent_id, slug) with a live sibling', async () => {
+    const rollback = await provisionTestDatabase();
+    const rollbackSql = postgres(rollback.url, { max: 1 });
+    try {
+      const tree = await seedTrashTree(rollbackSql);
+      const opId = crypto.randomUUID();
+      await rollbackSql`UPDATE nodes SET trashed_at = now(), trash_operation_id = ${opId} WHERE id = ${tree.pageId}`;
+      // A live sibling now holds the trashed page's freed slug — exactly
+      // what the live-only partial index (Decision 1) is for.
+      await rollbackSql`
+        INSERT INTO nodes (workspace_id, parent_id, type, path, position, slug, title)
+        VALUES (${tree.workspaceId}, ${tree.chapterId}, 'page'::node_type, '', 1, 'page', 'Page')
+      `;
+
+      const downSql = await Bun.file(new URL('./down/0022_trash.down.sql', import.meta.url)).text();
+      const error = await rollbackSql.unsafe(downSql).catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(Error);
+
+      // Nothing was dropped: the refusal happens before any structural change.
+      const columns = await rollbackSql<{ column_name: string }[]>`
+        SELECT column_name FROM information_schema.columns WHERE table_name = 'nodes' AND column_name = 'trashed_at'
+      `;
+      expect(columns).toHaveLength(1);
+    } finally {
+      await rollbackSql.end({ timeout: 1 }).catch(() => {});
+      await rollback.drop();
+    }
+  }, 20_000);
+
+  test('reverses cleanly when no trashed/live slug collision exists', async () => {
+    const rollback = await provisionTestDatabase();
+    const rollbackSql = postgres(rollback.url, { max: 1 });
+    try {
+      const tree = await seedTrashTree(rollbackSql);
+      const opId = crypto.randomUUID();
+      await rollbackSql`UPDATE nodes SET trashed_at = now(), trash_operation_id = ${opId} WHERE id = ${tree.pageId}`;
+
+      const downSql = await Bun.file(new URL('./down/0022_trash.down.sql', import.meta.url)).text();
+      await rollbackSql.unsafe(downSql);
+
+      const columns = await rollbackSql<{ column_name: string }[]>`
+        SELECT column_name FROM information_schema.columns
+        WHERE table_name = 'nodes' AND column_name IN ('trashed_at', 'trash_operation_id', 'trashed_by')
+      `;
+      expect(columns).toHaveLength(0);
+
+      const constraint = await rollbackSql<{ conname: string }[]>`
+        SELECT conname FROM pg_constraint WHERE conrelid = 'nodes'::regclass AND conname = 'nodes_parent_slug_unique'
+      `;
+      expect(constraint).toHaveLength(1);
+
+      const views = await rollbackSql<{ table_name: string }[]>`
+        SELECT table_name FROM information_schema.views WHERE table_name IN ('live_nodes', 'live_page_content')
+      `;
+      expect(views).toHaveLength(0);
+
+      const tables = await rollbackSql<{ tablename: string }[]>`
+        SELECT tablename FROM pg_tables WHERE tablename IN ('node_deletions', 'trash_purge_runs')
+      `;
+      expect(tables).toHaveLength(0);
+    } finally {
+      await rollbackSql.end({ timeout: 1 }).catch(() => {});
+      await rollback.drop();
+    }
+  }, 20_000);
 });

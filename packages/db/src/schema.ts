@@ -14,7 +14,7 @@
  * the hand-written objects exist after `migrate()` runs, so a future drift
  * between this file and the migrations fails the suite, not the tenant.
  */
-import { bigint, boolean, customType, date, integer, jsonb, pgEnum, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
+import { bigint, boolean, customType, date, integer, jsonb, pgEnum, pgTable, pgView, text, timestamp, uuid } from 'drizzle-orm/pg-core';
 import type { Action, Effect } from '@deep-wiki/core';
 
 /**
@@ -79,6 +79,8 @@ export const aiReservationState = pgEnum('ai_reservation_state', ['reserved', 's
 export const embeddingIndexState = pgEnum('embedding_index_state', ['building', 'active', 'retired']);
 /** A reindex job's own lifecycle (embedding-index-integrity spec — "Reindexing Is an Explicit Tracked Job"). */
 export const embeddingReindexJobState = pgEnum('embedding_reindex_job_state', ['queued', 'running', 'completed', 'failed']);
+/** A purge sweep's own lifecycle (deletion-and-trash design.md Decision 6 — the ai-reindex idiom applied to purge). */
+export const trashPurgeRunState = pgEnum('trash_purge_run_state', ['queued', 'running', 'completed', 'failed']);
 
 export const plans = pgTable('plans', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -120,7 +122,11 @@ export const workspaces = pgTable('workspaces', {
 /**
  * `parent_id` and the composite `(id, workspace_id)`/`(parent_id,
  * workspace_id)` foreign keys are declared only in the migration SQL — see
- * the module doc comment above.
+ * the module doc comment above. The paired-nullability CHECK on
+ * `trashedAt`/`trashOperationId`, the live-only partial unique index
+ * replacing the old unconditional `(parent_id, slug)` constraint, and the
+ * `nodes_trash_guard` trigger enforcing "live ⇒ parent live" are declared
+ * only in `0022_trash.sql` (deletion-and-trash design.md Decision 1).
  */
 export const nodes = pgTable('nodes', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -135,6 +141,9 @@ export const nodes = pgTable('nodes', {
   title: text('title').notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  trashedAt: timestamp('trashed_at', { withTimezone: true }),
+  trashOperationId: uuid('trash_operation_id'),
+  trashedBy: uuid('trashed_by').references(() => users.id, { onDelete: 'set null' }),
 });
 
 export const cells = pgTable('cells', {
@@ -270,6 +279,43 @@ export const pageContent = pgTable('page_content', {
   updatedBy: uuid('updated_by').references(() => users.id, { onDelete: 'set null' }),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
+
+/**
+ * The one spelling of `nodes`/`page_content` a read site may use outside
+ * `scripts/checks/trash-filter.ts`'s reasoned allow-list
+ * (trash-non-disclosure spec; deletion-and-trash design.md Decision 2).
+ * Declared as `.existing()` because the views themselves are created by
+ * `0022_trash.sql` — Drizzle's DSL builds the query builder's column
+ * shapes here, never the `CREATE VIEW` statement.
+ */
+export const liveNodes = pgView('live_nodes', {
+  id: uuid('id').notNull(),
+  workspaceId: uuid('workspace_id').notNull(),
+  parentId: uuid('parent_id'),
+  type: nodeType('type').notNull(),
+  path: text('path').notNull(),
+  position: integer('position').notNull(),
+  slug: text('slug').notNull(),
+  title: text('title').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull(),
+  trashedAt: timestamp('trashed_at', { withTimezone: true }),
+  trashOperationId: uuid('trash_operation_id'),
+  trashedBy: uuid('trashed_by'),
+}).existing();
+
+export const livePageContent = pgView('live_page_content', {
+  nodeId: uuid('node_id').notNull(),
+  workspaceId: uuid('workspace_id').notNull(),
+  nodeType: nodeType('node_type').notNull(),
+  markdown: text('markdown').notNull(),
+  renderedHtml: text('rendered_html').notNull(),
+  blockIndex: jsonb('block_index').notNull(),
+  contentHash: text('content_hash').notNull(),
+  pipelineVersion: integer('pipeline_version').notNull(),
+  updatedBy: uuid('updated_by'),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull(),
+}).existing();
 
 /**
  * The durable record of persisted block ids (design.md "Block identity" —
@@ -593,6 +639,53 @@ export const embeddingReindexJobs = pgTable('embedding_reindex_jobs', {
   state: embeddingReindexJobState('state').notNull().default('queued'),
   totalChunks: integer('total_chunks').notNull().default(0),
   completedChunks: integer('completed_chunks').notNull().default(0),
+  startedAt: timestamp('started_at', { withTimezone: true }),
+  finishedAt: timestamp('finished_at', { withTimezone: true }),
+  errorCode: text('error_code'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * One append-only row per trash/restore/purge event, keyed to the nearest
+ * book ancestor (deletion-and-trash design.md Decision 5). No FK to the
+ * node itself — the node is purged and this row stays, which is the whole
+ * point of a trace. The composite FK into `nodes (id, workspace_id,
+ * type)`, the `event`/`book_node_type` CHECKs, and the `BEFORE UPDATE`
+ * immutability trigger are declared only in the migration SQL.
+ */
+export const nodeDeletions = pgTable('node_deletions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  workspaceId: uuid('workspace_id')
+    .notNull()
+    .references(() => workspaces.id, { onDelete: 'cascade' }),
+  bookId: uuid('book_id'),
+  bookNodeType: nodeType('book_node_type').notNull().default('book'),
+  nodeId: uuid('node_id').notNull(),
+  nodeType: nodeType('node_type').notNull(),
+  title: text('title').notNull(),
+  location: text('location').notNull(),
+  event: text('event').notNull(),
+  trashOperationId: uuid('trash_operation_id').notNull(),
+  actorId: uuid('actor_id').references(() => users.id, { onDelete: 'set null' }),
+  pageCount: integer('page_count').notNull().default(0),
+  restricted: boolean('restricted').notNull().default(false),
+  occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * One tracked purge sweep per workspace (deletion-and-trash design.md
+ * Decision 6 — the `embedding_reindex_jobs` idiom applied to purge). No
+ * in-process scheduler reads this table; the CLI (`packages/db/trash-purge.ts`)
+ * and an operator cron line drive it.
+ */
+export const trashPurgeRuns = pgTable('trash_purge_runs', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  workspaceId: uuid('workspace_id')
+    .notNull()
+    .references(() => workspaces.id, { onDelete: 'cascade' }),
+  state: trashPurgeRunState('state').notNull().default('queued'),
+  cutoff: timestamp('cutoff', { withTimezone: true }).notNull(),
+  purgedNodes: integer('purged_nodes').notNull().default(0),
   startedAt: timestamp('started_at', { withTimezone: true }),
   finishedAt: timestamp('finished_at', { withTimezone: true }),
   errorCode: text('error_code'),

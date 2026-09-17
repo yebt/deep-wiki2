@@ -191,6 +191,40 @@ describe('createNode — two siblings named the same thing', () => {
   });
 });
 
+describe('nodes_parent_slug_live_idx — live-only slug uniqueness (tenancy-model spec)', () => {
+  /**
+   * `createNode()` itself is not rewritten to filter on `trashed_at` until
+   * Phase 3 of the deletion-and-trash change (design.md Decision 9); these
+   * two tests state the *storage-layer* invariant the partial index
+   * (`0022_trash.sql`) already enforces, independent of the application
+   * layer, using raw inserts exactly like `insertNode` above.
+   */
+  test('a live node may take a trashed sibling’s slug', async () => {
+    const tree = await seedTree();
+    const opId = crypto.randomUUID();
+    await sql`UPDATE nodes SET trashed_at = now(), trash_operation_id = ${opId} WHERE id = ${tree.page.id}`;
+
+    const created = await insertNode(tree.workspaceId, tree.chapter.id, 'page', 'page', 1);
+
+    expect(created.id).not.toBe(tree.page.id);
+    const rows = await sql<{ id: string; trashed_at: Date | null }[]>`
+      SELECT id, trashed_at FROM nodes WHERE parent_id = ${tree.chapter.id} AND slug = 'page' ORDER BY trashed_at NULLS LAST
+    `;
+    expect(rows).toHaveLength(2);
+    expect(rows.find((r) => r.id === created.id)?.trashed_at).toBeNull();
+  });
+
+  test('two live siblings still cannot share a slug', async () => {
+    const tree = await seedTree();
+
+    const error = await insertNode(tree.workspaceId, tree.chapter.id, 'page', 'page', 1).catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(Error);
+    const rows = await sql<{ id: string }[]>`SELECT id FROM nodes WHERE parent_id = ${tree.chapter.id} AND slug = 'page'`;
+    expect(rows).toHaveLength(1);
+  });
+});
+
 describe('createNode — a missing parent', () => {
   test('is refused, and nothing is written', async () => {
     const before = await sql<{ count: number }[]>`SELECT COUNT(*)::int AS count FROM nodes`;

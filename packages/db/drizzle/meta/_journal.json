@@ -155,6 +155,13 @@
       "when": 1735689600021,
       "tag": "0021_embedding_reindex_jobs",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1735689600022,
+      "tag": "0022_trash",
+      "breakpoints": true
     }
   ]
 }

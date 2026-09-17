@@ -122,3 +122,34 @@ describe('renameNode', () => {
     expect(error).toBeInstanceOf(NodeNotFoundError);
   });
 });
+
+describe('nodes_parent_slug_live_idx — live-only slug uniqueness (tenancy-model spec)', () => {
+  /**
+   * `renameNode()` itself is not rewritten to filter on `trashed_at` until
+   * Phase 3 of the deletion-and-trash change (design.md Decision 9); these
+   * two tests state the *storage-layer* invariant the partial index
+   * (`0022_trash.sql`) already enforces, independent of the application
+   * layer, using raw inserts exactly like `insertNode` above.
+   */
+  test('a live node may take a trashed sibling’s slug', async () => {
+    const tree = await seedTree();
+    const chapter = await createNode(sql, { parentId: tree.book.id, type: 'chapter', title: 'Overview' });
+    const opId = crypto.randomUUID();
+    await sql`UPDATE nodes SET trashed_at = now(), trash_operation_id = ${opId} WHERE id = ${chapter.id}`;
+
+    const recreated = await insertNode(tree.workspaceId, tree.book.id, 'chapter', 'overview');
+
+    expect(recreated.id).not.toBe(chapter.id);
+    const rows = await sql<{ id: string }[]>`SELECT id FROM nodes WHERE parent_id = ${tree.book.id} AND slug = 'overview'`;
+    expect(rows).toHaveLength(2);
+  });
+
+  test('two live siblings still cannot share a slug', async () => {
+    const tree = await seedTree();
+    await createNode(sql, { parentId: tree.book.id, type: 'chapter', title: 'Overview' });
+
+    const error = await insertNode(tree.workspaceId, tree.book.id, 'chapter', 'overview').catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(Error);
+  });
+});
