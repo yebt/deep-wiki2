@@ -17,6 +17,18 @@ export {
 } from './nodes/hierarchy';
 export type { NodeType } from './nodes/hierarchy';
 export { MAX_SLUG_LENGTH, slugifyTitle } from './nodes/slug';
+export { daysUntilPurge, decideRestore, decideTrash, TRASH_RETENTION_DAYS } from './trash/rules';
+export type {
+  DecideRestoreInput,
+  DecideRestoreReason,
+  DecideRestoreResult,
+  DecideTrashInput,
+  DecideTrashReason,
+  DecideTrashResult,
+  TrashLiveCounts,
+  TrashMode,
+  TrashSubmission,
+} from './trash/rules';
 export { normalizeEmail } from './email';
 export { Secret } from './secret';
 export type { PasswordHasher } from './ports/password-hasher';
