@@ -1533,4 +1533,28 @@ saving?" from the previous entry; the two-icon-pack requirement (§4.3) remains 
 
 ---
 
+### 2026-09-17 — Owner review of edit mode: no frame, more live syntax, source mode, and a creation dialog that asks less — awaiting the owner's eye
+
+**Reviewer:** none yet — this entry is what was shipped for the owner's four decisions of 2026-09-17, one commit each on `feat/editor-source-mode`, strict TDD (`docs/TODO.md` Findings, 2026-09-17, has the measurements and what was found on the way).
+**Verdict:** Pending
+
+1. **No border in edit mode.** The rounded box in the owner's screenshot — hugging the content,
+   fighting the `⋮⋮` handle — was `main.css` §9's global focus ring on the editor's
+   contenteditable (a browser treats a text-entry element as focus-visible on any focus, so it
+   stood for the whole session) following the surface's `rounded-lg`. The surface now draws
+   nothing: no radius, ring, border or fill (`EditorSurface.test.ts` holds the class list; its
+   `-m-4 p-4` reach stays so a click beside the first character lands in the document). The
+   indicator is **relocated, never removed** (§5): the caret, in the `primary` role M3's text
+   field gives it (`.prosemirror-editor { caret-color }`, `main.css` §13) — WCAG 2.4.7 counts
+   the text cursor as a text field's focus indicator. Edit mode is told by its surroundings:
+   the condensed bar with a filled Save, "Editing" in the breadcrumb, the handle, the
+   selection toolbar, the caret (§4.5's "visually unmistakable" holds without a box). Measured
+   in `e2e/editor-source.spec.ts` at 1280 in both themes and at 320: computed `outline-style:
+   none`, `border-radius: 0px`, caret colour equal to `--ui-primary`, the first paragraph at
+   the title's x, `expectNoHorizontalOverflow`; `e2e/editor.spec.ts`'s read/edit geometry
+   assertions unchanged and green. Recorded in `docs/DESIGN-SYSTEM.md` §14. Screenshots
+   `fb-editor2-surface-{1280-light,1280-dark,320-light}.png`.
+
+---
+
 *The next entry goes below this one.*

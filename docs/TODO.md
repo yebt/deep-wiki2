@@ -534,6 +534,35 @@ makes conventions portable across projects.
 
 Discoveries and constraints. Newest first.
 
+### 2026-09-17 — The "border" around the document in edit mode was the focus indicator, and the caret is where it belongs
+
+**What the owner saw.** A rounded box hugging the content in `/pages/:id/edit`, fighting the
+`⋮⋮` block handle in the margin (the 2026-09-17 review). The box was not a border: nothing in
+`EditorSurface` drew one. It was `main.css` §9's global focus indicator — 3px `secondary` at 2px
+offset — landing on the editor's contenteditable and following its `rounded-lg`. A browser treats
+a text-entry element as `:focus-visible` on *any* focus, pointer included, so the ring stood the
+whole time the caret was in the document, which in edit mode is always. Confirmed against the
+2026-09-16 screenshots: `fb-editor-ui-surface-1280-light.png` (editor unfocused) has no box;
+`fb-editor-ui-toolbar-1280-light.png` (a selection inside it) has the box.
+
+**Why the ring is wrong here and not elsewhere.** The indicator's job is to say which control
+holds focus. A document is not a control among controls: it is the whole pane, and the person
+knows they are in it because they are typing. WCAG 2.4.7 counts the text cursor as the focus
+indicator of a text field; M3's text field draws its caret in `primary`
+(`md.comp.outlined-text-field.caret.color`). So the indicator moved, the way it moved from the
+tree's `treeitem` to its row on 2026-09-07 — relocated, never removed (checklist §5 is
+pass/fail on this): `.prosemirror-editor { caret-color: var(--ui-primary) }` and
+`.prosemirror-editor:focus-visible { outline: none }`, `main.css` §13. The surface's
+`rounded-lg` went with it — nothing is drawn, so nothing is rounded; `-m-4 p-4` stays, because
+it is the reach that puts a click just beside the first character into the document and starts
+the block handle's hover band before the text does. The measure column, the heading and the
+read/edit alignment are untouched (`e2e/editor.spec.ts` still holds the title and the first
+paragraph to the pixel across the two modes; `e2e/editor-source.spec.ts` measures the computed
+outline, radius and caret colour in both themes).
+
+**Where it is recorded.** `docs/DESIGN-SYSTEM.md` §14 (the deviation from §5.1's uniform ring),
+`docs/UI-CHECKLIST.md` Review Log, 2026-09-17.
+
 ### 2026-09-16 — `e2e/editor.spec.ts`'s "flake" was one race, and it is the harness's: a key sent within the frame after a click is handled at the caret ProseMirror still holds
 
 **What happened.** The v0.5.0 verification saw `:754` (`/table`) time out waiting for "Saved"

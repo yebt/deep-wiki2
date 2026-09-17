@@ -568,12 +568,22 @@ defineExpose({
     @pointerenter="cancelHandleHide"
     @pointerleave="scheduleHandleHide"
   >
-    <!-- No `focus-within:ring-*` here. `main.css` declares the focus
-         indicator unlayered — 3px `secondary` at 2px offset — so it lands
-         on the editor when it takes focus like it lands on every other
-         control. The ring this used to add was a *second*, 2px `primary`
-         indicator drawn at the same time: measured on 2026-09-07, a focused
-         editor carried both, in two different roles and two widths.
+    <!-- No frame. The document is not a control: nothing here draws a
+         radius, a ring, a border or a fill. Until 2026-09-17 the global
+         focus indicator (`main.css` §9, 3px `secondary` at 2px offset)
+         landed on this contenteditable — Chrome treats a text-entry
+         element as focus-visible on any focus, pointer included — and
+         followed a `rounded-lg`, so the owner's screenshot showed a
+         rounded box hugging the content and fighting the block handle in
+         the margin. `main.css` §13 now relocates the indicator to the
+         caret, in the `primary` role M3's text field gives it: the caret
+         *is* the focus indicator of a text-entry surface (WCAG 2.4.7), so
+         the ring is relocated, never removed (checklist §5). Edit mode is
+         told by its surroundings — the condensed bar with a filled Save,
+         "Editing" in the breadcrumb, the handle, the selection toolbar,
+         the caret — not by a box (docs/UI-CHECKLIST.md Review Log,
+         2026-09-17). Before that, a ring this component added itself was
+         a *second* indicator beside the global one (2026-09-07).
          `min-h-64` rather than `min-h-[16rem]`: same 256px, on the scale
          instead of beside it (docs/UI-CHECKLIST.md §4.1).
          No canvas of its own: the document pane the workspace frame
@@ -585,9 +595,10 @@ defineExpose({
          paragraph stood at x=310.5 in read mode and x=326.5 in edit. The
          text now stands where read mode's article stands, and
          `e2e/editor.spec.ts` holds the two to the pixel. `-m-4 p-4`: the
-         box still reaches 16px past the text on every side, so the focus
-         indicator — 3px at 2px offset, main.css — does not hug the
-         first character the way it would on a bare column.
+         surface still reaches 16px past the text on every side, so a
+         click just beside the first character lands in the document and
+         the block handle's hover band (`onPointerMove`) begins before the
+         text does.
          `aria-activedescendant` is what connects the menus below to the
          element that actually holds focus — without it a screen-reader user
          gets no announcement as the arrow keys move the selection.
@@ -612,7 +623,7 @@ defineExpose({
     <div
       v-show="attached"
       ref="rootEl"
-      class="doc-body text-doc-body text-default prosemirror-editor -m-4 min-h-64 rounded-lg p-4"
+      class="doc-body text-doc-body text-default prosemirror-editor -m-4 min-h-64 p-4"
       data-testid="editor-surface"
       :data-transactions="transactionCount"
       role="textbox"

@@ -733,7 +733,24 @@ body {
 }
 
 /* ─────────────────────────────────────────────────────────────
-   13. THE EDITOR'S OWN MARKS  (block drag, 2026-09-16)
+   13. THE EDITOR'S OWN MARKS  (block drag, 2026-09-16; the caret,
+   2026-09-17)
+   The editing surface is a contenteditable, and a browser treats a
+   text-entry element as `:focus-visible` on ANY focus, pointer
+   included — so §9's indicator drew a 3px `secondary` box around the
+   whole document the moment the caret was in it (the owner's
+   screenshot: a rounded frame hugging the content, fighting the block
+   handle in the margin). A document is not a control. Its focus
+   indicator is the caret — WCAG 2.4.7 counts the text cursor for a
+   text field — drawn in the `primary` role, which is what M3's text
+   field gives its caret (`md.comp.outlined-text-field.caret.color`).
+   The indicator is relocated, never removed (checklist §5, pass/fail);
+   the same move the tree makes for its rows above. Edit mode is told
+   by its surroundings: the condensed bar with a filled Save, the
+   "Editing" crumb, the handle, the selection toolbar, the caret.
+   Recorded in docs/DESIGN-SYSTEM.md §14 and docs/UI-CHECKLIST.md's
+   Review Log, 2026-09-17.
+
    Two elements ProseMirror draws whose classes the host cannot put a
    utility on: the drop cursor (`prosemirror-dropcursor`, installed
    with `color: false` and the class `editor-drop-cursor` so this
@@ -747,6 +764,14 @@ body {
    §5.2: a container fill is for selected, never a state layer's job).
    Both read the theme's variables, never a literal (checklist §4.2).
    ───────────────────────────────────────────────────────────── */
+.prosemirror-editor {
+  caret-color: var(--ui-primary);
+}
+
+.prosemirror-editor:focus-visible {
+  outline: none;
+}
+
 .editor-drop-cursor {
   background-color: var(--ui-primary);
   border-radius: var(--radius-full);
