@@ -1,0 +1,9 @@
+[
+  {
+    "blockIds": [
+      "d:7d3c4cb106ee#0"
+    ],
+    "text": "Typed as __strong__, _emphasis_, ~~struck~~, `code`, [a link](https://example.com/a) and [https://example.com](https://example.com) on one line.",
+    "ordinal": 0
+  }
+]

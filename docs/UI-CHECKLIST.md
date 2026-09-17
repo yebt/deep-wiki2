@@ -1663,6 +1663,79 @@ it while every test passed. Now `UFieldGroup`, asserted on the server's DOM.
   is direction (a), the diff as `doc-body` prose (`docs/TODO.md` Open Questions).
 - The two-icon-pack requirement (§4.3) remains untested; everything the 2026-09-16 entries
   carried forward and this batch did not touch stands.
+### 2026-09-17 — Owner review of edit mode: no frame, more live syntax, source mode, and a creation dialog that asks less — awaiting the owner's eye
+
+**Reviewer:** none yet — this entry is what was shipped for the owner's four decisions of 2026-09-17, one commit each on `feat/editor-source-mode`, strict TDD (`docs/TODO.md` Findings, 2026-09-17, has the measurements and what was found on the way).
+**Verdict:** Pending
+
+1. **No border in edit mode.** The rounded box in the owner's screenshot — hugging the content,
+   fighting the `⋮⋮` handle — was `main.css` §9's global focus ring on the editor's
+   contenteditable (a browser treats a text-entry element as focus-visible on any focus, so it
+   stood for the whole session) following the surface's `rounded-lg`. The surface now draws
+   nothing: no radius, ring, border or fill (`EditorSurface.test.ts` holds the class list; its
+   `-m-4 p-4` reach stays so a click beside the first character lands in the document). The
+   indicator is **relocated, never removed** (§5): the caret, in the `primary` role M3's text
+   field gives it (`.prosemirror-editor { caret-color }`, `main.css` §13) — WCAG 2.4.7 counts
+   the text cursor as a text field's focus indicator. Edit mode is told by its surroundings:
+   the condensed bar with a filled Save, "Editing" in the breadcrumb, the handle, the
+   selection toolbar, the caret (§4.5's "visually unmistakable" holds without a box). Measured
+   in `e2e/editor-source.spec.ts` at 1280 in both themes and at 320: computed `outline-style:
+   none`, `border-radius: 0px`, caret colour equal to `--ui-primary`, the first paragraph at
+   the title's x, `expectNoHorizontalOverflow`; `e2e/editor.spec.ts`'s read/edit geometry
+   assertions unchanged and green. Recorded in `docs/DESIGN-SYSTEM.md` §14. Screenshots
+   `fb-editor2-surface-{1280-light,1280-dark,320-light}.png`.
+
+2. **Live input rules for what the parser already reads.** `~~x~~`, `*x*`, `__x__`,
+   `[text](url)` and a bare URL closed by a space now become their marks as they are typed
+   (§4.6, "live preview renders in place"), and each writes the pinned canonical spelling —
+   `_em_`, `__strong__`, `[url](url)` — so the first save cannot rewrite what was typed.
+   Every rule has a unit test and a `toMarkdown` → `fromMarkdown` identity test; two fixtures
+   join GATE-2 (182, from 177). Measured in `e2e/editor-source.spec.ts` through a real
+   keyboard: the marks in place, the punctuation consumed, the space after a bare URL kept.
+   Found on the way and fixed first: prosemirror-view's stylesheet had never been loaded
+   (`docs/TODO.md` Findings, 2026-09-17), so the gap cursor between two textless blocks was
+   invisible and a lone trailing space could vanish under the next key.
+
+3. **Source mode, like Obsidian.** One edit mode; `Ctrl`/`⌘`+`E` and a segmented control in the
+   condensed bar ("Visual | Source", `aria-pressed` with the opaque `secondary-container` fill,
+   tooltips with the keys — §4.3, §5) swap the live document for its markdown in a plain text
+   area and back, losslessly: visual → source is `toMarkdown` of the live document; source →
+   visual runs the probe and a non-canonical text **stays in source** with a chip notice that
+   names the first non-canonical line by its two spellings — never a silent rewrite (§3,
+   "recoverable", with the real next action). Save works from either view (the buffer is the
+   screen's; `flush()` applies); dirty state, lock, heartbeat, presence and confirm-on-leave are
+   shared, not duplicated; the choice persists per browser (`dw-editor-view`). The text area is
+   set in the code family at the reading surface's metrics (16px on 26px — §9.5's floor over
+   §2.3's 14px code role; recorded in `docs/DESIGN-SYSTEM.md` §14), same column, same reach, no
+   box, the caret its indicator; `Tab` indents two spaces and `Escape` is the stated way out
+   (§5, no keyboard trap). Below `sm` the control folds to one icon-only toggle and **Save is
+   icon-only** (label kept for assistive technology) — measured at 320, the "Editing" crumb was
+   otherwise clipped; the owner may prefer the crumb to give. Measured in
+   `e2e/editor-source.spec.ts` against the real backend: the bytes saved from the visual view
+   after a source edit are the bytes source showed, read back through a fresh edit session; the
+   refusal; the cookie across a reload; the crumb whole at 320 in both views;
+   `expectNoHorizontalOverflow` at 1280 and 320. Screenshots
+   `fb-editor2-source-{1280-light,1280-dark,320-light}.png` and
+   `fb-editor2-source-refused-1280-light.png`.
+
+4. **The creation dialog asks only what it does not know.** From a row's context menu ("New
+   page…" on a book) the place and the kind are answered by the invocation, so the dialog is
+   "New page", leads with the name field — focused (§5) — and states the answers in one line
+   ("Page in “Handbook”") beside a "Change…" disclosure (`aria-expanded`, `aria-controls`)
+   that reveals the radios pre-answered. From the toolbar the kind is a guess, so the radios
+   show as before, with or without a row picked. One component, two shapes, one submit path
+   (§4.1). Measured in `e2e/tree-writes.spec.ts` against the real API: the menu path creates
+   the page under the book from the name alone; both shapes at 1280 light, 1280 dark and 320
+   with `expectNoHorizontalOverflow`. Screenshots
+   `fb-editor2-dialog-{answered,asking}-{1280-light,1280-dark,320-light}.png`.
+
+**Known before review, not fixed**
+
+- Save is icon-only below `sm` (item 3); the owner may prefer the "Editing" crumb to give
+  instead. A syntax-highlighting layer for the source view is recorded as a future item, not
+  built (`docs/TODO.md`). The bare-URL rule keeps a trailing `.` or `)` in the link, where GFM's
+  autolink parse would trim it (item 2). The two-icon-pack requirement (§4.3) remains untested;
+  everything the 2026-09-16 entries carried forward and this batch did not touch.
 
 ---
 

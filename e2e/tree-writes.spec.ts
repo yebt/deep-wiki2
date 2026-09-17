@@ -258,3 +258,102 @@ for (const [width, theme] of [
     });
   });
 }
+
+/**
+ * The creation dialog asks only what it does not know (owner decision,
+ * 2026-09-17). From a row's context menu — "New page…" on the book — the
+ * place and the kind are answered by the invocation: the dialog is "New
+ * page", leads with the name, focused, states "Page in “<book>”" with a
+ * "Change…" disclosure, and creates under the book with the name alone.
+ * From the toolbar, the radios show as before. Both shapes are the
+ * owner's review material (`fb-editor2-dialog-*`, `DEEPWIKI_FRAME_SHOTS`).
+ */
+const EDITOR2_SHOTS = process.env.DEEPWIKI_FRAME_SHOTS ?? '';
+
+async function editor2Shot(page: Page, name: string): Promise<void> {
+  if (!EDITOR2_SHOTS) return;
+  await page.screenshot({ path: `${EDITOR2_SHOTS}/fb-editor2-${name}.png`, fullPage: false });
+}
+
+test('right-click → New page… on the book opens a dialog that asks only for the name, and creates the page there', async ({ page }) => {
+  const fixtures = mintFixtures();
+  await openTree(page, fixtures);
+
+  const book = page.getByRole('treeitem', { name: new RegExp(fixtures.bookTitle) });
+  await book.locator('.dw-tree-row').first().click({ button: 'right' });
+  const menu = page.getByRole('menu');
+  await expect(menu).toBeVisible();
+  await menu.getByRole('menuitem', { name: /^New page…/ }).click();
+
+  const dialog = page.getByRole('dialog', { name: 'New page' });
+  await expect(dialog).toBeVisible();
+  const name = dialog.getByLabel('Name');
+  await expect(name).toBeFocused();
+  await expect(dialog.getByTestId('tree-create-summary')).toHaveText(`Page in “${fixtures.bookTitle}”`);
+  await expect(dialog.getByTestId('tree-create-type')).toHaveCount(0);
+  await expect(dialog.getByTestId('tree-create-location')).toHaveCount(0);
+  // The name comes first in the dialog's reading order.
+  const order = await dialog.locator('[data-testid="tree-create-title"], [data-testid="tree-create-summary"]').evaluateAll((els) => els.map((el) => (el as HTMLElement).dataset.testid));
+  expect(order).toEqual(['tree-create-title', 'tree-create-summary']);
+
+  // The disclosure turns the answers back into questions, pre-answered.
+  const change = dialog.getByTestId('tree-create-change');
+  await expect(change).toHaveAccessibleName('Change…');
+  await expect(change).toHaveAttribute('aria-expanded', 'false');
+  await change.click();
+  await expect(change).toHaveAttribute('aria-expanded', 'true');
+  await expect(change).toHaveAccessibleName('Hide the choices');
+  await expect(dialog.getByTestId('tree-create-type').getByRole('radio', { checked: true })).toHaveAttribute('value', 'page');
+  await expect(dialog.getByTestId('tree-create-location').getByRole('radio', { checked: true })).toHaveAttribute('value', fixtures.bookId);
+  await change.click();
+  await expect(dialog.getByTestId('tree-create-summary')).toBeVisible();
+
+  const title = `E2E Page From Menu ${Date.now()}`;
+  await name.fill(title);
+  await dialog.getByRole('button', { name: 'Create' }).click();
+  await expect(dialog).toBeHidden();
+  await expect(page.getByRole('treeitem', { name: new RegExp(title) })).toBeVisible();
+  expect(await pageOrder(page, fixtures)).toEqual([fixtures.firstPageTitle, fixtures.secondPageTitle, title]);
+  await expect(page.getByRole('status').filter({ hasText: `Created page “${title}” in “${fixtures.bookTitle}”.` })).toHaveCount(1);
+});
+
+for (const [width, theme] of [
+  [1280, 'light'],
+  [1280, 'dark'],
+  [320, 'light'],
+] as const) {
+  test.describe(`the creation dialog's two shapes ${width} ${theme}`, () => {
+    test.use({ viewport: { width, height: 900 } });
+
+    test('pre-answered from the menu, and asking from the toolbar, screenshotted with no sideways scroll', async ({ page }) => {
+      const fixtures = mintFixtures();
+      await useTheme(page, theme);
+      await signInAs(page, fixtures.writerSessionToken);
+      await page.goto(`/workspaces/${seed.workspaceId}`);
+      await expect(page.getByRole('heading', { level: 1, name: 'E2E Workspace' })).toBeVisible({ timeout: 120_000 });
+      await openDrawerIfNarrow(page);
+      const book = page.getByRole('treeitem', { name: new RegExp(fixtures.bookTitle) });
+      await expect(book).toBeVisible({ timeout: 120_000 });
+
+      await book.locator('.dw-tree-row').first().click({ button: 'right' });
+      await page.getByRole('menu').getByRole('menuitem', { name: /^New page…/ }).click();
+      const answered = page.getByRole('dialog', { name: 'New page' });
+      await expect(answered.getByLabel('Name')).toBeFocused();
+      await expect(answered.getByTestId('tree-create-summary')).toContainText(fixtures.bookTitle);
+      await expectNoHorizontalOverflow(page, `dialog answered ${width} ${theme}`);
+      await editor2Shot(page, `dialog-answered-${width}-${theme}`);
+      await page.keyboard.press('Escape');
+      await expect(answered).toBeHidden();
+
+      // The toolbar's New… with the book picked: the kind is not known.
+      await book.focus();
+      await page.getByRole('button', { name: 'New…' }).click();
+      const asking = page.getByRole('dialog', { name: 'New item' });
+      await expect(asking).toBeVisible();
+      await expect(asking.getByTestId('tree-create-type')).toBeVisible();
+      await expect(asking.getByTestId('tree-create-summary')).toHaveCount(0);
+      await expectNoHorizontalOverflow(page, `dialog asking ${width} ${theme}`);
+      await editor2Shot(page, `dialog-asking-${width}-${theme}`);
+    });
+  });
+}

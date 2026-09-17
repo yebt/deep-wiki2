@@ -1256,4 +1256,27 @@ describe('EditorSurface', () => {
       expect(box.left).toBeGreaterThanOrEqual(0);
     });
   });
+
+  /**
+   * The owner's 2026-09-17 decision: no frame around the document in edit
+   * mode. The rounded box in the owner's screenshot was the global focus
+   * indicator landing on this contenteditable (Chrome treats a text-entry
+   * element as focus-visible on any focus) and following `rounded-lg`;
+   * the surface keeps its `-m-4 p-4` reach — the geometry read and edit
+   * mode share, held to the pixel in e2e/editor.spec.ts — and draws
+   * nothing: no radius, no ring, no border, no fill. The ring's job goes
+   * to the caret (main.css, `.prosemirror-editor`); e2e/editor-source.spec.ts
+   * measures the computed outline and caret colour in the browser.
+   */
+  describe('the surface draws no box of its own', () => {
+    test('carries no shape, ring, border or fill class, and keeps the reach that lines it up with read mode', async () => {
+      const component = await mountSurface();
+      const classes = component.get('[data-testid="editor-surface"]').classes();
+
+      expect(classes.some((name) => /^rounded/.test(name)), `rounded: ${classes.join(' ')}`).toBe(false);
+      expect(classes.some((name) => /^(ring|border|bg-|shadow)/.test(name)), `box: ${classes.join(' ')}`).toBe(false);
+      expect(classes).toContain('-m-4');
+      expect(classes).toContain('p-4');
+    });
+  });
 });

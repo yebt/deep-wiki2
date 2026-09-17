@@ -809,6 +809,188 @@ carries the measurements and the screenshots.
   the thirteen tests behind it down as "did not run"; the run between passed at 26.6s. It now
   takes the same `test.setTimeout` allowance the skeleton test in the same file already
   takes for the same reason — a harness trade, not a retry into passing.
+### 2026-09-17 — The creation dialog asks only what it does not know
+
+**What was wrong.** `NavigationTreeActions.vue`'s "New item" dialog showed the Location and Type
+radios even when a row's context menu had already answered both — "New page…" on a chapter
+opened a dialog that asked "Location? Type?" with the answers pre-selected, and the name field,
+the only real question, stood third (owner decision, 2026-09-17).
+
+**What changed.** `openCreate(type)` now records whether the invocation *answered* the kind
+(`answered`: a `type` was given and the picked row may hold it). When it did, the dialog is
+titled for the thing being made ("New page", "New chapter"), leads with the name field —
+focused through `UInput`'s `autofocus`, which lands after Reka's own initial focus — and states
+the two answers in one line ("Page in “Onboarding”", or "Shelf at the top level") beside a
+"Change…" disclosure: a text button with `aria-expanded`/`aria-controls` that reveals the same
+two radio groups, pre-answered, and reads "Hide the choices" while they show. From the toolbar
+the kind is only a guess (the first legal one), so the radios show as before, whether or not a
+row is picked; a type the row cannot hold ("New book…" would never be offered on a chapter, but
+the exposed method is callable) falls back to the asking shape. One dialog, two shapes, one
+submit path (`NavigationTreeActions.test.ts`: both shapes, the disclosure both ways, the posted
+body; `e2e/tree-writes.spec.ts`: the menu path against the real API, the created row, both
+shapes at 1280 light, 1280 dark and 320 with `expectNoHorizontalOverflow`).
+
+**Not changed.** The Rename dialog, which never asked anything it knew.
+
+### 2026-09-17 — Source mode: one edit mode, two views of one buffer, and what the toggle refuses
+
+**Shape.** `pages/[id]/edit.vue` owns `currentMarkdown` and always did; source mode
+(`EditorSourceSurface.vue`, a plain `<textarea>`) is a second reader and writer of that buffer
+beside `EditorSurface`. Nothing else moved: dirty state, the lock, the heartbeat, presence,
+`beforeunload` and the router guard never learn which view is up, and Save reads the same
+buffer from either — `flush()` closes the visual view's 300 ms window on the way out, the text
+area reports every keystroke. The choice persists per browser in `dw-editor-view`
+(`useEditorView`, the `dw-comments` shape). `Ctrl`/`⌘`+`E` is Obsidian's binding and was free:
+not in `keymap.ts`, not in any `defineShortcuts`, and a page may claim it (Chrome reserves
+`Ctrl+T/W/N`, not `Ctrl+E`).
+
+**The decision is pure and fail-closed.** `~/utils/editor-view.ts`: visual → source is always
+granted (`toMarkdown` of the live document is canonical by construction); source → visual runs
+`probe()` — now exported from `@deep-wiki/editor/mount` beside the converters, same binding as
+the `"."` export's — and a text that is not its own fixed point keeps the person in source with
+a chip-tier notice naming the first non-canonical line **by its two spellings** (as typed,
+beside what the pipeline would write), because "not canonical" alone is not something a person
+can act on. Nothing they typed is rewritten; the next edit clears the notice and the next
+attempt judges the new text. Save from a non-canonical source is still allowed and the server's
+own 409 answers it with "Use the canonical document" — the existing exit, never a silent
+rewrite. `probe()`'s `not_byte_identical` carries a line and no construct, which is why the
+notice names the spelling rather than a construct; an `unsupported_construct` refusal names the
+construct the probe already knows.
+
+**The surface.** A `<textarea>`, not CodeMirror — a second editor dependency is a permanent bug
+class — and not `UTextarea`: the library's text area is a form field (ring, 56px rhythm, size
+variants that bundle padding and font), and this is the document, the same object as the
+contenteditable beside it. Set in the code family at the reading surface's own metrics
+(`font-mono text-doc-body`, 16px on 26px): §2.3's code role is 14px, but §9.5's 16px floor binds
+every text-entry control and the checklist wins on correctness. Same `-m-4 p-4` reach, same
+measure column, no box, the caret in `primary` as the focus indicator (`main.css` §13). It grows
+with its text (`scrollHeight` after every edit; `field-sizing: content` when Firefox has it) so
+the pane scrolls, not the control. `Tab` inserts two spaces where the caret is; a captured Tab
+is a keyboard trap unless the way out is stated, so `Escape` leaves for the contextual bar and
+the `aria-describedby` says so (WCAG 2.1.2). `Shift`+`Tab` is left to the browser.
+
+**The bar.** A segmented control ("Visual | Source", `UFieldGroup`, `aria-pressed` plus the
+opaque `secondary-container` fill the selection toolbar uses for pressed, tooltips carrying
+`Ctrl`/`⌘`+`E`) from `sm` up; below `sm` one icon-only toggle, pressed while source is up —
+measured at 320 with the two halves drawn, even icon-only, the right-hand group ran to 213px
+and the "Editing" crumb clipped to "Editi…". Undo and Redo stand only beside the visual view:
+the text area's undo is the keyboard's own, and a button running the other view's history is
+§6's inert control. **Save is icon-only below `sm`** (label kept for assistive technology, the
+same idiom "Read page" already uses): with the view toggle beside Undo, Redo and Save the crumb
+was 17px short of whole, and of everything in that group the label on a filled, iconed
+primary action was the one thing the fill and the icon already say. The owner may prefer the
+crumb to give instead; it is a one-line change either way.
+
+**Measured** in `e2e/editor-source.spec.ts` against the real backend: type in visual, `Ctrl`+`E`,
+the source shows the typed text (flushed), edit in source with Tab-indented list, `Ctrl`+`E`
+back, the nested item rendered, Save, reload, `Ctrl`+`E`: the bytes read back through a fresh
+edit session are the bytes the source view showed. A non-canonical source (`**bold**`) stays as
+typed with the notice naming the line and both spellings; written `__bold__`, the same key opens
+the visual view. The cookie survives a reload. At 320 the crumb is whole in both views. Unit:
+`editor-view.test.ts` (the decision), `useEditorView.test.ts` (the cookie),
+`EditorSourceSurface.test.ts` (Tab, Escape, the report), `edit.test.ts` (the control, the swap,
+the refusal, Save from either view).
+
+**Future item, recorded not built.** A syntax-highlighting layer for the source view. It would
+be a second rendering of markdown (CodeMirror's language mode, or an overlay) beside the one
+parser, and the argument that keeps the editor on one parser applies to it; if it is ever
+wanted, the highlighter must be driven by `@deep-wiki/markdown`'s own tokens.
+
+### 2026-09-17 — The live input rules now cover what the pipeline already parses inline; GATE-2 is 182
+
+**What was missing.** `packages/editor/src/mount/input-rules.ts` had `**x**`, `_x_` and
+`` `x` `` — three of the inline constructs the schema models as marks. A person who typed
+`~~gone~~`, `*em*`, `__strong__`, `[text](url)` or a bare URL saw the punctuation stay as text
+until they reached for the toolbar (owner decision, 2026-09-17).
+
+**What was added, and what each writes.** A rule accepts the spelling a person *types*; the
+editor *writes* the pinned canonical one, so the saved bytes are what `canonicalise()` would have
+produced for the same input: `*em*` → `_em_`, `__strong__` → `__strong__` (and `**bold**` →
+`__bold__`, as before), `~~gone~~` → `~~gone~~`, `[text](url)` → `[text](url)` (`resourceLink`
+is pinned, so this is canonical and re-opens as typed; no title form), and a bare
+`http(s)://…` closed by a space → a link to itself, `[url](url)` — the spelling the pipeline's
+autolink-literal parse canonicalises to (`pins/pin-resourceLink.md`; `<url>` is in `refused/`).
+`input-rules.test.ts` holds every rule's transaction and, for all eight inline rules, the result
+through `toMarkdown` → `fromMarkdown` back to an equal document. Two fixtures join the corpus:
+`modelled/inline-shortcuts.md` (every spelling the rules emit, on one line) and
+`refused/autolink-literal.md` (a bare URL as bytes is non-canonical and must be refused on
+open, never silently rewritten). GATE-2: 177 → **182**.
+
+**Two things found on the way.**
+
+- **A marker beside a space is not a marker.** The pipeline reads `** bar **` as text (a
+  delimiter run next to whitespace is not flanking), so a rule that marked ` bar ` would write
+  `__ bar __`, read it back as text, and refuse the document on its next open. Every inline
+  rule now requires its content to begin and end with a non-space; the three pre-existing rules
+  had the hole too and are closed the same way (`markers padded with spaces fire nothing`).
+- **A trailing `.` or `)` stays in the URL.** `https://example.com/a.` followed by a space links
+  `https://example.com/a.`; GFM's autolink-literal parse trims trailing punctuation, this rule
+  does not. The document stays canonical either way (the mark's text is its href), so it is a
+  taste question for the owner, recorded rather than guessed.
+
+**The bare URL's space is the typed character.** `prosemirror-inputrules` matches text-before
+plus the typed text and the handler's transaction *replaces* the insertion, so the rule inserts
+the space itself as an unmarked node and clears the stored mark — which is what surfaced the
+missing stylesheet above.
+
+### 2026-09-17 — prosemirror-view's stylesheet was never loaded: a trailing space beside an inline element vanished under the next keystroke
+
+**How it surfaced.** The bare-URL input rule (below) turns `https://example.com/bare` into a link
+on the space that closes it and inserts that space itself, unmarked, after the link. In the
+browser the space showed after the rule ran — DOM `<a>…</a>" "` — and the next key replaced it:
+`"n"` where `" n"` should have been (measured with a DOM dump per keystroke, 2026-09-17). The
+unit test of the same transaction passed, so the loss was the DOM's, not the state's.
+
+**Cause.** `apps/web` never imported `prosemirror-view/style/prosemirror.css` (nor
+`prosemirror-gapcursor/style/gapcursor.css`). `.ProseMirror` therefore had `white-space:
+normal`, under which a trailing space is *collapsible* — Chrome's editing rewrites the text
+node around it when the next character lands — and ProseMirror itself warns about exactly this
+in the console on every mount ("ProseMirror expects the CSS white-space property to be set,
+preferably to 'pre-wrap'"). A space typed at the end of a longer text node had survived by
+Chrome's own nbsp juggling; a space that was a text node of its own, after a link, did not. The
+gap cursor — the caret ProseMirror draws between two blocks that hold no text, which
+`plugins.ts` installs precisely so a document ending in a table or a code block has a keyboard
+path past it — was an empty `<div>` with no rule to draw it, so it never showed.
+
+**Fix.** `main.css` §13 now carries both stylesheets' structural rules on `.prosemirror-editor`
+(`white-space: break-spaces` with the `pre-wrap` fallback, `word-wrap`, no ligatures, `li`
+positioned, `hideselection`, the separator image) and the gap cursor drawn in the caret's role
+(`--ui-primary`), never the packages' literals (`#8cf`, `black`) — checklist §4.2.
+`e2e/editor-source.spec.ts` measures the computed `white-space` on the focused editor.
+
+**Not done.** The two package stylesheets are not imported as files: `main.css` is the one
+stylesheet and Tailwind's `@import` of a package CSS would carry the colour literals with it.
+If prosemirror-view adds a structural rule in a future release it has to be copied here; the
+console warning is the tripwire.
+
+### 2026-09-17 — The "border" around the document in edit mode was the focus indicator, and the caret is where it belongs
+
+**What the owner saw.** A rounded box hugging the content in `/pages/:id/edit`, fighting the
+`⋮⋮` block handle in the margin (the 2026-09-17 review). The box was not a border: nothing in
+`EditorSurface` drew one. It was `main.css` §9's global focus indicator — 3px `secondary` at 2px
+offset — landing on the editor's contenteditable and following its `rounded-lg`. A browser treats
+a text-entry element as `:focus-visible` on *any* focus, pointer included, so the ring stood the
+whole time the caret was in the document, which in edit mode is always. Confirmed against the
+2026-09-16 screenshots: `fb-editor-ui-surface-1280-light.png` (editor unfocused) has no box;
+`fb-editor-ui-toolbar-1280-light.png` (a selection inside it) has the box.
+
+**Why the ring is wrong here and not elsewhere.** The indicator's job is to say which control
+holds focus. A document is not a control among controls: it is the whole pane, and the person
+knows they are in it because they are typing. WCAG 2.4.7 counts the text cursor as the focus
+indicator of a text field; M3's text field draws its caret in `primary`
+(`md.comp.outlined-text-field.caret.color`). So the indicator moved, the way it moved from the
+tree's `treeitem` to its row on 2026-09-07 — relocated, never removed (checklist §5 is
+pass/fail on this): `.prosemirror-editor { caret-color: var(--ui-primary) }` and
+`.prosemirror-editor:focus-visible { outline: none }`, `main.css` §13. The surface's
+`rounded-lg` went with it — nothing is drawn, so nothing is rounded; `-m-4 p-4` stays, because
+it is the reach that puts a click just beside the first character into the document and starts
+the block handle's hover band before the text does. The measure column, the heading and the
+read/edit alignment are untouched (`e2e/editor.spec.ts` still holds the title and the first
+paragraph to the pixel across the two modes; `e2e/editor-source.spec.ts` measures the computed
+outline, radius and caret colour in both themes).
+
+**Where it is recorded.** `docs/DESIGN-SYSTEM.md` §14 (the deviation from §5.1's uniform ring),
+`docs/UI-CHECKLIST.md` Review Log, 2026-09-17.
 
 ### 2026-09-16 — `e2e/editor.spec.ts`'s "flake" was one race, and it is the harness's: a key sent within the frame after a click is handled at the caret ProseMirror still holds
 

@@ -816,13 +816,16 @@ describe('edit-mode page', () => {
         session: { markdown: '# Hi\n', title: 'My Page', workspaceId: 'ws-1', lock: { holderUserId: 'me', acquiredAt: 'x', heartbeatAt: 'x' } },
       });
       const component = await mountSuspended(PageInApp, { global: { stubs: { EditorSurface: true, WorkspaceSidebar: true } } });
-      expect(component.find('main [role="status"][aria-live="polite"]').exists()).toBe(true);
+      // The banner, by what it says: the view toggle's own live region
+      // (2026-09-17) is always in the DOM beside it.
+      const savedBanner = () => component.findAll('main [role="status"][aria-live="polite"]').filter((el) => /Saved/.test(el.text()));
+      expect(savedBanner()).toHaveLength(1);
 
       const editorStub = component.findComponent({ name: 'EditorSurface' });
       editorStub.vm.$emit('update', '# Hi\n\nedited again\n');
       await component.vm.$nextTick();
 
-      expect(component.find('main [role="status"][aria-live="polite"]').exists()).toBe(false);
+      expect(savedBanner()).toHaveLength(0);
     });
   });
 
@@ -986,5 +989,158 @@ describe('edit-mode page', () => {
       expect(line.element.tagName).toBe('P');
       expect(line.element.parentElement!.classList.contains('text-doc-body')).toBe(true);
     });
+  });
+});
+
+/**
+ * Source mode (owner decision, 2026-09-17, "like Obsidian"): one edit
+ * mode, two views of the same buffer. The screen owns the markdown,
+ * `~/utils/editor-view` decides which view may show it, and this file
+ * holds the screen's half — the segmented control, the swap, the
+ * refusal, the cookie, and that Save reads the same buffer from either
+ * view. `Ctrl`/`⌘`+`E` is `defineShortcuts`' and the browser's to prove
+ * (`e2e/editor-source.spec.ts`).
+ */
+describe('edit-mode page — source mode', () => {
+  const SOURCE_STUBS = { global: { stubs: { EditorSurface: true, WorkspaceSidebar: true } } };
+
+  /** The real probe and converters, as the mount chunk hands them to the screen. */
+  async function mockEditorModule() {
+    const editor = await import('@deep-wiki/editor');
+    loadEditorMountMock.mockResolvedValue({ probe: editor.probe, fromMarkdown: editor.fromMarkdown, toMarkdown: editor.toMarkdown });
+  }
+
+  function readySession(markdown = '# Hi\n\nA paragraph.\n') {
+    return mockSession({
+      status: 'ready',
+      session: { markdown, title: 'Hi', workspaceId: 'ws-1', contentHash: 'h1', lock: { holderUserId: 'me', acquiredAt: 'x', heartbeatAt: 'x' } },
+    });
+  }
+
+  type Mounted = Awaited<ReturnType<typeof mountSuspended>>;
+  type Found = ReturnType<Mounted['findAll']>[number];
+
+  function viewButton(component: Mounted, name: 'Visual' | 'Source'): Found {
+    return component.findAll('[aria-label="Editor view"] button').find((button: Found) => button.text() === name)!;
+  }
+
+  function buttonNamed(component: Mounted, pattern: RegExp): Found | undefined {
+    return component.findAll('button').find((button: Found) => pattern.test(button.text()) || pattern.test(button.attributes('aria-label') ?? ''));
+  }
+
+  test('the bar carries a segmented control naming both views, Visual pressed, each stating the keys', async () => {
+    await mockEditorModule();
+    useEditorView().set('visual');
+    mockDefaults();
+    readySession();
+    const component = await mountSuspended(PageInApp, SOURCE_STUBS);
+
+    const visual = viewButton(component, 'Visual');
+    const source = viewButton(component, 'Source');
+    expect(visual.attributes('aria-pressed')).toBe('true');
+    expect(source.attributes('aria-pressed')).toBe('false');
+    expect(visual.attributes('aria-keyshortcuts')).toMatch(/\+E$/);
+    expect(source.attributes('aria-keyshortcuts')).toMatch(/\+E$/);
+    expect(component.findComponent({ name: 'EditorSurface' }).exists()).toBe(true);
+    expect(component.find('[data-testid="editor-source"]').exists()).toBe(false);
+  });
+
+  test('Source swaps the live view for the markdown of the buffer, announces it, remembers it, and puts Undo and Redo away', async () => {
+    await mockEditorModule();
+    useEditorView().set('visual');
+    mockDefaults();
+    readySession('# Hi\n\nA paragraph.\n');
+    const component = await mountSuspended(PageInApp, SOURCE_STUBS);
+    expect(buttonNamed(component, /^Undo$/)).toBeDefined();
+
+    await viewButton(component, 'Source').trigger('click');
+    await flushPromises();
+    await component.vm.$nextTick();
+
+    expect(component.findComponent({ name: 'EditorSurface' }).exists()).toBe(false);
+    const area = component.get('[data-testid="editor-source"]').element as HTMLTextAreaElement;
+    expect(area.value).toBe('# Hi\n\nA paragraph.\n');
+    expect(viewButton(component, 'Source').attributes('aria-pressed')).toBe('true');
+    expect(viewButton(component, 'Visual').attributes('aria-pressed')).toBe('false');
+    expect(component.get('[data-testid="editor-view-status"]').text()).toMatch(/Source view/);
+    expect(document.cookie).toContain('dw-editor-view=source');
+    expect(useEditorView().view.value).toBe('source');
+    // The textarea's own undo is the keyboard's; the bar's history buttons are the live view's.
+    expect(buttonNamed(component, /^Undo$/)).toBeUndefined();
+    expect(buttonNamed(component, /^Redo$/)).toBeUndefined();
+  });
+
+  test('a canonical edit in source opens back in the visual view with the edited buffer, and Save sends it', async () => {
+    await mockEditorModule();
+    useEditorView().set('source');
+    const { save } = mockDefaults();
+    readySession('# Hi\n\nA paragraph.\n');
+    const component = await mountSuspended(PageInApp, SOURCE_STUBS);
+    const area = component.get('[data-testid="editor-source"]').element as HTMLTextAreaElement;
+    area.value = '# Hi\n\nA paragraph, edited in source.\n';
+    area.dispatchEvent(new Event('input', { bubbles: true }));
+    await component.vm.$nextTick();
+
+    await viewButton(component, 'Visual').trigger('click');
+    await flushPromises();
+    await component.vm.$nextTick();
+
+    const editorStub = component.findComponent({ name: 'EditorSurface' });
+    expect(editorStub.exists()).toBe(true);
+    expect(editorStub.props('markdown')).toBe('# Hi\n\nA paragraph, edited in source.\n');
+    expect(component.find('[data-testid="editor-source"]').exists()).toBe(false);
+
+    const saveButton = buttonNamed(component, /^Save/)!;
+    expect(saveButton.attributes('aria-disabled')).toBeUndefined();
+    await saveButton.trigger('click');
+    expect(save).toHaveBeenCalledWith('# Hi\n\nA paragraph, edited in source.\n', 'h1');
+  });
+
+  test('a non-canonical source is refused: the view stays, nothing is rewritten, and the notice names the line by its two spellings', async () => {
+    await mockEditorModule();
+    useEditorView().set('source');
+    const { save } = mockDefaults();
+    readySession('# Hi\n\nA paragraph.\n');
+    const component = await mountSuspended(PageInApp, SOURCE_STUBS);
+    const area = component.get('[data-testid="editor-source"]').element as HTMLTextAreaElement;
+    area.value = '# Hi\n\nSay **bold** here.\n';
+    area.dispatchEvent(new Event('input', { bubbles: true }));
+    await component.vm.$nextTick();
+
+    await viewButton(component, 'Visual').trigger('click');
+    await flushPromises();
+    await component.vm.$nextTick();
+
+    expect(component.findComponent({ name: 'EditorSurface' }).exists()).toBe(false);
+    expect((component.get('[data-testid="editor-source"]').element as HTMLTextAreaElement).value).toBe('# Hi\n\nSay **bold** here.\n');
+    expect(viewButton(component, 'Source').attributes('aria-pressed')).toBe('true');
+    const notice = component.get('[data-testid="editor-view-refusal"]');
+    expect(notice.attributes('role')).toBe('alert');
+    expect(notice.text()).toMatch(/line 3/i);
+    expect(notice.text()).toContain('Say **bold** here.');
+    expect(notice.text()).toContain('Say __bold__ here.');
+
+    // Save still works from the source view, with what was typed: the
+    // server's own canonical check answers it, never a silent rewrite.
+    await buttonNamed(component, /^Save/)!.trigger('click');
+    expect(save).toHaveBeenCalledWith('# Hi\n\nSay **bold** here.\n', 'h1');
+
+    // A further edit clears the refusal; the next attempt judges the new text.
+    area.value = '# Hi\n\nSay __bold__ here.\n';
+    area.dispatchEvent(new Event('input', { bubbles: true }));
+    await component.vm.$nextTick();
+    expect(component.find('[data-testid="editor-view-refusal"]').exists()).toBe(false);
+  });
+
+  test('opens in the view the cookie remembers', async () => {
+    await mockEditorModule();
+    useEditorView().set('source');
+    mockDefaults();
+    readySession('# Remembered\n');
+    const component = await mountSuspended(PageInApp, SOURCE_STUBS);
+
+    expect(component.findComponent({ name: 'EditorSurface' }).exists()).toBe(false);
+    expect((component.get('[data-testid="editor-source"]').element as HTMLTextAreaElement).value).toBe('# Remembered\n');
+    expect(viewButton(component, 'Source').attributes('aria-pressed')).toBe('true');
   });
 });
