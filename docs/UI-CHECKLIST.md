@@ -1533,4 +1533,60 @@ saving?" from the previous entry; the two-icon-pack requirement (§4.3) remains 
 
 ---
 
+### 2026-09-17 — First owner verdicts on the Phase 3 gates; the management sidebar and invite dialog approved
+
+**Reviewer:** Eduardo
+**Verdict:** Mixed — gates 10.4 and 10.6 Fail, gate 10.2 a reported defect under
+investigation, gates 10.8/10.10/10.12 not evaluated, management sidebar and invite dialog
+Pass
+
+This is the first time the owner reviewed the six Phase 3 gates opened 2026-09-14
+(`docs/UI-CHECKLIST.md` Review Log, that date) against the running `v0.5.1` tag, alongside
+the management sidebar and invite dialog shipped 2026-09-16. Full decision text for the
+twelve product questions answered in the same session is in `docs/TODO.md` Findings
+2026-09-17; this entry carries only the verdicts on shipped UI.
+
+**Findings** (ordered by user impact)
+
+1. **Page diff and book diff read as a highlighted source pass, not a document a reader can
+   trust at a glance (gates 10.4, 10.6).**
+   - *Observable evidence:* `pages/pages/[id]/diff.vue` and `pages/books/[id]/diff.vue`
+     shown to the owner on `v0.5.1`, both treating the four change classes
+     (added/removed/modified/moved, §4.7) as whole-block states.
+   - *Root cause:* the diff was built and reviewed as a choice among three whole-block
+     presentation directions ((a)/(b)/(c), `docs/TODO.md` Open Questions, now superseded);
+     none of the three showed a change *inside* a modified block, so two people reading the
+     same modified paragraph cannot see which words actually changed without reading both
+     versions in full.
+   - *Correction applied:* None yet. Scoped as new work: a GitHub-style diff showing
+     word-level changes inside a block, on top of the four change classes already shipped,
+     with a two-column before/after view offered as an option (`docs/TODO.md` Phase 3,
+     gates 10.4/10.6 bullets, and Open Questions).
+   - *Rule added:* None — this file's §4.7 is unchanged pending the redesign; a rule belongs
+     there once the word-level mechanism is built and reviewed, not before.
+
+2. **Page history sometimes saves an empty entry (gate 10.2).**
+   - *Observable evidence:* reported by the owner while reviewing
+     `pages/pages/[id]/history.vue` on `v0.5.1`; not yet reproduced in this session.
+   - *Root cause:* under investigation — `docs/TODO.md` Findings 2026-09-17 names the two
+     leading candidates (a no-op save still inserting a `page_revision` row; the changeset
+     window closing and reopening around one).
+   - *Correction applied:* None yet — the defect is open, not fixed.
+   - *Rule added:* None — pending diagnosis.
+
+**Not evaluated this pass:** gates 10.8 (comment gutter and thread panel), 10.10 (orphaned-
+comment surface) and 10.12 (presence indicators). The owner's running dev servers predated
+the comments-from-read batch (`docs/UI-CHECKLIST.md` Review Log, 2026-09-16, "Starting a
+thread from read mode"), so those three surfaces were not the ones in front of him. They
+stay `Pending` in `docs/TODO.md`, unchanged by this entry.
+
+**Approved, outside the numbered gates:** the management sidebar and the invite dialog
+(this log's 2026-09-16 entry, "The management sidebar, and the invite dialog"). The owner's
+words: "settings feels like something apart." No follow-up requested; the follow-ups that
+entry already carried forward (`is_super_root`/`manage` not reaching the client,
+tailwind-merge, the shared `useConfirm()`) are unaffected by this approval and remain open
+where that entry left them.
+
+---
+
 *The next entry goes below this one.*

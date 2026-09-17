@@ -33,14 +33,15 @@ This file has three working sections plus a parking lot.
 
 ## Status
 
-_Last updated 2026-09-14._
+_Last updated 2026-09-17._
 
 | Phase | State |
 | --- | --- |
 | 0 — Foundations | Complete and archived (`openspec/changes/archive/2026-09-03-bootstrap-monorepo-foundations/`) |
 | 1 — Tenancy and permissions | SDD change complete and archived — 85/85 tasks, all 18 work units. GATE-1 satisfied. Owner-reviewed and approved (`docs/UI-CHECKLIST.md` Review Log). One broader roadmap item stays open past this change: Super Root plan-authoring admin route (see the unticked bullet below) |
 | 2 — Content and editor | SDD change complete and archived (`openspec/changes/archive/2026-09-07-content-and-editor/`), merged to `main` 2026-09-09. GATE-2 satisfied. One roadmap bullet stays partially shipped past this change: `/` slash commands cover heading/list/quote/code-block/divider only, not table/diagram-fence/callout/link-to-page (see the unticked bullet above) |
-| 3 — Versioning, diffs, comments and presence | **In progress — 88 of 97 tasks ticked** in `openspec/changes/versioning-and-collaboration/tasks.md` (counted 2026-09-14 by counting `- [x]` lines; 85 before this pass, then 6.9 ticked on the evidence of the read screen's `comments-unplaced` state and its e2e, 11.1 on the §7.2 rewrite below, and 11.2 because §14 already carried the row it asks for). Every build task in Phases 1–10 is done and every route is mounted (`apps/api/src/index.ts`). What remains is not code: the six **owner-review gates** (10.2, 10.4, 10.6, 10.8, 10.10, 10.12 — one per shipped surface, all still open, see `docs/UI-CHECKLIST.md` Review Log 2026-09-14) and Phase 11's remaining tasks (11.3 Findings, 11.4 `bun run verify`, 11.5 success-criteria confirmation). Two roadmap bullets below stay unticked past the change: the workspace-wide "what the team is working on" surface, which the change never scoped, and the per-viewer presence `mode` (`viewing`), which the shipped view derives from the lock and so only ever reports `editing` |
+| 3 — Versioning, diffs, comments and presence | **In progress — 88 of 97 tasks ticked** in `openspec/changes/versioning-and-collaboration/tasks.md` (counted 2026-09-14 by counting `- [x]` lines; 85 before this pass, then 6.9 ticked on the evidence of the read screen's `comments-unplaced` state and its e2e, 11.1 on the §7.2 rewrite below, and 11.2 because §14 already carried the row it asks for). Every build task in Phases 1–10 is done and every route is mounted (`apps/api/src/index.ts`). What remains is not code: the six **owner-review gates** (10.2, 10.4, 10.6, 10.8, 10.10, 10.12 — one per shipped surface) and Phase 11's remaining tasks (11.3 Findings, 11.4 `bun run verify`, 11.5 success-criteria confirmation). **First owner verdicts landed 2026-09-17** (`docs/UI-CHECKLIST.md` Review Log): 10.4 and 10.6 **not passed** (GitHub-style word-level diff plus a two-column option wanted, on top of the four change classes shipped); 10.2 has an owner-reported defect under investigation (an empty history entry sometimes saved); 10.8, 10.10 and 10.12 not yet evaluated. Two roadmap bullets below stay unticked past the change: the workspace-wide "what the team is working on" surface, which the change never scoped, and the per-viewer presence `mode` (`viewing`), which the shipped view derives from the lock and so only ever reports `editing` |
+| 3.5 — Workspace polish | Opened 2026-09-16. The management sidebar and invite dialog **approved** by the owner 2026-09-17 (`docs/UI-CHECKLIST.md` Review Log); the rest of the phase carries twelve further owner decisions from the same 2026-09-17 review (Findings) and is still in design/build |
 | 4–9 | Not started |
 
 `openspec/changes/versioning-and-collaboration/` is the active change. Its `tasks.md` is
@@ -181,7 +182,13 @@ lives or dies; it is deliberately front-loaded.
 - [ ] Migrate `plans` and per-workspace plan limits (workspace count per owner, seats,
       storage, AI token budget) — authored by Super Root. The `plans` table and the
       workspace-limit check landed (`packages/db/src/schema.ts`); there is no Super Root
-      authoring path yet — no admin route creates or edits a plan.
+      authoring path yet — no admin route creates or edits a plan. **Amended 2026-09-17**
+      (owner decision, Open Questions closed): a per-instance default plan is assigned
+      automatically to a self-registered user; a workspace's owner chooses which plan
+      applies to it, and the workspace's limits derive from that owner's plan. Needs a Super
+      Root **root panel** (Phase 3.5) listing every workspace in the instance alongside plan
+      management — this makes the `capabilities`/`GET /me` signal (Open Questions) a build
+      prerequisite for that panel, not a discretionary question.
 - [x] Migrate the single `permissions` table:
       `(subject_type, subject_id, resource_id, action, effect)` where `subject_type` is
       `user` | `cell` | `role` | `agent` and `effect` is `allow` | `deny`. **Amended:**
@@ -281,6 +288,12 @@ The markdown pipeline and the two document modes.
       (`apps/api/src/routes/tags.ts`), and no code under `apps/web/app` calls it or renders
       a tag anywhere. Tag *parsing* and the derived `page_tags` rows are done (bullet above);
       listing and navigation are not started.
+- [ ] Make wiki-links clickable in Read and Edit, and add Obsidian-style block references
+      (a stable-block-id link into a specific part of another page, on top of the block-id
+      mechanism already shipped) so cross-referencing another part of a document, or another
+      page, is easy. Reaffirmed by the owner 2026-09-17, alongside backlinks (above) and the
+      graph view (Phase 8, below) as the same underlying knowledge-graph feature seen from
+      three angles.
 - [x] Implement the navigation tree UI over `nodes` (shelves, books, chapters, pages) with
       drag reordering writing back to `position` (WU-17).
 
@@ -290,6 +303,13 @@ Ticks below were taken 2026-09-14 against the tree, not against
 `openspec/changes/versioning-and-collaboration/tasks.md`; the file and line named on each
 is the evidence. Every shipped screen in this phase is still waiting on its owner-review
 gate (tasks 10.2–10.12) — a tick here means built, mounted and tested, not reviewed.
+**First owner verdicts, 2026-09-17** (`docs/UI-CHECKLIST.md` Review Log 2026-09-17): gates
+10.4 (page diff) and 10.6 (book diff) **not passed** — see the two bullets below and Open
+Questions; gate 10.2 (page history) has an owner-reported defect under investigation, "an
+empty history entry is sometimes saved" (Findings 2026-09-17); gates 10.8, 10.10 and 10.12
+were not evaluated in that pass, because the owner's running dev servers predated the
+comments-from-read batch. The management sidebar and the invite dialog, reviewed the same
+day outside this task list, were **approved**.
 
 - [x] Migrate `page_revision`: content snapshot plus the block index at that revision.
       `packages/db/drizzle/0012_page_revisions_and_changesets.sql`; rows are immutable by
@@ -306,10 +326,15 @@ gate (tasks 10.2–10.12) — a tick here means built, mounted and tested, not r
       re-parsing both sides; `scripts/checks/diff-input-purity.ts` forbids feeding it the
       stored `block_index`.
 - [x] Build the page-level diff view. `apps/web/app/pages/pages/[id]/diff.vue` over
-      `GET /pages/:id/diff?from=&to=`.
+      `GET /pages/:id/diff?from=&to=`. **Gate 10.4 not passed (owner review, 2026-09-17)** —
+      built and mounted, but reopened: the diff must show GitHub-style word-level changes
+      inside a block, on top of the four change classes, plus an optional two-column
+      before/after view. See Open Questions and `docs/UI-CHECKLIST.md` Review Log
+      2026-09-17.
 - [x] Build the book-level diff view answering "what changed in this book since <date>"
       via changesets. `apps/web/app/pages/books/[id]/{history,diff}.vue` over
-      `GET /books/:id/{history,diff?since=}`, navigable between changed pages.
+      `GET /books/:id/{history,diff?since=}`, navigable between changed pages. **Gate 10.6
+      not passed (owner review, 2026-09-17)** — same rework as gate 10.4, above.
 - [x] Migrate `comments` anchored to `(block_id, offset_within_block)` so reflow above the
       anchor does not detach the comment. `0013_comments.sql`: `block_id`, `offset_start`,
       `offset_end`, `quote`, `quote_hash`, `status` (`anchored` | `orphaned`); migration
@@ -346,13 +371,20 @@ product decisions that do not fit any existing phase. This phase holds the latte
 - [ ] ZEN mode for both Read and Edit: hide everything non-essential from the screen.
       Distinct from focus mode (Phase 3, `Ctrl`/`⌘`+`\`), which hides only the sidebar.
 - [ ] `Ctrl`/`⌘`+`K` quick search / command palette.
-- [ ] Workspace dashboard: render shelves as bookshelves holding books, each book carrying a
-      user-chosen colour and cover for recognition — replaces the current card-list dashboard.
+- [ ] Workspace dashboard, two levels (owner decision 2026-09-17): the dashboard itself
+      lists **shelves**; opening a shelf shows its **bookshelf**, books rendered as covers
+      with a user-chosen colour and cover per book — replaces the current card-list
+      dashboard.
 - [ ] Management sidebar: inside management screens (members, registration, and future
       settings screens) the sidebar switches from the navigation tree to a dedicated
       management sidebar. Team-level settings for sharing models and rule packs/cells
       (`docs/SPECS.md`) and personal settings will live here once built — Phase 6 owns the
-      rule pack model itself; this phase only owns where its UI lives.
+      rule pack model itself; this phase only owns where its UI lives. **Approved by the
+      owner, 2026-09-17, together with the invite dialog** (`docs/UI-CHECKLIST.md` Review
+      Log) — "settings feels like something apart."
+- [ ] Root panel for the Super Root (owner decision 2026-09-17, closes the plans Open
+      Question above): every workspace in the instance, and plan management — the Phase 1
+      admin route this phase's management sidebar has been waiting to reach.
 - [ ] Notion-like block editing on the existing ProseMirror schema: a block handle, an inline
       floating toolbar, and `/` to insert tables/headings/etc., replacing the crowded
       breadcrumb-plus-buttons contextual bar. Editor direction confirmed 2026-09-16: stay on
@@ -360,8 +392,43 @@ product decisions that do not fit any existing phase. This phase holds the latte
       stores JSON blocks, which would break markdown-as-truth and GATE-2. Built 2026-09-16
       (`feat/editor-block-commands` for the package, `feat/editor-block-ui` for the Vue side:
       toolbar, handle, tunes, undo/redo, `/` icons); awaiting the owner's review.
+- [ ] Edit mode carries no frame or border around the document (owner decision 2026-09-17):
+      the environment — the bar, the block handle, the tools above — signals edit mode in
+      harmony with Nuxt UI, never a box that fights the block handle above. Amends the block
+      editing bullet above; not yet built against this rule.
+- [ ] Edit mode stays a single mode with an Obsidian-style shortcut toggling live preview and
+      raw markdown source, rather than two separate modes (owner decision 2026-09-17).
+      Markdown stays the truth, so the toggle must be lossless in both directions.
+- [ ] Route pages as `/w/<workspace-slug>/p/<uuid>` (owner decision 2026-09-17, option b):
+      the workspace slug in the URL, a stable id, the hierarchy carried in the breadcrumb
+      rather than the path. Old `/pages/<uuid>` routes must redirect rather than break.
+      Needs a `slug` column on `workspaces` and its own uniqueness/rename handling — not
+      designed yet.
+- [ ] Creation dialog never asks what it already knows (owner decision 2026-09-17): location
+      and type come from the row and the action chosen, so only the name is asked; the rest
+      (location, type) stays reachable but folded, not asked up front.
+- [ ] **Book mode** (owner decision 2026-09-17, new and large). Entering a book makes it the
+      header and the scope: chapters and pages chain into one continuous read, like a PDF;
+      AI stays scoped to that book; nothing drifts to the rest of the workspace until the
+      person returns to the general view. The owner's framing: "a book as a project is a
+      unit of concentration." Needs its own design pass before tasks — this bullet is the
+      placeholder for that.
+- [ ] Fix the 320px `ConfirmDialog`-under-drawer stacking defect (Findings 2026-09-16,
+      "found on the way, not fixed") the owner's way: `ConfirmDialog` always outranks every
+      other overlay, drawer included (owner decision 2026-09-17). The two Reka dialogs both
+      sit at `z-index: auto`; the fix is a stacking-context ruling, not a per-screen patch.
+- [ ] **Team decisions register** (owner decision 2026-09-17, new). A per-workspace place
+      where important decisions are abstracted out of documents and kept so the knowledge is
+      not lost — fed by hand and by the AI when it detects a decision in a document. Related
+      to `docs/SPECS.md`'s rule packs and cells (Phase 6, below) without merging into that
+      model: a rule pack is a convention applied going forward, a decision register is a
+      record of what was already decided and why. Needs its own design pass; no schema or
+      screen exists yet.
 
 ### Phase 4 — Diagrams
+
+Reaffirmed by the owner 2026-09-17: images and diagrams stay next after the current polish
+phase, unchanged from the 2026-09-16 scoping below.
 
 - [ ] Adopt Mermaid (and D2) fenced code blocks as the primary diagram format. Diagrams
       are text: they diff, they are indexable by RAG, and the AI can author them.
@@ -511,6 +578,9 @@ makes conventions portable across projects.
       review, all against the shared tool layer.
 - [ ] Accessibility pass: keyboard navigation through the tree, editor and diff views.
 - [ ] Responsive pass for the reading experience.
+- [ ] Graph view: visualise the corpus over its wiki-link and block-reference edges (owner
+      decision 2026-09-17, named as a later item — depends on the clickable wiki-links and
+      block references above and on backlinks actually being surfaced, Phase 2).
 
 ### Phase 9 — Export, and the deferred backlog
 
@@ -533,6 +603,108 @@ makes conventions portable across projects.
 ## Findings
 
 Discoveries and constraints. Newest first.
+
+### 2026-09-17 — The owner's review of v0.5.1: twelve decisions, and the first Phase 3 gate verdicts
+
+**What happened.** The owner reviewed the shipped `v0.5.1` tag and answered twelve standing
+product questions in one pass, plus the first real verdicts on the six Phase 3 owner-review
+gates opened 2026-09-14. Full text of each decision lives where it now governs: Open
+Questions (closed or amended, above), the Roadmap (Phase 1, 2, 3, 3.5 and 8, above), and
+`docs/SPECS.md` §2 (the plans decision). This entry is the index and the parts that fit
+nowhere else.
+
+**The twelve decisions, and where each now lives:**
+
+1. Edit mode carries no frame or border; the environment (bar, block handle, tools) signals
+   it instead, in harmony with Nuxt UI. Phase 3.5, above.
+2. One edit mode, Obsidian-style: a shortcut toggles live preview and raw markdown source,
+   losslessly, since markdown stays the truth. Phase 3.5, above.
+3. **Live input rules are missing** for `~~strikethrough~~`, `*emphasis*`, `__strong__`,
+   `[text](url)` and autolinks — its own entry, immediately below.
+4. Routing moves to `/w/<workspace-slug>/p/<uuid>` (option b): workspace in the URL, a
+   stable id, hierarchy in the breadcrumb; old `/pages/<uuid>` routes redirect. Phase 3.5,
+   above.
+5. The dashboard becomes two levels: it lists shelves, and opening one shows its bookshelf,
+   books as covers with a user-chosen colour and cover. Phase 3.5, above (narrows the
+   existing dashboard bullet).
+6. The creation dialog never asks what it already knows: location and type come from the
+   row and action chosen, only the name is asked. Phase 3.5, above.
+7. The condensed bar stays edit-mode-only; read mode keeps the full path and relies on the
+   tree highlighting the open document. Closes the Open Question of that name, above.
+8. **Book mode** (new, large): entering a book makes it the header and the scope, chapters
+   and pages chained into one continuous read, AI scoped to the book, no drift until the
+   person returns to the general view — "a book as a project is a unit of concentration."
+   Phase 3.5, above.
+9. `ConfirmDialog` always outranks every other overlay, drawer included, resolving the
+   320px stacking defect recorded 2026-09-16 ("found on the way, not fixed"). Phase 3.5,
+   above.
+10. **Plans**: a default plan for self-registered users; the workspace owner chooses the
+    workspace's plan; a workspace's limits derive from its owner. A root panel for the
+    Super Root lists every workspace in the instance and manages plans. This makes the
+    `capabilities`/`GET /me` signal (Open Questions) a build prerequisite, no longer a
+    discretionary question. Closes the "Default plan policy" Open Question; amends the
+    Phase 1 plans bullet and adds a Phase 3.5 root-panel bullet, above; `docs/SPECS.md` §2
+    amended, below.
+11. **Deletion**: containers must be empty to delete; the owner may force-delete by typing
+    the container's name and accepting "N pages will be deleted"; comments and revisions go
+    with the page, leaving a trace in the book's history ("page X deleted by Y"); trash with
+    restore, 30 days, then purge. Closes the "Node deletion" Open Question, above.
+12. **Team decisions register** (new): a per-workspace place where important decisions are
+    abstracted and kept, fed by hand and by the AI when it detects a decision in a document;
+    related to `docs/SPECS.md`'s rule packs/cells (Phase 6) without merging into that model.
+    Phase 3.5, above.
+
+Also reaffirmed, unchanged in substance: easy cross-references to another part of a
+document or another page (wiki-links made clickable, plus Obsidian-style block references)
+and a later graph view over that same edge set (Phase 2 and Phase 8, above); images and
+diagrams staying Phase 4 (above).
+
+**The Phase 3 gate verdicts (Findings, not decisions — the owner reviewed the shipped
+surfaces, not a question put to him):** gate 10.4 (page diff) and gate 10.6 (book diff)
+**not passed** — the owner wants a GitHub-style diff, word-level changes inside a block on
+top of the four change classes already shipped, with a two-column before/after view offered
+as an option; this supersedes the "Page diff directions (a) and (c)" Open Question, above,
+which asked the owner to choose among three narrower options that are no longer the ask.
+Gate 10.2 (page history) carries a reported defect, under investigation — its own entry,
+below. Gates 10.8, 10.10 and 10.12 were **not evaluated**: the owner's running dev servers
+predated the comments-from-read batch, so those surfaces were not the ones in front of him.
+The management sidebar and the invite dialog, reviewed the same day outside the numbered
+gate list, were **approved** — "settings feels like something apart." All verdicts are
+recorded in full in `docs/UI-CHECKLIST.md` Review Log, 2026-09-17.
+
+Impact: five Open Questions closed or amended, `docs/SPECS.md` §2 amended, and Phase 1,
+2, 3, 3.5 and 8 of the Roadmap gain or amend bullets, all above. Two gates (10.4, 10.6)
+reopen work already ticked; the other four gates' status is unchanged pending further
+review.
+
+### 2026-09-17 — Live input rules are missing for `~~strikethrough~~`, `*emphasis*`, `__strong__`, `[text](url)` and autolinks
+
+**What happened.** `packages/markdown` parses and round-trips all five constructs — fixtures
+exist for each in the GATE-2 corpus — but the editor's live typing conversion
+(`packages/editor/src/mount/input-rules.ts:57-59`) only wires the input rules for `**`/`__`
+(strong), `_`/`*` single-character emphasis wait state, and `` ` `` (code). Typing
+`~~text~~`, a bare `*emphasis*`, `__strong__` written with underscores, `[text](url)`, or a
+bare URL does not convert live the way `**bold**` already does; the construct still parses
+correctly on save (round-trip is intact) because the parser is unaffected, but the person
+typing gets no live feedback for five of the constructs the product actually supports.
+Raised by the owner during the 2026-09-17 review (decision 3 of that entry, above); the fix
+is in flight.
+
+Impact: `packages/editor/src/mount/input-rules.ts` only — the parser and round-trip are
+unaffected, so this is an editing-experience gap, not a data-integrity one.
+
+### 2026-09-17 — Page history sometimes saves an empty entry (gate 10.2, under investigation)
+
+**What happened.** The owner reported, during the 2026-09-17 review of `apps/web/app/pages/
+pages/[id]/history.vue` (gate 10.2), that an empty history entry is sometimes saved — a
+revision row with no meaningful content change. Not yet reproduced or root-caused in this
+pass; recorded so the gate's block on it is not lost. Candidates to check first: whether
+`savePage` inserts a `page_revision` row even when the incoming markdown hashes identical to
+the current one, and whether the changeset window (`CHANGESET_WINDOW_MINUTES`) can close and
+reopen around a no-op save.
+
+Impact: gate 10.2 stays open until this is diagnosed and fixed; no code changed by this
+entry.
 
 ### 2026-09-16 — `e2e/editor.spec.ts`'s "flake" was one race, and it is the harness's: a key sent within the frame after a click is handled at the caret ProseMirror still holds
 
@@ -4659,25 +4831,37 @@ Fixtures kept permanently at `scripts/checks/__fixtures__/test-coverage/`:
 Decisions still owed. Move an entry out of this section once answered and record the answer
 in Findings.
 
-- **Should every frame screen's bar condense, or edit mode's alone?** `AppShell`'s
-  `condensed` folds the breadcrumb to its last two crumbs behind an overflow menu. Edit mode
-  takes it (the owner's request, 2026-09-16); the read, history, diff and members screens
-  keep the full path. The tree beside every one of them already shows the path, which is the
-  argument for condensing everywhere; the read screen passed review with the full path,
-  which is the argument for asking first. (Findings 2026-09-16.)
+- ~~**Should every frame screen's bar condense, or edit mode's alone?**~~ **Answered
+  2026-09-17: edit mode's alone.** `AppShell`'s `condensed` folds the breadcrumb to its last
+  two crumbs behind an overflow menu, and that stays scoped to edit mode; in read mode the
+  tree highlights the open document and the full path stays on the read, history, diff and
+  members screens. Recorded in Findings 2026-09-17. Superseded original text follows.
+  `AppShell`'s `condensed` folds the breadcrumb to its last two crumbs behind an overflow
+  menu. Edit mode takes it (the owner's request, 2026-09-16); the read, history, diff and
+  members screens keep the full path. The tree beside every one of them already shows the
+  path, which is the argument for condensing everywhere; the read screen passed review with
+  the full path, which is the argument for asking first. (Findings 2026-09-16.)
 - **Dialog corner: 16px or M3's 28px?** Every dialog ships at `UModal`'s `rounded-lg` (16px,
   the container rung); DESIGN-SYSTEM §3.4 says dialogs keep `corner-extra-large` (28px), and
   the radius ladder has no 28px rung (`rounded-xl` is 24, `rounded-2xl` 32). A central ruling
   on `app.config.ts`'s `modal.slots.content`, once, or an amendment to §3.4. (Findings
   2026-09-16.)
-- **Default plan policy — what a new account gets.** `createWorkspace` refuses a user whose
-  `plan_id` is null (`NoPlanAssignedError` → `403 no_plan`), and both paths that create an
-  account — self-registration and invitation acceptance — leave it null; only the seed
-  scripts set one. `docs/SPECS.md` §2 makes plans the Super Root's to author and is silent
-  on a default. Options: a per-instance default plan assigned at account creation; a plan
-  chosen on the invitation; or no default, with the Super Root plan-authoring route (Phase 1,
-  still unticked) as the only assignment path. Until decided, only a seeded account can
-  reach `/workspaces/new` successfully. (Findings 2026-09-14.)
+- ~~**Default plan policy — what a new account gets.**~~ **Answered 2026-09-17.** A
+  per-instance default plan is assigned automatically to a self-registered user; the owner
+  of a workspace chooses which plan applies to it, and the workspace's limits derive from
+  that owner's plan, not from a plan handed to the workspace directly. The Super Root keeps
+  authoring plans, now from a dedicated root panel listing every workspace in the instance.
+  `docs/SPECS.md` §2 amended; recorded in Findings 2026-09-17. **Not yet built** — the
+  Super Root plan-authoring route (Phase 1, still unticked) and the root panel (Phase 3.5,
+  below) remain. Superseded original text follows.
+  `createWorkspace` refuses a user whose `plan_id` is null (`NoPlanAssignedError` →
+  `403 no_plan`), and both paths that create an account — self-registration and invitation
+  acceptance — leave it null; only the seed scripts set one. `docs/SPECS.md` §2 made plans
+  the Super Root's to author and was silent on a default. Options were: a per-instance
+  default plan assigned at account creation; a plan chosen on the invitation; or no default,
+  with the Super Root plan-authoring route (Phase 1, still unticked) as the only assignment
+  path. Until decided, only a seeded account could reach `/workspaces/new` successfully.
+  (Findings 2026-09-14.)
 - **Whether to teach tailwind-merge the project's type roles.** `ui.tv.twMergeConfig` in
   `app.config.ts` would stop a `--text-*` role inside a `:ui` slot override being dropped as
   a colour (Findings 2026-09-16). Cheap, central, and it changes what `WorkspaceSwitcher`'s
@@ -4693,24 +4877,45 @@ in Findings.
   no `write` signal per node it offers "Rename…" and "Move up/down" to every caller and
   lets the server refuse, where a `read`-only member should see the item disabled with
   the reason. The same `capabilities` answer, per node on `GET /workspaces/:id/tree`,
-  would close it.
+  would close it. **Amended 2026-09-17:** decision 10 on plans (below) makes this a
+  prerequisite rather than a standing question — "no longer a question" in the owner's own
+  words. Whichever of `capabilities` or `GET /me` is built, it must exist before the plans
+  work can show a workspace's own plan and limits to its owner, or gate the new Super Root
+  root panel. Which of the two mechanisms is picked is still open.
 - **`page_revision` retention.** Every save inserts an immutable revision row carrying the
   full markdown; nothing prunes, compacts or caps them. The table grows with every
   keystroke-and-save on every page forever. Owed: a retention rule (keep all, keep N per
   page, keep all within a window then thin), and who may run it. Not a Phase 3 question to
   answer in-flight; recorded so the growth is a decision, not a surprise.
-- **Node deletion — three questions, unchanged since 2026-09-09.** (1) What happens to
-  children — the schema cascades by accident, not by choice. (2) What happens to revisions
-  and comments other people wrote — a hard delete destroys the audit trail; a soft delete
-  is a schema and permissions change. (3) What a deleted id discloses — absence and denial
-  must stay indistinguishable across tree, backlinks, mentions and MCP. See the Finding of
-  that date; deletion is a recorded non-goal on the tree screen until all three are
-  answered.
-- **Page diff directions (a) and (c).** The audit's (a) — render each diff block as
-  `doc-body` prose with a left rule and a badge, so the diff reads as a document — and (c) —
-  a "moved from here" ghost at the block's old position — are unimplemented and are the
-  owner's call; (b) is what shipped. Recorded in `apps/web/app/pages/pages/[id]/diff.vue`'s
-  header comment and in Findings 2026-09-14 ("Seen on the way").
+- ~~**Node deletion — three questions, unchanged since 2026-09-09.**~~ **Answered
+  2026-09-17.** A container (shelf, book, chapter) must be empty to delete; the owner may
+  force a non-empty container by typing its name and accepting "N pages will be deleted."
+  Comments and revisions go with the deleted page rather than being orphaned or severed, and
+  the book's history keeps a trace ("page X deleted by Y"). Deletion is soft — a trash with
+  restore, 30 days, then purge — so a hard delete never runs against an audit trail on
+  demand. What a trashed or purged id discloses to a caller who cannot read it is not itself
+  answered by this decision; it stays governed by the existing non-disclosure rule (absence
+  and denial indistinguishable) until the trash/restore surface is built and can be checked
+  against it. Recorded in Findings 2026-09-17. **Not yet built** — the tree's delete
+  affordance, the trash/restore screen and API, and the purge job are new roadmap work
+  (Phase 3.5, below). Superseded original text follows.
+  (1) What happens to children — the schema cascades by accident, not by choice. (2) What
+  happens to revisions and comments other people wrote — a hard delete destroys the audit
+  trail; a soft delete is a schema and permissions change. (3) What a deleted id discloses —
+  absence and denial must stay indistinguishable across tree, backlinks, mentions and MCP.
+  See the Finding of 2026-09-09.
+- ~~**Page diff directions (a) and (c).**~~ **Superseded 2026-09-17.** The owner did not
+  pick among (a)/(b)/(c): reviewing the shipped page diff (gate 10.4) and book diff
+  (gate 10.6), the verdict was **not passed** — wanted instead is a GitHub-style diff with
+  word-level changes inside a block, on top of the existing four change classes
+  (added/removed/modified/moved), and a two-column before/after view offered as an option.
+  See `docs/UI-CHECKLIST.md` Review Log 2026-09-17 for the verdict and Phase 3, below, for
+  the rework this reopens. Superseded original text follows.
+  The audit's (a) — render each diff block as `doc-body` prose with a left rule and a badge,
+  so the diff reads as a document — and (c) — a "moved from here" ghost at the block's old
+  position — were unimplemented and were the owner's call; (b) is what shipped. Recorded in
+  `apps/web/app/pages/pages/[id]/diff.vue`'s header comment and in Findings 2026-09-14
+  ("Seen on the way").
 - **Registration answers the question password reset refuses.** `POST /auth/register`
   returns `409 "an account already exists for this email address"`, while
   `POST /auth/password-reset` goes to deliberate lengths — an identical body and now an

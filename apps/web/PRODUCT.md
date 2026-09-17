@@ -62,12 +62,18 @@ orphan handling — started from read mode on any paragraph or heading, replied 
 last workspace), focus mode (`Ctrl`/`⌘`+`\`) and a per-browser comments toggle on the read
 screen.
 
-Not yet: deleting anything (three open questions), commenting on a list, code block, table or
-raw-HTML block, self-registration that leads anywhere (no default plan), clickable wiki-links,
-backlinks or tags in the UI, logout, diagram/image/SVG rendering (Phase 4), any AI or MCP surface
-(Phases 5, 7), a `Ctrl`/`⌘`+`K` command palette, ZEN mode, user-contributed colour themes, and
-the workspace dashboard as bookshelves with user-chosen book colours and covers (owner
-decisions, 2026-09-16 — `docs/TODO.md` Phase 3.5).
+Not yet: deleting anything (design decided 2026-09-17 — empty-to-delete, owner force with a
+typed confirmation, trash with 30-day restore then purge — not yet built), commenting on a
+list, code block, table or raw-HTML block, self-registration that leads anywhere (default-plan
+policy decided 2026-09-17, not yet built), clickable wiki-links, block references, backlinks
+or tags in the UI, a graph view over that link set, logout, diagram/image/SVG rendering
+(Phase 4), any AI or MCP surface (Phases 5, 7), a `Ctrl`/`⌘`+`K` command palette, ZEN mode,
+user-contributed colour themes, book mode (a book read continuously as its own scoped unit of
+concentration, owner decision 2026-09-17), a team decisions register (owner decision
+2026-09-17), a Super Root panel over every workspace and its plan (owner decision 2026-09-17),
+and the two-level workspace dashboard — shelves, then a bookshelf of books with a user-chosen
+colour and cover per book (owner decisions, 2026-09-16 and 2026-09-17 — `docs/TODO.md`
+Phase 3.5).
 
 Technical constraints that bind every screen: Nuxt 4 + Nuxt UI v4 on Bun; `packages/core`
 has zero framework imports; one markdown parser; the ProseMirror document is a view, never

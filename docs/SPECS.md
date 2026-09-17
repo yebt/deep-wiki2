@@ -54,7 +54,7 @@ corpus is a **first-class consumption surface for agents**, not only for humans.
 
 | Actor | Scope | Capabilities |
 | --- | --- | --- |
-| **Super Root** | The whole deployment | Manage the application globally: suspend, remove, and inspect tenants; define the plans that bound what a user may create; view instance-wide operational state |
+| **Super Root** | The whole deployment | Manage the application globally: suspend, remove, and inspect tenants; author the plans that bound what a workspace's owner may choose for it (§2, "Plan assignment — DECIDED 2026-09-17"), from a dedicated root panel listing every workspace in the instance; view instance-wide operational state |
 | **Workspace Admin** | One workspace | Owner of a workspace. Manages its settings, permissions, AI credentials, formats, templates, teams, and invitations |
 | **Member** | One workspace | Works inside a workspace with access limited by the permission model |
 | **Cell / Team** | One workspace | Not a person: a named group of users used to assign permissions in bulk |
@@ -74,8 +74,18 @@ A workspace is the unit of tenancy and the unit of isolation. It carries:
 - Team/cell definitions
 - Invitation state and registration policy overrides
 
-A user may create **N workspaces, bounded by the plan** assigned by the Super Root. A user
-may invite existing users or new people into a workspace they own.
+A user may create **N workspaces, bounded by a plan**. A user may invite existing users or
+new people into a workspace they own.
+
+**Plan assignment — DECIDED 2026-09-17.** A per-instance default plan is assigned
+automatically to a self-registered user; the plan that actually bounds a given workspace is
+chosen by that workspace's owner, and the workspace's limits derive from the owner's plan —
+not from a plan handed to the workspace by the Super Root directly. The Super Root remains
+the sole author of what plans exist, now from a dedicated root panel that lists every
+workspace in the instance alongside plan management (`docs/TODO.md` Phase 1 and Phase 3.5).
+Not yet built: only the `plans` table and the workspace-count check exist today
+(`packages/db/src/schema.ts`); there is no default-plan assignment, no owner plan choice,
+and no root panel.
 
 ### Registration policy
 
