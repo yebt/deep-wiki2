@@ -604,6 +604,38 @@ makes conventions portable across projects.
 
 Discoveries and constraints. Newest first.
 
+### 2026-09-17 — `bun run test` lost 85 suites to one race: two processes creating `deepwiki_test_template`
+
+**What happened.** `bun run test` runs every package's suite at once (`--filter '*'`), and
+`packages/db` and `apps/api` each provision the shared test template from their own process.
+Both saw no `deepwiki_test_template`, both ran `CREATE DATABASE`, and the loser failed with
+`duplicate key value violates unique constraint "pg_database_datname_index"` — 85 suites red
+that pass alone (458/458). Behind that race stood a second one nobody had hit yet: `CREATE
+DATABASE … TEMPLATE` refuses while anyone is connected to the template, and the other process
+is connected to it exactly then, running the migrator.
+
+**The fix** (`packages/db/testing/provision.ts`). Every provisioner takes a session-level
+advisory lock keyed on the template's name, on the maintenance connection: exclusive to create
+or migrate (`ensureTemplateDatabase`), shared to copy (`createTestDatabase`, which
+`provisionTestDatabase` now goes through). A second process arriving at the same moment waits,
+finds the template, runs the migrator over nothing, and copies; copies wait for a migration
+and never for each other; a holder that dies releases the lock with its connection. The
+migrator's connection to the template is closed before the exclusive lock is released, so a
+copy that was waiting finds nobody on it.
+
+**Proof.** `provision.concurrency.test.ts` reproduces the race in one process — three
+`ensureTemplateDatabase()` calls at once against the real harness Postgres, on a template of
+the test's own (`dw_test_template_race`), each followed by a copy: red with the exact
+production error on the code before the lock (two of three rejected), green after; and two
+`provisionTestDatabase()` calls at once, which share the per-process memo. Then `bun run test`
+twice, the second after dropping `deepwiki_test_template` so db and api raced for it from
+cold: 460 + 393 + 1049 green both times.
+
+**Left as found.** `DROP DATABASE … WITH (FORCE)` on a database Postgres is still analysing
+waits for that worker — measured 4 s once — which is more than `bun test`'s 5 s hook default
+with several drops in a row; the new test drops inside its own body with a 120 s timeout,
+not in `afterAll`. Other suites drop one database each and stay well under.
+
 ### 2026-09-17 — The node responses name their workspace; the edit route's 501st request was never `/location`, it was the core barrel in the browser (branch `fix/routes-followups`)
 
 **What happened.** Two follow-ups from the routes batch (2026-09-16, "one more request per
@@ -1118,6 +1150,8 @@ branch: the API's two additions, the web move with its docs, the e2e migration w
   every read, edit, history and diff view (cached across hops; server-side on a full load).
   Folding `workspaceSlug` into the six node responses would remove it; deferred because two of
   those composables and the diff API route are another branch's this week.
+  **Closed 2026-09-17** (`fix/routes-followups`): the fold is done — see the Finding of that
+  date; it was not, as this note assumed, the edit route's 501st request.
 - The placeholder screen the old address shows when the server cannot resolve it is rendered in
   the document frame — the workspace is exactly what is not yet known — and is never seen in
   development or e2e (the cookie is forwarded and the server answers the 301).
