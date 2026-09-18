@@ -10,6 +10,7 @@ import {
   DeadAnchorError,
   heartbeatLock,
   NotCanonicalError,
+  PageNotFoundError,
   readPageHtml,
   readPageMarkdown,
   savePage,
@@ -51,10 +52,18 @@ interface LocatedNodeRow extends NodeRow {
   workspace_slug: string;
 }
 
+/**
+ * Every route in this file resolves its node through `live_nodes`
+ * (trash-non-disclosure spec): a trashed page must answer identically to
+ * an unknown one, for read and for every write this file exposes (save,
+ * the edit-session probe, the lock heartbeat, and the lock take-over) —
+ * the manager's trash block on `GET /pages/:id` is wired separately in
+ * Phase 6, after `trashLookup` exists.
+ */
 function locateNode(sql: postgres.Sql, nodeId: string): Promise<LocatedNodeRow[]> {
   return sql<LocatedNodeRow[]>`
     SELECT n.workspace_id, n.title, w.slug AS workspace_slug
-      FROM nodes n
+      FROM live_nodes n
       JOIN workspaces w ON w.id = n.workspace_id
      WHERE n.id = ${nodeId}
   `;
@@ -88,7 +97,7 @@ export function createPageRoutes(deps: PageRouteDeps): Hono<{ Variables: Session
     const nodeId = c.req.param('id');
     const session = c.get('session');
 
-    const [node] = await deps.sql<NodeRow[]>`SELECT workspace_id, title FROM nodes WHERE id = ${nodeId}`;
+    const [node] = await deps.sql<NodeRow[]>`SELECT workspace_id, title FROM live_nodes WHERE id = ${nodeId}`;
     if (!node) return c.json(ErrorResponseSchema.parse({ error: 'not found' }), 404);
 
     const authorized = await can(deps.sql, { subjectType: 'user', subjectId: session.userId, resourceId: nodeId, action: 'write' });
@@ -117,6 +126,13 @@ export function createPageRoutes(deps: PageRouteDeps): Hono<{ Variables: Session
       }
       if (error instanceof DeadAnchorError) {
         return c.json({ error: 'dead anchor', corrected: error.corrected, anchors: error.anchors }, 409);
+      }
+      // Defence in depth: the live_nodes lookup above already refuses a
+      // trashed or unknown page before this point, but savePage() carries
+      // the same check for its other callers (comments.ts's anchor mint),
+      // so a race between the two never surfaces as a raw 500.
+      if (error instanceof PageNotFoundError) {
+        return c.json(ErrorResponseSchema.parse({ error: 'not found' }), 404);
       }
       throw error;
     }
@@ -192,7 +208,7 @@ export function createPageRoutes(deps: PageRouteDeps): Hono<{ Variables: Session
     const nodeId = c.req.param('id');
     const session = c.get('session');
 
-    const [node] = await deps.sql<NodeRow[]>`SELECT workspace_id, title FROM nodes WHERE id = ${nodeId}`;
+    const [node] = await deps.sql<NodeRow[]>`SELECT workspace_id, title FROM live_nodes WHERE id = ${nodeId}`;
     if (!node) return c.json(ErrorResponseSchema.parse({ error: 'not found' }), 404);
 
     const authorized = await can(deps.sql, { subjectType: 'user', subjectId: session.userId, resourceId: nodeId, action: 'write' });

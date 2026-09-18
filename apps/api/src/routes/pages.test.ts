@@ -566,3 +566,93 @@ describe('POST /pages/:id/lock/take-over', () => {
     expect(res.status).toBe(403);
   });
 });
+
+// trash-non-disclosure spec: "A trashed id answers identically to an
+// unknown id" — every route this file exposes, for a former reader who
+// once had read (or write) on the page and now holds no `manage` grant.
+// tasks.md 4.3-4.4, 4.22.
+describe('trash-non-disclosure', () => {
+  async function trash(nodeId: string): Promise<void> {
+    await sql`UPDATE nodes SET trashed_at = now(), trash_operation_id = ${crypto.randomUUID()} WHERE id = ${nodeId}`;
+  }
+
+  test('GET /pages/:id on a trashed id answers byte-identically to an unknown id', async () => {
+    const fixture = await buildFixture();
+    await savePage(sql, { nodeId: fixture.pageId, workspaceId: fixture.workspaceId, markdown: '# Hello\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
+    await trash(fixture.pageId);
+    const app = buildApp();
+
+    const denied = await app.request(`/pages/${fixture.pageId}`, { headers: { cookie: fixture.readerCookie } });
+    const absent = await app.request(`/pages/${crypto.randomUUID()}`, { headers: { cookie: fixture.readerCookie } });
+
+    expect(denied.status).toBe(404);
+    const deniedBody = await denied.text();
+    expect(deniedBody).toBe(await absent.text());
+    expect(absent.status).toBe(404);
+  });
+
+  test('PUT /pages/:id on a trashed id is refused identically to an unknown id, and storage is unchanged', async () => {
+    const fixture = await buildFixture();
+    await savePage(sql, { nodeId: fixture.pageId, workspaceId: fixture.workspaceId, markdown: '# Original\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
+    await trash(fixture.pageId);
+    const app = buildApp();
+
+    const denied = await app.request(`/pages/${fixture.pageId}`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json', cookie: fixture.writerCookie },
+      body: JSON.stringify({ markdown: '# Changed\n', expectedContentHash: null }),
+    });
+    const absent = await app.request(`/pages/${crypto.randomUUID()}`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json', cookie: fixture.writerCookie },
+      body: JSON.stringify({ markdown: '# Changed\n', expectedContentHash: null }),
+    });
+
+    expect(denied.status).toBe(404);
+    expect(await denied.text()).toBe(await absent.text());
+    const [row] = await sql`SELECT markdown FROM page_content WHERE node_id = ${fixture.pageId}`;
+    expect(row!.markdown).toBe('# Original\n');
+  });
+
+  test('GET /pages/:id/edit-session on a trashed id is refused identically to an unknown id, and no lock is acquired', async () => {
+    const fixture = await buildFixture();
+    await savePage(sql, { nodeId: fixture.pageId, workspaceId: fixture.workspaceId, markdown: '# Hello\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
+    await trash(fixture.pageId);
+    const app = buildApp();
+
+    const denied = await app.request(`/pages/${fixture.pageId}/edit-session`, { headers: { cookie: fixture.writerCookie } });
+    const absent = await app.request(`/pages/${crypto.randomUUID()}/edit-session`, { headers: { cookie: fixture.writerCookie } });
+
+    expect(denied.status).toBe(404);
+    expect(await denied.text()).toBe(await absent.text());
+    const [lockRow] = await sql`SELECT 1 AS x FROM page_locks WHERE node_id = ${fixture.pageId}`;
+    expect(lockRow).toBeUndefined();
+  });
+
+  test('PATCH /pages/:id/lock on a trashed id is refused identically to an unknown id', async () => {
+    const fixture = await buildFixture();
+    await savePage(sql, { nodeId: fixture.pageId, workspaceId: fixture.workspaceId, markdown: '# Hello\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
+    const app = buildApp();
+    await app.request(`/pages/${fixture.pageId}/edit-session`, { headers: { cookie: fixture.writerCookie } });
+    await trash(fixture.pageId);
+
+    const denied = await app.request(`/pages/${fixture.pageId}/lock`, { method: 'PATCH', headers: { cookie: fixture.writerCookie } });
+    const absent = await app.request(`/pages/${crypto.randomUUID()}/lock`, { method: 'PATCH', headers: { cookie: fixture.writerCookie } });
+
+    expect(denied.status).toBe(404);
+    expect(await denied.text()).toBe(await absent.text());
+  });
+
+  test('POST /pages/:id/lock/take-over on a trashed id is refused identically to an unknown id', async () => {
+    const fixture = await buildFixture();
+    await savePage(sql, { nodeId: fixture.pageId, workspaceId: fixture.workspaceId, markdown: '# Hello\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
+    await trash(fixture.pageId);
+    const app = buildApp();
+
+    const denied = await app.request(`/pages/${fixture.pageId}/lock/take-over`, { method: 'POST', headers: { cookie: fixture.writerCookie } });
+    const absent = await app.request(`/pages/${crypto.randomUUID()}/lock/take-over`, { method: 'POST', headers: { cookie: fixture.writerCookie } });
+
+    expect(denied.status).toBe(404);
+    expect(await denied.text()).toBe(await absent.text());
+  });
+});
