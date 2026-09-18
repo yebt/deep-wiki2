@@ -291,3 +291,75 @@ describe('GET /mentions/subjects — caller authorisation', () => {
     expectNoDisclosure(body, { id: member, values: ['bobsecret'] }, res.headers);
   });
 });
+
+// trash-non-disclosure spec: "Backlinks and mentions carry no residual
+// trace" — a trashed page must not surface as an autocomplete suggestion,
+// and the two page-scoped endpoints must deny a trashed page identically
+// to an unknown one.
+describe('trash-non-disclosure', () => {
+  test('a trashed page matching the query does not autocomplete', async () => {
+    const owner = await insertUser('owner-trash-mentions');
+    const [ws] = await sql<{ id: string }[]>`INSERT INTO workspaces (owner_id, name, slug) VALUES (${owner}, 'WST', ${`wst-${crypto.randomUUID()}`}) RETURNING id`;
+    const root = await insertNode(ws!.id, null, 'workspace', 'root-trash', 'Root');
+    const trashedPage = await insertNode(ws!.id, root, 'page', 'trashed-mention', 'Secret Trashed Roadmap');
+    const requester = await insertUser('requester-trash');
+    await sql`
+      INSERT INTO permissions (workspace_id, subject_type, subject_id, resource_id, action, effect)
+      VALUES (${ws!.id}, 'user', ${requester}, ${trashedPage}, 'read', 'allow')
+    `;
+    await sql`UPDATE nodes SET trashed_at = now(), trash_operation_id = ${crypto.randomUUID()} WHERE id = ${trashedPage}`;
+
+    const app = buildApp();
+    const res = await app.request(`/mentions/pages?workspaceId=${ws!.id}&q=Secret`, { headers: { cookie: await cookieFor(requester) } });
+
+    expect(res.status).toBe(200);
+    const body: unknown = await res.json();
+    expectNoDisclosure(body, { id: trashedPage, slug: 'trashed-mention', title: 'Secret Trashed Roadmap' }, res.headers);
+    expect((body as { pages: unknown[] }).pages).toEqual([]);
+  });
+
+  test('GET /mentions/subjects on a trashed page answers identically to an unknown page', async () => {
+    const owner = await insertUser('owner-trash-subjects');
+    const [ws] = await sql<{ id: string }[]>`INSERT INTO workspaces (owner_id, name, slug) VALUES (${owner}, 'WST2', ${`wst2-${crypto.randomUUID()}`}) RETURNING id`;
+    const root = await insertNode(ws!.id, null, 'workspace', 'root-trash2', 'Root');
+    const page = await insertNode(ws!.id, root, 'page', 'page-trash2', 'Page');
+    const requester = await insertUser('requester-trash2');
+    await sql`
+      INSERT INTO permissions (workspace_id, subject_type, subject_id, resource_id, action, effect)
+      VALUES (${ws!.id}, 'user', ${requester}, ${page}, 'write', 'allow')
+    `;
+    await sql`UPDATE nodes SET trashed_at = now(), trash_operation_id = ${crypto.randomUUID()} WHERE id = ${page}`;
+    const cookie = await cookieFor(requester);
+    const MISSING_PAGE_ID = '00000000-0000-4000-8000-0000000000ff';
+
+    const app = buildApp();
+    const denied = await app.request(`/mentions/subjects?workspaceId=${ws!.id}&pageId=${page}&q=`, { headers: { cookie } });
+    const missing = await app.request(`/mentions/subjects?workspaceId=${ws!.id}&pageId=${MISSING_PAGE_ID}&q=`, { headers: { cookie } });
+
+    expect(denied.status).toBe(404);
+    expect(await denied.text()).toBe(await missing.text());
+  });
+
+  test('GET /pages/:id/mentions/:userId/check on a trashed page answers identically to an unknown page', async () => {
+    const owner = await insertUser('owner-trash-check');
+    const [ws] = await sql<{ id: string }[]>`INSERT INTO workspaces (owner_id, name, slug) VALUES (${owner}, 'WST3', ${`wst3-${crypto.randomUUID()}`}) RETURNING id`;
+    const root = await insertNode(ws!.id, null, 'workspace', 'root-trash3', 'Root');
+    const page = await insertNode(ws!.id, root, 'page', 'page-trash3', 'Page');
+    const requester = await insertUser('requester-trash3');
+    const mentioned = await insertUser('mentioned-trash3');
+    await sql`
+      INSERT INTO permissions (workspace_id, subject_type, subject_id, resource_id, action, effect)
+      VALUES (${ws!.id}, 'user', ${requester}, ${page}, 'read', 'allow')
+    `;
+    await sql`UPDATE nodes SET trashed_at = now(), trash_operation_id = ${crypto.randomUUID()} WHERE id = ${page}`;
+    const cookie = await cookieFor(requester);
+    const MISSING_PAGE_ID = '00000000-0000-4000-8000-0000000000fb';
+
+    const app = buildApp();
+    const denied = await app.request(`/pages/${page}/mentions/${mentioned}/check`, { headers: { cookie } });
+    const missing = await app.request(`/pages/${MISSING_PAGE_ID}/mentions/${mentioned}/check`, { headers: { cookie } });
+
+    expect(denied.status).toBe(404);
+    expect(await denied.text()).toBe(await missing.text());
+  });
+});

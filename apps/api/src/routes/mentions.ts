@@ -34,7 +34,7 @@ export function createMentionRoutes(deps: MentionRouteDeps): Hono<{ Variables: S
     if (!workspaceId) return c.json(ErrorResponseSchema.parse({ error: 'workspaceId is required' }), 400);
 
     const candidates = await deps.sql<{ id: string; title: string }[]>`
-      SELECT id, title FROM nodes
+      SELECT id, title FROM live_nodes
        WHERE workspace_id = ${workspaceId} AND type = 'page' AND title ILIKE ${`${query}%`}
        ORDER BY title
        LIMIT ${PAGE_CANDIDATE_LIMIT}
@@ -77,7 +77,7 @@ export function createMentionRoutes(deps: MentionRouteDeps): Hono<{ Variables: S
     // listed. The two ids arrive independently, and nothing else here
     // relates them — a caller may not hold up a page they can read in one
     // tenant to ask for another tenant's members.
-    const [node] = await deps.sql<{ workspace_id: string }[]>`SELECT workspace_id FROM nodes WHERE id = ${pageId}`;
+    const [node] = await deps.sql<{ workspace_id: string }[]>`SELECT workspace_id FROM live_nodes WHERE id = ${pageId}`;
     const callerCanRead =
       node !== undefined &&
       node.workspace_id === workspaceId &&
@@ -112,7 +112,7 @@ export function createMentionRoutes(deps: MentionRouteDeps): Hono<{ Variables: S
     // anything about it — otherwise `200 {canRead}` versus `404` is itself
     // a page-existence oracle for a caller with no grant. Absence and
     // denial-of-read share one response, as on the comment routes.
-    const [node] = await deps.sql<{ workspace_id: string }[]>`SELECT workspace_id FROM nodes WHERE id = ${pageId}`;
+    const [node] = await deps.sql<{ workspace_id: string }[]>`SELECT workspace_id FROM live_nodes WHERE id = ${pageId}`;
     const callerCanRead =
       node !== undefined &&
       (await can(deps.sql, { subjectType: 'user', subjectId: session.userId, resourceId: pageId, action: 'read' }));
