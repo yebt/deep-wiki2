@@ -53,7 +53,7 @@ export function createDiffRoutes(deps: DiffRouteDeps): Hono<{ Variables: Session
     if (!from || !to) return c.json(ErrorResponseSchema.parse({ error: 'from and to are required' }), 400);
 
     const [node] = await deps.sql<NodeRow[]>`
-      SELECT n.workspace_id, w.slug AS workspace_slug FROM nodes n JOIN workspaces w ON w.id = n.workspace_id WHERE n.id = ${pageId}
+      SELECT n.workspace_id, w.slug AS workspace_slug FROM live_nodes n JOIN workspaces w ON w.id = n.workspace_id WHERE n.id = ${pageId}
     `;
     const canRead =
       node !== undefined &&
@@ -99,7 +99,7 @@ export function createDiffRoutes(deps: DiffRouteDeps): Hono<{ Variables: Session
     if (Number.isNaN(sinceDate.getTime())) return c.json(ErrorResponseSchema.parse({ error: 'since must be a valid date' }), 400);
 
     const [node] = await deps.sql<NodeWithTitleRow[]>`
-      SELECT n.workspace_id, n.title, w.slug AS workspace_slug FROM nodes n JOIN workspaces w ON w.id = n.workspace_id WHERE n.id = ${bookId}
+      SELECT n.workspace_id, n.title, w.slug AS workspace_slug FROM live_nodes n JOIN workspaces w ON w.id = n.workspace_id WHERE n.id = ${bookId}
     `;
     const canRead =
       node !== undefined &&
@@ -118,7 +118,7 @@ export function createDiffRoutes(deps: DiffRouteDeps): Hono<{ Variables: Session
     // `SELECT` per page (the same batching principle `listChangedPagesSince`
     // itself already follows for revisions).
     const titleRows = readablePages.length
-      ? await deps.sql<TitleRow[]>`SELECT id, title FROM nodes WHERE id = ANY(${readablePages.map((p) => p.pageId)})`
+      ? await deps.sql<TitleRow[]>`SELECT id, title FROM live_nodes WHERE id = ANY(${readablePages.map((p) => p.pageId)})`
       : [];
     const titleByPageId = new Map(titleRows.map((row) => [row.id, row.title]));
 

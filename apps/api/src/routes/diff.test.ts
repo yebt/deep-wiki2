@@ -232,6 +232,26 @@ describe('GET /pages/:id/diff', () => {
     const body = (await res.json()) as { diff?: unknown };
     expect(body.diff).toBeUndefined();
   });
+
+  // trash-non-disclosure spec: a former reader gets the same 404 as an
+  // unknown page once the page is trashed.
+  test('a trashed page\'s diff answers identically to an unknown page', async () => {
+    const fixture = await buildPageFixture();
+    await sql`UPDATE nodes SET trashed_at = now(), trash_operation_id = ${crypto.randomUUID()} WHERE id = ${fixture.pageId}`;
+    const app = buildApp();
+
+    const denied = await app.request(
+      `/pages/${fixture.pageId}/diff?from=${fixture.fromRevisionId}&to=${fixture.toRevisionId}`,
+      { headers: { cookie: fixture.readerCookie } },
+    );
+    const missing = await app.request(
+      `/pages/${crypto.randomUUID()}/diff?from=${fixture.fromRevisionId}&to=${fixture.toRevisionId}`,
+      { headers: { cookie: fixture.readerCookie } },
+    );
+
+    expect(denied.status).toBe(404);
+    expect(await denied.text()).toBe(await missing.text());
+  });
 });
 
 describe('GET /books/:id/diff', () => {
@@ -386,5 +406,37 @@ describe('GET /books/:id/diff', () => {
     expect(body.pages).toHaveLength(1);
     expect(body.pages[0]!.baselineRevisionId).toBeNull();
     expect(body.pages[0]!.pageTitle).toBe('Brand New Page');
+  });
+
+  // trash-non-disclosure spec: a trashed book answers identically to an
+  // unknown one, and a trashed page contributes nothing to the aggregate.
+  test('a trashed book\'s diff answers identically to an unknown book', async () => {
+    const fixture = await buildBookFixture();
+    await sql`UPDATE nodes SET trashed_at = now(), trash_operation_id = ${crypto.randomUUID()} WHERE id = ${fixture.bookId}`;
+    const app = buildApp();
+
+    const denied = await app.request(`/books/${fixture.bookId}/diff?since=${encodeURIComponent(fixture.since.toISOString())}`, {
+      headers: { cookie: fixture.readerCookie },
+    });
+    const missing = await app.request(`/books/${crypto.randomUUID()}/diff?since=${encodeURIComponent(fixture.since.toISOString())}`, {
+      headers: { cookie: fixture.readerCookie },
+    });
+
+    expect(denied.status).toBe(404);
+    expect(await denied.text()).toBe(await missing.text());
+  });
+
+  test('a trashed page contributes nothing to the book-level diff', async () => {
+    const fixture = await buildBookFixture();
+    await sql`UPDATE nodes SET trashed_at = now(), trash_operation_id = ${crypto.randomUUID()} WHERE id = ${fixture.pageId}`;
+    const app = buildApp();
+
+    const res = await app.request(`/books/${fixture.bookId}/diff?since=${encodeURIComponent(fixture.since.toISOString())}`, {
+      headers: { cookie: fixture.readerCookie },
+    });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { pages: unknown[] };
+    expect(body.pages).toEqual([]);
   });
 });

@@ -156,6 +156,21 @@ describe('GET /pages/:id/history', () => {
     expect(missingRes.status).toBe(404);
     expect(await deniedRes.json()).toEqual(await missingRes.json());
   });
+
+  // revision-history spec: "History denied for a trashed page without
+  // manage" — a former reader gets the same 404 as an unknown page.
+  test('a trashed page\'s history answers identically to an unknown page for a former reader', async () => {
+    const fixture = await buildFixture();
+    await savePage(sql, { nodeId: fixture.pageId, workspaceId: fixture.workspaceId, markdown: '# One\n', expectedContentHash: null, updatedBy: fixture.authorId, changesetWindowMinutes: WINDOW_MINUTES });
+    await sql`UPDATE nodes SET trashed_at = now(), trash_operation_id = ${crypto.randomUUID()} WHERE id = ${fixture.pageId}`;
+
+    const app = buildApp();
+    const denied = await app.request(`/pages/${fixture.pageId}/history`, { headers: { cookie: fixture.readerCookie } });
+    const missing = await app.request(`/pages/${crypto.randomUUID()}/history`, { headers: { cookie: fixture.readerCookie } });
+
+    expect(denied.status).toBe(404);
+    expect(await denied.text()).toBe(await missing.text());
+  });
 });
 
 // changesets spec: "Book-Level History Is One Query" — the input the
@@ -346,5 +361,28 @@ describe('GET /books/:id/history', () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as { changesets: unknown[] };
     expect(body.changesets).toEqual([]);
+  });
+
+  // trash-non-disclosure spec: a trashed book answers identically to an
+  // unknown one for a former reader — `live_nodes` a 404 the moment the
+  // book itself is trashed.
+  test('a trashed book\'s history answers identically to an unknown book for a former reader', async () => {
+    const fixture = await seedBookFixture();
+    await savePage(sql, {
+      nodeId: fixture.nestedPageId,
+      workspaceId: fixture.workspaceId,
+      markdown: '# One\n',
+      expectedContentHash: null,
+      updatedBy: fixture.authorId,
+      changesetWindowMinutes: WINDOW_MINUTES,
+    });
+    await sql`UPDATE nodes SET trashed_at = now(), trash_operation_id = ${crypto.randomUUID()} WHERE id = ${fixture.bookId}`;
+
+    const app = buildApp();
+    const denied = await app.request(`/books/${fixture.bookId}/history`, { headers: { cookie: fixture.readerCookie } });
+    const missing = await app.request(`/books/${crypto.randomUUID()}/history`, { headers: { cookie: fixture.readerCookie } });
+
+    expect(denied.status).toBe(404);
+    expect(await denied.text()).toBe(await missing.text());
   });
 });

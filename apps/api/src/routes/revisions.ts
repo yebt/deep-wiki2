@@ -43,7 +43,7 @@ export function createRevisionRoutes(deps: RevisionRouteDeps): Hono<{ Variables:
     const session = c.get('session');
 
     const [node] = await deps.sql<NodeRow[]>`
-      SELECT n.workspace_id, w.slug AS workspace_slug FROM nodes n JOIN workspaces w ON w.id = n.workspace_id WHERE n.id = ${pageId}
+      SELECT n.workspace_id, w.slug AS workspace_slug FROM live_nodes n JOIN workspaces w ON w.id = n.workspace_id WHERE n.id = ${pageId}
     `;
     const canRead =
       node !== undefined &&
@@ -82,7 +82,7 @@ export function createRevisionRoutes(deps: RevisionRouteDeps): Hono<{ Variables:
     const session = c.get('session');
 
     const [node] = await deps.sql<NodeWithTitleRow[]>`
-      SELECT n.workspace_id, n.title, w.slug AS workspace_slug FROM nodes n JOIN workspaces w ON w.id = n.workspace_id WHERE n.id = ${bookId}
+      SELECT n.workspace_id, n.title, w.slug AS workspace_slug FROM live_nodes n JOIN workspaces w ON w.id = n.workspace_id WHERE n.id = ${bookId}
     `;
     const canRead =
       node !== undefined &&
