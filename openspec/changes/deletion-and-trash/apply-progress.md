@@ -368,6 +368,106 @@ None beyond the recorded deviations above.
 
 - [ ] Phase 5 (`db/src/trash/` use cases + permissions) through Phase 12 (docs + final verification) — see `tasks.md`.
 
-## Status
+## Status (superseded by work unit 5 below)
 
 Phase 1: 10/10 complete. Phase 2: 4/4 complete. Phase 3: 24/24 complete. Phase 4: 23/23 complete. Ready for `sdd-verify` on this work unit, then `sdd-apply` again for Phase 5.
+
+## Scope executed — Work unit 5 (Phase 5: `db/src/trash/` use cases + permissions)
+
+**Mode**: Strict TDD
+
+### Completed Tasks (Phase 5 — all 12)
+
+- [x] 5.1–5.2 `packages/db/src/trash/trash-node.ts` (`trashNode()`) + its GATE-1-style truth table.
+- [x] 5.3–5.4 `packages/db/src/trash/restore.ts` (`restoreOperation()`) + its truth table.
+- [x] 5.5–5.6 `packages/db/src/permissions/manageable-trash.ts` (`manageableTrashRoots`) + `packages/db/src/trash/listing.ts` (`listManageableTrash`).
+- [x] 5.7–5.8 `packages/db/src/trash/lookup.ts` (`trashLookup`).
+- [x] 5.9–5.10 `packages/db/src/trash/trace.ts` (`appendTrace`, `findTrashedTrace`) + `packages/db/src/permissions/grants-between.ts` (`hasGrantsBetween`).
+- [x] 5.11–5.12 Extended `packages/db/src/permissions/truth-table.test.ts` with 4 new `T1`–`T4` manage/owner-trash cases; the 33 pre-existing cases pass unmodified (37/37 total) — no resolver code changed, proving the existing CTE already reads the base table correctly.
+
+### TDD Cycle Evidence
+
+| Task | RED (observed failure) | GREEN |
+|---|---|---|
+| `grants-between.ts` | `Cannot find module './grants-between'` | 5/5 pass |
+| `manageable-trash.ts` | `Cannot find module './manageable-trash'` | 5/5 pass, first try (no implementation bugs) |
+| `trace.ts` | `Cannot find module './trace'` | 9/9 pass after fixing two test bugs (see Deviations #1, #2) |
+| `trash-node.ts` | `Cannot find module './trash-node'` | 18/18 pass after fixing test fixture bugs (missing real users for FK columns, missing `page_content` row for the `page_locks` FK — see Deviations #3) |
+| `restore.ts` | `Cannot find module './restore'` | 11/11 pass, first try |
+| `listing.ts` | `Cannot find module './listing'` | 5/5 pass, first try |
+| `lookup.ts` | `Cannot find module './lookup'` | 5/5 pass, first try |
+| `purge.ts` | `Cannot find module './purge'` | 7/8 pass first try, 8/8 after fixing a real production bug (see Deviations #4) |
+| truth-table T1–T4 | Baseline run confirmed 33/33 pass before the new cases were added (the RED step here is additive, not a failing-then-fixed pair — the new cases pass immediately since they test an existing, unmodified code path) | 37/37 pass |
+
+### Files Changed
+
+| File | Action | What Was Done |
+|---|---|---|
+| `packages/db/src/permissions/grants-between.ts` | Created | `hasGrantsBetween()` — one `EXISTS` over `permissions` for the op's ids below the book |
+| `packages/db/src/permissions/grants-between.test.ts` | Created | 5 tests |
+| `packages/db/src/permissions/manageable-trash.ts` | Created | `manageableTrashRoots()` — op-root query + `canManyResources(manage)` |
+| `packages/db/src/permissions/manageable-trash.test.ts` | Created | 5 tests |
+| `packages/db/src/permissions/truth-table.test.ts` | Modified | +4 tests (`T1`–`T4`) |
+| `packages/db/src/trash/trace.ts` | Created | `appendTrace()`, `findTrashedTrace()` |
+| `packages/db/src/trash/trace.test.ts` | Created | 9 tests |
+| `packages/db/src/trash/trash-node.ts` | Created | `trashNode()`, `ancestorTitles()` |
+| `packages/db/src/trash/trash-node.test.ts` | Created | 18 tests |
+| `packages/db/src/trash/restore.ts` | Created | `restoreOperation()` |
+| `packages/db/src/trash/restore.test.ts` | Created | 11 tests |
+| `packages/db/src/trash/listing.ts` | Created | `listManageableTrash()`, `fetchDisplayName()`, `computeRestoreBlockedBy()` (both exported for `lookup.ts`'s reuse) |
+| `packages/db/src/trash/listing.test.ts` | Created | 5 tests |
+| `packages/db/src/trash/lookup.ts` | Created | `trashLookup()` |
+| `packages/db/src/trash/lookup.test.ts` | Created | 5 tests |
+| `packages/db/src/trash/purge.ts` | Created | `purgeTrash()` |
+| `packages/db/src/trash/purge.test.ts` | Created | 8 tests |
+| `openspec/changes/deletion-and-trash/tasks.md` | Modified | marked 5.1–5.12 `[x]` |
+
+### Truth-Table Sizes
+
+| Module | Cases |
+|---|---|
+| `trash-node.ts` | 18 (not_found ×2, forbidden ×1, empty-container ×3, force-delete ×5, subtree atomicity ×1, trace/lock ×2, `ancestorTitles` ×3, plus the empty-page case folded into empty-container) |
+| `restore.ts` | 11 (manage gate ×2, co-trashed subtree ×2, ancestor-trashed ×2, slug collision ×2, restore-as ×2, position ×1) |
+| `manageable-trash.ts` | 5 |
+| `listing.ts` | 5 |
+| `lookup.ts` | 5 |
+| `trace.ts` | 9 |
+| `grants-between.ts` | 5 |
+| `truth-table.test.ts` (new) | 4 (`T1`–`T4`), 37 total in the file |
+| **Total new/modified assertions this unit** | **56 new trash-package tests + 4 new/extended permission-resolver cases = 60** |
+
+### Work Unit Evidence
+
+| Evidence | Value |
+|---|---|
+| Focused test command | `bun test packages/db/src/trash` → 56 pass, 0 fail (6 files); `bun test packages/db/src/permissions/truth-table.test.ts` → 37 pass, 0 fail |
+| Runtime harness | Provisioned test Postgres (`packages/db/testing/provision.ts`) for every file — real transactions, real triggers (`nodes_trash_guard`, `node_deletions_forbid_update_trigger`), real FK cascades, nothing mocked |
+| Rollback boundary | Every file in this unit is additive and unreferenced by any route until Phase 6 mounts `routes/trash.ts`; each of the 8 new/modified files reverts independently by deleting it (or, for `truth-table.test.ts`, reverting its one appended `describe` block) |
+
+### Full Verification (this work unit)
+
+- `bun run check` — ok (12/12 structural checks pass; `trash-filter`'s `packages/db/src/trash/` allow-list reason held true throughout — every file added there is one of the reasoned writers, no new base-table read leaked outside it)
+- `bun run typecheck` — exit 0 (root + every workspace member, including `apps/web`/`apps/api`/`apps/landing`) — after fixing 12 test-only type errors (see Deviations #5)
+- `bun run lint` — exit 0 (root `eslint .` + every workspace member)
+- `bun run -F @deep-wiki/db test` — 570 pass, 0 fail (60 files)
+- `bun run -F @deep-wiki/core test` — 158 pass, 0 fail (unaffected by this unit; run per the assigned scope's verification list)
+
+### Deviations from Design
+
+1. **`trace.test.ts`'s "an UPDATE raises" test needed the async-IIFE wrapping idiom `page-revision.test.ts` already established**, not a bare `expect(sql\`UPDATE …\`).rejects.toThrow()`. Passing postgres.js's tagged-template result directly to `expect(...).rejects` hung the test runner past its 5s per-test timeout; wrapping the awaited call in `(async () => { await sql\`…\` })()` (the codebase's own existing idiom) fixed it immediately. Recorded as a discovery, not a design deviation — the fix makes the test match the codebase's established pattern exactly.
+2. **`trace.test.ts`'s "purging one page does not remove the book's other trace rows" test had a query bug**, not an implementation bug: it re-queried `nodes` by `slug = 'page'` with no workspace scoping, which can match a same-slugged row from an earlier test's fixture tree. Fixed by using the `page` node already returned from `seedTree()` directly. The assertion itself was also corrected: `node_id` carries no foreign key at all (by design), so deleting one page's node row leaves **both** trace rows intact, not just the untouched one — the original assertion incorrectly expected the deleted page's own trace row to vanish too.
+3. **`trash-node.test.ts` needed real seeded users, not `crypto.randomUUID()`, for every `actorId` that reaches a successful trash** — `nodes.trashed_by` and `node_deletions.actor_id` both carry a real `REFERENCES users(id)` foreign key, so a random UUID only works for tests that never reach a write (the `not_found`/`forbidden` paths). Similarly, the page-lock-release test needed a real `page_content` row before `page_locks` (whose own FK targets `page_content(node_id, workspace_id)`, not `nodes`) could accept an insert. Both are test-fixture corrections; `trashNode()` itself needed no change.
+4. **`purge.ts`'s deletion had to run in two ordered bulk passes (pages, then containers), not one flat `DELETE … WHERE id = ANY(ids)`.** `page_revision_changeset_fk` is not `DEFERRABLE`, so purging a book and one of its own pages in the same statement can fail: if Postgres processes the book row first, its cascade tries to delete the book's `changeset` row while a `page_revision` row (removed only via the *page's* own cascade through `page_content`) still references it, raising a live foreign-key violation. Deleting every eligible `page`-typed node first (cascading `page_content` → `page_revision`, `comments`, `chunks`) before deleting any container clears that reference unconditionally, regardless of row-processing order. This is a genuine, previously-latent schema interaction this change is the first feature to exercise (no prior feature hard-deletes a book), not a design.md deviation — Decision 6's own text already says "the cascade removes content, blocks, revisions, comments, links, tags, chunks, locks, grants and changesets," which is achieved, just via two ordered statements instead of one.
+5. **12 pre-existing-pattern-violating test assertions failed `tsc`, not `bun test`.** `expect(<raw postgres.js query result>).toEqual([])` does not type-check against `postgres`'s `RowList` type (`Type 'never[]' is missing … columns, count, command, statement, state`) even though it runs correctly at runtime; no existing test in the codebase does this against a raw query result (every existing `toEqual([])` in the repo targets a plain array returned from an application function). Fixed by switching those 12 assertions to `expect(rows.length).toBe(0)`, across `trace.test.ts`, `restore.test.ts`, `trash-node.test.ts` and `purge.test.ts` — no production code was affected.
+
+### Issues Found
+
+None beyond the recorded deviations above.
+
+### Remaining Tasks (not in this work unit's scope)
+
+- [ ] Phase 6 (contracts + route wiring) through Phase 12 (docs + final verification) — see `tasks.md`.
+
+## Status
+
+Phase 1: 10/10. Phase 2: 4/4. Phase 3: 24/24. Phase 4: 23/23. Phase 5: 12/12. Ready for `sdd-verify` on this work unit, then `sdd-apply` again for Phase 6.

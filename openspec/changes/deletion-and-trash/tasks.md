@@ -136,18 +136,18 @@ Chain strategy: stacked-to-main
 
 ## Phase 5: `db/src/trash/` Use Cases and Permissions
 
-- [ ] 5.1 RED: `packages/db/src/trash/trash-node.test.ts` — a GATE-1-style truth table over `{isOwner, hasManage, isContainer, liveDescendants, submitted}`, written first from the unauthorised subject's point of view: 404-vs-403 split, non-empty refusal, stale count, already-trashed exclusion (`node-trash` spec, every scenario).
-- [ ] 5.2 GREEN: `packages/db/src/trash/trash-node.ts` — `trashNode()`: row-lock the workspace, re-read the node from the base table, count via `subtree.ts`, `decideTrash`, propagate, release `page_locks`, append the trace.
-- [ ] 5.3 RED: `packages/db/src/trash/restore.test.ts` — co-trashed subtree restored, a separately-trashed descendant stays trashed, ancestor-trashed refusal, slug collision `409`, restore-as success, second collision refused the same way (`trash-restore` spec, every scenario).
-- [ ] 5.4 GREEN: `packages/db/src/trash/restore.ts` — `restoreOperation()` per design Decision 4.
-- [ ] 5.5 RED: `packages/db/src/trash/listing.test.ts` — the listing shows only manageable trashed nodes; empty for a subject with no `manage` anywhere.
-- [ ] 5.6 GREEN: `packages/db/src/permissions/manageable-trash.ts` (`manageableTrashRoots`) + `packages/db/src/trash/listing.ts`.
-- [ ] 5.7 RED: `packages/db/src/trash/lookup.test.ts` — `trashLookup` denies a subject without `manage` identically to unknown; permits the manager who trashed it.
-- [ ] 5.8 GREEN: `packages/db/src/trash/lookup.ts`.
-- [ ] 5.9 RED: `packages/db/src/trash/trace.test.ts` — append-only (an `UPDATE` raises), `trashed`/`restored`/`purged` events, no cascading FK to the node, cascades only with the book, `restricted` hides the title from a subject without access to the node and shows it to one who had access (`deletion-trace` spec, every scenario).
-- [ ] 5.10 GREEN: `packages/db/src/trash/trace.ts` (`appendTrace`, reusing `resolveBookId`) + `packages/db/src/permissions/grants-between.ts` (`hasGrantsBetween`).
-- [ ] 5.11 RED: extend `packages/db/src/permissions/truth-table.test.ts` with the `manage`/owner trash cases; run first to confirm it fails only on the new cases.
-- [ ] 5.12 GREEN: wire the new cases into the resolver/truth-table fixtures; confirm the pre-existing 30 cases are unmodified.
+- [x] 5.1 RED: `packages/db/src/trash/trash-node.test.ts` — a GATE-1-style truth table over `{isOwner, hasManage, isContainer, liveDescendants, submitted}`, written first from the unauthorised subject's point of view: 404-vs-403 split, non-empty refusal, stale count, already-trashed exclusion (`node-trash` spec, every scenario). (See Deviations — the 404/403 split lives at the route layer per design Decision 3; this function's own split is `not_found` (unknown or already-trashed) vs `forbidden` (exists, no manage/owner), exactly `decideTrash()`'s own dimensions plus that one addition.)
+- [x] 5.2 GREEN: `packages/db/src/trash/trash-node.ts` — `trashNode()`: row-lock the workspace, re-read the node from the base table, count via `subtree.ts`, `decideTrash`, propagate, release `page_locks`, append the trace.
+- [x] 5.3 RED: `packages/db/src/trash/restore.test.ts` — co-trashed subtree restored, a separately-trashed descendant stays trashed, ancestor-trashed refusal, slug collision `409`, restore-as success, second collision refused the same way (`trash-restore` spec, every scenario).
+- [x] 5.4 GREEN: `packages/db/src/trash/restore.ts` — `restoreOperation()` per design Decision 4.
+- [x] 5.5 RED: `packages/db/src/trash/listing.test.ts` — the listing shows only manageable trashed nodes; empty for a subject with no `manage` anywhere.
+- [x] 5.6 GREEN: `packages/db/src/permissions/manageable-trash.ts` (`manageableTrashRoots`) + `packages/db/src/trash/listing.ts`.
+- [x] 5.7 RED: `packages/db/src/trash/lookup.test.ts` — `trashLookup` denies a subject without `manage` identically to unknown; permits the manager who trashed it.
+- [x] 5.8 GREEN: `packages/db/src/trash/lookup.ts`.
+- [x] 5.9 RED: `packages/db/src/trash/trace.test.ts` — append-only (an `UPDATE` raises), `trashed`/`restored`/`purged` events, no cascading FK to the node, cascades only with the book (`deletion-trace` spec). (See Deviations — the `restricted` disclosure filtering scenario is route-layer work per design.md Decision 5's own "Disclosure" paragraph, out of this db-only module's scope; this file proves the `restricted` boolean is stored and read back faithfully instead.)
+- [x] 5.10 GREEN: `packages/db/src/trash/trace.ts` (`appendTrace`, `findTrashedTrace`) + `packages/db/src/permissions/grants-between.ts` (`hasGrantsBetween`). (See Deviations — `resolveBookId` is reused by `trash-node.ts` itself, called before propagation while the node is still live, rather than inside `appendTrace`; `restored`/`purged` events copy from `findTrashedTrace` instead, per the design text's own distinction.)
+- [x] 5.11 RED: extend `packages/db/src/permissions/truth-table.test.ts` with the `manage`/owner trash cases; run first to confirm it fails only on the new cases.
+- [x] 5.12 GREEN: wire the new cases into the resolver/truth-table fixtures; confirm the pre-existing 30 cases are unmodified. (No resolver code changed — the four new `T1`-`T4` cases prove the existing CTE already reads the base `nodes` table and needs no trash-specific change; all 33 pre-existing cases pass unmodified alongside the 4 new ones, 37/37 total.)
 
 ## Phase 6: Contracts and Route Wiring
 
