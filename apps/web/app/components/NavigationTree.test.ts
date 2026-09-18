@@ -3,6 +3,8 @@ import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { computed, defineComponent, h, nextTick, ref } from 'vue';
 import NavigationTreeActions from '~/components/NavigationTreeActions.vue';
+import type { TreeNode } from '~/composables/useTree';
+import type { ForceDeleteFetcher, TrashFetcher } from '~/composables/useTrash';
 import NavigationTree from './NavigationTree.vue';
 
 /**
@@ -26,7 +28,7 @@ mockNuxtImport('navigateTo', () => navigateToMock);
 // load. `NavigationTreeNode.test.ts` holds the warming itself.
 mockNuxtImport('preloadRouteComponents', () => preloadRouteComponentsMock);
 
-function mockTree(overrides: { status?: string; nodes?: unknown[]; message?: string } = {}) {
+function mockTree(overrides: { status?: string; nodes?: unknown[]; message?: string; manageable?: string[]; isOwner?: boolean } = {}) {
   navigateToMock.mockClear();
   const load = vi.fn(async () => {});
   const reorder = vi.fn(async () => true);
@@ -36,17 +38,29 @@ function mockTree(overrides: { status?: string; nodes?: unknown[]; message?: str
   const selectedId = ref<string | null>(null);
   const nodes = ref(overrides.nodes ?? []);
   const reveal = vi.fn();
+  // The real `removeNode`: the row leaves the (mocked) shared record at once, and the undo puts the exact tree back.
+  const removeNode = vi.fn((id: string) => {
+    const before = nodes.value;
+    const prune = (list: TreeNode[]): TreeNode[] => list.filter((node) => node.id !== id).map((node) => ({ ...node, children: prune(node.children as TreeNode[]) }));
+    nodes.value = prune(before as TreeNode[]);
+    return () => {
+      nodes.value = before;
+    };
+  });
   useWorkspaceTreeMock.mockReturnValue({
     status: ref(overrides.status ?? 'idle'),
     nodes,
     rootId: ref('root-1'),
     message: ref(overrides.message ?? ''),
+    manageable: computed(() => new Set(overrides.manageable ?? [])),
+    isOwner: computed(() => overrides.isOwner ?? false),
     collapsedIds: computed(() => collapsed.value),
     selectedId,
     load,
     reorder,
     applyCreated,
     applyRenamed,
+    removeNode,
     toggleCollapsed: (id: string) => {
       const next = new Set(collapsed.value);
       if (next.has(id)) next.delete(id);
@@ -56,7 +70,7 @@ function mockTree(overrides: { status?: string; nodes?: unknown[]; message?: str
     reveal,
     pathTo: () => [],
   });
-  return { load, reorder, applyCreated, applyRenamed, reveal, selectedId };
+  return { load, reorder, applyCreated, applyRenamed, reveal, selectedId, removeNode, nodes };
 }
 
 // Attached to the document: focus and the menu's focus return are real
@@ -69,7 +83,15 @@ afterEach(() => {
   mounted = null;
 });
 
-async function mount(given: { workspaceId: string | null; workspaceSlug?: string | null; currentNodeId?: string | null } = { workspaceId: 'ws-1' }) {
+async function mount(
+  given: {
+    workspaceId: string | null;
+    workspaceSlug?: string | null;
+    currentNodeId?: string | null;
+    trashFetcher?: TrashFetcher;
+    forceDeleteFetcher?: ForceDeleteFetcher;
+  } = { workspaceId: 'ws-1' },
+) {
   const props = { workspaceSlug: given.workspaceId ? 'acme' : null, ...given };
   const wrapper = await mountSuspended(
     defineComponent({
@@ -564,7 +586,12 @@ describe('NavigationTree', () => {
       expect(labels.some((label) => label?.startsWith('Open'))).toBe(true);
       expect(labels.some((label) => label?.startsWith('Page history'))).toBe(true);
       expect(labels.some((label) => label?.startsWith('Copy link'))).toBe(true);
-      expect(labels.some((label) => /delete/i.test(label ?? ''))).toBe(false);
+      // Delete is last, and for a row the caller cannot manage it stays in
+      // the menu with its reason (navigation-tree spec; checklist §3, §5).
+      const remove = menuItems().find((item) => item.textContent?.includes('Delete…'))!;
+      expect(remove).toBeDefined();
+      expect(remove.getAttribute('aria-disabled')).toBe('true');
+      expect(remove.textContent).toMatch(/manage access/i);
 
       // The first of two siblings: "Move up" stays in the menu, disabled
       // with its reason on show; "Move down" is live.
@@ -635,6 +662,119 @@ describe('NavigationTree', () => {
       await settle();
       expect(menu()).toBeNull();
       expect(document.activeElement).toBe(row.element);
+    });
+
+    /*
+     * Delete (design.md Decision 8): from the menu, the toolbar and the
+     * `Delete` key, one flow — the product's one confirm dialog, the row
+     * out of the tree before the server answers, and the outcome said
+     * beside the tree and in a live region. The dialog itself is
+     * `ConfirmDialog`'s to render; here the pending question is answered
+     * through `useConfirm` directly, as the dialog would.
+     */
+    describe('delete', () => {
+      const TRASHED = { trashOperationId: 'op-1', trashed: { pages: 1, containers: 0 } };
+
+      async function openMenuOn(component: Awaited<ReturnType<typeof mount>>, nodeId: string): Promise<void> {
+        await component.get(`[data-node-id="${nodeId}"] [draggable="true"]`).trigger('contextmenu', { clientX: 40, clientY: 40 });
+        await settle();
+      }
+
+      async function chooseDelete(): Promise<void> {
+        const item = menuItems().find((entry) => entry.textContent?.includes('Delete…'))!;
+        item.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+        await settle();
+        await settle();
+      }
+
+      test('"Delete…" is live on a manageable page, and picking it asks the product\'s one question', async () => {
+        mockTree({ status: 'success', nodes: NODES, manageable: ['page-1'] });
+        const component = await mount({ workspaceId: 'ws-1', trashFetcher: vi.fn(async () => TRASHED) });
+        await openMenuOn(component, 'page-1');
+        const remove = menuItems().find((item) => item.textContent?.includes('Delete…'))!;
+        expect(remove.getAttribute('aria-disabled')).toBeNull();
+
+        await chooseDelete();
+
+        expect(useConfirm().pending.value).toMatchObject({ title: 'Delete “First page”?', confirmLabel: 'Delete', tone: 'destructive' });
+        useConfirm().settle(false);
+        await settle();
+        expect(component.find('[data-node-id="page-1"]').exists(), 'a "no" leaves the row').toBe(true);
+      });
+
+      test('a "yes" takes the row out at once, and success is said beside the tree with a link to the Trash, and announced', async () => {
+        const { removeNode } = mockTree({ status: 'success', nodes: NODES, manageable: ['page-1'] });
+        let release!: () => void;
+        const trashFetcher = vi.fn(() => new Promise<typeof TRASHED>((resolve) => { release = () => resolve(TRASHED); }));
+        const component = await mount({ workspaceId: 'ws-1', trashFetcher });
+        await openMenuOn(component, 'page-1');
+        await chooseDelete();
+
+        useConfirm().settle(true);
+        await settle();
+        expect(removeNode).toHaveBeenCalledWith('page-1');
+        expect(component.find('[data-node-id="page-1"]').exists(), 'gone before the server answered').toBe(false);
+        expect(trashFetcher).toHaveBeenCalledWith('page-1');
+        release();
+        await settle();
+
+        expect(component.find('[data-node-id="page-1"]').exists()).toBe(false);
+        const notice = component.find('[data-testid="tree-delete-notice"]');
+        expect(notice.exists()).toBe(true);
+        expect(notice.text()).toContain('Moved “First page” to the trash');
+        const link = notice.find('a');
+        expect(link.attributes('href')).toBe('/w/acme/trash');
+        expect(link.text()).toMatch(/trash/i);
+        expect(component.get('[data-testid="tree-menu-status"]').text()).toContain('Moved “First page” to the trash');
+        // Focus does not fall off the tree with the row: it lands on a neighbour.
+        expect((document.activeElement as HTMLElement | null)?.getAttribute('role')).toBe('treeitem');
+      });
+
+      test('a refusal puts the row back and says why, beside the tree', async () => {
+        mockTree({ status: 'success', nodes: NODES, manageable: ['page-1'] });
+        const trashFetcher = vi.fn(async () => { throw { response: { status: 403 }, data: { error: 'forbidden' } }; });
+        const component = await mount({ workspaceId: 'ws-1', trashFetcher });
+        await openMenuOn(component, 'page-1');
+        await chooseDelete();
+
+        useConfirm().settle(true);
+        await settle();
+        await settle();
+
+        expect(component.find('[data-node-id="page-1"]').exists()).toBe(true);
+        const alert = component.find('[data-testid="tree-delete-error"]');
+        expect(alert.exists()).toBe(true);
+        expect(alert.attributes('role')).toBe('alert');
+        expect(alert.text()).toMatch(/permission/i);
+      });
+
+      test('the Delete key on a focused row opens the same flow; on a row that cannot be deleted it says why instead', async () => {
+        mockTree({ status: 'success', nodes: NODES, manageable: ['page-1'] });
+        const component = await mount({ workspaceId: 'ws-1', trashFetcher: vi.fn(async () => TRASHED) });
+
+        await component.get('[data-node-id="page-2"]').trigger('keydown', { key: 'Delete' });
+        await settle();
+        expect(useConfirm().pending.value).toBeNull();
+        expect(component.get('[data-testid="tree-menu-status"]').text()).toMatch(/manage access/i);
+
+        await component.get('[data-node-id="page-1"]').trigger('keydown', { key: 'Delete' });
+        await settle();
+        expect(useConfirm().pending.value?.title).toBe('Delete “First page”?');
+        useConfirm().settle(false);
+      });
+
+      test('the toolbar\'s Delete acts on the selected row through the same flow', async () => {
+        const { selectedId } = mockTree({ status: 'success', nodes: NODES, manageable: ['page-2'] });
+        const component = await mount({ workspaceId: 'ws-1', trashFetcher: vi.fn(async () => TRASHED) });
+        selectedId.value = 'page-2';
+        await settle();
+
+        component.get('[data-testid="tree-delete-open"]').element.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        await settle();
+
+        expect(useConfirm().pending.value?.title).toBe('Delete “Second page”?');
+        useConfirm().settle(false);
+      });
     });
 
     test('the `⋯` button opens the same menu', async () => {

@@ -5,15 +5,20 @@ interface TreeRecord {
   nodes: readonly TreeNode[];
   rootId: string | null;
   message: string;
+  manageable: readonly string[];
+  isOwner: boolean;
 }
 
-const EMPTY: TreeRecord = { status: 'idle', nodes: [], rootId: null, message: '' };
+const EMPTY: TreeRecord = { status: 'idle', nodes: [], rootId: null, message: '', manageable: [], isOwner: false };
 
 export interface UseWorkspaceTreeResult {
   readonly status: ComputedRef<TreeStatus>;
   readonly nodes: ComputedRef<readonly TreeNode[]>;
   readonly rootId: ComputedRef<string | null>;
   readonly message: ComputedRef<string>;
+  /** Ids the caller holds `manage` on (`useTree`). */
+  readonly manageable: ComputedRef<ReadonlySet<string>>;
+  readonly isOwner: ComputedRef<boolean>;
   /** Containers the person folded; everything else is open. */
   readonly collapsedIds: ComputedRef<ReadonlySet<string>>;
   /** The row the person picked — what the toolbar acts on. */
@@ -22,6 +27,7 @@ export interface UseWorkspaceTreeResult {
   readonly reorder: (nodeId: string, newParentId: string, newIndex: number) => Promise<boolean>;
   readonly applyCreated: (created: CreatedNode) => void;
   readonly applyRenamed: (renamed: RenamedNode) => void;
+  readonly removeNode: (nodeId: string) => () => void;
   readonly toggleCollapsed: (nodeId: string) => void;
   /** Unfold every ancestor of a node so its row is on screen. */
   readonly reveal: (nodeId: string) => void;
@@ -74,15 +80,17 @@ export function useWorkspaceTree(workspaceId: MaybeRefOrGetter<string | null>, d
       t.nodes.value = current.nodes;
       t.rootId.value = current.rootId;
       t.message.value = current.message;
+      t.manageable.value = new Set(current.manageable);
+      t.isOwner.value = current.isOwner;
       watch(
-        [t.status, t.nodes, t.rootId, t.message],
-        ([status, nodes, rootId, message]) => {
+        [t.status, t.nodes, t.rootId, t.message, t.manageable, t.isOwner],
+        ([status, nodes, rootId, message, manageable, isOwner]) => {
           // Only the first load shows a skeleton; a refresh of a tree
           // already on screen keeps the loaded rows in place while the
           // answer arrives, so `loading` is not written over `success`.
           const shown = records.value[workspaceId] ?? EMPTY;
           if (status === 'loading' && shown.status === 'success') return;
-          records.value = { ...records.value, [workspaceId]: { status, nodes, rootId, message } };
+          records.value = { ...records.value, [workspaceId]: { status, nodes, rootId, message, manageable: [...manageable], isOwner } };
         },
         { flush: 'sync' },
       );
@@ -107,6 +115,10 @@ export function useWorkspaceTree(workspaceId: MaybeRefOrGetter<string | null>, d
 
   function applyRenamed(renamed: RenamedNode): void {
     transport()?.applyRenamed(renamed);
+  }
+
+  function removeNode(nodeId: string): () => void {
+    return transport()?.removeNode(nodeId) ?? (() => {});
   }
 
   const collapsedIds = computed<ReadonlySet<string>>(() => new Set(id.value ? (folds.value[id.value] ?? []) : []));
@@ -156,12 +168,15 @@ export function useWorkspaceTree(workspaceId: MaybeRefOrGetter<string | null>, d
     nodes: computed(() => record.value.nodes),
     rootId: computed(() => record.value.rootId),
     message: computed(() => record.value.message),
+    manageable: computed(() => new Set(record.value.manageable)),
+    isOwner: computed(() => record.value.isOwner),
     collapsedIds,
     selectedId,
     load,
     reorder,
     applyCreated,
     applyRenamed,
+    removeNode,
     toggleCollapsed,
     reveal,
     pathTo,

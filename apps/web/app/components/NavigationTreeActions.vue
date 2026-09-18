@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * Creating and renaming a node, from the navigation tree.
+ * Creating, renaming and deleting a node, from the navigation tree.
  *
  * ── Where it stands, and why not in a row ──────────────────────────────
  *
@@ -49,6 +49,7 @@
  */
 import { legalChildTypes, type NodeType } from '@deep-wiki/contracts';
 import type { CreatedNode, RenamedNode, TreeNode } from '~/composables/useTree';
+import { deleteRowAction } from '~/composables/useTreeRowActions';
 
 interface CreateNodeBody {
   readonly parentId: string;
@@ -68,8 +69,11 @@ export type RenameNodeFetcher = (nodeId: string, body: { title: string }) => Pro
 const props = defineProps<{
   nodes: readonly TreeNode[];
   rootId: string | null;
-  /** The row the user picked — the "here" a new node goes under, and the one Rename acts on. `null` until they pick one. */
+  /** The row the user picked — the "here" a new node goes under, and the one Rename and Delete act on. `null` until they pick one. */
   selectedId: string | null;
+  /** Ids the caller holds `manage` on, and whether they own the workspace — the tree response's, for Delete (design.md Decision 8). */
+  manageable: ReadonlySet<string>;
+  isOwner: boolean;
   /** Injected in tests, exactly as `useTree` takes its fetchers. */
   createFetcher?: CreateNodeFetcher;
   renameFetcher?: RenameNodeFetcher;
@@ -79,9 +83,12 @@ const props = defineProps<{
  * The server's answer, handed to the tree to draw: the row appears from
  * the one request that made it, not from a second `GET /tree` (2026-09-16;
  * until then the tree reloaded on `changed`, and the new row landed on the
- * second round trip).
+ * second round trip). `delete` is different: it names the row and asks
+ * the tree to run the flow (`useTrash`), because the flow takes the row
+ * out before the server answers and puts it back on a refusal — the
+ * tree's own edits, beside the tree that draws them.
  */
-const emit = defineEmits<{ created: [node: CreatedNodePayload]; renamed: [node: RenamedNodePayload] }>();
+const emit = defineEmits<{ created: [node: CreatedNodePayload]; renamed: [node: RenamedNodePayload]; delete: [nodeId: string] }>();
 
 const config = useRuntimeConfig();
 
@@ -303,6 +310,18 @@ async function submitRename(): Promise<void> {
   }
 }
 
+/* ─── Delete ────────────────────────────────────────────────────────── */
+
+/** The one decision the row's menu makes, for the picked row; `null` until a row is picked. */
+const deleteAction = computed(() => (renameTarget.value ? deleteRowAction(renameTarget.value, { manageable: props.manageable, isOwner: props.isOwner }) : null));
+const deleteReason = computed(() => (deleteAction.value ? deleteAction.value.reason : 'Select a row in the tree to delete it.'));
+const canDelete = computed(() => deleteAction.value !== null && !deleteAction.value.disabled);
+
+function requestDelete(): void {
+  if (!canDelete.value || !renameTarget.value) return;
+  emit('delete', renameTarget.value.id);
+}
+
 /**
  * The row's context menu (`NavigationTree`) opens these same two dialogs:
  * one create, one rename, one classification of failure, whichever
@@ -399,6 +418,29 @@ function applyWriteError(
         </UButton>
       </UTooltip>
       <p id="tree-rename-reason" class="sr-only">Select a row in the tree to rename it.</p>
+
+      <!-- Delete: icon-only, since the pane holds two words and not three
+           (measured at 280px), so both halves of §4.3 — a name that carries
+           the target and a tooltip. The tooltip carries the reason while
+           the control is unavailable (§3 "Disabled") and the target when it
+           is; `aria-describedby` says the reason to assistive technology.
+           Outlined `error`: a destructive action keeps a visible boundary
+           (DESIGN-SYSTEM §9.1), quieter than the tonal New… beside it. -->
+      <UTooltip :text="canDelete ? `Delete “${renameTarget?.title}”` : deleteReason">
+        <UButton
+          size="sm"
+          variant="outline"
+          color="error"
+          icon="i-lucide-trash-2"
+          square
+          :aria-label="renameTarget ? `Delete “${renameTarget.title}”…` : 'Delete…'"
+          :aria-disabled="canDelete ? undefined : 'true'"
+          :aria-describedby="canDelete ? undefined : 'tree-delete-reason'"
+          data-testid="tree-delete-open"
+          @click="requestDelete"
+        />
+      </UTooltip>
+      <p v-if="!canDelete" id="tree-delete-reason" class="sr-only">{{ deleteReason }}</p>
     </div>
 
     <!-- Success is confirmed visibly *and* announced (checklist §3, §5),

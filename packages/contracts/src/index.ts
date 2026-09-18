@@ -179,6 +179,7 @@ export type {
   TrashListingItem,
   TrashListingResponse,
   TrashLookupResponse,
+  TrashNodeResponse,
 } from './trash';
 
 export {

@@ -9,7 +9,15 @@ export interface TreeNode {
   readonly children: readonly TreeNode[];
 }
 
-export type FetchTree = (workspaceId: string) => Promise<{ rootId: string; nodes: readonly TreeNode[] }>;
+/** What `GET /workspaces/:id/tree` answers: the rows, and — since the trash — which of them the caller may manage, and whether they own the workspace. */
+export interface TreeResponse {
+  readonly rootId: string;
+  readonly nodes: readonly TreeNode[];
+  readonly manageable?: readonly string[];
+  readonly isOwner?: boolean;
+}
+
+export type FetchTree = (workspaceId: string) => Promise<TreeResponse>;
 export type ReorderFetcher = (nodeId: string, newParentId: string, newIndex: number) => Promise<{ ok: boolean }>;
 
 /** What `POST /nodes` answers — enough to draw the row without asking for the tree again. */
@@ -39,6 +47,10 @@ export interface UseTreeResult {
   readonly nodes: Ref<readonly TreeNode[]>;
   readonly rootId: Ref<string | null>;
   readonly message: Ref<string>;
+  /** Ids the caller holds `manage` on — the one permission signal the tree carries, for Delete (design.md Decision 8). */
+  readonly manageable: Ref<ReadonlySet<string>>;
+  /** The caller owns the workspace: every row is theirs to delete, children and all. */
+  readonly isOwner: Ref<boolean>;
   readonly load: () => Promise<void>;
   /**
    * Moves the node locally at once, then writes; a refusal puts the tree
@@ -50,6 +62,12 @@ export interface UseTreeResult {
   readonly applyCreated: (created: CreatedNode) => void;
   /** Patches the node `PATCH /nodes/:id` just renamed, from the response alone. */
   readonly applyRenamed: (renamed: RenamedNode) => void;
+  /**
+   * Takes the node out locally, subtree and all, before `DELETE /nodes/:id`
+   * is answered — a delete draws first like a drag does — and returns the
+   * way back, for a refusal. The tree is never reloaded for a delete.
+   */
+  readonly removeNode: (nodeId: string) => () => void;
 }
 
 /* ─── Local edits of a loaded tree ─────────────────────────────────────
@@ -139,6 +157,12 @@ export function insertCreatedNode(nodes: readonly TreeNode[], rootId: string | n
   return withChildAt(nodes, created.parentId, rootId, child, Number.MAX_SAFE_INTEGER);
 }
 
+/** The node `DELETE /nodes/:id` trashed, gone from wherever it was — with everything under it, as the server trashes it. */
+export function removeTreeNode(nodes: readonly TreeNode[], nodeId: string): readonly TreeNode[] {
+  const { nodes: without, removed } = withoutNode(nodes, nodeId);
+  return removed ? without : nodes;
+}
+
 /** The node `PATCH /nodes/:id` renamed, patched in place. */
 export function renameTreeNode(nodes: readonly TreeNode[], renamed: RenamedNode): readonly TreeNode[] {
   return mapNode(nodes, renamed.id, (node) => ({ ...node, slug: renamed.slug, title: renamed.title }));
@@ -178,6 +202,8 @@ export function useTree(workspaceId: string, deps: UseTreeDeps = {}): UseTreeRes
   const nodes = ref<readonly TreeNode[]>([]);
   const rootId = ref<string | null>(null);
   const message = ref('');
+  const manageable = ref<ReadonlySet<string>>(new Set());
+  const isOwner = ref(false);
 
   async function load(): Promise<void> {
     status.value = 'loading';
@@ -185,6 +211,8 @@ export function useTree(workspaceId: string, deps: UseTreeDeps = {}): UseTreeRes
       const result = await fetchTree(workspaceId);
       nodes.value = result.nodes;
       rootId.value = result.rootId;
+      manageable.value = new Set(result.manageable ?? []);
+      isOwner.value = result.isOwner ?? false;
       status.value = 'success';
       message.value = '';
     } catch (error) {
@@ -231,5 +259,14 @@ export function useTree(workspaceId: string, deps: UseTreeDeps = {}): UseTreeRes
     nodes.value = renameTreeNode(nodes.value, renamed);
   }
 
-  return { status, nodes, rootId, message, load, reorder, applyCreated, applyRenamed };
+  function removeNode(nodeId: string): () => void {
+    const before = nodes.value;
+    nodes.value = removeTreeNode(before, nodeId);
+    return () => {
+      // Back to exactly what was drawn before — as a refused drag does.
+      nodes.value = before;
+    };
+  }
+
+  return { status, nodes, rootId, message, manageable, isOwner, load, reorder, applyCreated, applyRenamed, removeNode };
 }

@@ -67,6 +67,8 @@ async function mountActions(
     selectedId?: string | null;
     createFetcher?: CreateNodeFetcher;
     renameFetcher?: RenameNodeFetcher;
+    manageable?: string[];
+    isOwner?: boolean;
   } = {},
 ): Promise<Mounted> {
   const wrapper = await mountSuspended(
@@ -81,6 +83,8 @@ async function mountActions(
               selectedId: overrides.selectedId === undefined ? null : overrides.selectedId,
               createFetcher: overrides.createFetcher,
               renameFetcher: overrides.renameFetcher,
+              manageable: new Set(overrides.manageable ?? []),
+              isOwner: overrides.isOwner ?? false,
             }),
         }),
     }),
@@ -451,5 +455,53 @@ describe('NavigationTreeActions — the dialog asks only what it does not know',
     expect(dialogTitle(mounted)).toBe('New item');
     expect(byTestId(mounted, 'tree-create-type')).not.toBeNull();
     expect(checkedRadio(mounted, 'tree-create-type')).toBe('page');
+  });
+});
+
+/**
+ * Delete in the toolbar (design.md Decision 8): the third control, icon-only
+ * — a 280px pane holds "New…" and "Rename…" and not a third word (checklist
+ * §4.3: a name and a tooltip, both) — acting on the picked row through the
+ * same decision the row's menu makes (`deleteRowAction`), and asking the
+ * tree to run the flow: the flow lives beside the tree that draws the row.
+ */
+describe('NavigationTreeActions — deleting', () => {
+  test('is aria-disabled with a reason when no row is selected, and stays in the tab order', async () => {
+    const mounted = await mountActions({ selectedId: null, manageable: ['page-1'] });
+    const button = byTestId(mounted, 'tree-delete-open')!;
+    expect(button.getAttribute('aria-disabled')).toBe('true');
+    expect(button.hasAttribute('disabled')).toBe(false);
+    const reason = mounted.roots.map((root) => root.querySelector(`#${button.getAttribute('aria-describedby')}`)).find(Boolean);
+    expect(reason?.textContent).toMatch(/select a row/i);
+  });
+
+  test('is aria-disabled with the row\'s own reason when the picked row cannot be deleted', async () => {
+    const mounted = await mountActions({ selectedId: 'page-1', manageable: [] });
+    const button = byTestId(mounted, 'tree-delete-open')!;
+    expect(button.getAttribute('aria-disabled')).toBe('true');
+    const reason = mounted.roots.map((root) => root.querySelector(`#${button.getAttribute('aria-describedby')}`)).find(Boolean);
+    expect(reason?.textContent).toMatch(/manage access/i);
+
+    const nonEmpty = await mountActions({ selectedId: 'chapter-1', manageable: ['chapter-1'] });
+    const chapterButton = byTestId(nonEmpty, 'tree-delete-open')!;
+    expect(chapterButton.getAttribute('aria-disabled')).toBe('true');
+    expect(nonEmpty.roots.map((root) => root.querySelector(`#${chapterButton.getAttribute('aria-describedby')}`)).find(Boolean)?.textContent).toMatch(/empty this chapter first/i);
+  });
+
+  test('names its target, and asks the tree to delete it', async () => {
+    const mounted = await mountActions({ selectedId: 'page-1', manageable: ['page-1'] });
+    const button = byTestId(mounted, 'tree-delete-open')!;
+    expect(button.getAttribute('aria-disabled')).toBeNull();
+    expect(button.getAttribute('aria-label')).toBe('Delete “Day one”…');
+
+    button.click();
+    await settle();
+
+    expect(mounted.wrapper.findComponent(NavigationTreeActions).emitted('delete')).toEqual([['page-1']]);
+  });
+
+  test('the owner may delete any row, children and all', async () => {
+    const mounted = await mountActions({ selectedId: 'chapter-1', manageable: [], isOwner: true });
+    expect(byTestId(mounted, 'tree-delete-open')!.getAttribute('aria-disabled')).toBeNull();
   });
 });

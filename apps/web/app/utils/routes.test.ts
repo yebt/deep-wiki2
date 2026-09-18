@@ -17,6 +17,7 @@ import {
   parseLegacyPath,
   registrationSettingsUrl,
   settingsUrl,
+  trashUrl,
   workspaceUrl,
   workspacesUrl,
 } from './routes';
@@ -37,6 +38,10 @@ describe('route helpers', () => {
     expect(membersUrl(SLUG)).toBe('/w/acme/members');
     expect(settingsUrl(SLUG)).toBe('/w/acme/settings');
     expect(aiUrl(SLUG)).toBe('/w/acme/ai');
+    // The Trash screen (design.md Decision 8) — the address exists before
+    // the screen does, so the delete flow's "restore from Trash" link
+    // never spells it by hand.
+    expect(trashUrl(SLUG)).toBe('/w/acme/trash');
   });
 
   test('a page is /w/<slug>/p/<id>, and its views hang off it', () => {

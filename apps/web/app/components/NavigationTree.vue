@@ -46,13 +46,22 @@
  *   was folded; the rows draw the matched text in a `<mark>`, the count
  *   is announced, and Escape in the box clears, hides and hands focus
  *   back to the tree's row.
+ * - Delete (2026-09-18, design.md Decision 8): "Delete…" last in every
+ *   row's menu, the toolbar's trash control, and the `Delete` key on a
+ *   focused row all run `deleteNode()` (`useTrash`) — the product's one
+ *   confirm dialog, the row out of the tree before the server answers, a
+ *   refusal putting it back with the reason in the chip beside the tree,
+ *   and success said there too with a link to the Trash, and announced.
+ *   Live only where the tree response says `manageable` or `isOwner`;
+ *   elsewhere it stays in the menu, disabled, with the reason on show.
  */
 import type { ContextMenuItem } from '@nuxt/ui';
 import NavigationTreeActions from '~/components/NavigationTreeActions.vue';
 import type { TreeNode } from '~/composables/useTree';
+import { deleteNode, type ForceDeleteFetcher, type TrashFetcher } from '~/composables/useTrash';
 import { useTreeFilter } from '~/composables/useTreeFilter';
-import { treeRowActions, type TreeRowAction } from '~/composables/useTreeRowActions';
-import { pageUrl } from '~/utils/routes';
+import { deleteRowAction, treeRowActions, type TreeRowAction } from '~/composables/useTreeRowActions';
+import { pageUrl, trashUrl } from '~/utils/routes';
 
 const props = defineProps<{
   workspaceId: string | null;
@@ -60,10 +69,13 @@ const props = defineProps<{
   workspaceSlug: string | null;
   /** The page open on screen, if any: marked current and revealed. */
   currentNodeId?: string | null;
+  /** Injected in tests, exactly as `useTree` takes its fetchers. */
+  trashFetcher?: TrashFetcher;
+  forceDeleteFetcher?: ForceDeleteFetcher;
 }>();
 
 const tree = useWorkspaceTree(() => props.workspaceId);
-const { status, nodes, rootId, message, collapsedIds, selectedId, load, reorder, applyCreated, applyRenamed, reveal } = tree;
+const { status, nodes, rootId, message, manageable, isOwner, collapsedIds, selectedId, load, reorder, applyCreated, applyRenamed, removeNode, reveal } = tree;
 
 /**
  * The filter owns which rows are shown and which folds apply: the
@@ -224,6 +236,10 @@ function onKeydown({ event, node, parentId, index }: { event: KeyboardEvent; nod
   }
 
   switch (event.key) {
+    case 'Delete':
+      event.preventDefault();
+      void deleteRow(node.id);
+      break;
     case 'ArrowDown':
       event.preventDefault();
       focusNode(flat[at + 1]?.node.id);
@@ -282,7 +298,70 @@ function onToggle(nodeId: string): void {
 }
 
 const KEYBOARD_HELP =
-  'Arrow keys move through the tree, Enter opens a page or folds a shelf, book or chapter, Alt with the arrow keys moves an item among its siblings, and Shift+F10 opens a row’s menu.';
+  'Arrow keys move through the tree, Enter opens a page or folds a shelf, book or chapter, Alt with the arrow keys moves an item among its siblings, Delete moves an item to the trash, and Shift+F10 opens a row’s menu.';
+
+/* ─── Delete ──────────────────────────────────────────────────────────
+ * One flow for the menu, the toolbar and the key (`useTrash.deleteNode`):
+ * the dialog is `useConfirm`'s, the removal is the shared tree's, and
+ * the two requests are the props' when a test injects them.
+ */
+const config = useRuntimeConfig();
+const { confirm } = useConfirm();
+const trashNode: TrashFetcher = (nodeId) =>
+  props.trashFetcher ? props.trashFetcher(nodeId) : $fetch(`${config.public.apiBaseUrl}/nodes/${nodeId}`, { method: 'DELETE', credentials: 'include' });
+const forceDeleteNode: ForceDeleteFetcher = (nodeId, body) =>
+  props.forceDeleteFetcher
+    ? props.forceDeleteFetcher(nodeId, body)
+    : $fetch(`${config.public.apiBaseUrl}/nodes/${nodeId}/force-delete`, { method: 'POST', credentials: 'include', body });
+
+/** What the last delete came to: the notice beside the tree, one at a time. */
+const deleteNotice = ref<{ readonly title: string } | null>(null);
+const deleteError = ref<string | null>(null);
+/** The node, wherever it stands — the menu's row may be folded away by the time the dialog answers. */
+function nodeById(nodeId: string): TreeNode | null {
+  const walk = (list: readonly TreeNode[]): TreeNode | null => {
+    for (const node of list) {
+      if (node.id === nodeId) return node;
+      const found = walk(node.children);
+      if (found) return found;
+    }
+    return null;
+  };
+  return walk(nodes.value);
+}
+
+async function deleteRow(nodeId: string): Promise<void> {
+  const node = nodeById(nodeId);
+  if (!node) return;
+  const action = deleteRowAction(node, { manageable: manageable.value, isOwner: isOwner.value });
+  if (action.disabled) {
+    // The key on a row that cannot be deleted: say why, the way the menu
+    // and the toolbar show it, rather than nothing.
+    announcement.value = action.reason ?? '';
+    return;
+  }
+  deleteNotice.value = null;
+  deleteError.value = null;
+  const at = visible.value.findIndex((v) => v.node.id === nodeId);
+  const result = await deleteNode(
+    { id: node.id, type: node.type, title: node.title, visibleChildren: node.children.length },
+    { confirm, trashFetcher: trashNode, forceDeleteFetcher: forceDeleteNode, removeRow: removeNode },
+  );
+  if (result.kind === 'cancelled') return;
+  if (result.kind === 'refused') {
+    deleteError.value = result.message;
+    return;
+  }
+  // Said twice on purpose: the chip is what a sighted person reads, the
+  // always-present region is what is reliably announced (§5).
+  deleteNotice.value = { title: node.title };
+  announcement.value = `Moved “${node.title}” to the trash — restore it from the Trash.`;
+  // The dialog returns focus to the row that asked, and that row is gone:
+  // the tree's one tab stop lands on the row now standing where it stood.
+  await nextTick();
+  const rows = visible.value;
+  focusNode(rows[Math.min(Math.max(at, 0), rows.length - 1)]?.node.id);
+}
 
 /* ─── The row's context menu ──────────────────────────────────────────
  * One `UContextMenu` around the whole tree rather than one per row: a
@@ -382,6 +461,11 @@ function runAction(entry: FlatNode, action: TreeRowAction): void {
     case 'copy-link':
       void copyLink(node);
       break;
+    case 'delete':
+      // After the menu has closed and focus is back on the row, so the
+      // dialog's own focus return lands on the row too.
+      afterMenuClose = () => void deleteRow(node.id);
+      break;
     default:
       break;
   }
@@ -443,7 +527,13 @@ defineShortcuts(computed(() => (focusInSidebar.value ? { meta_shift_f: { usingIn
 const menuItems = computed<ContextMenuItem[][]>(() => {
   const entry = menuEntry.value;
   if (!entry) return [];
-  return treeRowActions(entry.node, { index: entry.index, siblingCount: entry.siblings.length, workspaceSlug: props.workspaceSlug ?? '' }).map((group) =>
+  return treeRowActions(entry.node, {
+    index: entry.index,
+    siblingCount: entry.siblings.length,
+    workspaceSlug: props.workspaceSlug ?? '',
+    manageable: manageable.value,
+    isOwner: isOwner.value,
+  }).map((group) =>
     group.map((action) => ({
       label: action.label,
       icon: action.icon,
@@ -467,8 +557,11 @@ const menuItems = computed<ContextMenuItem[][]>(() => {
       :nodes="nodes"
       :root-id="rootId"
       :selected-id="selectedId"
+      :manageable="manageable"
+      :is-owner="isOwner"
       @created="applyCreated"
       @renamed="applyRenamed"
+      @delete="deleteRow"
     />
 
     <div class="flex items-center justify-between gap-2 px-2">
@@ -575,6 +668,16 @@ const menuItems = computed<ContextMenuItem[][]>(() => {
 
       <template v-else>
         <InlineNotice v-if="reorderError" tier="chip" tone="error" role="alert">{{ reorderError }}</InlineNotice>
+        <!-- A delete's outcome, in the chip tier beside the tree (§3):
+             a refusal with its reason, or the success with the way back —
+             a destructive action gets more than a toast that vanishes. -->
+        <InlineNotice v-if="deleteError" tier="chip" tone="error" role="alert" data-testid="tree-delete-error">{{ deleteError }}</InlineNotice>
+        <InlineNotice v-if="deleteNotice" tier="chip" tone="success" data-testid="tree-delete-notice">
+          Moved “{{ deleteNotice.title }}” to the trash.
+          <template #actions>
+            <UButton variant="link" size="sm" class="p-0" :to="trashUrl(workspaceSlug ?? '')">Restore from Trash</UButton>
+          </template>
+        </InlineNotice>
         <!-- The list scrolls inside the pane: a 400-page book scrolls the
              tree, not the room. One context menu around it, for every
              row (see the script). Its container is the menu rung,

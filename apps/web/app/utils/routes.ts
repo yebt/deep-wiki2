@@ -17,6 +17,7 @@
  *   /w/<slug>/b/<id>/history        a book's changesets
  *   /w/<slug>/b/<id>/diff?since     a changeset's pages compared
  *   /w/<slug>/members|settings|ai   the workspace's management screens
+ *   /w/<slug>/trash                 what was deleted, for 30 days
  *   /workspaces, /workspaces/new    the chooser and the way to a new one
  *   /admin/registration, /account   the instance's and the person's own
  *
@@ -68,6 +69,11 @@ export function settingsUrl(slug: string): string {
 
 export function aiUrl(slug: string): string {
   return `${workspaceUrl(slug)}/ai`;
+}
+
+/** The Trash screen (design.md Decision 8): the delete flow links here before the screen exists, so the address is minted once. */
+export function trashUrl(slug: string): string {
+  return `${workspaceUrl(slug)}/trash`;
 }
 
 export function pageUrl(slug: string, id: string): string {

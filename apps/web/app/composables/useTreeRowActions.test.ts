@@ -1,7 +1,7 @@
 import { LEGAL_PARENT_TYPES, legalChildTypes, type NodeType } from '@deep-wiki/contracts';
 import { describe, expect, test } from 'vitest';
 import type { TreeNode } from './useTree';
-import { treeRowActions, type TreeRowAction } from './useTreeRowActions';
+import { deleteRowAction, treeRowActions, type TreeRowAction } from './useTreeRowActions';
 
 function node(type: string, id = `${type}-1`, children: TreeNode[] = []): TreeNode {
   return { id, type, slug: id, title: `The ${type}`, position: 0, children };
@@ -15,7 +15,7 @@ function byKind(groups: readonly (readonly TreeRowAction[])[], kind: TreeRowActi
   return flat(groups).filter((action) => action.kind === kind);
 }
 
-const MIDDLE = { index: 1, siblingCount: 3, workspaceSlug: 'acme' };
+const MIDDLE = { index: 1, siblingCount: 3, workspaceSlug: 'acme', manageable: new Set<string>(), isOwner: false };
 
 describe('treeRowActions', () => {
   describe('"New <child>…" comes from the one LEGAL_PARENT_TYPES table', () => {
@@ -130,9 +130,70 @@ describe('treeRowActions', () => {
     }
   });
 
-  test('delete is not offered — three open questions in docs/TODO.md', () => {
-    for (const type of ['shelf', 'book', 'chapter', 'page']) {
-      expect(flat(treeRowActions(node(type), MIDDLE)).some((action) => /delete|remove/i.test(action.label))).toBe(false);
-    }
+  /**
+   * Delete (navigation-tree spec, "Delete Row Action Is Available Where
+   * Trashing Is Permitted" and "Delete Is Disabled With A Stated Reason
+   * For A Non-Empty Container"; design.md Decision 8). Offered on every
+   * row, last in the menu; live when the row is in the tree response's
+   * `manageable` or the caller is the workspace owner; otherwise disabled
+   * with the reason on show. A container with visible children is a
+   * non-owner's stop, since only the owner may take pages with it — the
+   * client's "non-empty" is a lower bound (unreadable children are
+   * invisible), and the server's own answer is what the flow acts on.
+   */
+  describe('delete', () => {
+    const manageable = new Set(['page-1', 'chapter-1', 'shelf-1']);
+
+    test('is offered on every row, last, as "Delete…" with the trash icon', () => {
+      for (const type of ['shelf', 'book', 'chapter', 'page']) {
+        const groups = treeRowActions(node(type), MIDDLE);
+        const lastGroup = groups[groups.length - 1]!;
+        expect(lastGroup.map((action) => action.kind), type).toEqual(['delete']);
+        const [remove] = byKind(groups, 'delete');
+        expect(remove?.label).toBe('Delete…');
+        expect(remove?.icon).toBe('i-lucide-trash-2');
+      }
+    });
+
+    test('is live on a manageable page for a member who is not the owner', () => {
+      const [remove] = byKind(treeRowActions(node('page'), { ...MIDDLE, manageable }), 'delete');
+      expect(remove?.disabled).toBe(false);
+      expect(remove?.reason).toBeUndefined();
+    });
+
+    test('is disabled with a reason naming manage access when the row is not manageable and the caller is not the owner', () => {
+      const [remove] = byKind(treeRowActions(node('page', 'page-9'), { ...MIDDLE, manageable }), 'delete');
+      expect(remove?.disabled).toBe(true);
+      expect(remove?.reason).toBe('You need manage access to delete this.');
+    });
+
+    test('is live on an unmanageable row for the workspace owner', () => {
+      const [remove] = byKind(treeRowActions(node('page', 'page-9'), { ...MIDDLE, isOwner: true }), 'delete');
+      expect(remove?.disabled).toBe(false);
+    });
+
+    test('is disabled with a reason naming the container and what it holds when it has visible children and the caller is not the owner', () => {
+      const chapter = node('chapter', 'chapter-1', [node('page', 'page-1')]);
+      const [remove] = byKind(treeRowActions(chapter, { ...MIDDLE, manageable }), 'delete');
+      expect(remove?.disabled).toBe(true);
+      expect(remove?.reason).toBe('Empty this chapter first — only the workspace owner can delete a chapter with pages in it.');
+
+      const shelf = node('shelf', 'shelf-1', [node('book', 'book-1')]);
+      expect(byKind(treeRowActions(shelf, { ...MIDDLE, manageable }), 'delete')[0]?.reason).toBe(
+        'Empty this shelf first — only the workspace owner can delete a shelf with books in it.',
+      );
+    });
+
+    test('is live on the same non-empty container for the owner, and on an empty container for a manager', () => {
+      const chapter = node('chapter', 'chapter-1', [node('page', 'page-1')]);
+      expect(byKind(treeRowActions(chapter, { ...MIDDLE, isOwner: true }), 'delete')[0]?.disabled).toBe(false);
+      expect(byKind(treeRowActions(node('chapter', 'chapter-1'), { ...MIDDLE, manageable }), 'delete')[0]?.disabled).toBe(false);
+    });
+
+    test('deleteRowAction() is the same decision the menu makes, for the toolbar', () => {
+      const chapter = node('chapter', 'chapter-1', [node('page', 'page-1')]);
+      expect(deleteRowAction(chapter, { manageable, isOwner: false })).toEqual(byKind(treeRowActions(chapter, { ...MIDDLE, manageable }), 'delete')[0]);
+      expect(deleteRowAction(node('page'), { manageable, isOwner: false }).disabled).toBe(false);
+    });
   });
 });

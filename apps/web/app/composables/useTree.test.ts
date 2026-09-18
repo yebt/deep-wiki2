@@ -123,6 +123,51 @@ describe('useTree', () => {
     expect(fetchTree).toHaveBeenCalledTimes(1);
   });
 
+  // ── What the caller may do (design.md Decision 8) ──────────────────
+  // The tree response carries `manageable` — the ids the caller holds
+  // `manage` on — and `isOwner`; the one permission signal the client
+  // has, for a Delete that is disabled with a reason rather than refused
+  // by the server after the fact.
+
+  test('exposes manageable ids as a set and isOwner from the response, empty and false when the response carries neither', async () => {
+    const withGrants = useTree('ws-1', { fetchTree: vi.fn(async () => ({ rootId: 'root-1', nodes: SIBLINGS(), manageable: ['page-1', 'book-1'], isOwner: true })) });
+    await withGrants.load();
+    expect(withGrants.manageable.value).toEqual(new Set(['page-1', 'book-1']));
+    expect(withGrants.isOwner.value).toBe(true);
+
+    const without = useTree('ws-1', { fetchTree: vi.fn(async () => ({ rootId: 'root-1', nodes: SIBLINGS() })) });
+    await without.load();
+    expect(without.manageable.value).toEqual(new Set());
+    expect(without.isOwner.value).toBe(false);
+  });
+
+  // A delete draws before the server answers, like a drag: the row is
+  // gone at once and comes back only on a refusal. `removeNode` returns
+  // the way back so the flow that made the request can take it.
+
+  test('removeNode() takes the node out locally, subtree and all, and returns an undo that restores the exact tree', async () => {
+    const { nodes, load, removeNode } = useTree('ws-1', { fetchTree: vi.fn(async () => ({ rootId: 'root-1', nodes: NESTED() })) });
+    await load();
+    const before = nodes.value;
+
+    const undo = removeNode('chapter-1');
+
+    expect(nodes.value[0]!.children.map((node) => node.id)).toEqual(['page-1']);
+    expect(nodes.value[0]!.children[0]!.position).toBe(0);
+    undo();
+    expect(nodes.value).toBe(before);
+  });
+
+  test('removeNode() on an id the tree does not hold changes nothing, and its undo is harmless', async () => {
+    const { nodes, load, removeNode } = useTree('ws-1', { fetchTree: vi.fn(async () => ({ rootId: 'root-1', nodes: SIBLINGS() })) });
+    await load();
+    const before = nodes.value;
+    const undo = removeNode('nowhere');
+    expect(nodes.value).toBe(before);
+    undo();
+    expect(nodes.value).toBe(before);
+  });
+
   test('applyRenamed() patches the one node\'s title and slug in place', async () => {
     const fetchTree = vi.fn(async () => ({ rootId: 'root-1', nodes: NESTED() }));
     const { load, applyRenamed, nodes } = useTree('ws-1', { fetchTree });

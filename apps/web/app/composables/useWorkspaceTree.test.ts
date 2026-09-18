@@ -149,6 +149,20 @@ describe('useWorkspaceTree', () => {
     expect(tree.status.value).toBe('success');
   });
 
+  test('manageable and isOwner reach the shared record, and removeNode() edits it at once with a way back', async () => {
+    const fetchTree = vi.fn(async () => ({ rootId: 'root-1', nodes: TWO_PAGES(), manageable: ['page-1'], isOwner: false }));
+    const tree = useWorkspaceTree(ref<string | null>('ws-removed'), { fetchTree });
+    await tree.load();
+    expect(tree.manageable.value).toEqual(new Set(['page-1']));
+    expect(tree.isOwner.value).toBe(false);
+
+    const second = useWorkspaceTree(ref<string | null>('ws-removed'), { fetchTree });
+    const undo = second.removeNode('page-1');
+    expect(tree.nodes.value[0]!.children.map((node) => node.title)).toEqual(['Second page']);
+    undo();
+    expect(tree.nodes.value[0]!.children.map((node) => node.title)).toEqual(['First page', 'Second page']);
+  });
+
   test('a second instance draws a created and a renamed node from the response, and a refresh keeps the rows on screen', async () => {
     const fetchTree = vi.fn(async () => ({ rootId: 'root-1', nodes: TWO_PAGES() }));
     const first = useWorkspaceTree(ref<string | null>('ws-created'), { fetchTree });

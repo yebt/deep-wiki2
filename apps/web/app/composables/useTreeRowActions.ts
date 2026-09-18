@@ -39,17 +39,24 @@ import { bookHistoryUrl, pageHistoryUrl, pageUrl } from '~/utils/routes';
  * the accessible name — one set of words, not a label and a hidden
  * longer one (§4.3).
  *
- * ── What is not here ────────────────────────────────────────────────────
+ * ── Delete, and the one permission that reaches the client ─────────────
  *
- * No permission is consulted, because none reaches the client: the tree
- * endpoint hands over ids, types and titles and nothing about what the
- * caller may do with them (docs/TODO.md Open Questions). A rename or a
- * move a `read`-only member asks for is refused by the server and shown
- * as the toolbar already shows it — the same dialog, the same sentence.
- * And no delete, on purpose: three open questions in docs/TODO.md come
- * first.
+ * "Delete…" is last, on every row (navigation-tree spec, "Delete Row
+ * Action Is Available Where Trashing Is Permitted"; design.md Decision
+ * 8). It is the one action with a permission behind it: the tree
+ * response carries `manageable` — the ids the caller holds `manage` on —
+ * and `isOwner`, and nothing else about what the caller may do
+ * (docs/TODO.md Open Questions, narrowed by this one signal). Two
+ * reasons keep it disabled, both said in full: no `manage` and not the
+ * owner; or a container with children the tree shows when the caller is
+ * not the owner, because only the owner may take pages with it. The
+ * tree's "non-empty" is a lower bound — children the caller cannot read
+ * are invisible — so the server's own `409 not_empty` is what the flow
+ * finally acts on (`useTrash.ts`). A rename or a move a `read`-only
+ * member asks for is still refused by the server and shown as the
+ * toolbar already shows it — the same dialog, the same sentence.
  */
-export type TreeRowActionKind = 'create' | 'rename' | 'move-up' | 'move-down' | 'open' | 'history' | 'copy-link';
+export type TreeRowActionKind = 'create' | 'rename' | 'move-up' | 'move-down' | 'open' | 'history' | 'copy-link' | 'delete';
 
 export interface TreeRowAction {
   readonly kind: TreeRowActionKind;
@@ -70,7 +77,14 @@ export interface TreeRowActionContext {
   readonly siblingCount: number;
   /** The workspace the row belongs to, by the slug its destinations' addresses carry. */
   readonly workspaceSlug: string;
+  /** Ids the caller holds `manage` on, from the tree response. */
+  readonly manageable: ReadonlySet<string>;
+  /** The caller is the workspace owner: every row is theirs to delete, children and all. */
+  readonly isOwner: boolean;
 }
+
+/** What the caller may do, for the one action that asks: the tree response's `manageable` and `isOwner`. */
+export type DeleteContext = Pick<TreeRowActionContext, 'manageable' | 'isOwner'>;
 
 export const NODE_TYPE_LABELS: Record<NodeType, string> = {
   workspace: 'Workspace',
@@ -80,7 +94,30 @@ export const NODE_TYPE_LABELS: Record<NodeType, string> = {
   page: 'Page',
 };
 
-/** Groups, in menu order: create · rename and move · destinations · copy. Empty groups are dropped. */
+/** What a container holds, for the reason a non-owner reads: "a shelf with books in it", "a book with chapters or pages in it". */
+function contentsWord(type: NodeType): string {
+  const children = legalChildTypes(type).map((child) => `${NODE_TYPE_LABELS[child].toLowerCase()}s`);
+  return children.join(' or ');
+}
+
+/**
+ * The Delete item for one row — the menu's and the toolbar's, one
+ * decision. Disabled with the reason on show, never removed
+ * (docs/UI-CHECKLIST.md §3 "Disabled", §5).
+ */
+export function deleteRowAction(node: TreeNode, ctx: DeleteContext): TreeRowAction {
+  const base = { kind: 'delete' as const, label: 'Delete…', icon: 'i-lucide-trash-2' };
+  if (ctx.isOwner) return { ...base, disabled: false };
+  if (!ctx.manageable.has(node.id)) return { ...base, disabled: true, reason: 'You need manage access to delete this.' };
+  if (node.children.length > 0) {
+    const type = node.type as NodeType;
+    const word = NODE_TYPE_LABELS[type].toLowerCase();
+    return { ...base, disabled: true, reason: `Empty this ${word} first — only the workspace owner can delete a ${word} with ${contentsWord(type)} in it.` };
+  }
+  return { ...base, disabled: false };
+}
+
+/** Groups, in menu order: create · rename and move · destinations · copy · delete. Empty groups are dropped. */
 export function treeRowActions(node: TreeNode, ctx: TreeRowActionContext): readonly (readonly TreeRowAction[])[] {
   const type = node.type as NodeType;
 
@@ -125,5 +162,5 @@ export function treeRowActions(node: TreeNode, ctx: TreeRowActionContext): reado
       ? { kind: 'copy-link', label: 'Copy link', icon: 'i-lucide-link', disabled: false }
       : { kind: 'copy-link', label: 'Copy link', icon: 'i-lucide-link', disabled: true, reason: 'Only a page has an address to copy yet.' };
 
-  return [creates, edits, destinations, [copy]].filter((group) => group.length > 0);
+  return [creates, edits, destinations, [copy], [deleteRowAction(node, ctx)]].filter((group) => group.length > 0);
 }

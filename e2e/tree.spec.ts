@@ -117,7 +117,12 @@ test.describe('the row context menu', () => {
     const moveUp = menu.getByRole('menuitem', { name: /^Move up/ });
     await expect(moveUp).toHaveAttribute('aria-disabled', 'true');
     await expect(moveUp).toContainText('Already first');
-    await expect(menu.getByRole('menuitem', { name: /delete/i })).toHaveCount(0);
+    // Delete is offered on every row; this writer holds `write` and not
+    // `manage`, so it stays in the menu with its reason on show
+    // (navigation-tree spec; `e2e/tree-writes.spec.ts` drives the flow).
+    const remove = menu.getByRole('menuitem', { name: /^Delete…/ });
+    await expect(remove).toHaveAttribute('aria-disabled', 'true');
+    await expect(remove).toContainText('manage access');
 
     await menu.getByRole('menuitem', { name: /^Rename…/ }).click();
 
