@@ -16,7 +16,8 @@
     "seed": "bun run seed.ts",
     "backfill:render": "bun run backfill-render.ts",
     "verify:paths": "bun run verify-paths.ts",
-    "ai:reindex": "bun run ai-reindex.ts"
+    "ai:reindex": "bun run ai-reindex.ts",
+    "trash:purge": "bun run trash-purge.ts"
   },
   "dependencies": {
     "@deep-wiki/core": "workspace:*",
