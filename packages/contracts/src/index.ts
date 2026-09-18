@@ -151,6 +151,37 @@ export {
 export type { CreateNodeRequest, CreateNodeResponse, NodeLocationResponse, NodeType, NodeWorkspace, RenameNodeRequest, RenameNodeResponse } from './nodes';
 
 export {
+  DeletionTraceSchema,
+  ForceDeleteRequestSchema,
+  NameMismatchRefusalSchema,
+  NotEmptyRefusalSchema,
+  RestoreAncestorTrashedRefusalSchema,
+  RestoreRequestSchema,
+  RestoreResponseSchema,
+  RestoreSlugTakenRefusalSchema,
+  StaleCountRefusalSchema,
+  TrashedCountsSchema,
+  TrashListingResponseSchema,
+  TrashLookupResponseSchema,
+  TrashNodeResponseSchema,
+} from './trash';
+export type {
+  DeletionTracePayload,
+  ForceDeleteRequest,
+  NameMismatchRefusal,
+  NotEmptyRefusal,
+  RestoreAncestorTrashedRefusal,
+  RestoreRequest,
+  RestoreResponse,
+  RestoreSlugTakenRefusal,
+  StaleCountRefusal,
+  TrashedCounts,
+  TrashListingItem,
+  TrashListingResponse,
+  TrashLookupResponse,
+} from './trash';
+
+export {
   CreateWorkspaceRefusalSchema,
   CreateWorkspaceRequestSchema,
   CreateWorkspaceResponseSchema,

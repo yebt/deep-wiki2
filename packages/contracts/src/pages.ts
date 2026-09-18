@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { NodeWorkspaceSchema } from './nodes';
+import { TrashLookupResponseSchema } from './trash';
 
 /**
  * Request/response schemas for `apps/api/src/routes/pages.ts`
@@ -28,6 +29,8 @@ export const ReadPageResponseSchema = z.object({
   workspaceId: z.string(),
   /** The same workspace, with the slug the address carries — what the frame checks `/w/<slug>/p/<id>` against (`NodeWorkspaceSchema`). */
   workspace: NodeWorkspaceSchema,
+  /** Present only when this page is trashed and the caller may `manage` it (design.md Decision 7, `trashLookup`). Its absence for everyone else is byte-identical to a page that was never trashed at all — a former reader without `manage` never reaches this shape (`live_nodes` misses first, `apps/api/src/routes/pages.ts`). */
+  trash: TrashLookupResponseSchema.optional(),
 });
 export type ReadPageResponse = z.infer<typeof ReadPageResponseSchema>;
 

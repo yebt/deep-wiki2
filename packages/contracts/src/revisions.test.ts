@@ -172,4 +172,23 @@ describe('BookHistoryResponseSchema', () => {
 
     expect(parsed.title).toBe('');
   });
+
+  // changesets spec: "History Response Carries Deletions Alongside
+  // Changesets" (deletion-trace spec). `deletions` defaults to `[]` so a
+  // fixture predating this field (every test above) still parses.
+  test('deletions defaults to an empty array and parses a restricted line with its title withheld', () => {
+    const withoutDeletions = BookHistoryResponseSchema.parse({ title: 'Handbook', workspaceId: 'ws-1', workspace: { id: 'ws-1', slug: 'acme' }, changesets: [] });
+    expect(withoutDeletions.deletions).toEqual([]);
+
+    const withDeletions = BookHistoryResponseSchema.parse({
+      title: 'Handbook',
+      workspaceId: 'ws-1',
+      workspace: { id: 'ws-1', slug: 'acme' },
+      changesets: [],
+      deletions: [
+        { id: 'd-1', event: 'trashed', nodeType: 'page', title: null, actorDisplayName: null, occurredAt: '2026-01-01T00:00:00.000Z', restricted: true },
+      ],
+    });
+    expect(withDeletions.deletions[0]!.title).toBeNull();
+  });
 });

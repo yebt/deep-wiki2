@@ -16,6 +16,23 @@ describe('ReadPageResponseSchema', () => {
     expect(() => ReadPageResponseSchema.parse({ html: '<p>Hi</p>', title: 'Hi', workspace: { id: 'ws-1', slug: 'acme' } })).toThrow();
   });
 
+  // design.md Decision 7: the `trash` block is present only for a manager
+  // viewing a trashed page after a `live_nodes` miss; absent for the
+  // ordinary read path this describe block otherwise exercises.
+  test('the trash block is absent by default and parses when a manager is looking at a trashed page', () => {
+    const ordinary = ReadPageResponseSchema.parse({ html: '<p>Hi</p>', title: 'Hi', workspaceId: 'ws-1', workspace: { id: 'ws-1', slug: 'acme' } });
+    expect(ordinary.trash).toBeUndefined();
+
+    const trashed = ReadPageResponseSchema.parse({
+      html: '<p>Hi</p>',
+      title: 'Hi',
+      workspaceId: 'ws-1',
+      workspace: { id: 'ws-1', slug: 'acme' },
+      trash: { operationId: 'op-1', trashedAt: '2026-01-01T00:00:00.000Z', trashedBy: null, daysLeft: 12, restoreBlockedBy: null },
+    });
+    expect(trashed.trash?.daysLeft).toBe(12);
+  });
+
   // The address `/w/<slug>/p/<id>` names a place twice; the frame checks
   // the two agree from this response rather than a second request
   // (`GET /nodes/:id/location`, 2026-09-17: one extra request per node

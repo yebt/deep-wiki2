@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { NodeWorkspaceSchema } from './nodes';
+import { DeletionTraceSchema } from './trash';
 
 /**
  * `GET /pages/:id/history` response (revision-history spec: "Page History
@@ -59,5 +60,7 @@ export const BookHistoryResponseSchema = z.object({
   /** The same workspace, with the slug the address carries (`NodeWorkspaceSchema`). */
   workspace: NodeWorkspaceSchema,
   changesets: z.array(BookChangesetSchema),
+  /** Trash/restore/purge trace lines for this book (changesets spec: "History Response Carries Deletions Alongside Changesets"; deletion-trace spec). The client renders this interleaved with `changesets` as one timeline ordered by time. Defaults to `[]` so a fixture predating this field still parses. */
+  deletions: z.array(DeletionTraceSchema).default([]),
 });
 export type BookHistoryResponse = z.infer<typeof BookHistoryResponseSchema>;
