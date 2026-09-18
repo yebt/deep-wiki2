@@ -28,6 +28,7 @@ import { createPageRoutes } from './routes/pages';
 import { createPresenceRoutes } from './routes/presence';
 import { createRevisionRoutes } from './routes/revisions';
 import { createTagRoutes } from './routes/tags';
+import { createTrashRoutes } from './routes/trash';
 import { createTreeRoutes } from './routes/tree';
 import { createUploadRoutes } from './routes/uploads';
 import { createWorkspaceRoutes } from './routes/workspaces';
@@ -200,6 +201,7 @@ export function composeApp(adapters: AppAdapters, settings: AppSettings): Hono {
   app.route('/', createMentionRoutes({ sql, sessionIdleTimeoutMinutes }));
   app.route('/', createWorkspaceRoutes({ sql, sessionIdleTimeoutMinutes }));
   app.route('/', createTreeRoutes({ sql, sessionIdleTimeoutMinutes }));
+  app.route('/', createTrashRoutes({ sql, sessionIdleTimeoutMinutes }));
   app.route(
     '/',
     createCommentRoutes({
