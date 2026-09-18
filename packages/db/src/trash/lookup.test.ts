@@ -99,6 +99,21 @@ describe('trashLookup', () => {
     expect(result!.restoreBlockedBy).toBeNull();
   });
 
+  // apps/api/src/routes/pages.ts's GET /pages/:id wires this result
+  // straight into its response after a live_nodes miss, with no second
+  // base-table read of its own — it needs the node's own identity here.
+  test('carries the trashed node\'s own title and workspace identity', async () => {
+    const { workspaceId, page, ownerId } = await seedTree();
+    await trashNode(sql, { nodeId: page.id, actorId: ownerId, isOwner: false, hasManage: true, mode: 'trash' });
+    await grantManage(workspaceId, page.id, ownerId);
+
+    const result = await trashLookup(sql, { nodeId: page.id, subjectId: ownerId });
+
+    expect(result!.title).toBe('page');
+    expect(result!.workspaceId).toBe(workspaceId);
+    expect(result!.workspaceSlug).toEqual(expect.any(String));
+  });
+
   test('a different manager (manage on the node, not the one who trashed it) can also look it up', async () => {
     const { workspaceId, page, ownerId } = await seedTree();
     await trashNode(sql, { nodeId: page.id, actorId: ownerId, isOwner: false, hasManage: true, mode: 'trash' });

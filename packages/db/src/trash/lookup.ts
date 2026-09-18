@@ -24,6 +24,10 @@ export interface TrashLookupResult {
   readonly trashedBy: { readonly id: string; readonly displayName: string } | null;
   readonly daysLeft: number;
   readonly restoreBlockedBy: { readonly title: string } | null;
+  /** The trashed node's own identity — `apps/api/src/routes/pages.ts`'s only way to answer `GET /pages/:id` after a `live_nodes` miss without a second base-table read of its own. */
+  readonly title: string;
+  readonly workspaceId: string;
+  readonly workspaceSlug: string;
 }
 
 interface TrashedNodeRow {
@@ -32,13 +36,17 @@ interface TrashedNodeRow {
   trash_operation_id: string;
   trashed_at: Date;
   trashed_by: string | null;
+  title: string;
+  workspace_id: string;
+  workspace_slug: string;
 }
 
 /** `null` unless the node is trashed AND the subject may `manage` it — a non-manager and a nonexistent node get the same `null`. */
 export async function trashLookup(sql: SqlExecutor, input: TrashLookupInput): Promise<TrashLookupResult | null> {
   const [node] = await sql<TrashedNodeRow[]>`
-    SELECT parent_id, slug, trash_operation_id, trashed_at, trashed_by
-      FROM nodes WHERE id = ${input.nodeId} AND trashed_at IS NOT NULL
+    SELECT n.parent_id, n.slug, n.trash_operation_id, n.trashed_at, n.trashed_by, n.title, n.workspace_id, w.slug AS workspace_slug
+      FROM nodes n JOIN workspaces w ON w.id = n.workspace_id
+     WHERE n.id = ${input.nodeId} AND n.trashed_at IS NOT NULL
   `;
   if (!node) return null;
 
@@ -56,5 +64,8 @@ export async function trashLookup(sql: SqlExecutor, input: TrashLookupInput): Pr
     trashedBy,
     daysLeft: daysUntilPurge(node.trashed_at, input.now ?? new Date()),
     restoreBlockedBy,
+    title: node.title,
+    workspaceId: node.workspace_id,
+    workspaceSlug: node.workspace_slug,
   };
 }
