@@ -163,6 +163,24 @@ describe('POST /workspaces/:workspaceId/ai-credentials', () => {
     expect(rowsA).toHaveLength(1);
     expect(rowsB).toHaveLength(0);
   });
+
+  // trash-non-disclosure spec: this route's root-node lookup goes through
+  // `live_nodes` — defensive, since nothing trashes a workspace root today,
+  // proven here by direct SQL so a bug elsewhere can never save a
+  // credential against a trashed root instead of refusing.
+  test('a trashed workspace root answers "workspace not found"', async () => {
+    const fixture = await seedFixture();
+    await sql`UPDATE nodes SET trashed_at = now(), trash_operation_id = ${crypto.randomUUID()} WHERE id = ${fixture.rootId}`;
+    const app = buildApp(new FakeProbe({ ok: true }));
+
+    const res = await app.request(`/workspaces/${fixture.workspaceId}/ai-credentials`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie: fixture.adminCookie },
+      body: JSON.stringify({ provider: 'anthropic', apiKey: 'sk-anything' }),
+    });
+
+    expect(res.status).toBe(404);
+  });
 });
 
 describe('GET /workspaces/:workspaceId/ai-credentials', () => {

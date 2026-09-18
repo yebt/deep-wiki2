@@ -152,7 +152,7 @@ export function createWorkspaceRoutes(deps: WorkspaceRouteDeps): Hono<{ Variable
     const [workspace] = await deps.sql<{ id: string; name: string; slug: string; root_id: string }[]>`
       SELECT w.id, w.name, w.slug, n.id AS root_id
         FROM workspaces w
-        JOIN nodes n ON n.workspace_id = w.id AND n.type = 'workspace' AND n.parent_id IS NULL
+        JOIN live_nodes n ON n.workspace_id = w.id AND n.type = 'workspace' AND n.parent_id IS NULL
        WHERE w.id = ${workspaceId}
     `;
     if (!workspace) return notFound(c);

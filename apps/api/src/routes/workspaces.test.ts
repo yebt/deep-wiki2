@@ -386,4 +386,20 @@ describe('GET /workspaces/:id/members', () => {
 
     expect(res.status).toBe(401);
   });
+
+  // trash-non-disclosure spec: this route's root-node lookup goes through
+  // `live_nodes` like every other node read in this file — a defensive
+  // check with no route to trigger it today (nothing trashes a workspace
+  // root), proven here by direct SQL so a bug elsewhere can never surface
+  // this route's members list against a trashed root instead of refusing.
+  test('a trashed workspace root answers the same 404 as one that never existed', async () => {
+    const fixture = await buildMembersFixture();
+    await sql`UPDATE nodes SET trashed_at = now(), trash_operation_id = ${crypto.randomUUID()} WHERE id = ${fixture.workspace.rootId}`;
+
+    const denied = await buildApp().request(`/workspaces/${fixture.workspace.id}/members`, { headers: { cookie: fixture.managerCookie } });
+    const absent = await buildApp().request(`/workspaces/${crypto.randomUUID()}/members`, { headers: { cookie: fixture.managerCookie } });
+
+    expect(denied.status).toBe(404);
+    expect(await denied.text()).toBe(await absent.text());
+  });
 });

@@ -90,7 +90,7 @@ export function createInvitationRoutes(deps: InvitationRouteDeps): Hono<{ Variab
     // gets the same answer as an id that names nothing.
     if (!UUID_SHAPE.test(workspaceId)) return notFound(c);
     const [root] = await deps.sql<{ id: string }[]>`
-      SELECT id FROM nodes WHERE workspace_id = ${workspaceId} AND type = 'workspace'
+      SELECT id FROM live_nodes WHERE workspace_id = ${workspaceId} AND type = 'workspace'
     `;
     if (!root) return notFound(c);
 

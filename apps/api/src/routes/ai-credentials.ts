@@ -51,7 +51,7 @@ export function createAiCredentialRoutes(deps: AiCredentialRouteDeps): Hono<{ Va
 
   async function resolveWorkspaceRootId(workspaceId: string): Promise<string | undefined> {
     const [root] = await deps.sql<{ id: string }[]>`
-      SELECT id FROM nodes WHERE workspace_id = ${workspaceId} AND type = 'workspace'
+      SELECT id FROM live_nodes WHERE workspace_id = ${workspaceId} AND type = 'workspace'
     `;
     return root?.id;
   }

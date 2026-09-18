@@ -202,6 +202,29 @@ describe('POST /invitations', () => {
     expectNoDisclosure(deniedText, { id: fixture.workspaceId, slug: fixture.workspaceSlug, values: [fixture.rootId] }, denied.headers);
     expect(await sql`SELECT id FROM invitations WHERE workspace_id = ${fixture.workspaceId}`).toHaveLength(0);
   });
+
+  // trash-non-disclosure spec: this route's root-node lookup goes through
+  // `live_nodes` — defensive, since nothing trashes a workspace root today,
+  // proven here by direct SQL so a bug elsewhere can never issue an
+  // invitation against a trashed root instead of refusing.
+  test('a trashed workspace root answers the same 404 as a nonexistent workspace', async () => {
+    const fixture = await buildFixture();
+    await sql`UPDATE nodes SET trashed_at = now(), trash_operation_id = ${crypto.randomUUID()} WHERE id = ${fixture.rootId}`;
+    const app = buildApp();
+
+    const denied = await app.request('/invitations', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie: fixture.adminCookie },
+      body: JSON.stringify({
+        workspaceId: fixture.workspaceId,
+        email: 'someone-trashed@example.com',
+        startingGrants: [{ resourceId: fixture.bookId, action: 'read' }],
+      }),
+    });
+
+    expect(denied.status).toBe(404);
+    expect(await sql`SELECT id FROM invitations WHERE workspace_id = ${fixture.workspaceId}`).toHaveLength(0);
+  });
 });
 
 describe('POST /invitations/accept', () => {
