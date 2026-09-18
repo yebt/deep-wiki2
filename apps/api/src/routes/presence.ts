@@ -124,8 +124,12 @@ export function createPresenceRoutes(deps: PresenceRouteDeps): Hono<{ Variables:
         if (!authorized) return; // silently dropped — no "hidden event" signal either
 
         if (closed) return;
-        const [node] = await deps.sql<NodeTitleRow[]>`SELECT title FROM nodes WHERE id = ${event.pageId}`;
-        if (!node) return; // the page was deleted meanwhile
+        // live_nodes: a trashed page is dropped exactly like a deleted one
+        // (trash-non-disclosure spec) — `can(read)` above still resolves
+        // true for a trashed page (the permission model is untouched), so
+        // this is the one check that actually excludes it.
+        const [node] = await deps.sql<NodeTitleRow[]>`SELECT title FROM live_nodes WHERE id = ${event.pageId}`;
+        if (!node) return; // the page was deleted or trashed meanwhile
 
         const [author] = await deps.sql<UserNameRow[]>`SELECT display_name FROM users WHERE id = ${event.userId}`;
 

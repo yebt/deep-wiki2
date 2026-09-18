@@ -354,6 +354,30 @@ describe('GET /workspaces/:workspaceId/presence/stream — per-subscriber non-di
     const outsiderFrame = await outsiderFr.nextPresenceFrame(700);
     expect(outsiderFrame).toBeNull();
   });
+
+  // trash-non-disclosure spec: a trashed page's presence event must not
+  // reach a former reader — the same non-disclosure this route already
+  // gives an unreadable page, evaluated fresh per event.
+  test('a trashed page\'s event reaches nobody, not even a subject who could read it before', async () => {
+    const fixture = await buildFixture();
+    await sql`UPDATE nodes SET trashed_at = now(), trash_operation_id = ${crypto.randomUUID()} WHERE id = ${fixture.pageId}`;
+    const broadcaster = new TestBroadcaster();
+    const app = buildApp({ broadcaster });
+
+    const res = await app.request(`/workspaces/${fixture.workspaceId}/presence/stream`, {
+      headers: { cookie: fixture.readerCookie },
+    });
+    const fr = new FrameReader(res.body!.getReader());
+    await fr.next();
+
+    const since = new Date().toISOString();
+    broadcaster.publish({ workspaceId: fixture.workspaceId, pageId: fixture.pageId, userId: fixture.editorUserId, since });
+
+    const frame = await fr.nextPresenceFrame(700);
+
+    expect(frame).toBeNull();
+    expectNoDisclosure(fr.transcript(), { id: fixture.pageId, title: fixture.pageTitle }, res.headers);
+  });
 });
 
 describe('per-event authorisation is re-evaluated on every candidate event', () => {
