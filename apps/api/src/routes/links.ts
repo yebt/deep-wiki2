@@ -32,15 +32,20 @@ export function createLinkRoutes(deps: LinkRouteDeps): Hono<{ Variables: Session
     // learn that the target page exists. Same rule as the comment routes,
     // and the singular analogue of `readableResourceIds` dropping an
     // unreadable id rather than reporting it as denied.
-    const [target] = await deps.sql<{ workspace_id: string }[]>`SELECT workspace_id FROM nodes WHERE id = ${targetId}`;
+    // live_nodes: a trashed target answers exactly like a missing one
+    // (trash-non-disclosure spec), and a trashed source page must not
+    // survive the candidate list below either.
+    const [target] = await deps.sql<{ workspace_id: string }[]>`SELECT workspace_id FROM live_nodes WHERE id = ${targetId}`;
     const authorized =
       target !== undefined &&
       (await can(deps.sql, { subjectType: 'user', subjectId: session.userId, resourceId: targetId, action: 'read' }));
     if (!target || !authorized) return c.json(ErrorResponseSchema.parse({ error: 'not found' }), 404);
 
     const candidates = await deps.sql<{ source_page_id: string }[]>`
-      SELECT DISTINCT source_page_id FROM links
-       WHERE workspace_id = ${target.workspace_id} AND target_page_id = ${targetId}
+      SELECT DISTINCT l.source_page_id
+        FROM links l
+        JOIN live_nodes n ON n.id = l.source_page_id
+       WHERE l.workspace_id = ${target.workspace_id} AND l.target_page_id = ${targetId}
        LIMIT ${BACKLINK_CANDIDATE_LIMIT}
     `;
     const candidateIds = candidates.map((row) => row.source_page_id);
@@ -56,7 +61,7 @@ export function createLinkRoutes(deps: LinkRouteDeps): Hono<{ Variables: Session
     const pages =
       survivorIds.length === 0
         ? []
-        : await deps.sql<{ id: string; title: string }[]>`SELECT id, title FROM nodes WHERE id = ANY(${survivorIds}::uuid[])`;
+        : await deps.sql<{ id: string; title: string }[]>`SELECT id, title FROM live_nodes WHERE id = ANY(${survivorIds}::uuid[])`;
 
     // Counts are computed over the filtered set (design.md "Listing
     // without disclosure", rule 1) — never over the unfiltered candidates.

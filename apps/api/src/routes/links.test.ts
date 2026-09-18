@@ -126,4 +126,58 @@ describe('GET /pages/:id/backlinks', () => {
     expect(denied.status).toBe(404);
     expectNoDisclosure(deniedBody, { id: target, slug: 'target3', title: 'Target3' }, denied.headers);
   });
+
+  // trash-non-disclosure spec: "Backlinks and mentions carry no residual
+  // trace" — a trashed source page must drop out of the backlinks list,
+  // and a trashed target must answer identically to an unknown one for a
+  // former reader.
+  test('a trashed source page is absent from backlinks, with nothing revealing its title or existence', async () => {
+    const owner = await insertUser('owner4');
+    const [ws] = await sql<{ id: string }[]>`INSERT INTO workspaces (owner_id, name, slug) VALUES (${owner}, 'WS4', ${`ws4-${crypto.randomUUID()}`}) RETURNING id`;
+    const root = await insertNode(ws!.id, null, 'workspace', 'root4', 'Root');
+    const target = await insertNode(ws!.id, root, 'page', 'target4', 'Target4');
+    const trashedSource = await insertNode(ws!.id, root, 'page', 'trashed-source', 'Trashed Source');
+    const requester = await insertUser('requester4');
+
+    await sql`
+      INSERT INTO permissions (workspace_id, subject_type, subject_id, resource_id, action, effect)
+      VALUES (${ws!.id}, 'user', ${requester}, ${target}, 'read', 'allow')
+    `;
+    await sql`
+      INSERT INTO permissions (workspace_id, subject_type, subject_id, resource_id, action, effect)
+      VALUES (${ws!.id}, 'user', ${requester}, ${trashedSource}, 'read', 'allow')
+    `;
+    await savePage(sql, { nodeId: trashedSource, workspaceId: ws!.id, markdown: `See [[Target4]].\n`, expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
+    await sql`UPDATE nodes SET trashed_at = now(), trash_operation_id = ${crypto.randomUUID()} WHERE id = ${trashedSource}`;
+
+    const app = buildApp();
+    const res = await app.request(`/pages/${target}/backlinks`, { headers: { cookie: await cookieFor(requester) } });
+
+    expect(res.status).toBe(200);
+    const body: unknown = await res.json();
+    expectNoDisclosure(body, { id: trashedSource, slug: 'trashed-source', title: 'Trashed Source' }, res.headers);
+    expect((body as { total: number }).total).toBe(0);
+  });
+
+  test('a trashed target answers byte-identically to a target that never existed', async () => {
+    const owner = await insertUser('owner5');
+    const [ws] = await sql<{ id: string }[]>`INSERT INTO workspaces (owner_id, name, slug) VALUES (${owner}, 'WS5', ${`ws5-${crypto.randomUUID()}`}) RETURNING id`;
+    const root = await insertNode(ws!.id, null, 'workspace', 'root5', 'Root');
+    const target = await insertNode(ws!.id, root, 'page', 'target5', 'Target5');
+    const requester = await insertUser('requester5');
+    await sql`
+      INSERT INTO permissions (workspace_id, subject_type, subject_id, resource_id, action, effect)
+      VALUES (${ws!.id}, 'user', ${requester}, ${target}, 'read', 'allow')
+    `;
+    await sql`UPDATE nodes SET trashed_at = now(), trash_operation_id = ${crypto.randomUUID()} WHERE id = ${target}`;
+    const cookie = await cookieFor(requester);
+    const MISSING_PAGE_ID = '00000000-0000-4000-8000-0000000000fe';
+
+    const app = buildApp();
+    const denied = await app.request(`/pages/${target}/backlinks`, { headers: { cookie } });
+    const missing = await app.request(`/pages/${MISSING_PAGE_ID}/backlinks`, { headers: { cookie } });
+
+    expect(denied.status).toBe(404);
+    expect(await denied.text()).toBe(await missing.text());
+  });
 });
