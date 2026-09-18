@@ -298,6 +298,140 @@ describe('page-existence probing — absence and denial answer identically', () 
   });
 });
 
+// trash-non-disclosure / comment-threads specs: a former reader/commenter
+// must not learn a page was trashed, and its comment data must be as
+// absent as a page with zero comments. tasks.md 4.20-4.21 (gap file — not
+// named by design Decision 7's route table).
+describe('trash-non-disclosure', () => {
+  async function trash(nodeId: string): Promise<void> {
+    await sql`UPDATE nodes SET trashed_at = now(), trash_operation_id = ${crypto.randomUUID()} WHERE id = ${nodeId}`;
+  }
+
+  test('GET indicators on a trashed page answers identically to an unknown page', async () => {
+    const fixture = await buildFixture();
+    await sql`
+      INSERT INTO page_content (node_id, workspace_id, markdown, content_hash)
+      VALUES (${fixture.pageId}, ${fixture.workspaceId}, 'Some text. ^blockh\n', 'hash')
+    `;
+    await trash(fixture.pageId);
+    const app = buildApp();
+
+    const denied = await app.request(`/pages/${fixture.pageId}/comments/indicators`, { headers: { cookie: fixture.commenterCookie } });
+    const missing = await app.request(`/pages/${crypto.randomUUID()}/comments/indicators`, { headers: { cookie: fixture.commenterCookie } });
+
+    expect(denied.status).toBe(404);
+    expect(await denied.text()).toBe(await missing.text());
+  });
+
+  test('GET /pages/:id/comments on a trashed page answers identically to an unknown page, with no thread data disclosed', async () => {
+    const fixture = await buildFixture();
+    await sql`
+      INSERT INTO page_content (node_id, workspace_id, markdown, content_hash)
+      VALUES (${fixture.pageId}, ${fixture.workspaceId}, 'Some text. ^blocki\n', 'hash')
+    `;
+    await sql`
+      INSERT INTO page_blocks (page_id, workspace_id, block_id, status, content_hash, excerpt)
+      VALUES (${fixture.pageId}, ${fixture.workspaceId}, 'blocki', 'active', 'h', 'excerpt')
+    `;
+    const [thread] = await sql<{ id: string }[]>`
+      INSERT INTO comments (workspace_id, page_id, body, block_id, offset_start, offset_end, quote, quote_hash, status)
+      VALUES (${fixture.workspaceId}, ${fixture.pageId}, 'Confidential thread body', 'blocki', 0, 4, 'Some', 'h', 'anchored')
+      RETURNING id
+    `;
+    await trash(fixture.pageId);
+    const app = buildApp();
+
+    const denied = await app.request(`/pages/${fixture.pageId}/comments`, { headers: { cookie: fixture.commenterCookie } });
+    const missing = await app.request(`/pages/${crypto.randomUUID()}/comments`, { headers: { cookie: fixture.commenterCookie } });
+
+    expect(denied.status).toBe(404);
+    const deniedBody = await denied.text();
+    expect(deniedBody).toBe(await missing.text());
+    expectNoDisclosure(deniedBody, { id: thread!.id, values: ['Confidential thread body'] }, denied.headers);
+  });
+
+  test('POST /pages/:id/comments on a trashed page answers identically to an unknown page, and writes nothing', async () => {
+    const fixture = await buildFixture();
+    await sql`
+      INSERT INTO page_content (node_id, workspace_id, markdown, content_hash)
+      VALUES (${fixture.pageId}, ${fixture.workspaceId}, 'Some text. ^blockj\n', 'hash')
+    `;
+    await trash(fixture.pageId);
+    const app = buildApp();
+    const body = JSON.stringify({ blockId: 'blockj', offsetStart: 0, offsetEnd: 4, quote: 'Some', body: 'probe' });
+    const headers = { 'content-type': 'application/json', cookie: fixture.commenterCookie };
+
+    const denied = await app.request(`/pages/${fixture.pageId}/comments`, { method: 'POST', headers, body });
+    const missing = await app.request(`/pages/${crypto.randomUUID()}/comments`, { method: 'POST', headers, body });
+
+    expect(denied.status).toBe(404);
+    expect(await denied.text()).toBe(await missing.text());
+    const rows = await sql`SELECT id FROM comments WHERE page_id = ${fixture.pageId}`;
+    expect(rows).toHaveLength(0);
+  });
+
+  test('PATCH /comments/:threadId/resolved on a trashed page\'s thread answers identically to an unknown thread', async () => {
+    const fixture = await buildFixture();
+    await sql`
+      INSERT INTO page_content (node_id, workspace_id, markdown, content_hash)
+      VALUES (${fixture.pageId}, ${fixture.workspaceId}, 'Some text. ^blockk\n', 'hash')
+    `;
+    await sql`
+      INSERT INTO page_blocks (page_id, workspace_id, block_id, status, content_hash, excerpt)
+      VALUES (${fixture.pageId}, ${fixture.workspaceId}, 'blockk', 'active', 'h', 'excerpt')
+    `;
+    const [thread] = await sql<{ id: string }[]>`
+      INSERT INTO comments (workspace_id, page_id, body, block_id, offset_start, offset_end, quote, quote_hash, status)
+      VALUES (${fixture.workspaceId}, ${fixture.pageId}, 'a thread', 'blockk', 0, 4, 'Some', 'h', 'anchored')
+      RETURNING id
+    `;
+    await trash(fixture.pageId);
+    const app = buildApp();
+    const body = JSON.stringify({ resolved: true });
+    const headers = { 'content-type': 'application/json', cookie: fixture.commenterCookie };
+
+    const denied = await app.request(`/comments/${thread!.id}/resolved`, { method: 'PATCH', headers, body });
+    const missing = await app.request(`/comments/${crypto.randomUUID()}/resolved`, { method: 'PATCH', headers, body });
+
+    expect(denied.status).toBe(404);
+    expect(await denied.text()).toBe(await missing.text());
+    const [row] = await sql<{ resolved_at: Date | null }[]>`SELECT resolved_at FROM comments WHERE id = ${thread!.id}`;
+    expect(row!.resolved_at).toBeNull();
+  });
+
+  // The reply path never calls readPageMarkdown() (only a new root
+  // comment mints an anchor), so this route's own node lookup is the only
+  // gate — it must answer identically to an unknown page too.
+  test('a reply on a trashed page answers identically to an unknown page, and writes nothing', async () => {
+    const fixture = await buildFixture();
+    await sql`
+      INSERT INTO page_content (node_id, workspace_id, markdown, content_hash)
+      VALUES (${fixture.pageId}, ${fixture.workspaceId}, 'Some text. ^blockl\n', 'hash')
+    `;
+    await sql`
+      INSERT INTO page_blocks (page_id, workspace_id, block_id, status, content_hash, excerpt)
+      VALUES (${fixture.pageId}, ${fixture.workspaceId}, 'blockl', 'active', 'h', 'excerpt')
+    `;
+    const [rootThread] = await sql<{ id: string }[]>`
+      INSERT INTO comments (workspace_id, page_id, body, block_id, offset_start, offset_end, quote, quote_hash, status)
+      VALUES (${fixture.workspaceId}, ${fixture.pageId}, 'a root thread', 'blockl', 0, 4, 'Some', 'h', 'anchored')
+      RETURNING id
+    `;
+    await trash(fixture.pageId);
+    const app = buildApp();
+    const body = JSON.stringify({ parentId: rootThread!.id, body: 'a reply' });
+    const headers = { 'content-type': 'application/json', cookie: fixture.commenterCookie };
+
+    const denied = await app.request(`/pages/${fixture.pageId}/comments`, { method: 'POST', headers, body });
+    const missing = await app.request(`/pages/${crypto.randomUUID()}/comments`, { method: 'POST', headers, body });
+
+    expect(denied.status).toBe(404);
+    expect(await denied.text()).toBe(await missing.text());
+    const replies = await sql`SELECT id FROM comments WHERE parent_id = ${rootThread!.id}`;
+    expect(replies).toHaveLength(0);
+  });
+});
+
 describe('POST /pages/:id/comments — anchor minting', () => {
   test('a comment on an unanchored block mints and persists a real anchor', async () => {
     const fixture = await buildFixture();

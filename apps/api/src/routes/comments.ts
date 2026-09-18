@@ -87,7 +87,7 @@ export function createCommentRoutes(deps: CommentRouteDeps): Hono<{ Variables: S
     const pageId = c.req.param('id');
     const session = c.get('session');
 
-    const [node] = await deps.sql<NodeRow[]>`SELECT workspace_id FROM nodes WHERE id = ${pageId}`;
+    const [node] = await deps.sql<NodeRow[]>`SELECT workspace_id FROM live_nodes WHERE id = ${pageId}`;
     const canRead =
       node !== undefined &&
       (await can(deps.sql, { subjectType: 'user', subjectId: session.userId, resourceId: pageId, action: 'read' }));
@@ -114,7 +114,7 @@ export function createCommentRoutes(deps: CommentRouteDeps): Hono<{ Variables: S
     const pageId = c.req.param('id');
     const session = c.get('session');
 
-    const [node] = await deps.sql<NodeRow[]>`SELECT workspace_id FROM nodes WHERE id = ${pageId}`;
+    const [node] = await deps.sql<NodeRow[]>`SELECT workspace_id FROM live_nodes WHERE id = ${pageId}`;
     const canRead =
       node !== undefined &&
       (await can(deps.sql, { subjectType: 'user', subjectId: session.userId, resourceId: pageId, action: 'read' }));
@@ -163,7 +163,7 @@ export function createCommentRoutes(deps: CommentRouteDeps): Hono<{ Variables: S
     const pageId = c.req.param('id');
     const session = c.get('session');
 
-    const [node] = await deps.sql<NodeRow[]>`SELECT workspace_id FROM nodes WHERE id = ${pageId}`;
+    const [node] = await deps.sql<NodeRow[]>`SELECT workspace_id FROM live_nodes WHERE id = ${pageId}`;
     const canRead =
       node !== undefined &&
       (await can(deps.sql, { subjectType: 'user', subjectId: session.userId, resourceId: pageId, action: 'read' }));
@@ -255,7 +255,7 @@ export function createCommentRoutes(deps: CommentRouteDeps): Hono<{ Variables: S
 
       if (minted.markdown !== content.markdown) {
         const [currentRow] = await deps.sql<{ content_hash: string }[]>`
-          SELECT content_hash FROM page_content WHERE node_id = ${pageId} AND workspace_id = ${node.workspace_id}
+          SELECT content_hash FROM live_page_content WHERE node_id = ${pageId} AND workspace_id = ${node.workspace_id}
         `;
         await savePage(deps.sql, {
           nodeId: pageId,
@@ -313,8 +313,13 @@ export function createCommentRoutes(deps: CommentRouteDeps): Hono<{ Variables: S
     const threadId = c.req.param('threadId');
     const session = c.get('session');
 
+    // Joined to live_nodes on page_id: a thread on a now-trashed page must
+    // answer identically to an unknown thread (trash-non-disclosure spec).
     const [thread] = await deps.sql<{ workspace_id: string; page_id: string }[]>`
-      SELECT workspace_id, page_id FROM comments WHERE id = ${threadId} AND parent_id IS NULL
+      SELECT c.workspace_id, c.page_id
+        FROM comments c
+        JOIN live_nodes n ON n.id = c.page_id
+       WHERE c.id = ${threadId} AND c.parent_id IS NULL
     `;
     const canRead =
       thread !== undefined &&
