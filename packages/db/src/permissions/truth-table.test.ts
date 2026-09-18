@@ -420,3 +420,46 @@ describe('tenant scope derived from the authenticated subject', () => {
     expect(await canRead('user', u, ws2.id, 'manage')).toBe(false);
   });
 });
+
+// deletion-and-trash design.md Decision 2: "The permission resolver keeps
+// walking the base table, so manage on a trashed node still resolves and
+// the Trash listing is an ordinary canManyResources(manage) fold." These
+// cases prove the resolver itself needed no change for trash at all — its
+// own CTE already reads the base `nodes` table, never `live_nodes` — and
+// that owner force-delete authority (packages/core's decideTrash) is a
+// caller-supplied fact, never a grant row the resolver could produce.
+describe('T — deletion-and-trash: manage resolves through a trashed node; owner authority stays outside the resolver', () => {
+  test('T1: manage granted directly on a trashed node still resolves', async () => {
+    const u = await insertUser('t1');
+    const trashedPage = await insertNode(ws.workspaceId, chapter1.id, 'page', 't1-trashed');
+    await sql`UPDATE nodes SET trashed_at = now(), trash_operation_id = ${crypto.randomUUID()} WHERE id = ${trashedPage.id}`;
+    await grant(ws.workspaceId, 'user', u, trashedPage.id, 'manage', 'allow');
+
+    expect(await canRead('user', u, trashedPage.id, 'manage')).toBe(true);
+  });
+
+  test('T2: manage inherited from a live ancestor still reaches a trashed descendant', async () => {
+    const u = await insertUser('t2');
+    const trashedPage = await insertNode(ws.workspaceId, chapter1.id, 'page', 't2-trashed');
+    await sql`UPDATE nodes SET trashed_at = now(), trash_operation_id = ${crypto.randomUUID()} WHERE id = ${trashedPage.id}`;
+    await grant(ws.workspaceId, 'user', u, chapter1.id, 'manage', 'allow');
+
+    expect(await canRead('user', u, trashedPage.id, 'manage')).toBe(true);
+  });
+
+  test('T3: a deny above a trashed node still blocks manage on it, exactly as for a live one', async () => {
+    const u = await insertUser('t3');
+    const trashedPage = await insertNode(ws.workspaceId, chapter1.id, 'page', 't3-trashed');
+    await sql`UPDATE nodes SET trashed_at = now(), trash_operation_id = ${crypto.randomUUID()} WHERE id = ${trashedPage.id}`;
+    await grant(ws.workspaceId, 'user', u, chapter1.id, 'manage', 'deny');
+
+    expect(await canRead('user', u, trashedPage.id, 'manage')).toBe(false);
+  });
+
+  test('T4: the workspace owner carries no implicit manage grant through the resolver — owner force-delete authority lives in packages/core’s decideTrash, never as a permission row', async () => {
+    // ownerId created this fixture's workspace (insertWorkspace's owner_id)
+    // but this test suite never inserts a permission row for it — the
+    // resolver has nothing to fold into an allow.
+    expect(await canRead('user', ownerId, book1.id, 'manage')).toBe(false);
+  });
+});
