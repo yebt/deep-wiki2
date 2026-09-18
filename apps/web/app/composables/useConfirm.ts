@@ -22,7 +22,29 @@
  * a function is not state Nuxt can carry. A second question while one is
  * pending answers the first with `false`: there is never a second dialog
  * and never a promise left hanging.
+ *
+ * Two additions for a delete (design.md Decision 8, 2026-09-18), still
+ * one dialog:
+ *
+ * - **`confirmText`** — the question asks the person to type the thing's
+ *   name. The match is the consent: the confirm action stays unavailable
+ *   until the typed value equals it exactly, so a stray Enter cannot
+ *   agree to something irreversible.
+ * - **`onConfirm`** — a "yes" the server must still honour. The owner's
+ *   force-delete is re-verified against the current name and count, and
+ *   a refusal (`stale_count`, `name_mismatch`) is not a reason to close
+ *   the dialog and open another: `accept()` runs the handler with the
+ *   dialog still open, closes on `null`, and hands a refusal back to the
+ *   dialog to show — under the field, and as a new description when the
+ *   consequence itself changed.
  */
+export interface ConfirmRefusal {
+  /** Shown under the typed-name field (or beside the actions when there is none), and announced. */
+  readonly fieldError?: string;
+  /** The consequence changed since the question was asked: the new description, replacing the old. */
+  readonly description?: string;
+}
+
 export interface ConfirmOptions {
   /** The question, as a question: "Leave without saving?" */
   readonly title: string;
@@ -34,6 +56,15 @@ export interface ConfirmOptions {
   readonly cancelLabel?: string;
   /** `destructive` when saying yes loses something: the action is the error colour, not the accent. */
   readonly tone?: 'primary' | 'destructive';
+  /** When set, the person must type exactly this — the thing's name — before the confirm action is available. */
+  readonly confirmText?: string;
+  /**
+   * Runs on "yes" with the dialog still open and its action busy. `null`
+   * closes the dialog and answers `true`; a refusal keeps it open with the
+   * refusal shown. Cancelling while it runs answers `false` and discards
+   * whatever it later returns.
+   */
+  readonly onConfirm?: (typed: string) => Promise<ConfirmRefusal | null>;
 }
 
 export interface PendingConfirm {
@@ -43,6 +74,8 @@ export interface PendingConfirm {
   readonly confirmLabel: string;
   readonly cancelLabel: string;
   readonly tone: 'primary' | 'destructive';
+  /** The name to type, or `null` when the question has no such field. */
+  readonly confirmText: string | null;
 }
 
 export interface UseConfirmResult {
@@ -52,10 +85,17 @@ export interface UseConfirmResult {
   readonly confirm: (options: ConfirmOptions) => Promise<boolean>;
   /** Answer the pending question. `ConfirmDialog`'s, and a no-op with nothing pending. */
   readonly settle: (answer: boolean) => void;
+  /**
+   * Say yes. Without an `onConfirm` this is `settle(true)`; with one, the
+   * handler runs first and the dialog closes only on `null`. Returns the
+   * refusal for the dialog to show, or `null`. `ConfirmDialog`'s.
+   */
+  readonly accept: (typed?: string) => Promise<ConfirmRefusal | null>;
 }
 
 let nextId = 1;
 const resolvers = new Map<number, (answer: boolean) => void>();
+const handlers = new Map<number, (typed: string) => Promise<ConfirmRefusal | null>>();
 
 export function useConfirm(): UseConfirmResult {
   const pending = useState<PendingConfirm | null>('dw-confirm', () => null);
@@ -66,7 +106,25 @@ export function useConfirm(): UseConfirmResult {
     pending.value = null;
     const resolve = resolvers.get(current.id);
     resolvers.delete(current.id);
+    handlers.delete(current.id);
     resolve?.(answer);
+  }
+
+  async function accept(typed = ''): Promise<ConfirmRefusal | null> {
+    const current = pending.value;
+    if (!current) return null;
+    const handler = handlers.get(current.id);
+    if (!handler) {
+      settle(true);
+      return null;
+    }
+    const refusal = await handler(typed);
+    // Escape, or a second question, may have answered this one while the
+    // handler ran: a late "yes" or a late refusal belongs to nothing.
+    if (pending.value?.id !== current.id) return null;
+    if (refusal) return refusal;
+    settle(true);
+    return null;
   }
 
   function confirm(options: ConfirmOptions): Promise<boolean> {
@@ -74,6 +132,7 @@ export function useConfirm(): UseConfirmResult {
     const id = nextId++;
     return new Promise<boolean>((resolve) => {
       resolvers.set(id, resolve);
+      if (options.onConfirm) handlers.set(id, options.onConfirm);
       pending.value = {
         id,
         title: options.title,
@@ -81,9 +140,10 @@ export function useConfirm(): UseConfirmResult {
         confirmLabel: options.confirmLabel,
         cancelLabel: options.cancelLabel ?? 'Cancel',
         tone: options.tone ?? 'primary',
+        confirmText: options.confirmText ?? null,
       };
     });
   }
 
-  return { pending, confirm, settle };
+  return { pending, confirm, settle, accept };
 }
