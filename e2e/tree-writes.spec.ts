@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import { expectNoHorizontalOverflow } from './overflow';
 import { API_URL } from './ports';
-import { pageUrl, workspaceUrl } from '../apps/web/app/utils/routes';
+import { pageUrl, trashUrl, workspaceUrl } from '../apps/web/app/utils/routes';
 
 /**
  * The tree's writes are optimistic (2026-09-16; `useTree.ts`): a dropped
@@ -40,6 +40,11 @@ interface TreeFixtures {
   readonly firstPageTitle: string;
   readonly secondPageId: string;
   readonly secondPageTitle: string;
+  readonly managerSessionToken: string;
+  readonly ownerSessionToken: string;
+  readonly chapterId: string;
+  readonly chapterTitle: string;
+  readonly hiddenPageId: string;
 }
 
 const seed: SeedFixtures = JSON.parse(readFileSync(new URL('.auth-fixtures.json', import.meta.url), 'utf8'));
@@ -105,11 +110,10 @@ test.beforeAll(async ({ browser }) => {
   await page.close();
 });
 
-/** The titles of the book's pages, in the order the tree draws them. */
+/** The titles of the book's own pages, in the order the tree draws them — a page row's title is a link, a container's a span, and the book also holds a chapter. */
 async function pageOrder(page: Page, fixtures: TreeFixtures): Promise<string[]> {
   const book = page.getByRole('treeitem', { name: new RegExp(fixtures.bookTitle) });
-  // The title element: a link on a page row, a span on a container's.
-  return book.locator('[role="group"] [role="treeitem"] .dw-tree-row > .truncate').allTextContents();
+  return book.locator(':scope > [role="group"] > [role="treeitem"] > .dw-tree-row > a.truncate').allTextContents();
 }
 
 /** Opens the dashboard with the writer's book unfolded and both pages on screen. */
@@ -167,9 +171,10 @@ test('a drag lands at once, the PATCH follows, and no GET /tree follows a succes
   const fromServer = await page.request.get(`${API_URL}/workspaces/${seed.workspaceId}/tree`, {
     headers: { cookie: `session=${fixtures.writerSessionToken}` },
   });
-  const tree = (await fromServer.json()) as { nodes: { title: string; children: { title: string; children: { title: string }[] }[] }[] };
+  const tree = (await fromServer.json()) as { nodes: { title: string; children: { title: string; children: { title: string; type: string }[] }[] }[] };
   const book = tree.nodes.find((shelf) => shelf.title === fixtures.shelfTitle)!.children.find((node) => node.title === fixtures.bookTitle)!;
-  expect(book.children.map((node) => node.title)).toEqual([fixtures.secondPageTitle, fixtures.firstPageTitle]);
+  // The book's pages; the fixture chapter stands after them, untouched.
+  expect(book.children.filter((node) => node.type === 'page').map((node) => node.title)).toEqual([fixtures.secondPageTitle, fixtures.firstPageTitle]);
 });
 
 test('a refused drag snaps back and says why, beside the tree', async ({ page }) => {
@@ -197,6 +202,8 @@ test('a created page is drawn from the response, and no GET /tree follows it', a
   await page.getByRole('treeitem', { name: new RegExp(fixtures.firstPageTitle) }).focus();
   await page.getByRole('button', { name: 'New…' }).click();
   await expect(page.getByTestId('tree-create-location-fixed').or(page.getByTestId('tree-create-location'))).toContainText(fixtures.bookTitle);
+  // The toolbar guesses a book's first legal child (a chapter); this test is about a page.
+  await page.getByTestId('tree-create-type').getByLabel('Page', { exact: true }).check();
   const title = `E2E Tree Page Three ${Date.now()}`;
   await page.getByTestId('tree-create-title').fill(title);
   await page.getByTestId('tree-create-submit').click();
@@ -356,6 +363,227 @@ for (const [width, theme] of [
       await expect(asking.getByTestId('tree-create-summary')).toHaveCount(0);
       await expectNoHorizontalOverflow(page, `dialog asking ${width} ${theme}`);
       await editor2Shot(page, `dialog-asking-${width}-${theme}`);
+    });
+  });
+}
+
+/**
+ * Delete (node-trash and navigation-tree specs; design.md Decision 8),
+ * against the real API: a delete is a move to the trash, the row leaves
+ * the tree before the server has answered, and the server's own answer —
+ * not the tree's guess — decides what happens to a container. A manager
+ * who is not the owner is stopped twice, once by the tree (children it
+ * shows) and once by the server (a child it does not); the owner is asked
+ * to type the container's name, and the count they agreed to is
+ * re-verified. The dialog is `ConfirmDialog`, the product's one.
+ */
+const TRASH_SHOTS = process.env.DEEPWIKI_TRASH_SHOTS ?? '';
+
+async function trashShot(page: Page, name: string): Promise<void> {
+  if (!TRASH_SHOTS) return;
+  await page.screenshot({ path: `${TRASH_SHOTS}/trash-${name}.png`, fullPage: false });
+}
+
+/** Opens the dashboard as `token` with the fixture book's rows on screen. */
+async function openTreeAs(page: Page, token: string, fixtures: TreeFixtures): Promise<void> {
+  await signInAs(page, token);
+  await page.goto(workspaceUrl(seed.workspaceSlug));
+  await expect(page.getByRole('heading', { level: 1, name: 'E2E Workspace' })).toBeVisible({ timeout: 120_000 });
+  await openDrawerIfNarrow(page);
+  await expect(page.getByRole('treeitem', { name: new RegExp(fixtures.chapterTitle) })).toBeVisible({ timeout: 120_000 });
+}
+
+/** Right-click → the row's menu → "Delete…"; returns the item so a test can read its state before choosing. */
+async function openDeleteFor(page: Page, title: string): Promise<ReturnType<Page['getByRole']>> {
+  const row = page.getByRole('treeitem', { name: new RegExp(title) });
+  await row.locator('.dw-tree-row').first().click({ button: 'right' });
+  await expect(page.getByRole('menu')).toBeVisible();
+  return page.getByRole('menu').getByRole('menuitem', { name: /^Delete…/ });
+}
+
+/** The titles under the fixture book, from the server, as `token` sees them. */
+async function serverBookChildren(page: Page, token: string, fixtures: TreeFixtures): Promise<string[]> {
+  const response = await page.request.get(`${API_URL}/workspaces/${seed.workspaceId}/tree`, { headers: { cookie: `session=${token}` } });
+  const tree = (await response.json()) as { nodes: { title: string; children: { title: string; children: { title: string }[] }[] }[] };
+  const book = tree.nodes.find((shelf) => shelf.title === fixtures.shelfTitle)?.children.find((node) => node.title === fixtures.bookTitle);
+  return book?.children.map((node) => node.title) ?? [];
+}
+
+test('a manager deletes an empty page: the row leaves at once, the DELETE follows, the notice links to the Trash, and focus stays in the tree', async ({ page }) => {
+  const fixtures = mintFixtures();
+  const requests: { method: string; url: string }[] = [];
+  page.on('request', (request) => requests.push({ method: request.method(), url: request.url() }));
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route(`${API_URL}/nodes/${fixtures.secondPageId}`, async (route) => {
+    if (route.request().method() !== 'DELETE') return route.continue();
+    await held;
+    await route.continue();
+  });
+  await openTreeAs(page, fixtures.managerSessionToken, fixtures);
+
+  const item = await openDeleteFor(page, fixtures.secondPageTitle);
+  await expect(item).not.toHaveAttribute('aria-disabled', 'true');
+  await item.click();
+
+  const dialog = page.getByRole('dialog', { name: `Delete “${fixtures.secondPageTitle}”?` });
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText('It moves to the trash for 30 days');
+  // The safe action holds focus; the destructive one is the filled error button.
+  await expect(dialog.getByRole('button', { name: 'Cancel' })).toBeFocused();
+  await dialog.getByRole('button', { name: 'Delete' }).click();
+
+  // Optimistic: gone while the server has not answered.
+  await expect(page.getByRole('treeitem', { name: new RegExp(fixtures.secondPageTitle) })).toHaveCount(0);
+  expect(requests.some((r) => r.method === 'DELETE' && r.url.endsWith(`/nodes/${fixtures.secondPageId}`)), 'the delete was written').toBe(true);
+  release();
+
+  const notice = page.getByTestId('tree-delete-notice');
+  await expect(notice).toContainText(`Moved “${fixtures.secondPageTitle}” to the trash.`);
+  await expect(notice.getByRole('link', { name: 'Restore from Trash' })).toHaveAttribute('href', trashUrl(seed.workspaceSlug));
+  await expect(page.getByTestId('tree-menu-status')).toContainText(`Moved “${fixtures.secondPageTitle}” to the trash`);
+  // The row that asked is gone, so the tree's tab stop lands on a neighbour, not on the body.
+  await expect(page.locator('[role="treeitem"]:focus')).toHaveCount(1);
+  // The tree re-draws after the removal; read the order once it has settled.
+  await expect.poll(() => pageOrder(page, fixtures)).toEqual([fixtures.firstPageTitle]);
+  expect(await serverBookChildren(page, fixtures.managerSessionToken, fixtures)).toEqual([fixtures.firstPageTitle, fixtures.chapterTitle]);
+});
+
+test('a manager who is not the owner cannot delete a container the tree shows children in: the item stays in the menu with the reason', async ({ page }) => {
+  const fixtures = mintFixtures();
+  await openTreeAs(page, fixtures.managerSessionToken, fixtures);
+
+  const item = await openDeleteFor(page, fixtures.bookTitle);
+  await expect(item).toHaveAttribute('aria-disabled', 'true');
+  await expect(item).toContainText('Empty this book first — only the workspace owner can delete a book with chapters or pages in it.');
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('menu')).toBeHidden();
+});
+
+test('a manager deleting a chapter that only looks empty is refused by the server with the count, and the row comes back', async ({ page }) => {
+  const fixtures = mintFixtures();
+  await openTreeAs(page, fixtures.managerSessionToken, fixtures);
+  // The chapter's one page is hidden from the manager, so the tree draws it childless and offers Delete.
+  const item = await openDeleteFor(page, fixtures.chapterTitle);
+  await expect(item).not.toHaveAttribute('aria-disabled', 'true');
+  await item.click();
+  const dialog = page.getByRole('dialog', { name: `Delete “${fixtures.chapterTitle}”?` });
+  await dialog.getByRole('button', { name: 'Delete' }).click();
+
+  const alert = page.getByTestId('tree-delete-error');
+  await expect(alert).toHaveText(`Empty “${fixtures.chapterTitle}” before deleting it (1 page).`);
+  await expect(alert).toHaveAttribute('role', 'alert');
+  await expect(page.getByRole('treeitem', { name: new RegExp(fixtures.chapterTitle) })).toBeVisible();
+  expect(await serverBookChildren(page, fixtures.managerSessionToken, fixtures)).toContain(fixtures.chapterTitle);
+});
+
+test('the owner deleting a chapter with pages types its name: a wrong name is refused, a count that changed is re-asked, and the right name deletes', async ({ page }) => {
+  const fixtures = mintFixtures();
+  await openTreeAs(page, fixtures.ownerSessionToken, fixtures);
+
+  const item = await openDeleteFor(page, fixtures.chapterTitle);
+  await expect(item).not.toHaveAttribute('aria-disabled', 'true');
+  await item.click();
+  await page.getByRole('dialog', { name: `Delete “${fixtures.chapterTitle}”?` }).getByRole('button', { name: 'Delete' }).click();
+
+  // The server refused the plain delete with the count; the same dialog asks again, name to type, focused.
+  const dialog = page.getByRole('dialog', { name: `Delete “${fixtures.chapterTitle}” and everything in it?` });
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText('1 page will be deleted.');
+  const field = dialog.getByLabel(`Type ${fixtures.chapterTitle} to confirm`);
+  await expect(field).toBeFocused();
+  const accept = dialog.getByRole('button', { name: 'Delete' });
+  await expect(accept).toHaveAttribute('aria-disabled', 'true');
+  await expect(accept).toHaveAccessibleDescription('Type the name exactly as shown.');
+
+  // The wrong name: still unavailable, and Enter does nothing.
+  await field.fill(fixtures.chapterTitle.toLowerCase());
+  await expect(accept).toHaveAttribute('aria-disabled', 'true');
+  await field.press('Enter');
+  await expect(dialog).toBeVisible();
+
+  // A page created underneath while the dialog is open: the count the owner agreed to is stale.
+  const created = await page.request.post(`${API_URL}/nodes`, {
+    headers: { cookie: `session=${fixtures.ownerSessionToken}` },
+    data: { parentId: fixtures.chapterId, type: 'page', title: `E2E Tree Late Page ${Date.now()}` },
+  });
+  expect(created.ok(), await created.text()).toBe(true);
+
+  await field.fill(fixtures.chapterTitle);
+  await expect(accept).not.toHaveAttribute('aria-disabled', 'true');
+  await accept.click();
+  await expect(dialog).toContainText('The count changed while this was open.');
+  await expect(dialog).toContainText('2 pages will be deleted.');
+  await expect(field).toBeFocused();
+
+  await accept.click();
+  await expect(dialog).toBeHidden();
+  await expect(page.getByRole('treeitem', { name: new RegExp(fixtures.chapterTitle) })).toHaveCount(0);
+  await expect(page.getByTestId('tree-delete-notice')).toContainText(`Moved “${fixtures.chapterTitle}” to the trash.`);
+  expect(await serverBookChildren(page, fixtures.ownerSessionToken, fixtures)).toEqual([fixtures.firstPageTitle, fixtures.secondPageTitle]);
+});
+
+test('the Delete key on a focused row opens the same question, and Escape leaves the row where it was', async ({ page }) => {
+  const fixtures = mintFixtures();
+  await openTreeAs(page, fixtures.managerSessionToken, fixtures);
+
+  const row = page.getByRole('treeitem', { name: new RegExp(fixtures.firstPageTitle) });
+  await row.focus();
+  await page.keyboard.press('Delete');
+  const dialog = page.getByRole('dialog', { name: `Delete “${fixtures.firstPageTitle}”?` });
+  await expect(dialog).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+  await expect(row).toBeVisible();
+  await expect(row).toBeFocused();
+});
+
+/**
+ * The owner's review material for gate 1/3: the menu with Delete on a
+ * page row, the server's refusal beside the tree, and the typed-name
+ * dialog — at 1280 in both themes and at 320, each measured for sideways
+ * overflow on the pane and the document with the dialog open.
+ */
+for (const [width, theme] of [
+  [1280, 'light'],
+  [1280, 'dark'],
+  [320, 'light'],
+] as const) {
+  test.describe(`delete review material ${width} ${theme}`, () => {
+    test.use({ viewport: { width, height: 900 } });
+
+    test('the menu, the refusal and the force dialog, screenshotted with no sideways scroll', async ({ page }) => {
+      const fixtures = mintFixtures();
+      await useTheme(page, theme);
+      await openTreeAs(page, fixtures.managerSessionToken, fixtures);
+
+      const item = await openDeleteFor(page, fixtures.secondPageTitle);
+      await expect(item).toBeVisible();
+      await expectNoHorizontalOverflow(page, `trash menu ${width} ${theme}`);
+      await trashShot(page, `menu-${width}-${theme}`);
+      await page.keyboard.press('Escape');
+      await expect(page.getByRole('menu')).toBeHidden();
+
+      await (await openDeleteFor(page, fixtures.chapterTitle)).click();
+      await page.getByRole('dialog', { name: `Delete “${fixtures.chapterTitle}”?` }).getByRole('button', { name: 'Delete' }).click();
+      await expect(page.getByTestId('tree-delete-error')).toContainText('before deleting it');
+      await expectNoHorizontalOverflow(page, `trash refusal ${width} ${theme}`);
+      await trashShot(page, `refusal-${width}-${theme}`);
+
+      // The owner, in the same browser: the cookie swapped, the screen reloaded.
+      await openTreeAs(page, fixtures.ownerSessionToken, fixtures);
+      await (await openDeleteFor(page, fixtures.chapterTitle)).click();
+      await page.getByRole('dialog', { name: `Delete “${fixtures.chapterTitle}”?` }).getByRole('button', { name: 'Delete' }).click();
+      const dialog = page.getByRole('dialog', { name: `Delete “${fixtures.chapterTitle}” and everything in it?` });
+      await expect(dialog).toBeVisible();
+      await dialog.getByLabel(`Type ${fixtures.chapterTitle} to confirm`).fill('not the name');
+      await expect(dialog.getByRole('button', { name: 'Delete' })).toHaveAttribute('aria-disabled', 'true');
+      await expectNoHorizontalOverflow(page, `trash force dialog ${width} ${theme}`);
+      await trashShot(page, `force-dialog-${width}-${theme}`);
+      await page.keyboard.press('Escape');
+      await expect(dialog).toBeHidden();
     });
   });
 }

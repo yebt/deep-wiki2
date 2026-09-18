@@ -160,6 +160,14 @@ describe('deleteNode — the owner\'s force-delete', () => {
     expect(h.deps.forceDeleteFetcher).not.toHaveBeenCalled();
   });
 
+  test('one thing under it reads in the singular — "It moves", not "They move"', async () => {
+    const h = harness([true, false], { trashFetcher: vi.fn(async () => { throw responseError(409, { error: 'not_empty', pages: 1, containers: 0, canForce: true }); }) });
+
+    await deleteNode(CHAPTER, h.deps);
+
+    expect(h.asked[1]?.description).toBe('1 page will be deleted. It moves to the trash for 30 days, where anyone who manages it can restore it.');
+  });
+
   test('the typed name and the shown count go to force-delete; success takes the row out and reports what was trashed', async () => {
     const forced = { trashOperationId: 'op-2', trashed: { pages: 3, containers: 2 } };
     const forceDeleteFetcher = vi.fn(async () => forced);

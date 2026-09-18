@@ -1793,6 +1793,98 @@ the z scale, not tones.
 - Everything the 2026-09-16 entries carried forward: the contextual (third) pane is an overlay,
   the resize handle is pointer-only, the two-icon-pack requirement (§4.3) is untested.
 
+### 2026-09-18 — Delete in the tree, and the confirm dialog's typed-name step — awaiting the owner's eye (deletion-and-trash gate 1/3)
+
+**Reviewer:** none yet — this entry is what was shipped for review, not a review.
+**Verdict:** Pending
+
+`openspec/changes/deletion-and-trash/tasks.md` Phase 8 (`8.6` is the gate). Three commits on
+`main`: the dialog's `confirmText` and `onConfirm`, the Delete action with its flow, and the
+e2e with the review material. Strict TDD throughout; `docs/TODO.md` is untouched by this batch —
+the findings below are the batch's own.
+
+**Pre-build contract (§2).** *Who:* a member with `manage` on a node (from the tree response's
+new `manageable[]`), or the workspace owner (`isOwner`), on the dashboard or any screen with
+the tree beside it. *Goal:* "get rid of this page / this chapter" — knowing it can come back.
+*Primary action:* Delete, in the row's menu; the toolbar's trash control and the `Delete` key
+are the same action. *Data:* `manageable[]` and `isOwner` from `GET /workspaces/:id/tree`,
+the row's own children as the tree shows them, and the server's `409 not_empty` body — its
+`pages`/`containers` count and `canForce`. *Not:* the Trash screen (Phase 9 — the link is
+minted, the screen is not), restore, purge, a delete of the workspace itself. *Empty / too
+much:* a row with nothing under it is one question; a chapter with 400 pages is the same
+dialog with "400 pages" in it, and the owner types one name.
+
+**What to look at**
+
+1. **"Delete…" is last in every row's menu, and disabled with its reason where it cannot
+   run** (`useTreeRowActions.deleteRowAction`; §3 "Disabled", §5): "You need manage access to
+   delete this." without `manage`; "Empty this chapter first — only the workspace owner can
+   delete a chapter with pages in it." for a manager on a container the tree shows children in.
+   The toolbar carries the same decision as an icon-only trash control — a 280px pane holds
+   "New…" and "Rename…" and not a third word — named for its target, tooltipped with the reason
+   or the target (§4.3), Outlined `error` so the destructive action keeps a boundary (§9.1) and
+   stays quieter than the tonal New… beside it. The keyboard help names the `Delete` key.
+2. **A delete draws before the server answers** (`useTrash.deleteNode`, `useTree.removeNode`):
+   the row leaves the tree on "yes", the `DELETE` follows, and only a refusal puts it back — the
+   reason in the chip beside the tree, as a refused drag is shown. Success is said there too,
+   "Moved “X” to the trash." with a "Restore from Trash" link (`trashUrl`), and announced in the
+   tree's always-present live region (§3 "Success": a destructive action gets more than a
+   toast). Focus, which the dialog returns to a row that no longer exists, lands on the row now
+   standing in its place. A row the tree shows children in is *not* taken out ahead of a request
+   the server will certainly refuse.
+3. **The server's own refusal decides a container's fate.** The tree's "non-empty" is a lower
+   bound — the manager's chapter in the e2e holds a page they cannot read — so a manager's
+   "yes" on a childless-looking chapter is answered `409 not_empty` and shown as "Empty “X”
+   before deleting it (1 page)." with the row back. For the owner the same answer carries
+   `canForce`, and the same dialog asks again.
+4. **The typed-name step, on the one dialog** (`ConfirmDialog`, `useConfirm`; design.md
+   Decision 8): a labelled `UFormField` — "Type *Handbook* to confirm", the name emphasised in
+   the label itself — over a `UInput` at the content-area field's metrics (16px, `h-14`, §9.5),
+   focused on open in place of Cancel because the match is the consent. The confirm action is
+   `aria-disabled` with "Type the name exactly as shown." on hover, on focus and by
+   `aria-describedby` (never the attribute, §5) until the trimmed value equals the name, case
+   and all; Enter in the field agrees only then. `onConfirm` runs the force-delete with the
+   dialog still open: `stale_count` (a page created underneath — the e2e does it through the
+   API while the dialog is open) swaps in the fresh count under the description and says so
+   under the field, focus back on the field; `name_mismatch` says the item was renamed. Nothing
+   closes the dialog but a yes the server honoured, or the person. `z-70`, Escape and the scrim
+   as "no", focus return — unchanged.
+
+**Measured** in `e2e/tree-writes.spec.ts` against the real API (18 tests, 1 worker, 4.3 min on
+a host at load average 60) and `e2e/tree.spec.ts` (11): the row gone while the `DELETE` is
+held and the server's tree agreeing afterwards; the manager's book refused in the menu with
+the reason; the manager's chapter refused by the server with "(1 page)" and the row back; the
+owner's wrong name leaving Delete unavailable and Enter inert, the count re-asked as "2 pages"
+after a page was created underneath, the right name deleting; the `Delete` key opening the
+question and Escape leaving focus on the row; a `write`-only member's item disabled with
+"manage access". `expectNoHorizontalOverflow` at 1280 light, 1280 dark and 320 light with the
+menu open, with the refusal shown, and with the typed-name dialog open. Screenshots
+`trash-{menu,refusal,force-dialog}-{1280-light,1280-dark,320-light}.png` in the session
+scratchpad (`DEEPWIKI_TRASH_SHOTS`). No new colour, token or rung: the chip tier, the
+`error` outline, the field family and the dialog are the ones already reviewed.
+
+**Findings against my own work, fixed before review:** "1 page will be deleted. They move to
+the trash…" — the retention sentence now has a singular form. The pre-existing "created page"
+e2e was creating a *chapter* (the toolbar guesses a book's first legal child) and matched it by
+title alone; it now picks the Page type and the `pageOrder` helper reads only page rows.
+
+**Known before review, not fixed**
+
+- The "Restore from Trash" link lands on the not-found screen until Phase 9 builds
+  `/w/<slug>/trash`; the address is minted now so no screen spells it by hand.
+- design.md Decision 8 says a non-owner's `409 not_empty` is shown "without a count"; the
+  server already returns the count to that caller, and the notice names it so the manager
+  knows what to empty. The owner may prefer the design's wording — one string.
+- The success chip (`InlineNotice`, `role="status"`) and the tree's sr-only live region both
+  carry the "Moved…" sentence, so a screen reader may hear it twice; the region is the one that
+  is reliably announced, the chip is the one a sighted person reads.
+- `aria-disabled` on the confirm action is drawn with the library's own treatment (the same as
+  the toolbar's Rename… with no row picked): the button keeps its fill and dims. If the owner
+  wants an unavailable destructive action to read Outlined until the name matches, that is a
+  variant swap in `ConfirmDialog`.
+- The two-icon-pack requirement (§4.3) remains untested; everything the 2026-09-17 entries
+  carried forward and this batch did not touch stands.
+
 ---
 
 *The next entry goes below this one.*

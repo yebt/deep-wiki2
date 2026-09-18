@@ -3,7 +3,13 @@
  * one book — `write` on the book and on its two pages — with the shelf
  * above them readable, because the tree shows a node only when every
  * ancestor is independently readable (`apps/api/src/routes/tree.ts`, the
- * path-visible rule). Minted into the database `e2e/global-setup.ts`
+ * path-visible rule). For the delete cases (design.md Decision 8), three
+ * more things under the same shelf: a **manager** who is not the owner,
+ * holding `manage` on the book; a **chapter** under the book whose one
+ * page the manager is denied `read` on — so the chapter looks empty to
+ * them and the server still answers `409 not_empty` — and a session for
+ * the **workspace owner**, given `manage` on the shelf (ownership is not
+ * a grant; `can()` never consults it), for the force-delete. Minted into the database `e2e/global-setup.ts`
  * already seeded, the same way and for the same reason
  * `e2e/editor-fixtures.bun.ts` is a second script rather than more rows in
  * `seed.bun.ts` — see that file's own doc comment.
@@ -28,6 +34,15 @@ export interface TreeFixtures {
   readonly firstPageTitle: string;
   readonly secondPageId: string;
   readonly secondPageTitle: string;
+  /** Holds `manage` on the book, `read` on the shelf, and is denied `read` on the chapter's one page. Not the owner. */
+  readonly managerSessionToken: string;
+  /** The workspace's owner, with `manage` on the shelf. */
+  readonly ownerSessionToken: string;
+  /** The chapter under the book, third among the book's children. */
+  readonly chapterId: string;
+  readonly chapterTitle: string;
+  /** The page under the chapter the manager cannot read. */
+  readonly hiddenPageId: string;
 }
 
 /** Mints a writer and a shelf › book › two pages they may reorder, under `workspaceId`'s root, into `sql`'s database. */
@@ -69,6 +84,33 @@ export async function mintTreeFixtures(sql: postgres.Sql, workspaceId: string): 
     { resourceId: second!.id, action: 'write', effect: 'allow' },
   ]);
 
+  const chapterTitle = `E2E Tree Chapter ${run}`;
+  const [chapter] = await sql<{ id: string }[]>`
+    INSERT INTO nodes (workspace_id, parent_id, type, path, position, slug, title)
+    VALUES (${workspaceId}, ${book!.id}, 'chapter', '', 2, ${`e2e-tree-chapter-${run}`}, ${chapterTitle}) RETURNING id
+  `;
+  const [hidden] = await sql<{ id: string }[]>`
+    INSERT INTO nodes (workspace_id, parent_id, type, path, position, slug, title)
+    VALUES (${workspaceId}, ${chapter!.id}, 'page', '', 0, ${`e2e-tree-hidden-${run}`}, ${`E2E Tree Hidden Page ${run}`}) RETURNING id
+  `;
+
+  const [manager] = await sql<{ id: string }[]>`
+    INSERT INTO users (email, password_hash, display_name)
+    VALUES (${`e2e-tree-manager-${run}@example.com`}, 'unused', 'E2E Tree Manager') RETURNING id
+  `;
+  const { token: managerSessionToken } = await createSession(sql, { userId: manager!.id, idleTimeoutMinutes: 30, absoluteTimeoutDays: 30 });
+  await insertGrants(sql, workspaceId, 'user', manager!.id, [
+    { resourceId: shelf!.id, action: 'read', effect: 'allow' },
+    { resourceId: book!.id, action: 'manage', effect: 'allow' },
+    // Deny wins: the page is under a book they manage, and still invisible to them.
+    { resourceId: hidden!.id, action: 'read', effect: 'deny' },
+  ]);
+
+  const [workspace] = await sql<{ owner_id: string }[]>`SELECT owner_id FROM workspaces WHERE id = ${workspaceId}`;
+  if (!workspace) throw new Error('tree-fixtures: the seeded workspace has no owner');
+  const { token: ownerSessionToken } = await createSession(sql, { userId: workspace.owner_id, idleTimeoutMinutes: 30, absoluteTimeoutDays: 30 });
+  await insertGrants(sql, workspaceId, 'user', workspace.owner_id, [{ resourceId: shelf!.id, action: 'manage', effect: 'allow' }]);
+
   return {
     writerSessionToken,
     shelfTitle,
@@ -78,6 +120,11 @@ export async function mintTreeFixtures(sql: postgres.Sql, workspaceId: string): 
     firstPageTitle,
     secondPageId: second!.id,
     secondPageTitle,
+    managerSessionToken,
+    ownerSessionToken,
+    chapterId: chapter!.id,
+    chapterTitle,
+    hiddenPageId: hidden!.id,
   };
 }
 

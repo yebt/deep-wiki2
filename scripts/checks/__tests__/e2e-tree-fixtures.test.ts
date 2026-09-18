@@ -39,7 +39,7 @@ describe('e2e/tree-fixtures.bun.ts', () => {
     const fixtures = await mintTreeFixtures(sql, workspaceId);
 
     const pages = await sql<{ id: string; position: number }[]>`
-      SELECT id, position FROM nodes WHERE parent_id = ${fixtures.bookId} ORDER BY position ASC
+      SELECT id, position FROM nodes WHERE parent_id = ${fixtures.bookId} AND type = 'page' ORDER BY position ASC
     `;
     expect(pages.map((page) => page.id)).toEqual([fixtures.firstPageId, fixtures.secondPageId]);
 
@@ -53,5 +53,41 @@ describe('e2e/tree-fixtures.bun.ts', () => {
     const [grantee] = await sql<{ subject_id: string }[]>`SELECT subject_id FROM permissions WHERE resource_id = ${fixtures.bookId} AND action = 'write'`;
     const [session] = await sql<{ user_id: string }[]>`SELECT user_id FROM sessions WHERE user_id = ${grantee!.subject_id}`;
     expect(session).toBeTruthy();
+  }, 30_000);
+
+  /**
+   * The delete cases (`e2e/tree-writes.spec.ts`, design.md Decision 8): a
+   * manager who is not the owner, holding `manage` on the book; a chapter
+   * under it whose one page the manager is denied `read` on, so the
+   * chapter looks empty to them and the server still refuses to trash it;
+   * and the workspace owner, who holds `manage` on the shelf and is the
+   * one the force-delete is for.
+   */
+  test('mints a manager, a chapter with a page hidden from them, and a session for the workspace owner', async () => {
+    const fixtures = await mintTreeFixtures(sql, workspaceId);
+
+    const [chapter] = await sql<{ parent_id: string; type: string }[]>`SELECT parent_id, type FROM nodes WHERE id = ${fixtures.chapterId}`;
+    expect(chapter).toEqual({ parent_id: fixtures.bookId, type: 'chapter' });
+    const [hidden] = await sql<{ parent_id: string; type: string }[]>`SELECT parent_id, type FROM nodes WHERE id = ${fixtures.hiddenPageId}`;
+    expect(hidden).toEqual({ parent_id: fixtures.chapterId, type: 'page' });
+
+    const [managerSession] = await sql<{ user_id: string }[]>`SELECT user_id FROM sessions WHERE token_hash IS NOT NULL AND user_id = (
+      SELECT subject_id FROM permissions WHERE resource_id = ${fixtures.bookId} AND action = 'manage' AND effect = 'allow' LIMIT 1
+    )`;
+    expect(managerSession).toBeTruthy();
+    const managerId = managerSession!.user_id;
+    const [denied] = await sql<{ effect: string }[]>`
+      SELECT effect FROM permissions WHERE subject_id = ${managerId} AND resource_id = ${fixtures.hiddenPageId} AND action = 'read'
+    `;
+    expect(denied?.effect).toBe('deny');
+
+    const [ws] = await sql<{ owner_id: string }[]>`SELECT owner_id FROM workspaces WHERE id = ${workspaceId}`;
+    expect(managerId).not.toBe(ws!.owner_id);
+    const [ownerSession] = await sql<{ user_id: string }[]>`SELECT user_id FROM sessions WHERE user_id = ${ws!.owner_id}`;
+    expect(ownerSession).toBeTruthy();
+    const [ownerGrant] = await sql<{ action: string }[]>`
+      SELECT action FROM permissions WHERE subject_id = ${ws!.owner_id} AND action = 'manage' AND effect = 'allow' AND resource_id = (SELECT parent_id FROM nodes WHERE id = ${fixtures.bookId})
+    `;
+    expect(ownerGrant?.action).toBe('manage');
   }, 30_000);
 });

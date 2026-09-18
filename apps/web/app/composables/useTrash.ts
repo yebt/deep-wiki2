@@ -74,7 +74,8 @@ interface NotEmptyBody {
   readonly canForce: boolean;
 }
 
-const RETENTION = 'They move to the trash for 30 days, where anyone who manages them can restore them.';
+const RETENTION_ONE = 'It moves to the trash for 30 days, where anyone who manages it can restore it.';
+const RETENTION_MANY = 'They move to the trash for 30 days, where anyone who manages them can restore them.';
 const MESSAGES = {
   forbidden: "You don't have permission to delete this. Ask a workspace admin for manage access.",
   gone: 'That item is no longer there. Reload the tree and try again.',
@@ -103,7 +104,8 @@ export function countSentence(counts: TrashedCounts, type: string, separator = '
 }
 
 function forceDescription(counts: TrashedCounts, type: string): string {
-  return `${countSentence(counts, type)} will be deleted. ${RETENTION}`;
+  const retention = counts.pages + counts.containers === 1 ? RETENTION_ONE : RETENTION_MANY;
+  return `${countSentence(counts, type)} will be deleted. ${retention}`;
 }
 
 function notEmptyOf(error: unknown): NotEmptyBody | null {
@@ -128,7 +130,7 @@ function refusalMessage(error: unknown): string {
 export async function deleteNode(target: DeleteTarget, deps: DeleteNodeDeps): Promise<DeleteNodeResult> {
   const agreed = await deps.confirm({
     title: `Delete “${target.title}”?`,
-    description: 'It moves to the trash for 30 days, where anyone who manages it can restore it.',
+    description: RETENTION_ONE,
     confirmLabel: 'Delete',
     tone: 'destructive',
   });
