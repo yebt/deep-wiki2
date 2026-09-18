@@ -172,11 +172,11 @@ Chain strategy: stacked-to-main
 
 ## Phase 8: Web — Delete Action and Confirm Dialog Extension
 
-- [ ] 8.1 RED: `apps/web/app/composables/useConfirm.test.ts` — with `confirmText` set, the confirm button stays `aria-disabled` until the typed value matches exactly; Enter inside the field confirms only on match.
-- [ ] 8.2 GREEN: `apps/web/app/composables/useConfirm.ts`, `apps/web/app/components/ConfirmDialog.vue` — `ConfirmOptions.confirmText` per design Decision 8.
-- [ ] 8.3 RED: `apps/web/app/composables/useTreeRowActions.test.ts` — Delete is disabled with a stated reason for a non-manageable id and for a non-owner on a non-empty container; enabled for the owner (`navigation-tree` spec).
-- [ ] 8.4 GREEN: `apps/web/app/composables/useTreeRowActions.ts`, `apps/web/app/components/NavigationTreeActions.vue` — Delete kind, confirm flow, `409 not_empty` → `confirmText` dialog.
-- [ ] 8.5 Build the delete flow against a real dev server per `docs/UI-CHECKLIST.md` §2–§6 (read both files in full first, per `CLAUDE.md`); write and pass its e2e happy path plus the force-delete wrong-name/stale-count cases.
+- [x] 8.1 RED: `apps/web/app/composables/useConfirm.test.ts` — with `confirmText` set, the confirm button stays `aria-disabled` until the typed value matches exactly; Enter inside the field confirms only on match.
+- [x] 8.2 GREEN: `apps/web/app/composables/useConfirm.ts`, `apps/web/app/components/ConfirmDialog.vue` — `ConfirmOptions.confirmText` per design Decision 8.
+- [x] 8.3 RED: `apps/web/app/composables/useTreeRowActions.test.ts` — Delete is disabled with a stated reason for a non-manageable id and for a non-owner on a non-empty container; enabled for the owner (`navigation-tree` spec).
+- [x] 8.4 GREEN: `apps/web/app/composables/useTreeRowActions.ts`, `apps/web/app/components/NavigationTreeActions.vue` — Delete kind, confirm flow, `409 not_empty` → `confirmText` dialog.
+- [x] 8.5 Build the delete flow against a real dev server per `docs/UI-CHECKLIST.md` §2–§6 (read both files in full first, per `CLAUDE.md`); write and pass its e2e happy path plus the force-delete wrong-name/stale-count cases.
 - [ ] 8.6 **STOP — owner review gate 1/3: Delete action and the extended confirm dialog.** Do not start Phase 9 until reviewed against `docs/UI-CHECKLIST.md` and `docs/DESIGN-SYSTEM.md`.
 
 ## Phase 9: Web — Trash Screen

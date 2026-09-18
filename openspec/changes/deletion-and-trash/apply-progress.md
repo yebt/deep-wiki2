@@ -569,6 +569,71 @@ None beyond the recorded deviations above.
 
 - [ ] Phase 8 (web: delete action + confirm dialog) through Phase 12 (docs + final verification) — see `tasks.md`. Phase 8's owner review gate 1/3 is the next human checkpoint.
 
+## Status (superseded by work unit 8 below)
+
+Phase 1: 10/10. Phase 2: 4/4. Phase 3: 24/24. Phase 4: 23/23. Phase 5: 12/12. Phase 6: 10/10. Phase 7: 5/5.
+
+## Scope executed — Work unit 8 (Phase 8: Delete action + `confirmText`), ending at owner-review gate 1/3
+
+**Mode**: Strict TDD. Three commits on `main`: `3360126` (dialog), `1ce67e5` (Delete + flow), `a3fa410` (e2e + fixtures + Review Log).
+
+### Completed Tasks (Phase 8 — 5 of 6; 8.6 is the owner's gate and stays `[ ]`)
+
+- [x] 8.1–8.2 `ConfirmOptions.confirmText` and `onConfirm` (`useConfirm.ts`), the typed-name field on `ConfirmDialog.vue`: labelled `UFormField` naming what to type, focused on open, confirm action `aria-disabled` with "Type the name exactly as shown." (tooltip + `aria-describedby`) until the trimmed value equals the name exactly (case-sensitive), Enter in the field agrees only on a match; a refusal from `onConfirm` keeps the dialog open with the field error, a replaced description and focus on the field.
+- [x] 8.3–8.4 `deleteRowAction()`/`'delete'` kind in `useTreeRowActions.ts` (last group; disabled reasons per design Decision 8), `manageable`/`isOwner`/`removeNode` on `useTree.ts` + `useWorkspaceTree.ts`, the flow in `useTrash.ts` (`deleteNode()`, `countSentence()`), the toolbar's icon-only trash control in `NavigationTreeActions.vue`, and `NavigationTree.vue` wiring (menu item, `Delete` key, chip notices, live region, focus handoff to the neighbouring row). `trashUrl()` in `utils/routes.ts`. `TrashNodeResponse` type exported from the contracts barrel.
+- [x] 8.5 `e2e/tree-writes.spec.ts` (+7 tests, 18 total) over `e2e/tree-fixtures.bun.ts` (manager-not-owner, chapter with a page hidden from them, owner session); `e2e/tree.spec.ts` updated for the `write`-only member's disabled Delete; screenshots `trash-{menu,refusal,force-dialog}-{1280-light,1280-dark,320-light}.png`; `docs/UI-CHECKLIST.md` Review Log entry "2026-09-18 — Delete in the tree, and the confirm dialog's typed-name step — awaiting the owner's eye".
+- [ ] 8.6 **STOP — owner review gate 1/3.** Not started: Phase 9.
+
+### TDD Cycle Evidence
+
+| Task | RED (observed failure) | GREEN | REFACTOR |
+|---|---|---|---|
+| 8.1/8.2 `useConfirm` (5 tests) | `confirmText` undefined on pending; `accept is not a function` | 11/11 | `handlers` map beside `resolvers` (a function is not `useState`) |
+| 8.1/8.2 `ConfirmDialog` (4 tests) | `no field in the dialog`; `aria-disabled` null | 11/11 | one accept button with the tooltip switched off on match (first cut swapped the element under the pointer) |
+| 8.3 `useTreeRowActions` (7 tests) | last group `['copy-link']` not `['delete']`; `deleteRowAction is not a function` | 22/22 | `contentsWord()` from `legalChildTypes()` — no second hierarchy list |
+| 8.4 `routes.trashUrl` | `trashUrl is not a function` | 15/15 (incl. `handBuiltRouteStrings` walk) | — |
+| 8.4 `useTree` (3 tests) / `useWorkspaceTree` (1) | `manageable` undefined; `removeNode is not a function` | 16/16, 11/11 | `removeTreeNode()` reuses `withoutNode()` |
+| 8.4 `useTrash` (17 tests) | `Failed to resolve import "./useTrash"` | 17/17 | dropped the unused `isOwner` dep (the server's `canForce` decides); holder object for the closure-written answer (`tsc` narrowing); singular retention sentence |
+| 8.4 `NavigationTreeActions` (4 tests) | `tree-delete-open` absent | 27/27 | — |
+| 8.4 `NavigationTree` (5 new + 1 amended) | `Cannot read properties of undefined (reading 'has')` (menu without `manageable`); `tree-delete-open` absent | 38/38 | — |
+| 8.5 fixtures test | `fixtures.chapterId` undefined (postgres could not bind it) | 2/2 | sibling assertion scoped to pages |
+| 8.5 e2e (7 new) | run 1: pre-existing server assertion saw the chapter; run 2: pre-existing "created page" test was creating a chapter; run 3: `pageOrder` read mid-redraw | 18/18 (+ `tree.spec.ts` 11/11) | `expect.poll` after the removal, the Page type chosen explicitly |
+
+### Work Unit Evidence
+
+| Evidence | Value |
+|---|---|
+| Focused test command | `bun run -F @deep-wiki/web test` → 117 files, 1095 pass, 0 fail (baseline before the unit: 117 pass on the 8 touched suites) |
+| Runtime harness | `bunx playwright test e2e/tree-writes.spec.ts e2e/tree.spec.ts` against the real API + seeded Postgres → 29/29 pass (4.4 min, 1 worker, host load average ~60). Invoked through Playwright directly rather than `bun run e2e` because the host could not boot `nuxt dev` inside Playwright's 120s `webServer` window; the suite's web server was started by hand on 4173 (pid recorded, killed afterwards; the owner's server on 3001 untouched) and `scripts/e2e.ts`'s lock preflight refuses while that lock is held. `bun test scripts/checks/__tests__/e2e-tree-fixtures.test.ts` → 2/2 |
+| Rollback boundary | `3360126` (dialog: `confirmText` optional, `accept()` additive) · `1ce67e5` (Delete + flow: `useTrash.ts` new; `manageable`/`isOwner`/`removeNode` additive; `deleteRowAction` last group; toolbar control) · `a3fa410` (e2e/fixtures/docs). Each reverts on its own; the contracts barrel line is one type export |
+
+### Full Verification (this work unit, each stage its own process)
+
+- `bun run check` — ok (12/12)
+- `bun run typecheck` — exit 0
+- `bun run lint` — exit 0
+- `bun run -F @deep-wiki/web test` — 1095 pass, 0 fail
+- e2e `tree-writes.spec.ts` + `tree.spec.ts` — 29/29 pass
+
+### Deviations from Design
+
+1. **`DELETE /nodes/:id` answers `200` with `{ trashOperationId, trashed }`, not `204`** (the orchestrator's scope text said 204; the shipped route from work unit 6 returns the body). The flow reads the body and reports the counts; no change to the API.
+2. **A non-owner's `409 not_empty` notice names the count** ("Empty “X” before deleting it (1 page).") where design Decision 8 says "without a count for a non-owner". The scope text asked for the counts, and the server already returns them to that caller, so the notice discloses nothing the response did not. Recorded in the Review Log as the owner's call.
+3. **`useConfirm` gained `onConfirm`/`accept()` beyond Decision 8's `confirmText`.** Needed so `stale_count` re-asks with the fresh count and `name_mismatch` keeps the dialog with the field's error *inside the open dialog* (the scope's wording) rather than closing and reopening it. Still one dialog; the extension is additive and optional.
+4. **The toolbar's Delete is icon-only** (name + tooltip, §4.3): a 280px pane holds "New…" and "Rename…" and a third labelled button wrapped.
+5. **`useTree.removeNode` returns an undo instead of a `trash(nodeId, write)` wrapper**, so the flow (which has three request stages) owns when the row leaves and returns; `reorder`'s snapshot-and-revert idiom is reused.
+6. **`TrashNodeResponse` is now exported from `packages/contracts/src/index.ts`** — the type existed in `trash.ts` but the barrel omitted it.
+
+### Issues Found
+
+- The pre-existing "a created page is drawn from the response" e2e created a **chapter** (the toolbar guesses a book's first legal child) and matched it by title; it now picks the Page type. Not a product defect, a test that said less than it seemed to.
+- Under load, `bun run e2e`'s `webServer` timeout (120s) is too short for `nuxt dev` on this host; recorded in the Review Log's measurement paragraph, no change made to the harness.
+
+### Remaining Tasks (not in this work unit's scope)
+
+- [ ] 8.6 — the owner's review gate 1/3 (STOP).
+- [ ] Phase 9 (Trash screen) through Phase 12 — see `tasks.md`.
+
 ## Status
 
-Phase 1: 10/10. Phase 2: 4/4. Phase 3: 24/24. Phase 4: 23/23. Phase 5: 12/12. Phase 6: 10/10. Phase 7: 5/5. Ready for `sdd-verify` on this work unit, then `sdd-apply` again for Phase 8 (web).
+Phase 1: 10/10. Phase 2: 4/4. Phase 3: 24/24. Phase 4: 23/23. Phase 5: 12/12. Phase 6: 10/10. Phase 7: 5/5. Phase 8: 5/6 — stopped at gate 1/3 (8.6). Ready for `sdd-verify` on this work unit; Phase 9 waits for the owner's verdict.
