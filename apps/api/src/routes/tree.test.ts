@@ -147,6 +147,22 @@ describe('GET /workspaces/:id/tree', () => {
     expect(ids).not.toContain(fixture.hiddenChapter.id);
     expect(ids).not.toContain(fixture.hiddenChapterPage.id);
   });
+
+  // trash-non-disclosure spec: "A read surface excludes a trashed node
+  // through the live view" — a former reader of a now-trashed page must
+  // see the tree exactly as if that page never existed.
+  test('a trashed page is absent from the tree for a subject who could read it before', async () => {
+    const fixture = await buildFixture();
+    await sql`UPDATE nodes SET trashed_at = now(), trash_operation_id = ${crypto.randomUUID()} WHERE id = ${fixture.visibleBook.id}`;
+    const app = buildApp();
+
+    const res = await app.request(`/workspaces/${fixture.workspaceId}/tree`, { headers: { cookie: fixture.readerCookie } });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { nodes: { id: string; children: unknown[] }[] };
+    const ids = flatten(body.nodes as never);
+    expect(ids).not.toContain(fixture.visibleBook.id);
+  });
 });
 
 /*
@@ -615,6 +631,31 @@ describe('PATCH /nodes/:id', () => {
 
     const [row] = await sql<{ title: string }[]>`SELECT title FROM nodes WHERE id = ${fixture.hiddenChapter.id}`;
     expect(row!.title).toBe('chapter-hidden');
+  });
+
+  // trash-non-disclosure spec: `authorizeWrite` is the one place every
+  // tree write resolves its target, so a trashed node must answer exactly
+  // like an unknown one there too — never the raw nodes_trash_guard
+  // check-violation the rename UPDATE would otherwise surface.
+  test('renaming a trashed node is refused identically to an unknown node', async () => {
+    const fixture = await buildFixture();
+    await sql`UPDATE nodes SET trashed_at = now(), trash_operation_id = ${crypto.randomUUID()} WHERE id = ${fixture.hiddenChapterPage.id}`;
+    const app = buildApp();
+
+    const denied = await app.request(`/nodes/${fixture.hiddenChapterPage.id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', cookie: fixture.writerCookie },
+      body: JSON.stringify({ title: 'Probe' }),
+    });
+    const absent = await app.request(`/nodes/${crypto.randomUUID()}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', cookie: fixture.writerCookie },
+      body: JSON.stringify({ title: 'Probe' }),
+    });
+
+    expect(denied.status).toBe(404);
+    const deniedBody = await denied.text();
+    expect(deniedBody).toBe(await absent.text());
   });
 
   test('a read-only subject cannot rename', async () => {

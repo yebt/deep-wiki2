@@ -148,7 +148,7 @@ async function authorizeWrite(
   { ok: true; node: { workspace_id: string; type: string; parent_id: string | null } } | { ok: false; response: Response }
 > {
   const [node] = await sql<{ workspace_id: string; type: string; parent_id: string | null }[]>`
-    SELECT workspace_id, type, parent_id FROM nodes WHERE id = ${input.nodeId}
+    SELECT workspace_id, type, parent_id FROM live_nodes WHERE id = ${input.nodeId}
   `;
   const canRead =
     node !== undefined &&
@@ -210,13 +210,13 @@ export function createTreeRoutes(deps: TreeRouteDeps): Hono<{ Variables: Session
     if (!readableWorkspaces.has(workspaceId)) return notFound(c);
 
     const [root] = await deps.sql<{ id: string }[]>`
-      SELECT id FROM nodes WHERE workspace_id = ${workspaceId} AND type = 'workspace' AND parent_id IS NULL
+      SELECT id FROM live_nodes WHERE workspace_id = ${workspaceId} AND type = 'workspace' AND parent_id IS NULL
     `;
     if (!root) return notFound(c);
 
     const rows = await deps.sql<NodeRow[]>`
       SELECT id, parent_id, type, slug, title, position, path
-        FROM nodes
+        FROM live_nodes
        WHERE workspace_id = ${workspaceId} AND id <> ${root.id}
     `;
 
@@ -261,7 +261,7 @@ export function createTreeRoutes(deps: TreeRouteDeps): Hono<{ Variables: Session
 
     const [node] = await deps.sql<{ type: string; workspace_id: string; workspace_slug: string }[]>`
       SELECT n.type, n.workspace_id, w.slug AS workspace_slug
-        FROM nodes n
+        FROM live_nodes n
         JOIN workspaces w ON w.id = n.workspace_id
        WHERE n.id = ${nodeId}
     `;
