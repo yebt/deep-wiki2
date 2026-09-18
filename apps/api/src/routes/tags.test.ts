@@ -84,4 +84,28 @@ describe('GET /tags/:name/pages', () => {
     const body = (await res.json()) as { pages: { id: string }[] };
     expect(body.pages.map((p) => p.id)).toEqual([page]);
   });
+
+  // trash-non-disclosure spec: a trashed page tagged with the name must be
+  // excluded from tag-filtered navigation for a former reader.
+  test('a trashed page tagged with the name is excluded, with nothing disclosed', async () => {
+    const owner = await insertUser('owner3');
+    const [ws] = await sql<{ id: string }[]>`INSERT INTO workspaces (owner_id, name, slug) VALUES (${owner}, 'WS3', ${`ws3-${crypto.randomUUID()}`}) RETURNING id`;
+    const root = await insertNode(ws!.id, null, 'workspace', 'root3', 'Root');
+    const trashedPage = await insertNode(ws!.id, root, 'page', 'trashed', 'Trashed Project');
+    await savePage(sql, { nodeId: trashedPage, workspaceId: ws!.id, markdown: 'Body #project text.\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
+    const requester = await insertUser('requester3');
+    await sql`
+      INSERT INTO permissions (workspace_id, subject_type, subject_id, resource_id, action, effect)
+      VALUES (${ws!.id}, 'user', ${requester}, ${trashedPage}, 'read', 'allow')
+    `;
+    await sql`UPDATE nodes SET trashed_at = now(), trash_operation_id = ${crypto.randomUUID()} WHERE id = ${trashedPage}`;
+
+    const app = buildApp();
+    const res = await app.request(`/tags/project/pages?workspaceId=${ws!.id}`, { headers: { cookie: await cookieFor(requester) } });
+
+    expect(res.status).toBe(200);
+    const body: unknown = await res.json();
+    expectNoDisclosure(body, { id: trashedPage, slug: 'trashed', title: 'Trashed Project' }, res.headers);
+    expect((body as { pages: unknown[] }).pages).toEqual([]);
+  });
 });

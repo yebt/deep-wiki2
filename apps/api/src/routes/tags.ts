@@ -33,7 +33,7 @@ export function createTagRoutes(deps: TagRouteDeps): Hono<{ Variables: SessionVa
       SELECT n.id
         FROM page_tags pt
         JOIN tags t ON t.id = pt.tag_id
-        JOIN nodes n ON n.id = pt.page_id
+        JOIN live_nodes n ON n.id = pt.page_id
        WHERE t.workspace_id = ${workspaceId} AND t.name = ${name}
        LIMIT ${TAG_PAGE_CANDIDATE_LIMIT}
     `;
@@ -50,7 +50,7 @@ export function createTagRoutes(deps: TagRouteDeps): Hono<{ Variables: SessionVa
     const pages =
       survivorIds.length === 0
         ? []
-        : await deps.sql<{ id: string; title: string }[]>`SELECT id, title FROM nodes WHERE id = ANY(${survivorIds}::uuid[])`;
+        : await deps.sql<{ id: string; title: string }[]>`SELECT id, title FROM live_nodes WHERE id = ANY(${survivorIds}::uuid[])`;
 
     return c.json({ pages });
   });
