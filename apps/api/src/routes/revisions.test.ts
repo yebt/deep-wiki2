@@ -386,3 +386,97 @@ describe('GET /books/:id/history', () => {
     expect(await denied.text()).toBe(await missing.text());
   });
 });
+
+// changesets spec: "History Response Carries Deletions Alongside
+// Changesets"; deletion-trace spec: the `restricted` disclosure rule.
+describe('GET /books/:id/history — deletions', () => {
+  async function seedDeletionsFixture() {
+    const owner = await seedUser('Owner');
+    const reader = await seedUser('Reader');
+    const [ws] = await sql<{ id: string }[]>`
+      INSERT INTO workspaces (owner_id, name, slug) VALUES (${owner}, 'WS', ${`ws-${crypto.randomUUID()}`}) RETURNING id
+    `;
+    const [root] = await sql<{ id: string }[]>`
+      INSERT INTO nodes (workspace_id, parent_id, type, path, position, slug, title)
+      VALUES (${ws!.id}, NULL, 'workspace', '', 0, 'root', 'Root') RETURNING id
+    `;
+    const [book] = await sql<{ id: string }[]>`
+      INSERT INTO nodes (workspace_id, parent_id, type, path, position, slug, title)
+      VALUES (${ws!.id}, ${root!.id}, 'book', '', 0, ${`book-${crypto.randomUUID()}`}, 'Operations Handbook') RETURNING id
+    `;
+    const [page] = await sql<{ id: string }[]>`
+      INSERT INTO nodes (workspace_id, parent_id, type, path, position, slug, title)
+      VALUES (${ws!.id}, ${book!.id}, 'page', '', 0, ${`page-${crypto.randomUUID()}`}, 'Overview') RETURNING id
+    `;
+    await sql`
+      INSERT INTO permissions (workspace_id, subject_type, subject_id, resource_id, action, effect)
+      VALUES (${ws!.id}, 'user', ${reader}, ${book!.id}, 'read', 'allow')
+    `;
+
+    return { workspaceId: ws!.id, bookId: book!.id, pageId: page!.id, ownerId: owner, readerId: reader, readerCookie: await cookieFor(reader) };
+  }
+
+  async function trashAndTrace(input: {
+    workspaceId: string;
+    bookId: string;
+    pageId: string;
+    actorId: string;
+    restricted: boolean;
+  }): Promise<void> {
+    const opId = crypto.randomUUID();
+    await sql`UPDATE nodes SET trashed_at = now(), trash_operation_id = ${opId} WHERE id = ${input.pageId}`;
+    await sql`
+      INSERT INTO node_deletions (workspace_id, book_id, node_id, node_type, title, location, event, trash_operation_id, actor_id, page_count, restricted)
+      VALUES (${input.workspaceId}, ${input.bookId}, ${input.pageId}, 'page'::node_type, 'Overview', 'Book', 'trashed', ${opId}, ${input.actorId}, 1, ${input.restricted})
+    `;
+  }
+
+  function buildApp() {
+    return createRevisionRoutes({ sql, sessionIdleTimeoutMinutes: 30 });
+  }
+
+  test('an unrestricted trace is visible to any reader of the book', async () => {
+    const fixture = await seedDeletionsFixture();
+    await trashAndTrace({ ...fixture, actorId: fixture.ownerId, restricted: false });
+
+    const app = buildApp();
+    const res = await app.request(`/books/${fixture.bookId}/history`, { headers: { cookie: fixture.readerCookie } });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { deletions: { title: string | null; event: string; restricted: boolean }[] };
+    expect(body.deletions).toHaveLength(1);
+    expect(body.deletions[0]).toMatchObject({ title: 'Overview', event: 'trashed', restricted: false });
+  });
+
+  test('a restricted trace hides the title from a subject without access to the node', async () => {
+    const fixture = await seedDeletionsFixture();
+    // Narrower than the book's grant: an explicit deny on the page itself.
+    await sql`
+      INSERT INTO permissions (workspace_id, subject_type, subject_id, resource_id, action, effect)
+      VALUES (${fixture.workspaceId}, 'user', ${fixture.readerId}, ${fixture.pageId}, 'read', 'deny')
+    `;
+    await trashAndTrace({ ...fixture, actorId: fixture.ownerId, restricted: true });
+
+    const app = buildApp();
+    const res = await app.request(`/books/${fixture.bookId}/history`, { headers: { cookie: fixture.readerCookie } });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { deletions: { title: string | null; actorDisplayName: string | null; restricted: boolean }[] };
+    expect(body.deletions).toHaveLength(1);
+    expect(body.deletions[0]!.title).toBeNull();
+    expect(body.deletions[0]!.actorDisplayName).toBeNull();
+    expect(body.deletions[0]!.restricted).toBe(true);
+  });
+
+  test('a subject who could read the node sees the full restricted trace', async () => {
+    const fixture = await seedDeletionsFixture();
+    // No deny this time: the reader's book-level grant still reaches the page.
+    await trashAndTrace({ ...fixture, actorId: fixture.ownerId, restricted: true });
+
+    const app = buildApp();
+    const res = await app.request(`/books/${fixture.bookId}/history`, { headers: { cookie: fixture.readerCookie } });
+
+    const body = (await res.json()) as { deletions: { title: string | null }[] };
+    expect(body.deletions[0]!.title).toBe('Overview');
+  });
+});

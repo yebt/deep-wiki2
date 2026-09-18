@@ -5,7 +5,7 @@
  * caller with no grant cannot tell "this page does not exist" from "this
  * page exists and you may not see it".
  */
-import { can, listBookHistory, listPageRevisions, readableResourceIds } from '@deep-wiki/db';
+import { can, canManyResources, listBookDeletions, listBookHistory, listPageRevisions, readableResourceIds } from '@deep-wiki/db';
 import { BookHistoryResponseSchema, ErrorResponseSchema, PageHistoryResponseSchema } from '@deep-wiki/contracts';
 import { Hono, type Context } from 'hono';
 import type postgres from 'postgres';
@@ -105,6 +105,41 @@ export function createRevisionRoutes(deps: RevisionRouteDeps): Hono<{ Variables:
       }))
       .filter((changeset) => changeset.revisions.length > 0);
 
+    // changesets spec: "History Response Carries Deletions Alongside
+    // Changesets"; deletion-trace spec — "A Restricted Trace Discloses Only
+    // That A Page Was Deleted To A Subject Who Could Not Have Read It"
+    // (design.md Decision 5, "Disclosure"). A `restricted` row is filtered
+    // through `canManyResources(read)` on `node_id` while the row still
+    // physically exists — the permission resolver walks the base `nodes`
+    // table regardless of `trashed_at`, so this already covers a trashed
+    // node correctly; once the node is purged, `canManyResources` can no
+    // longer resolve it (its own ancestor CTE anchors on the row existing),
+    // so `manage` on the book is the fallback for that case.
+    const deletionRows = await listBookDeletions(deps.sql, { bookId, workspaceId: node.workspace_id });
+    const restrictedNodeIds = [...new Set(deletionRows.filter((row) => row.restricted).map((row) => row.nodeId))];
+    const [readableRestrictedIds, hasManageOnBook] = await Promise.all([
+      canManyResources(deps.sql, {
+        workspaceId: node.workspace_id,
+        subjectType: 'user',
+        subjectId: session.userId,
+        action: 'read',
+        resourceIds: restrictedNodeIds,
+      }),
+      can(deps.sql, { subjectType: 'user', subjectId: session.userId, resourceId: bookId, action: 'manage' }),
+    ]);
+    const deletions = deletionRows.map((row) => {
+      const visibleDetail = !row.restricted || readableRestrictedIds.has(row.nodeId) || hasManageOnBook;
+      return {
+        id: row.id,
+        event: row.event,
+        nodeType: row.nodeType,
+        title: visibleDetail ? row.title : null,
+        actorDisplayName: visibleDetail ? row.actorDisplayName : null,
+        occurredAt: row.occurredAt.toISOString(),
+        restricted: row.restricted,
+      };
+    });
+
     return c.json(
       BookHistoryResponseSchema.parse({
         title: node.title,
@@ -123,6 +158,7 @@ export function createRevisionRoutes(deps: RevisionRouteDeps): Hono<{ Variables:
             createdAt: revision.createdAt.toISOString(),
           })),
         })),
+        deletions,
       }),
     );
   });
