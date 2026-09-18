@@ -226,4 +226,45 @@ describe('GET /workspaces/:id/activity', () => {
     const res = await buildApp().request(`/workspaces/${f.workspaceId}/activity`);
     expect(res.status).toBe(401);
   });
+
+  // trash-non-disclosure spec: a trashed page's revisions and threads must
+  // not appear on the dashboard for a subject who could read it before.
+  // This route names no live view of its own — it delegates entirely to
+  // `listWorkspaceRevisions()` and `listOpenThreadsForUser()`, both already
+  // fixed in Phase 3 — so this RED/GREEN pair proves the delegation holds
+  // end to end rather than adding a query here.
+  test('a trashed page contributes no revision to `recent`/`mine` and no thread', async () => {
+    const f = await buildFixture();
+    await grant(f.workspaceId, f.readerId, f.hiddenPageId, 'read');
+    await grant(f.workspaceId, f.readerId, f.hiddenPageId, 'comment');
+    await savePage(sql, {
+      nodeId: f.hiddenPageId,
+      workspaceId: f.workspaceId,
+      markdown: 'Trashed text. ^blockc\n',
+      expectedContentHash: null,
+      updatedBy: f.readerId,
+      changesetWindowMinutes: WINDOW_MINUTES,
+    });
+    await createRootComment(sql, {
+      workspaceId: f.workspaceId,
+      pageId: f.hiddenPageId,
+      authorId: f.ownerId,
+      body: 'Before trashing',
+      blockId: 'blockc',
+      offsetStart: 0,
+      offsetEnd: 7,
+      quote: 'Trashed',
+      quoteHash: 'h3',
+    });
+    await sql`UPDATE nodes SET trashed_at = now(), trash_operation_id = ${crypto.randomUUID()} WHERE id = ${f.hiddenPageId}`;
+
+    const res = await buildApp().request(`/workspaces/${f.workspaceId}/activity`, { headers: { cookie: f.readerCookie } });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as ActivityBody;
+    expect(body.recent).toEqual([]);
+    expect(body.mine).toEqual([]);
+    expect(body.threads).toEqual([]);
+    expectNoDisclosure(body, { id: f.hiddenPageId, title: 'Salaries', values: ['Before trashing', 'Trashed'] }, res.headers);
+  });
 });
