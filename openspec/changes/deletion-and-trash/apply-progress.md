@@ -468,6 +468,107 @@ None beyond the recorded deviations above.
 
 - [ ] Phase 6 (contracts + route wiring) through Phase 12 (docs + final verification) — see `tasks.md`.
 
-## Status
+## Status (superseded by work units 6–7 below)
 
 Phase 1: 10/10. Phase 2: 4/4. Phase 3: 24/24. Phase 4: 23/23. Phase 5: 12/12. Ready for `sdd-verify` on this work unit, then `sdd-apply` again for Phase 6.
+
+## Scope executed — Work units 6 and 7 (Phase 6: contracts + routes + wiring; Phase 7: purge CLI + cron)
+
+**Mode**: Strict TDD
+
+### Completed Tasks (Phase 6 — all 10; Phase 7 — all 5)
+
+- [x] 6.1–6.3 `packages/contracts/src/trash.ts` (every schema from design Decision 7) + `apps/api/src/routes/trash.ts` (`createTrashRoutes`: `DELETE /nodes/:id`, `POST /nodes/:id/force-delete`, `GET /workspaces/:ref/trash`, `GET /trash/nodes/:id`, `POST /trash/:operationId/restore`) + mounted in `apps/api/src/index.ts`.
+- [x] 6.4–6.5 `apps/api/src/routes/tree.ts` — `manageable[]`/`isOwner` on `GET /workspaces/:id/tree`.
+- [x] 6.6–6.7 `apps/api/src/routes/pages.ts` — `GET /pages/:id` wires `trashLookup` after the `live_nodes` miss; a manager gets the content plus a `trash` block, everyone else the plain 404.
+- [x] 6.8–6.9 `apps/api/src/routes/revisions.ts` — `GET /books/:id/history` gains `deletions[]`, filtered by `restricted` per design Decision 5's "Disclosure" paragraph.
+- [x] 6.10 `bun run scripts/checks/routes-mounted.ts` — `createTrashRoutes` confirmed referenced as code.
+- [x] 7.1–7.2 `packages/db/src/trash/purge.ts`/`purge.test.ts` — confirmed already complete from work unit 5 (see Deviations), re-verified green, marked `[x]`.
+- [x] 7.3–7.4 `packages/db/trash-purge.ts` CLI (`ai-reindex.ts` idiom) + `packages/db/trash-purge.test.ts` (child-process test) + `trash:purge` script in `packages/db/package.json`.
+- [x] 7.5 `docs/RUNNING.md` — Commands table row + new §8 "Trash purge" (cron line, what purges, that the trace survives, no on-demand purge).
+
+### TDD Cycle Evidence
+
+| Task | RED (observed failure) | GREEN |
+|---|---|---|
+| contracts (`trash.ts`) | N/A — pure schema module, no production behaviour to fail against; proven by `trash.test.ts`'s 13 parse/reject assertions passing on first write | 13/13 pass, plus `pages.test.ts`/`revisions.test.ts`'s 2 new assertions for the `trash`/`deletions` fields |
+| `apps/api/src/routes/trash.ts` | `Cannot find module './trash'` before the route file existed; `route.test.ts` written first and run against the empty module | 18/18 pass on first full implementation (no fix cycle needed) |
+| `tree.ts` manageable/isOwner | `body.isOwner`/`body.manageable` were `undefined` (property did not exist on the response) | 3 new tests pass; 29/29 total in `tree.test.ts` |
+| `pages.ts` trash block | `res.status` was `404` where `200` was expected — the route's `live_nodes` miss short-circuited before `trashLookup` existed in the handler | 2 new tests pass; 29/29 total in `pages.test.ts` |
+| `revisions.ts` deletions | `body.deletions` was `undefined` | 3 new tests pass (unrestricted visible, restricted hidden, restricted visible-to-reader); 15/15 total in `revisions.test.ts` |
+| `readTrashedPageHtml` (`packages/db/src/trash/content.ts`) | `Cannot find module './content'` | 2/2 pass after fixing a test-fixture bug (see Deviations #1) |
+| `listBookDeletions` (`packages/db/src/trash/history.ts`) | `Cannot find module './history'` | 3/3 pass, first try |
+| `trashLookup`'s 3 new identity fields | N/A — additive fields on an already-green function; proven by a new assertion in the existing truth table, not a new RED/GREEN pair | 6/6 pass in `lookup.test.ts` (5 pre-existing + 1 new) |
+| `trash-purge.ts` CLI | `Cannot find module` before the file existed; the 6 refusal-shape tests and the 2 real-DB iteration tests were all written first against the empty module | 7/7 pass, first try, once run scoped to the package (see Deviations #4) |
+
+### Files Changed
+
+| File | Action | What Was Done |
+|---|---|---|
+| `packages/contracts/src/trash.ts` | Created | Every schema from design Decision 7: `TrashNodeResponseSchema`, `NotEmptyRefusalSchema`, `ForceDeleteRequestSchema`, `NameMismatchRefusalSchema`, `StaleCountRefusalSchema`, `TrashListingResponseSchema`, `TrashLookupResponseSchema`, `RestoreRequestSchema`, `RestoreResponseSchema`, `RestoreAncestorTrashedRefusalSchema`, `RestoreSlugTakenRefusalSchema`, `DeletionTraceSchema` |
+| `packages/contracts/src/trash.test.ts` | Created | 13 tests |
+| `packages/contracts/src/index.ts` | Modified | barrel exports for `trash.ts` |
+| `packages/contracts/src/pages.ts` | Modified | `ReadPageResponseSchema` gains `trash: TrashLookupResponseSchema.optional()` |
+| `packages/contracts/src/pages.test.ts` | Modified | 1 new test (absent by default, parses when present) |
+| `packages/contracts/src/revisions.ts` | Modified | `BookHistoryResponseSchema` gains `deletions: z.array(DeletionTraceSchema).default([])` |
+| `packages/contracts/src/revisions.test.ts` | Modified | 1 new test (defaults to `[]`, parses a restricted line with title withheld) |
+| `packages/db/src/trash/content.ts` | Created | `readTrashedPageHtml()` — the one place a trashed page's HTML is read from the base `page_content` table on purpose, for the manager-still-reads-it-content scenario `read-page.ts` cannot answer (it always joins `live_page_content`) |
+| `packages/db/src/trash/content.test.ts` | Created | 2 tests |
+| `packages/db/src/trash/history.ts` | Created | `listBookDeletions()` — the raw, unfiltered `node_deletions` read for a book; visibility filtering is the route's job |
+| `packages/db/src/trash/history.test.ts` | Created | 3 tests |
+| `packages/db/src/trash/lookup.ts` | Modified | `TrashLookupResult` gains `title`, `workspaceId`, `workspaceSlug` — `pages.ts`'s only way to answer `GET /pages/:id` after a `live_nodes` miss without a second base-table read of its own |
+| `packages/db/src/trash/lookup.test.ts` | Modified | 1 new test |
+| `packages/db/src/index.ts` | Modified | exports every `trash/*` and `permissions/manageable-trash` symbol the route layer needs |
+| `apps/api/src/routes/trash.ts` | Created | `createTrashRoutes()` — the whole route surface above |
+| `apps/api/src/routes/trash.test.ts` | Created | 18 tests |
+| `apps/api/src/routes/tree.ts` | Modified | `GET /workspaces/:id/tree` gains `manageable`/`isOwner` |
+| `apps/api/src/routes/tree.test.ts` | Modified | 3 new tests |
+| `apps/api/src/routes/pages.ts` | Modified | `GET /pages/:id` wires `trashLookup`/`readTrashedPageHtml` after the `live_nodes` miss |
+| `apps/api/src/routes/pages.test.ts` | Modified | 2 new tests |
+| `apps/api/src/routes/revisions.ts` | Modified | `GET /books/:id/history` merges `listBookDeletions()` rows, `restricted`-filtered via `canManyResources(read)` + `manage`-on-book fallback |
+| `apps/api/src/routes/revisions.test.ts` | Modified | 3 new tests |
+| `apps/api/src/index.ts` | Modified | mounts `createTrashRoutes` |
+| `packages/db/trash-purge.ts` | Created | the `trash:purge` CLI, `ai-reindex.ts`'s shape |
+| `packages/db/trash-purge.test.ts` | Created | 7 tests (6 fast refusal-shape, 2 real-DB `--all`/`--workspace` iteration) |
+| `packages/db/package.json` | Modified | `trash:purge` script |
+| `docs/RUNNING.md` | Modified | Commands table row + new §8 "Trash purge" |
+| `openspec/changes/deletion-and-trash/tasks.md` | Modified | marked 6.1–6.10 and 7.1–7.5 `[x]` |
+
+### Work Unit Evidence
+
+| Evidence | Value |
+|---|---|
+| Focused test command | `bun run -F @deep-wiki/contracts test` → 170 pass, 0 fail; `bun run -F @deep-wiki/db test trash` → 66 pass across 9 files (5 pre-existing trash modules + `content.ts`/`history.ts`); `bun run -F @deep-wiki/db test trash-purge` → 7 pass; `bun run -F @deep-wiki/api test trash tree pages revisions` → 18+29+29+15 = 91 pass |
+| Runtime harness | Real Hono app in every route test (`app.request(...)`); provisioned test Postgres for every db-layer test; `bun run e2e -- e2e/tree.spec.ts e2e/read.spec.ts e2e/book-history.spec.ts` → 27/27 pass, confirming the widened tree/page/book-history responses do not regress existing web behaviour |
+| Rollback boundary | Unmount `createTrashRoutes` in `index.ts` and delete `apps/api/src/routes/trash.ts`/`trash.test.ts` to revert the whole new route surface independently; the three route edits (`tree.ts`, `pages.ts`, `revisions.ts`) each revert independently since each adds an optional/defaulted field or an after-the-miss branch, never changing an existing success path; `packages/db/trash-purge.ts`/`.test.ts` and the `package.json` script line are additive |
+
+### Full Verification (this work unit)
+
+- `bun run check` — ok (12/12 structural checks pass; `trash-filter` unaffected — the new route/db files call through existing live-view-safe functions or read tables outside its two rules' scope)
+- `bun run typecheck` — exit 0 (root + every workspace member, including `apps/web`/`apps/api`/`apps/landing`)
+- `bun run lint` — exit 0 (root `eslint .` + every workspace member)
+- `bun run -F @deep-wiki/contracts test` — 170 pass, 0 fail
+- `bun run -F @deep-wiki/db test` — 583 pass, 0 fail (63 files)
+- `bun run -F @deep-wiki/api test` — 496 pass, 0 fail (59 files)
+- `bun run e2e -- e2e/tree.spec.ts e2e/read.spec.ts e2e/book-history.spec.ts` — 27/27 pass
+
+### Deviations from Design
+
+1. **`readTrashedPageHtml()` (`packages/db/src/trash/content.ts`) is a new function this work unit's task list does not name literally.** Task 6.7 says only "wire `trashLookup` after the `live_nodes` miss", but `trashLookup()` alone cannot satisfy the page-content spec's "A manager can still read a trashed page's content" scenario: `readPageHtml()` always joins `live_page_content`, which by construction excludes every trashed row, manager included. Rather than leave that scenario unmet, added one function in the `packages/db/src/trash/` directory (already allow-listed for reading trashed rows on purpose) that reads the base `page_content` table directly, callable only after the route's own `trashLookup()` call has already confirmed trashed-and-manage. `packages/db/src/index.ts` exports it alongside the rest of `trash/`.
+2. **`trashLookup()`'s result gained three fields (`title`, `workspaceId`, `workspaceSlug`) beyond design Decision 7's own `TrashLookupResult` shape**, for the same reason as #1: `apps/api/src/routes/pages.ts` needs the trashed node's own identity to answer `GET /pages/:id`, and reading `nodes`/`workspaces` directly from `pages.ts` itself would trip `trash-filter.ts` rule 1 (that file carries no `ALLOW_LIST` entry). Extending the one function already allow-listed to read the base table was the option that added no new allow-list entry anywhere. Additive only — existing `lookup.test.ts` assertions read specific fields off the result, never the whole object, so nothing broke.
+3. **`GET /trash/nodes/:id` is implemented and tested even though the assigned scope text and task 6.1 do not name it literally.** Design Decision 7's own route table lists it as part of the surface ("feeds the 'in the trash' state on a page screen"), and it is a thin, already-necessary wrapper over the already-built `trashLookup()` — omitting it would leave the shipped API surface short of what design.md committed to. One describe block in `trash.test.ts` covers it (manager lookup succeeds, outsider gets 404).
+4. **`trash-purge.test.ts`'s fast refusal tests only pass when run scoped to the package (`bun run -F @deep-wiki/db test`), not via a bare `bun test <path>` from the repo root.** `Bun.spawnSync(['bun', 'run', CLI, ...])`'s child process auto-loads `.env` from its own cwd; the repo root carries a real `.env` with a live `DATABASE_URL`, which defeats the "refuses without DATABASE_URL" test's premise if the parent test process's cwd is the repo root. `ai-reindex.test.ts` has this exact same property (confirmed) — it is a pre-existing idiom risk, not new to this file, and the documented verification command (`bun run -F @deep-wiki/db test`) always runs with cwd `packages/db`, which carries no `.env`, so the shipped test suite is unaffected.
+5. **Phase 7 tasks 7.1/7.2 were already complete before this work unit started.** Work unit 5's apply-progress (Phase 5) recorded `packages/db/src/trash/purge.ts` and `purge.test.ts` as created and fully green (8/8) — built ahead of `tasks.md`'s own Phase 7 sequencing because `trace.ts`'s `findTrashedTrace()` needed a caller to prove the `purged` event end-to-end. Re-verified both files still pass unmodified as part of this work unit's `bun run -F @deep-wiki/db test` run, then marked `[x]` in `tasks.md` rather than reimplementing them.
+6. **The `restricted`-disclosure filter's post-purge fallback (`manage` on the book) is implemented in `revisions.ts` but has no dedicated RED test of its own.** The `deletion-trace` spec's own scenarios describe the pre-purge case only (a still-existing trashed node); the post-purge "manage on book" fallback comes from design.md Decision 5's "Disclosure" paragraph, one layer more detailed than the spec's scenarios. `canManyResources(read)` structurally cannot resolve a purged node's id at all (its ancestor CTE anchors on the row existing), so the fallback is exercised by the code path but not proven by a scenario naming a purged-and-restricted row; recorded as a gap for whoever verifies this work unit or extends `e2e/trash.spec.ts` in Phase 11.
+
+### Issues Found
+
+None beyond the recorded deviations above.
+
+### Remaining Tasks (not in this work unit's scope)
+
+- [ ] Phase 8 (web: delete action + confirm dialog) through Phase 12 (docs + final verification) — see `tasks.md`. Phase 8's owner review gate 1/3 is the next human checkpoint.
+
+## Status
+
+Phase 1: 10/10. Phase 2: 4/4. Phase 3: 24/24. Phase 4: 23/23. Phase 5: 12/12. Phase 6: 10/10. Phase 7: 5/5. Ready for `sdd-verify` on this work unit, then `sdd-apply` again for Phase 8 (web).

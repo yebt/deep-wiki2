@@ -297,6 +297,7 @@ Run from the repository root.
 | `bun run gate-2-round-trip` | Markdown → ProseMirror → markdown must be lossless |
 | `bun run compose:smoke` | Proves the container stack actually works, not just that it started |
 | `bun run setup:hooks` | Points git at `.githooks` — do this once per clone |
+| `bun run -F @deep-wiki/db trash:purge --workspace <id\|slug>` / `--all` | Deletes every node trashed 30+ days ago, one workspace per invocation or per iteration of `--all`. Operator-invoked only — see §8 |
 
 `bun run check` deliberately excludes `env:check`: `.env` is your machine's state, not the
 repository's, and blocking a docs commit over a local misconfiguration is over-reach.
@@ -427,3 +428,40 @@ private port block (14600–14606) under a private compose project name (`podman
 touched), then torn down with `podman compose --env-file <copy> -p <name> down -v`. That is
 also how to verify this file without disturbing whoever else is on the machine. If you
 change a command here, run it first.
+
+---
+
+## 8. Trash purge
+
+Deleting a page or container always trashes it first (`node-trash` spec); nothing in the
+product hard-deletes on demand (`trash-purge` spec — "No On-Demand Purge Exists"). A trashed
+node's `page_content`, revisions, comments and chunks stay exactly as they were, hidden rather
+than changed, until this job runs and the row's 30-day retention has elapsed
+(`TRASH_RETENTION_DAYS`, `packages/core/src/trash/rules.ts`). There is no in-process scheduler:
+the CLI is the only thing that ever purges, and it purges only what is already past that
+window — running it early changes nothing.
+
+The append-only trace (`node_deletions` — "page X deleted by Y at T") survives the purge on
+purpose: it carries no foreign key to the node it describes, so a book's history keeps saying
+what happened to a page long after the page, its content and its revisions are gone. The trace
+row is removed only if its own book is later purged too.
+
+Install the sweep as a nightly cron job, once per deployment:
+
+```
+17 3 * * *  cd <repo> && bun run -F @deep-wiki/db trash:purge --all
+```
+
+`--all` iterates every workspace, one transaction each, so one workspace's failure cannot roll
+back another's. To purge a single workspace instead — for a support request, or while
+verifying the job itself — pass `--workspace <id>` or `--workspace <slug>`:
+
+```
+bun run -F @deep-wiki/db trash:purge --workspace acme
+bun run -F @deep-wiki/db trash:purge --workspace 3f9c2e40-...-000000000000
+```
+
+Each run prints one line naming the workspace, the tracked `trash_purge_runs` row it wrote,
+and how many nodes it deleted — `trash:purge: workspace <id> — run <runId>, purged <n> node(s)`
+— which is also what the cron job's own log ends up holding. A workspace with nothing eligible
+completes as a no-op, and a rerun of an already-`completed` run changes nothing.

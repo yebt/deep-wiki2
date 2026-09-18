@@ -151,24 +151,24 @@ Chain strategy: stacked-to-main
 
 ## Phase 6: Contracts and Route Wiring
 
-- [ ] 6.1 RED: `apps/api/src/routes/trash.test.ts` — `DELETE /nodes/:id` (empty → `200`; non-empty non-owner → `409 not_empty`; no `read` → `404`; `read` no `manage` → `403`); `POST /nodes/:id/force-delete` (`name_mismatch`, `stale_count`, success); `GET /workspaces/:ref/trash` (manageable-only listing); `POST /trash/:opId/restore` (all `trash-restore` scenarios) — against a real Hono app.
-- [ ] 6.2 GREEN: `packages/contracts/src/trash.ts` — every schema from design Decision 7.
-- [ ] 6.3 GREEN: `apps/api/src/routes/trash.ts` (`createTrashRoutes`) implementing 6.1; mount in `apps/api/src/index.ts`.
-- [ ] 6.4 RED: `apps/api/src/routes/tree.test.ts` — the tree response carries `manageable[]` and `isOwner`.
-- [ ] 6.5 GREEN: `apps/api/src/routes/tree.ts` — add `manageable`/`isOwner` per design Decision 7.
-- [ ] 6.6 RED: `apps/api/src/routes/pages.test.ts` — `GET /pages/:id` on a trashed id returns the `trash` block for the manager who trashed it, and the plain `404` for everyone else.
-- [ ] 6.7 GREEN: `apps/api/src/routes/pages.ts` — wire `trashLookup` after the `live_nodes` miss.
-- [ ] 6.8 RED: `apps/api/src/routes/revisions.test.ts` — `GET /books/:id/history` carries `deletions[]` alongside `changesets[]` (`changesets` spec).
-- [ ] 6.9 GREEN: `apps/api/src/routes/revisions.ts` — merge `node_deletions` rows into the history response.
-- [ ] 6.10 Run `bun run scripts/checks/routes-mounted.ts` — confirm `createTrashRoutes` is referenced as code in `index.ts`.
+- [x] 6.1 RED: `apps/api/src/routes/trash.test.ts` — `DELETE /nodes/:id` (empty → `200`; non-empty non-owner → `409 not_empty`; no `read` → `404`; `read` no `manage` → `403`); `POST /nodes/:id/force-delete` (`name_mismatch`, `stale_count`, success); `GET /workspaces/:ref/trash` (manageable-only listing); `POST /trash/:opId/restore` (all `trash-restore` scenarios) — against a real Hono app. Also covers `GET /trash/nodes/:id` per design Decision 7's own route table (manager lookup vs. 404 for an outsider).
+- [x] 6.2 GREEN: `packages/contracts/src/trash.ts` — every schema from design Decision 7.
+- [x] 6.3 GREEN: `apps/api/src/routes/trash.ts` (`createTrashRoutes`) implementing 6.1; mount in `apps/api/src/index.ts`.
+- [x] 6.4 RED: `apps/api/src/routes/tree.test.ts` — the tree response carries `manageable[]` and `isOwner`.
+- [x] 6.5 GREEN: `apps/api/src/routes/tree.ts` — add `manageable`/`isOwner` per design Decision 7.
+- [x] 6.6 RED: `apps/api/src/routes/pages.test.ts` — `GET /pages/:id` on a trashed id returns the `trash` block for the manager who trashed it, and the plain `404` for everyone else.
+- [x] 6.7 GREEN: `apps/api/src/routes/pages.ts` — wire `trashLookup` after the `live_nodes` miss. (See Deviations — needed a new `readTrashedPageHtml()` in `packages/db/src/trash/content.ts` and three new identity fields on `trashLookup()`'s own result, neither named literally by this task.)
+- [x] 6.8 RED: `apps/api/src/routes/revisions.test.ts` — `GET /books/:id/history` carries `deletions[]` alongside `changesets[]` (`changesets` spec), including the `restricted` disclosure scenarios from the `deletion-trace` spec.
+- [x] 6.9 GREEN: `apps/api/src/routes/revisions.ts` — merge `node_deletions` rows into the history response via a new `packages/db/src/trash/history.ts` (`listBookDeletions`), filtered by `restricted` per design Decision 5's "Disclosure" paragraph.
+- [x] 6.10 Run `bun run scripts/checks/routes-mounted.ts` — confirm `createTrashRoutes` is referenced as code in `index.ts`.
 
 ## Phase 7: Purge Job and CLI
 
-- [ ] 7.1 RED: `packages/db/src/trash/purge.test.ts` — `trash-purge` spec scenarios: a 29-day node untouched, a 31-day node purged, idempotent rerun, cascade inventory (content/revisions/comment/chunks for a page; changeset for a book), a tracked run row through `completed`.
-- [ ] 7.2 GREEN: `packages/db/src/trash/purge.ts` — `purgeTrash()` per design Decision 6.
-- [ ] 7.3 RED: `packages/db/trash-purge.test.ts` — the CLI validates `--workspace <uuid>` / `--all`, rejects a malformed uuid, and `--all` iterates workspaces one transaction each.
-- [ ] 7.4 GREEN: `packages/db/trash-purge.ts` CLI + `package.json` `trash:purge` script.
-- [ ] 7.5 Update `docs/RUNNING.md` with the operator cron line (`17 3 * * *  cd <repo> && bun run -F @deep-wiki/db trash:purge --all`).
+- [x] 7.1 RED: `packages/db/src/trash/purge.test.ts` — `trash-purge` spec scenarios: a 29-day node untouched, a 31-day node purged, idempotent rerun, cascade inventory (content/revisions/comment/chunks for a page; changeset for a book), a tracked run row through `completed`. (See Deviations — this RED/GREEN pair was actually done in work unit 5/Phase 5, ahead of this phase's own sequencing; `purge.ts`/`purge.test.ts` already existed, fully green, 8/8, before this work unit started. Confirmed still passing; marked `[x]` here rather than redone.)
+- [x] 7.2 GREEN: `packages/db/src/trash/purge.ts` — `purgeTrash()` per design Decision 6. (Same note as 7.1 — pre-existing from work unit 5.)
+- [x] 7.3 RED: `packages/db/trash-purge.test.ts` — the CLI validates `--workspace <id|slug>` / `--all`, rejects a malformed ref, and `--all` iterates workspaces one transaction each.
+- [x] 7.4 GREEN: `packages/db/trash-purge.ts` CLI + `package.json` `trash:purge` script.
+- [x] 7.5 Update `docs/RUNNING.md` with the operator cron line (`17 3 * * *  cd <repo> && bun run -F @deep-wiki/db trash:purge --all`) and a new §8 "Trash purge" paragraph.
 
 ## Phase 8: Web — Delete Action and Confirm Dialog Extension
 
