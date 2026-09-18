@@ -29,6 +29,21 @@ export class StaleContentError extends Error {
   }
 }
 
+/**
+ * page-content spec: "Read of a trashed page's content is denied like
+ * absence" applies to saving too — a trashed page (or one that never
+ * existed at all) must be denied identically, before the write transaction
+ * ever opens (trash-non-disclosure spec). `live_nodes` is the one check
+ * that answers both cases the same way: a trashed node and an unknown one
+ * are both simply absent from it.
+ */
+export class PageNotFoundError extends Error {
+  constructor(nodeId: string) {
+    super(`page ${nodeId} does not exist`);
+    this.name = 'PageNotFoundError';
+  }
+}
+
 export interface SavePageInput {
   readonly nodeId: string;
   readonly workspaceId: string;
@@ -87,6 +102,16 @@ export async function savePage(sql: postgres.Sql, input: SavePageInput): Promise
   const tree = parse(canonical);
   const renderedHtml = render(canonical);
   const blockIndex = buildBlockIndex(tree, canonical);
+
+  // Checked before the write transaction opens (design Decision 9 / tasks
+  // 3.10-3.13): a trashed page and a nonexistent one are the same absence,
+  // and this is the one place that absence is decided for every caller of
+  // savePage() — the route's own live_nodes lookup and this one must never
+  // be allowed to disagree.
+  const [live] = await sql<{ id: string }[]>`
+    SELECT id FROM live_nodes WHERE id = ${input.nodeId} AND workspace_id = ${input.workspaceId}
+  `;
+  if (!live) throw new PageNotFoundError(input.nodeId);
 
   return sql.begin(async (tx) => {
     let previousMarkdown: string | null = null;

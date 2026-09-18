@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import postgres from 'postgres';
 import { provisionTestDatabase, TEST_CHANGESET_WINDOW_MINUTES, type ProvisionedTestDatabase } from '../../testing/provision';
 import { CURRENT_PIPELINE_VERSION } from '@deep-wiki/markdown';
-import { NotCanonicalError, savePage, StaleContentError } from './save-page';
+import { NotCanonicalError, PageNotFoundError, savePage, StaleContentError } from './save-page';
 
 let db: ProvisionedTestDatabase;
 let sql: postgres.Sql;
@@ -355,5 +355,43 @@ describe('savePage — revisions', () => {
     expect(third.unchanged).toBe(false);
     const rows = await sql<{ content: string }[]>`SELECT content FROM page_revision WHERE page_id = ${nodeId} ORDER BY created_at ASC`;
     expect(rows.map((r) => r.content)).toEqual(['# One\n', '# Two\n']);
+  });
+});
+
+// page-content spec: "Save denied like absence" (trash-non-disclosure) — a
+// save against a trashed page is denied identically to a save against a
+// page that never existed, and never reaches the write transaction.
+describe('trash-non-disclosure', () => {
+  test('saving to a trashed page is denied identically to a page that never existed', async () => {
+    const { workspaceId, nodeId } = await seedPageNode();
+    await savePage(sql, { nodeId, workspaceId, markdown: '# Hello\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
+    await sql`UPDATE nodes SET trashed_at = now(), trash_operation_id = ${crypto.randomUUID()} WHERE id = ${nodeId}`;
+
+    await expect(
+      savePage(sql, {
+        nodeId,
+        workspaceId,
+        markdown: '# Edited\n',
+        expectedContentHash: null,
+        changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES,
+      }),
+    ).rejects.toThrow(PageNotFoundError);
+
+    const [row] = await sql`SELECT markdown FROM page_content WHERE node_id = ${nodeId}`;
+    expect(row!.markdown).toBe('# Hello\n');
+  });
+
+  test('saving to a nonexistent page raises the same PageNotFoundError', async () => {
+    const { workspaceId } = await seedPageNode();
+
+    await expect(
+      savePage(sql, {
+        nodeId: crypto.randomUUID(),
+        workspaceId,
+        markdown: '# Edited\n',
+        expectedContentHash: null,
+        changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES,
+      }),
+    ).rejects.toThrow(PageNotFoundError);
   });
 });

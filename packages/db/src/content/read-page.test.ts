@@ -98,3 +98,26 @@ describe('readPageMarkdown (edit mode)', () => {
     expect(result).not.toHaveProperty('renderedHtml');
   });
 });
+
+// page-content spec: "Read of a trashed page's content is denied like
+// absence" — a former reader's page-content read must answer identically
+// (undefined) to a page whose content row never existed at all.
+describe('trash-non-disclosure', () => {
+  test('readPageHtml on a trashed page returns undefined, identically to no content row', async () => {
+    const ref = await seedSavedPage('# Hello\n');
+    await sql`UPDATE nodes SET trashed_at = now(), trash_operation_id = ${crypto.randomUUID()} WHERE id = ${ref.nodeId}`;
+
+    const result = await readPageHtml(sql, ref);
+
+    expect(result).toBeUndefined();
+  });
+
+  test('readPageMarkdown on a trashed page returns undefined, identically to no content row', async () => {
+    const ref = await seedSavedPage('# Hello\n\nBody text.\n');
+    await sql`UPDATE nodes SET trashed_at = now(), trash_operation_id = ${crypto.randomUUID()} WHERE id = ${ref.nodeId}`;
+
+    const result = await readPageMarkdown(sql, ref);
+
+    expect(result).toBeUndefined();
+  });
+});
