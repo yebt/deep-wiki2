@@ -83,43 +83,17 @@ export const ALLOW_LIST: Record<string, string> = {
     'Write transaction and its reads, entered only after the route already located the node through live_nodes.',
   'packages/db/src/content/backfill-render.ts':
     'Write transaction and its reads, entered only after the route already located the node through live_nodes.',
-  'packages/db/src/content/read-page.ts':
-    'Write transaction and its reads, entered only after the route already located the node through live_nodes.',
   'packages/db/seed.ts':
     'Seeds a fresh database with rows that are all live by construction; not an application read path the trash mechanism guards.',
   'e2e/':
     'End-to-end fixtures set up scenarios by writing directly to the base tables; not an application read path.',
 
-  // ── Phase 3/4 pending (deletion-and-trash tasks.md) ──────────────────
-  //
-  // Design Decision 2: "Everything else … turns red at first and is made
-  // green one file at a time." This check (Phase 2) is deliberately built
-  // and wired before any of these sites are rewritten, so `bun run check`
-  // — and the pre-commit hook that runs it — would otherwise refuse this
-  // very commit. Each line names the task that removes it; task 2.4's
-  // proof-of-red evidence in apply-progress.md is the authoritative list
-  // this block exists to keep green until then. An entry that becomes
-  // stale (its file no longer trips either rule) is a build error by
-  // design — that is what turns "fixed" into "done", not a forgotten line.
-  'apps/api/src/routes/tree.ts': 'Phase 3/4 pending: task 4.2 (GREEN not yet landed — still queries the base nodes table).',
-  'apps/api/src/routes/pages.ts': 'Phase 3/4 pending: task 4.4 (GREEN not yet landed — still queries the base nodes table).',
-  'apps/api/src/routes/links.ts':
-    'Phase 3/4 pending: task 4.6 (GREEN not yet landed — still queries the base nodes table and reads links without naming a live view).',
-  'apps/api/src/routes/mentions.ts': 'Phase 3/4 pending: task 4.8 (GREEN not yet landed — still queries the base nodes table).',
-  'apps/api/src/routes/tags.ts':
-    'Phase 3/4 pending: task 4.10 (GREEN not yet landed — still queries the base nodes table and reads page_tags without naming a live view).',
-  'apps/api/src/routes/revisions.ts':
-    'Phase 3/4 pending: task 4.14 (GREEN not yet landed — still queries the base nodes table).',
-  'apps/api/src/routes/diff.ts': 'Phase 3/4 pending: task 4.14 (GREEN not yet landed — still queries the base nodes table).',
-  'apps/api/src/routes/presence.ts': 'Phase 3/4 pending: task 4.16 (GREEN not yet landed — still queries the base nodes table).',
-  'apps/api/src/routes/workspaces.ts':
-    'Phase 3/4 pending: task 4.18 (GREEN not yet landed — still queries the base nodes table).',
-  'apps/api/src/routes/invitations.ts':
-    'Phase 3/4 pending: task 4.18 (GREEN not yet landed — still queries the base nodes table).',
-  'apps/api/src/routes/ai-credentials.ts':
-    'Phase 3/4 pending: task 4.18 (GREEN not yet landed — still queries the base nodes table).',
-  'apps/api/src/routes/comments.ts':
-    'Phase 3/4 pending: not named by any task in tasks.md yet — found by this check\'s first real run (task 2.4). Still queries the base nodes table and reads comments without naming a live view; needs a task before Phase 4 closes.',
+  // The "Phase 3/4 pending" block that lived here (design Decision 2:
+  // "Everything else … turns red at first and is made green one file at a
+  // time") is gone: Phases 3 and 4 closed every site on task 2.4's
+  // proof-of-red list, plus the six gap files it found without a task
+  // naming them. Only Decision 2's initial, structural exemptions remain
+  // above.
 };
 
 /**
