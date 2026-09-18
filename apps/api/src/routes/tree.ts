@@ -20,6 +20,7 @@
  */
 import {
   can,
+  canManyResources,
   createNode,
   DuplicateSiblingSlugError,
   readableResourceIds,
@@ -228,11 +229,28 @@ export function createTreeRoutes(deps: TreeRouteDeps): Hono<{ Variables: Session
     });
 
     const nodes = buildTree(rows, readable, root.id);
+
+    // design.md Decision 7: the one `manage` signal the client needs for a
+    // disabled-with-reason Delete action (navigation-tree spec, Decision
+    // 8). Computed over every row the query fetched, not just the visible
+    // ones — a manager's own manage grant is what makes a node visible in
+    // the first place via `readable`, so restricting to `visible` ids would
+    // only ever shrink this set for no reason.
+    const [workspace] = await deps.sql<{ owner_id: string }[]>`SELECT owner_id FROM workspaces WHERE id = ${workspaceId}`;
+    const isOwner = workspace?.owner_id === session.userId;
+    const manageableIds = await canManyResources(deps.sql, {
+      workspaceId,
+      subjectType: 'user',
+      subjectId: session.userId,
+      action: 'manage',
+      resourceIds: rows.map((row) => row.id),
+    });
+
     // The workspace's root node (type 'workspace') is deliberately never
     // itself a tree entry, but its id is what a top-level drag-drop must
     // target as `newParentId` — without it, the client has no legal
     // parent id to send when reordering a shelf among its siblings.
-    return c.json({ rootId: root.id, nodes });
+    return c.json({ rootId: root.id, nodes, manageable: [...manageableIds], isOwner });
   });
 
   /**

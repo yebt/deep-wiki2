@@ -165,6 +165,52 @@ describe('GET /workspaces/:id/tree', () => {
   });
 });
 
+// design.md Decision 7: the tree response gains `manageable[]` and
+// `isOwner` — the one `manage` signal the client needs for a
+// disabled-with-reason Delete action (navigation-tree spec, Decision 8).
+describe('GET /workspaces/:id/tree — manageable and isOwner', () => {
+  test('the owner sees isOwner true and every visible node manageable', async () => {
+    const fixture = await buildFixture();
+    const [row] = await sql<{ owner_id: string }[]>`SELECT owner_id FROM workspaces WHERE id = ${fixture.workspaceId}`;
+    const ownerId = row!.owner_id;
+    const ownerCookie = await cookieFor(ownerId);
+    await grant(fixture.workspaceId, ownerId, fixture.root.id, 'manage');
+    const app = buildApp();
+
+    const res = await app.request(`/workspaces/${fixture.workspaceId}/tree`, { headers: { cookie: ownerCookie } });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { isOwner: boolean; manageable: string[] };
+    expect(body.isOwner).toBe(true);
+    expect(body.manageable).toContain(fixture.shelf.id);
+  });
+
+  test('a writer without manage is not the owner and has no manageable ids', async () => {
+    const fixture = await buildFixture();
+    const app = buildApp();
+
+    const res = await app.request(`/workspaces/${fixture.workspaceId}/tree`, { headers: { cookie: fixture.writerCookie } });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { isOwner: boolean; manageable: string[] };
+    expect(body.isOwner).toBe(false);
+    expect(body.manageable).toEqual([]);
+  });
+
+  test('a manage grant on one node makes it (and its descendants) manageable, and nothing else', async () => {
+    const fixture = await buildFixture();
+    await grant(fixture.workspaceId, fixture.writerId, fixture.shelf.id, 'manage');
+    const app = buildApp();
+
+    const res = await app.request(`/workspaces/${fixture.workspaceId}/tree`, { headers: { cookie: fixture.writerCookie } });
+
+    // manage on the shelf resolves down its whole subtree — the same
+    // inheritance `can()` already gives every other action.
+    const body = (await res.json()) as { manageable: string[] };
+    expect(new Set(body.manageable)).toEqual(new Set([fixture.shelf.id, fixture.visibleBook.id, fixture.hiddenChapter.id, fixture.hiddenChapterPage.id]));
+  });
+});
+
 /*
  * The test above proves a hidden *chapter* is absent from a member's tree.
  * It cannot fail if the endpoint answers a subject who is in no way part
