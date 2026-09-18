@@ -280,6 +280,94 @@ None beyond the recorded deviations above.
 - [ ] 3.10–3.13 `content/read-page.ts`/`save-page.ts` — Phase 3's own list, not assigned to this work unit (Deviation #1).
 - [ ] Phase 4 (green: api routes) through Phase 12 (docs + final verification) — see `tasks.md`.
 
-## Status
+## Status (superseded by work unit 4 below)
 
 Phase 1: 10/10 complete. Phase 2: 4/4 complete. Phase 3: 20/24 complete (3.1–3.9, 3.14–3.31 done; 3.10–3.13 pending, out of this work unit's scope). Ready for `sdd-verify` on this work unit, then `sdd-apply` again for the remainder of Phase 3 (3.10–3.13) and Phase 4.
+
+## Scope executed — Work unit 4 (Phase 3 remainder + Phase 4, plus gap files)
+
+**Mode**: Strict TDD
+
+### Completed Tasks
+
+- [x] 3.10–3.13 `packages/db/src/content/{read-page,save-page}.ts` (Phase 3's remaining tasks).
+- [x] 4.1–4.23 every `apps/api/src/routes/*.ts` read site named in Phase 4, plus two gap files found and added as tasks: `apps/api/src/routes/comments.ts` (4.20–4.21) and the `page-lock.ts` write-action Finding closed via `pages.ts` (4.22).
+
+### TDD Cycle Evidence
+
+| Task | RED (observed failure) | GREEN |
+|---|---|---|
+| 3.10–3.11 read-page.ts | `readPageHtml`/`readPageMarkdown` on a trashed page returned the stored content instead of `undefined` | both join `live_page_content`; 8/8 `read-page.test.ts` pass; `ALLOW_LIST` entry for this file removed (no longer trips rule 1) |
+| 3.12–3.13 save-page.ts | Saving to a trashed page succeeded and overwrote `page_content` instead of throwing | new `PageNotFoundError`, thrown by a `live_nodes` pre-check before the transaction opens; 31/31 `save-page.test.ts` pass |
+| 4.1–4.2 tree.ts | Trashed book stayed in the tree body; renaming a trashed node threw an uncaught `NodeNotFoundError` (500) instead of 404 | `live_nodes` in `/workspaces/:id/tree`, `/nodes/:id/location`, and `authorizeWrite`; 26/26 `tree.test.ts` pass |
+| 4.3–4.4, 4.22 pages.ts | `PUT` on a trashed page threw an uncaught `PageNotFoundError` (500); `PATCH /pages/:id/lock` on a trashed page answered `200 {status:'lost'}` instead of 404 | `locateNode()` and both inline `NodeRow` queries join `live_nodes`; `PageNotFoundError` caught and mapped to 404; 27/27 `pages.test.ts` pass (GET/edit-session/take-over already passed as a side effect of 3.10–3.11) |
+| 4.5–4.6 links.ts | A trashed source page's backlink survived filtering; a trashed target answered 200 instead of 404 | target lookup, candidate-source query (now joined to `live_nodes`), and title lookup all read `live_nodes`; 5/5 `links.test.ts` pass |
+| 4.7–4.8 mentions.ts | Trashed page autocompleted; `/mentions/subjects` and the mention-check route on a trashed page answered 200 instead of 404 | all three lookups join `live_nodes`; 12/12 `mentions.test.ts` pass |
+| 4.9–4.10 tags.ts | A trashed page tagged with the searched name still appeared | candidate join and title lookup read `live_nodes`; 3/3 `tags.test.ts` pass |
+| 4.11–4.12 activity.ts | N/A — test passed immediately; `activity.ts` delegates entirely to Phase-3-fixed `listWorkspaceRevisions`/`listOpenThreadsForUser` | no code change; 9/9 `activity.test.ts` pass |
+| 4.13–4.14 revisions.ts/diff.ts | Trashed page's/book's history and diff answered 200 instead of 404 | every inline node lookup and the diff title-batch query join `live_nodes`; 12/12 `revisions.test.ts`, 11/11 `diff.test.ts` pass (the "trashed page excluded from book-level diff" sub-case already passed via Phase 3's `book-diff.ts` fix) |
+| 4.15–4.16 presence.ts | A trashed page's presence event still reached a former reader's SSE stream | the per-event title lookup joins `live_nodes` (the poll fallback already delegated to the Phase-3-fixed `listActivePresence`); 12/12 `presence.test.ts` pass |
+| 4.17–4.18 workspaces/invitations/ai-credentials.ts | A trashed workspace root (set by direct SQL — no route trashes a root) still let members/an invitation/a credential save through instead of refusing | each root-node lookup joins `live_nodes`; 16/16, 6/6, 6/6 pass respectively |
+| 4.20–4.21 comments.ts (gap file) | Indicators/threads/PATCH-resolved on a trashed page answered 200 instead of 404; a reply on a trashed page's thread still wrote a row | all three `NodeRow` lookups join `live_nodes`; the resolved-thread lookup joins `comments` to `live_nodes`; the anchor-mint's `page_content` re-read now goes through `live_page_content`, so this file needs no `ALLOW_LIST` entry at all; 29/29 `comments.test.ts` pass |
+
+### Files Changed
+
+| File | Action | What Was Done |
+|---|---|---|
+| `packages/db/src/content/read-page.ts` | Modified | both reads join `live_page_content` |
+| `packages/db/src/content/read-page.test.ts` | Modified | two new tests |
+| `packages/db/src/content/save-page.ts` | Modified | new `PageNotFoundError`; `live_nodes` pre-check before `sql.begin` |
+| `packages/db/src/content/save-page.test.ts` | Modified | two new tests |
+| `packages/db/src/index.ts` | Modified | export `PageNotFoundError` |
+| `apps/api/src/routes/tree.ts` | Modified | `live_nodes` in three lookups |
+| `apps/api/src/routes/pages.ts` | Modified | `live_nodes` in `locateNode()` and two inline queries; catch `PageNotFoundError` → 404 |
+| `apps/api/src/routes/links.ts` | Modified | `live_nodes` in three queries |
+| `apps/api/src/routes/mentions.ts` | Modified | `live_nodes` in three queries |
+| `apps/api/src/routes/tags.ts` | Modified | `live_nodes` in two queries |
+| `apps/api/src/routes/revisions.ts` | Modified | `live_nodes` in two queries |
+| `apps/api/src/routes/diff.ts` | Modified | `live_nodes` in three queries |
+| `apps/api/src/routes/presence.ts` | Modified | `live_nodes` in the per-event title lookup |
+| `apps/api/src/routes/workspaces.ts` | Modified | `live_nodes` in the members route's root join |
+| `apps/api/src/routes/invitations.ts` | Modified | `live_nodes` in the root lookup |
+| `apps/api/src/routes/ai-credentials.ts` | Modified | `live_nodes` in `resolveWorkspaceRootId` |
+| `apps/api/src/routes/comments.ts` | Modified | `live_nodes` in four lookups; `live_page_content` in the anchor-mint re-read |
+| `apps/api/src/routes/{tree,pages,links,mentions,tags,activity,revisions,diff,presence,workspaces,invitations,ai-credentials,comments}.test.ts` | Modified | one `trash-non-disclosure` describe block (or, for the three root-only routes, one defensive test) per file |
+| `scripts/checks/trash-filter.ts` | Modified | removed every "Phase 3/4 pending" `ALLOW_LIST` entry, plus `content/read-page.ts`'s Decision-2 entry (no longer trips either rule); `ALLOW_LIST` now holds only Decision 2's original structural/single-file entries |
+| `openspec/changes/deletion-and-trash/tasks.md` | Modified | marked 3.10–3.13 and 4.1–4.19 `[x]`; added and marked 4.20–4.23 for the `comments.ts` gap file and the `page-lock.ts` write-action Finding |
+
+### Work Unit Evidence
+
+| Evidence | Value |
+|---|---|
+| Focused test command | `bun run -F @deep-wiki/db test` → 500 pass, 0 fail (52 files); `bun run -F @deep-wiki/api test` → 470 pass, 0 fail (58 files) |
+| Runtime harness | `bun run e2e -- e2e/read.spec.ts e2e/tree.spec.ts e2e/comments.spec.ts` — the combined run showed 2 failures (`comments.spec.ts:86`, `read.spec.ts:208`), both the documented environmental flake at docs/TODO.md 2026-09-16 ("30s first-visit timeout in e2e/comments.spec.ts fails against bun run e2e's dev webServer" under concurrent load); re-run in isolation: `e2e/comments.spec.ts` 8/8 pass, `e2e/read.spec.ts` 10/10 pass, `e2e/tree.spec.ts` 16/16 pass (already green in the combined run) |
+| Rollback boundary | Each route file's `live_nodes`/`live_page_content` swap, and its own test additions, is independently revertible; `content/{read-page,save-page}.ts` revert independently of the route layer; `scripts/checks/trash-filter.ts`'s `ALLOW_LIST` shrink is a pure subtraction, so reverting any one file's fix requires re-adding that file's own line |
+
+### Full Verification (this work unit)
+
+- `bun run check` — ok (12/12 structural checks pass; `trash-filter` `ALLOW_LIST` holds only Decision 2's initial entries, no `Phase 3/4 pending` block left)
+- `bun run typecheck` — exit 0 (root + every workspace member, including `apps/web`/`apps/api`/`apps/landing`)
+- `bun run lint` — exit 0 (root + every workspace member)
+- `bun run -F @deep-wiki/db test` — 500 pass, 0 fail
+- `bun run -F @deep-wiki/api test` — 470 pass, 0 fail
+- `bun run e2e -- e2e/read.spec.ts e2e/tree.spec.ts e2e/comments.spec.ts` — green (see Runtime harness row above for the one documented flake and its isolated-rerun confirmation)
+
+### Deviations from Design
+
+1. **`packages/db/src/content/read-page.ts` dropped from `ALLOW_LIST` entirely**, rather than staying as a Decision-2 initial entry. Design Decision 2 lists it among the "write transaction and its reads, entered only after the route already located the node through live_nodes" group, but `read-page.ts` is a pure read module — nothing about it needs the base table once it joins `live_page_content` directly, and doing so closes the page-content spec's "denied like absence" requirement one layer earlier than relying solely on the caller. `save-page.ts`, `rebuild-derived.ts`, and `backfill-render.ts` keep their entries: they are genuinely inside a write transaction.
+2. **`save-page.ts`'s new `PageNotFoundError` also covers a nonexistent node**, not only a trashed one — the task wording ("saving to a trashed page is denied identically to absence") is satisfied more directly by one `live_nodes` check that cannot distinguish the two cases by construction, rather than a trash-specific branch plus the pre-existing (and, before this fix, uncontrolled — a raw FK-violation error) absence path.
+3. **`apps/api/src/routes/comments.ts`'s anchor-mint `page_content` re-read was switched to `live_page_content`**, beyond the literal task wording ("the three node lookups join live_nodes"), because doing so closed the file's need for any `ALLOW_LIST` entry at all — the alternative (leaving it on the base table with a new allow-list line) would have left a permanent exemption for a file the fix could remove entirely.
+4. **`apps/api/src/routes/workspaces.ts`/`invitations.ts`/`ai-credentials.ts`'s RED tests are defensive, not disclosure-scenario tests**, because all three routes only ever look up the workspace root node, and nothing in this product trashes a root. Each RED test sets `trashed_at` on the root by direct SQL (no route can reach this state) and asserts the route refuses rather than proceeding — proving the `live_nodes` join is real defense-in-depth, not just check-satisfying syntax, should a future bug ever let a root become trashed.
+5. **Two e2e failures in the combined `read+tree+comments` run were the pre-existing environmental flake documented at `docs/TODO.md` 2026-09-16** (dev-server first-visit hydration exceeding the specs' 30s timeout under concurrent worker load), not a regression from this work unit's changes — confirmed by re-running each failing spec file alone, where both passed completely (8/8 and 10/10).
+
+### Issues Found
+
+None beyond the recorded deviations above.
+
+### Remaining Tasks (not in this work unit's scope)
+
+- [ ] Phase 5 (`db/src/trash/` use cases + permissions) through Phase 12 (docs + final verification) — see `tasks.md`.
+
+## Status
+
+Phase 1: 10/10 complete. Phase 2: 4/4 complete. Phase 3: 24/24 complete. Phase 4: 23/23 complete. Ready for `sdd-verify` on this work unit, then `sdd-apply` again for Phase 5.

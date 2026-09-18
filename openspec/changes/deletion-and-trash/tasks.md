@@ -84,17 +84,17 @@ Chain strategy: stacked-to-main
 - [x] 3.7 (parallel) GREEN: `packages/db/src/nodes/move.ts` — live-view lookups.
 - [x] 3.8 (parallel) RED: `packages/db/src/nodes/reorder.test.ts` — reordering excludes trashed siblings from the live position sequence.
 - [x] 3.9 (parallel) GREEN: `packages/db/src/nodes/reorder.ts` — live-view lookups.
-- [ ] 3.10 (parallel) RED: `packages/db/src/content/read-page.test.ts` — a former reader requesting a now-trashed page's content is denied identically to an unknown page (`page-content` spec). **Not in this work unit's assigned scope — see apply-progress.md.**
-- [ ] 3.11 (parallel) GREEN: `packages/db/src/content/read-page.ts` — join `live_page_content`. **Not in this work unit's assigned scope — see apply-progress.md.**
-- [ ] 3.12 (parallel) RED: `packages/db/src/content/save-page.test.ts` — saving to a trashed page is denied identically to absence. **Not in this work unit's assigned scope — see apply-progress.md.**
-- [ ] 3.13 (parallel) GREEN: `packages/db/src/content/save-page.ts` — check `live_nodes` before the write transaction opens. **Not in this work unit's assigned scope — see apply-progress.md.**
+- [x] 3.10 (parallel) RED: `packages/db/src/content/read-page.test.ts` — a former reader requesting a now-trashed page's content is denied identically to an unknown page (`page-content` spec).
+- [x] 3.11 (parallel) GREEN: `packages/db/src/content/read-page.ts` — join `live_page_content`.
+- [x] 3.12 (parallel) RED: `packages/db/src/content/save-page.test.ts` — saving to a trashed page is denied identically to absence.
+- [x] 3.13 (parallel) GREEN: `packages/db/src/content/save-page.ts` — check `live_nodes` before the write transaction opens; new `PageNotFoundError` covers both a trashed and a nonexistent node identically.
 - [x] 3.14 (parallel) RED: `packages/db/src/revisions/queries.test.ts` — a former reader's history query on a now-trashed page is denied identically to no `read` (`revision-history` spec).
 - [x] 3.15 (parallel) GREEN: `packages/db/src/revisions/queries.ts` — join `live_nodes`.
 - [x] 3.16 (parallel) RED: `packages/db/src/changesets/history.test.ts` — a trashed page's revisions are excluded from book history for a subject without `manage` on that page; other pages in the same changeset still appear (`changesets` spec).
 - [x] 3.17 (parallel) GREEN: `packages/db/src/changesets/history.ts` — join `live_nodes` per revision row.
 - [x] 3.18 (parallel) RED: `packages/db/src/comments/queries.test.ts` — comment data for a trashed page is fully absent for a former reader, scanned with `expect-no-disclosure` (`comment-threads` spec).
 - [x] 3.19 (parallel) GREEN: `packages/db/src/comments/queries.ts` — join `live_nodes`.
-- [x] 3.20 Run `bun run scripts/checks/trash-filter.ts` — confirm every file touched in this phase is green; route-layer files stay red until Phase 4. (`content/read-page.ts`/`save-page.ts` — tasks 3.10–3.13 — remain untouched; not flagged by the check since they are Decision-2 initial `ALLOW_LIST` entries, but functionally still pending, out of this work unit's scope.)
+- [x] 3.20 Run `bun run scripts/checks/trash-filter.ts` — confirm every file touched in this phase is green; route-layer files stay red until Phase 4. (`content/read-page.ts`/`save-page.ts` closed by 3.10–3.13: `read-page.ts` now joins `live_page_content` and its `ALLOW_LIST` entry is gone; `save-page.ts` gained a `live_nodes` pre-check and keeps its `ALLOW_LIST` entry for its own write-transaction `page_content` reads.)
 - [x] 3.21 RED: `packages/db/src/changesets/resolve-changeset.test.ts` — `resolveBookId` on a trashed node id returns `null`, identically to an unknown id (gap file found by task 2.4's red list, not named by any prior task).
 - [x] 3.22 GREEN: `packages/db/src/changesets/resolve-changeset.ts` — the ancestor-walk CTE reads `live_nodes`.
 - [x] 3.23 RED: `packages/db/src/changesets/book-diff.test.ts` — a trashed page's revisions are excluded from `listChangedPagesSince` for the book-level diff (`trash-non-disclosure` spec — "diff" is a named surface; gap file, not named by any prior task).
@@ -111,25 +111,28 @@ Chain strategy: stacked-to-main
 
 *All pairs in this phase touch disjoint route files and can run in parallel worktrees.*
 
-- [ ] 4.1 (parallel) RED: `apps/api/src/routes/tree.test.ts` — a trashed page is absent from the tree for a subject who could read it before (`navigation-tree` spec).
-- [ ] 4.2 (parallel) GREEN: `apps/api/src/routes/tree.ts` — query `live_nodes`.
-- [ ] 4.3 (parallel) RED: `apps/api/src/routes/pages.test.ts` — `GET /pages/:id` on a trashed id answers byte-identical to an unknown id for a former reader.
-- [ ] 4.4 (parallel) GREEN: `apps/api/src/routes/pages.ts` — `live_nodes`/`live_page_content` lookup, `notFound()` on miss (the manager's trash block is wired in Phase 6).
-- [ ] 4.5 (parallel) RED: `apps/api/src/routes/links.test.ts` — backlinks exclude a trashed source page (`knowledge-graph` spec).
-- [ ] 4.6 (parallel) GREEN: `apps/api/src/routes/links.ts` — join `live_nodes`.
-- [ ] 4.7 (parallel) RED: `apps/api/src/routes/mentions.test.ts` — autocomplete excludes a trashed page.
-- [ ] 4.8 (parallel) GREEN: `apps/api/src/routes/mentions.ts` — join `live_nodes`.
-- [ ] 4.9 (parallel) RED: `apps/api/src/routes/tags.test.ts` — tag-filtered navigation excludes a trashed page.
-- [ ] 4.10 (parallel) GREEN: `apps/api/src/routes/tags.ts` — join `live_nodes`.
-- [ ] 4.11 (parallel) RED: `apps/api/src/routes/activity.test.ts` — activity for a trashed page is absent for a former reader.
-- [ ] 4.12 (parallel) GREEN: `apps/api/src/routes/activity.ts` — join `live_nodes`.
-- [ ] 4.13 (parallel) RED: `apps/api/src/routes/revisions.test.ts` and `apps/api/src/routes/diff.test.ts` — history/diff on a trashed page denied identically to no `read`.
-- [ ] 4.14 (parallel) GREEN: `apps/api/src/routes/revisions.ts`, `apps/api/src/routes/diff.ts` — join `live_nodes`.
-- [ ] 4.15 (parallel) RED: `apps/api/src/routes/presence.test.ts` — presence and locks for a trashed page are absent.
-- [ ] 4.16 (parallel) GREEN: `apps/api/src/routes/presence.ts` — join `live_nodes`/`live_page_content`.
-- [ ] 4.17 (parallel) RED: `apps/api/src/routes/{workspaces,invitations,ai-credentials}.test.ts` — any node-scoped count or lookup these routes expose excludes a trashed page.
-- [ ] 4.18 (parallel) GREEN: `apps/api/src/routes/{workspaces,invitations,ai-credentials}.ts` — join `live_nodes` wherever they touch node rows.
-- [ ] 4.19 Run `bun run scripts/checks/trash-filter.ts` — MUST be fully green with no `ALLOW_LIST` growth beyond Decision 2's initial entries; this is the gate before Phase 5 starts.
+- [x] 4.1 (parallel) RED: `apps/api/src/routes/tree.test.ts` — a trashed page is absent from the tree for a subject who could read it before (`navigation-tree` spec).
+- [x] 4.2 (parallel) GREEN: `apps/api/src/routes/tree.ts` — query `live_nodes` (`/workspaces/:id/tree`, `/nodes/:id/location`, and `authorizeWrite`, the one lookup every tree write shares).
+- [x] 4.3 (parallel) RED: `apps/api/src/routes/pages.test.ts` — `GET /pages/:id` on a trashed id answers byte-identical to an unknown id for a former reader; extended with the same scenario for `PUT`, `edit-session`, the lock heartbeat, and the lock take-over.
+- [x] 4.4 (parallel) GREEN: `apps/api/src/routes/pages.ts` — every node lookup (`locateNode` and the two inline queries) reads `live_nodes`; `PageNotFoundError` (new, `save-page.ts`) is caught and mapped to the same `404 not found` (the manager's trash block is wired in Phase 6).
+- [x] 4.5 (parallel) RED: `apps/api/src/routes/links.test.ts` — backlinks exclude a trashed source page (`knowledge-graph` spec); a trashed target answers identically to an unknown one.
+- [x] 4.6 (parallel) GREEN: `apps/api/src/routes/links.ts` — join `live_nodes` on the target lookup, the candidate-source query, and the title lookup.
+- [x] 4.7 (parallel) RED: `apps/api/src/routes/mentions.test.ts` — autocomplete excludes a trashed page; the two page-scoped endpoints (`/mentions/subjects`, `/pages/:id/mentions/:userId/check`) deny a trashed page identically to an unknown one.
+- [x] 4.8 (parallel) GREEN: `apps/api/src/routes/mentions.ts` — join `live_nodes` in all three lookups.
+- [x] 4.9 (parallel) RED: `apps/api/src/routes/tags.test.ts` — tag-filtered navigation excludes a trashed page.
+- [x] 4.10 (parallel) GREEN: `apps/api/src/routes/tags.ts` — join `live_nodes`.
+- [x] 4.11 (parallel) RED: `apps/api/src/routes/activity.test.ts` — activity for a trashed page is absent for a former reader. This test passed immediately (no RED observed): `activity.ts` never queries `nodes`/a page-keyed table itself, only `listWorkspaceRevisions()` and `listOpenThreadsForUser()`, both fixed in Phase 3 — the test proves the delegation holds end to end.
+- [x] 4.12 (parallel) GREEN: `apps/api/src/routes/activity.ts` — no code change; the file was already correctly absent from task 2.4's red list (confirmed in apply-progress.md work unit 2).
+- [x] 4.13 (parallel) RED: `apps/api/src/routes/revisions.test.ts` and `apps/api/src/routes/diff.test.ts` — history/diff on a trashed page (and a trashed book) denied identically to no `read`.
+- [x] 4.14 (parallel) GREEN: `apps/api/src/routes/revisions.ts`, `apps/api/src/routes/diff.ts` — join `live_nodes` in every node lookup and the title batch query.
+- [x] 4.15 (parallel) RED: `apps/api/src/routes/presence.test.ts` — presence and locks for a trashed page are absent.
+- [x] 4.16 (parallel) GREEN: `apps/api/src/routes/presence.ts` — the per-event title lookup joins `live_nodes` (the poll fallback already delegates to the Phase 3-fixed `listActivePresence`).
+- [x] 4.17 (parallel) RED: `apps/api/src/routes/{workspaces,invitations,ai-credentials}.test.ts` — all three routes only ever look up the workspace root node (never a page), so the meaningful test is defensive: a trashed root (set by direct SQL — no route trashes a root) answers the same refusal an absent workspace does, rather than surfacing members/an invitation/a credential save against it.
+- [x] 4.18 (parallel) GREEN: `apps/api/src/routes/{workspaces,invitations,ai-credentials}.ts` — join `live_nodes` in each root-node lookup.
+- [x] 4.20 (parallel) RED: `apps/api/src/routes/comments.test.ts` — comment indicators, threads, creation, and a reply for a trashed page are denied identically to an unknown page for a former reader/commenter; `PATCH /comments/:threadId/resolved` on a trashed page's thread is denied the same way (gap file, not named by design Decision 7's route table — found by task 2.4's red list, `apps/api/src/routes/comments.ts`).
+- [x] 4.21 (parallel) GREEN: `apps/api/src/routes/comments.ts` — the three node lookups join `live_nodes`; the resolved-thread lookup joins `comments` to `live_nodes` on `page_id`; the anchor-mint's `page_content` re-read now goes through `live_page_content`, so this file needs no `ALLOW_LIST` entry at all.
+- [x] 4.22 (parallel) RED: `apps/api/src/routes/pages.test.ts` — once `pages.ts` gates every route through `live_nodes` (task 4.4), the lock routes (`GET /pages/:id/edit-session`, `PATCH /pages/:id/lock`, `POST /pages/:id/lock/take-over`) on a trashed page's id are denied identically to an unknown id (closes the Finding recorded in apply-progress.md work unit 3, Deviation #3 — `page-lock.ts`'s `acquireLock`/`heartbeatLock`/`takeOverLock` needed no code change themselves once their one caller gates through `live_nodes`; folded into task 4.3's test additions rather than a separate RED/GREEN pair, since the fix is entirely in `pages.ts`).
+- [x] 4.23 Run `bun run scripts/checks/trash-filter.ts` — fully green; `ALLOW_LIST` holds only Decision 2's initial entries (no `Phase 3/4 pending` block left) — this is the gate before Phase 5 starts.
 
 ## Phase 5: `db/src/trash/` Use Cases and Permissions
 
