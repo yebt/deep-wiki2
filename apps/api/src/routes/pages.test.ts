@@ -159,6 +159,53 @@ describe('GET /pages/:id', () => {
   });
 });
 
+// design.md Decision 7 / page-content spec delta: "A manager can still
+// read a trashed page's content" — wired in after the `live_nodes` miss
+// via `trashLookup()`. Everyone else gets the plain 404 an unknown id gets.
+describe('GET /pages/:id — the manager trash block', () => {
+  async function trashFixturePage(fixture: Fixture): Promise<void> {
+    await sql`
+      UPDATE nodes SET trashed_at = now(), trash_operation_id = ${crypto.randomUUID()}
+       WHERE id = ${fixture.pageId}
+    `;
+  }
+
+  test('a manager sees the content plus a trash block', async () => {
+    const fixture = await buildFixture();
+    await savePage(sql, { nodeId: fixture.pageId, workspaceId: fixture.workspaceId, markdown: '# Hello\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
+    const [reader] = await sql<{ id: string }[]>`SELECT subject_id AS id FROM permissions WHERE resource_id = ${fixture.pageId} AND action = 'read' LIMIT 1`;
+    await sql`
+      INSERT INTO permissions (workspace_id, subject_type, subject_id, resource_id, action, effect)
+      VALUES (${fixture.workspaceId}, 'user', ${reader!.id}, ${fixture.pageId}, 'manage', 'allow')
+    `;
+    await trashFixturePage(fixture);
+    const app = buildApp();
+
+    const res = await app.request(`/pages/${fixture.pageId}`, { headers: { cookie: fixture.readerCookie } });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { html: string; trash?: { operationId: string; daysLeft: number } };
+    expect(body.html).toContain('Hello');
+    expect(body.trash?.daysLeft).toBe(30);
+  });
+
+  test('a former reader without manage gets the plain 404 an unknown id gets', async () => {
+    const fixture = await buildFixture();
+    await savePage(sql, { nodeId: fixture.pageId, workspaceId: fixture.workspaceId, markdown: '# Hello\n', expectedContentHash: null, changesetWindowMinutes: TEST_CHANGESET_WINDOW_MINUTES });
+    await trashFixturePage(fixture);
+    const app = buildApp();
+
+    const [known, unknown] = await Promise.all([
+      app.request(`/pages/${fixture.pageId}`, { headers: { cookie: fixture.readerCookie } }),
+      app.request(`/pages/${crypto.randomUUID()}`, { headers: { cookie: fixture.readerCookie } }),
+    ]);
+
+    expect(known.status).toBe(404);
+    expect(unknown.status).toBe(404);
+    expect(await known.json()).toEqual(await unknown.json());
+  });
+});
+
 describe('PUT /pages/:id', () => {
   test('a subject with no write grant cannot save, and storage is unchanged', async () => {
     const fixture = await buildFixture();

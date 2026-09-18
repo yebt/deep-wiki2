@@ -13,9 +13,11 @@ import {
   PageNotFoundError,
   readPageHtml,
   readPageMarkdown,
+  readTrashedPageHtml,
   savePage,
   StaleContentError,
   takeOverLock,
+  trashLookup,
 } from '@deep-wiki/db';
 import { probe } from '@deep-wiki/editor';
 import type { PresenceBroadcaster } from '@deep-wiki/core';
@@ -82,7 +84,30 @@ export function createPageRoutes(deps: PageRouteDeps): Hono<{ Variables: Session
     const session = c.get('session');
 
     const [node] = await locateNode(deps.sql, nodeId);
-    if (!node) return c.json(ErrorResponseSchema.parse({ error: 'not found' }), 404);
+    if (!node) {
+      // design.md Decision 7 / page-content spec delta: "A manager can
+      // still read a trashed page's content". `trashLookup` already folds
+      // "trashed AND manage" into one null-or-not answer, so a former
+      // reader without manage falls straight through to the same 404 an
+      // unknown id gets, one call site below.
+      const trash = await trashLookup(deps.sql, { nodeId, subjectId: session.userId });
+      if (!trash) return c.json(ErrorResponseSchema.parse({ error: 'not found' }), 404);
+
+      const content = await readTrashedPageHtml(deps.sql, { nodeId, workspaceId: trash.workspaceId });
+      return c.json({
+        html: content?.renderedHtml ?? '',
+        title: trash.title,
+        workspaceId: trash.workspaceId,
+        workspace: { id: trash.workspaceId, slug: trash.workspaceSlug },
+        trash: {
+          operationId: trash.operationId,
+          trashedAt: trash.trashedAt.toISOString(),
+          trashedBy: trash.trashedBy,
+          daysLeft: trash.daysLeft,
+          restoreBlockedBy: trash.restoreBlockedBy,
+        },
+      });
+    }
 
     const authorized = await can(deps.sql, { subjectType: 'user', subjectId: session.userId, resourceId: nodeId, action: 'read' });
     if (!authorized) return c.json(ErrorResponseSchema.parse({ error: 'forbidden' }), 403);
