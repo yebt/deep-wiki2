@@ -607,6 +607,51 @@ makes conventions portable across projects.
 
 Discoveries and constraints. Newest first.
 
+### 2026-09-23 — Two e2e tests that had stopped being true, found by running the suite rather than trusting it
+
+Hunting for other defects of the never-saved class (the entry below) meant running the whole
+Playwright suite against a real stack rather than re-reading it. 243 tests: **228 passed, 2
+failed, 13 did not run** (both failures are in `serial` files, which abort the rest). Neither
+failure is a product defect and neither was caused by this batch — both were already red on
+`main` at `fb5ffd0`, which is where a throwaway worktree
+(`<repo-parent>/deep-wiki2-worktrees/baseline`) was used to prove it.
+
+**1. `e2e/editor.spec.ts` still measured a toolbar row that had grown a third control.**
+
+`expect(|renameBox.right - rowBox.right|).toBeLessThanOrEqual(1)` — "Rename… ends at the row's
+edge" — failed by **exactly 36px**, twice (at 1280 in the sidebar, and at 320 in the drawer).
+36px is the icon-only Delete control that `1ce67e5` added to the tree's toolbar on 2026-09-18:
+the row still fills the pane, but the control that ends at its edge is Delete now. The batch
+that added it updated `e2e/tree.spec.ts` and not this file, and its review-log entry repeats
+the earlier batch's measurement sentence rather than a fresh one. Fixed by asking for the
+row's **last** control, so a fourth one cannot walk past the edge unnoticed either.
+
+**2. `e2e/comments.spec.ts` raced hydration — and its read-only twin passed vacuously.**
+
+`a commenter starts a thread from a block's "+"` asserted `toHaveCount(2)` on the "+" buttons
+with Playwright's default 5s, immediately after the heading appeared. Since the read layer
+(`useApiRead`) the article is in the document the *server* sent, and the gutter, the marks and
+the "+" are drawn only once the client bundle has hydrated it — measured here on a cold dev
+route at ~19s. So the assertion was counting an unhydrated page. Instrumented directly (a
+throwaway probe spec in the baseline worktree): at the moment it failed the browser had made
+**one** request, the document itself; `GET /pages/:id/comments` had not been sent, so
+`canComment` was still its initial `false` and `CommentGutter` drew no "+" at all. After
+`waitForHydration` the same page shows both.
+
+The same file's **negative** assertions are the worse half: "a reader with read but not comment
+sees nothing of the overlay" (`comments.spec.ts`) and the two read-only invariant tests in
+`e2e/read.spec.ts` assert that no mark and no toggle exist — and nothing does exist before
+hydration, on any page, for any caller. Those three passed without ever testing the rule they
+name. `waitForHydration` was already in this repository for exactly this (`e2e/hydration.ts`,
+written after the 2026-09-16 "clicked before hydration" regression) and was called by two of
+the file's seven tests; it is now called by all of them.
+
+**The gap class, and it is the same shape as the entry below.** *An assertion about something
+the client draws, made before the client has drawn anything, is not an assertion.* It fails
+noisily when it is positive and silently when it is negative — and the silent half is the one
+that had been green for a week. Worth a sweep: every `toHaveCount(0)` and `not.toBeVisible()`
+in `e2e/` that runs between a `goto` and a `waitForHydration` is a candidate.
+
 ### 2026-09-23 — A page created from the tree answered "This page does not exist", and three layers of tests could not see it
 
 **What the owner did.** Created a page from the navigation tree. The toolbar said
