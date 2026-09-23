@@ -309,7 +309,13 @@ test('right-click → New page… on the book names the page in the row, and cre
   await field.press('Enter');
 
   await expect(page.getByRole('treeitem', { name: new RegExp(title) })).toBeVisible();
-  await expect(page.getByRole('status').filter({ hasText: `Created page “${title}” in “${fixtures.bookTitle}”.` })).toHaveCount(1);
+  // Said in both of the places docs/UI-CHECKLIST.md §4.12 keeps: the
+  // tree's always-present live region, which is what a screen reader
+  // hears, and — since 2026-09-23 — the toast, which is what a sighted
+  // person reads. One sentence, two surfaces, neither of them a banner
+  // that stays.
+  await expect(page.getByTestId('tree-menu-status')).toHaveText(`Created page “${title}” in “${fixtures.bookTitle}”.`);
+  await expect(page.getByRole('status').filter({ hasText: `Created page “${title}” in “${fixtures.bookTitle}”.` })).toHaveCount(2);
 });
 
 /**

@@ -574,12 +574,21 @@ async function selectWord(editor: ReturnType<Page['getByTestId']>, nth: number, 
   }, word);
 }
 
-/** Save, and wait for the screen's own word that the row holds it — never inside the 300ms window the buffer reports in. */
+/**
+ * Save, and wait for the screen's own word that the row holds it — never
+ * inside the 300ms window the buffer reports in.
+ *
+ * `.first()`: since 2026-09-23 that word is a toast, and a toast stays for
+ * a few seconds, so a test that saves twice in a row has two of them on
+ * screen at once. That is the tier working — each save is confirmed — and
+ * not something to assert away; what this helper needs is that one has
+ * arrived (docs/UI-CHECKLIST.md §4.12).
+ */
 async function saveAndConfirm(page: Page): Promise<void> {
   const save = page.locator('#content-bar').getByRole('button', { name: /^Save/ });
   await expect(save).not.toHaveAttribute('aria-disabled');
   await save.click();
-  await expect(page.getByRole('status').filter({ hasText: /Saved/ })).toBeVisible({ timeout: 30000 });
+  await expect(page.getByRole('status').filter({ hasText: /Saved/ }).first()).toBeVisible({ timeout: 30000 });
 }
 
 test.describe('the block UI against the real backend, 1280x900', () => {

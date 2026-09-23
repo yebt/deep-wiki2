@@ -66,6 +66,11 @@ async function useTheme(page: Page, theme: 'light' | 'dark'): Promise<void> {
   await page.addInitScript((value) => localStorage.setItem('nuxt-color-mode', value), theme);
 }
 
+/** What the document is actually painted in, asserted beside every screenshot that claims a theme. */
+async function expectTheme(page: Page, theme: 'light' | 'dark'): Promise<void> {
+  await expect(page.locator('html')).toHaveClass(theme === 'dark' ? /\bdark\b/ : /\blight\b/);
+}
+
 /** The three combinations the gate asks to see: two contrasting themes at 1280, and 320 in light. */
 const CASES = [
   { label: '1280-light', width: 1280, theme: 'light' as const },
@@ -103,6 +108,10 @@ for (const shape of CASES) {
     const format = refusal.getByRole('button', { name: 'Format' });
     await expect(format).toBeVisible();
     await expectNoHorizontalOverflow(page, `source refusal ${shape.label}`);
+    // The screenshot claims a theme; assert it rather than trusting the
+    // preference to have arrived (§4.2 asks for two contrasting themes,
+    // and a shot that quietly came out in the other one proves nothing).
+    await expectTheme(page, shape.theme);
     await shot(page, `source-format-${shape.label}`);
 
     // One click: the text becomes its canonical form and the visual view
@@ -124,6 +133,7 @@ for (const shape of CASES) {
     await expect(toast.getByRole('button', { name: /close/i })).toBeVisible();
     await expect(page.locator('#content-main')).not.toContainText('Saved “');
     await expectNoHorizontalOverflow(page, `saved toast ${shape.label}`);
+    await expectTheme(page, shape.theme);
     await shot(page, `toast-${shape.label}`);
 
     // The bytes the source view showed are what was saved: read them back.
@@ -148,6 +158,7 @@ for (const shape of CASES) {
     await expect(page.locator('h1')).toHaveCount(1);
     await expect(page.locator('h1').getByTestId('page-title-field')).toBeVisible();
     await expectNoHorizontalOverflow(page, `title editing ${shape.label}`);
+    await expectTheme(page, shape.theme);
     await shot(page, `title-${shape.label}`);
 
     // Escape writes nothing and hands focus back to the control that asked.

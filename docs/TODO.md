@@ -615,6 +615,29 @@ makes conventions portable across projects.
 
 Discoveries and constraints. Newest first.
 
+### 2026-09-23 — Two toasts are one tier working, and a screenshot that claims a theme has to assert it
+
+Two things the e2e suite taught this batch after the toasts landed, both worth keeping.
+
+**A toast stays for a few seconds, so a test that acts twice sees two.** `e2e/editor.spec.ts`'s
+`saveAndConfirm` saved, bolded, and saved again inside five seconds, and its
+`getByRole('status').filter({ hasText: /Saved/ })` then resolved to two elements — a Playwright
+strict-mode violation, and the first thing the banner-to-toast move broke. That is the tier working
+(each save is confirmed, and the confirmations stack up to the cap) rather than something to assert
+away, so the helper waits for the first. The same shape in `e2e/tree-writes.spec.ts`: a created
+row's sentence is now in *two* places on purpose — the tree's always-present live region and the
+toast — so a `toHaveCount(1)` that used to mean "announced once" now means "announced in one place
+only", which is not what the rule says (`docs/UI-CHECKLIST.md` §4.12). It names both.
+
+**A screenshot that claims a theme proves nothing unless the theme is asserted.** The review
+material for this batch is shot at 1280 light, 1280 dark and 320 light, and the dark shot of the
+read screen came out **light**: the theme preference is applied by color-mode's own client plugin,
+and `waitForHydration` does not wait for it — the page was photographed in the window between the
+server's light document and the client's dark one. Nothing was wrong with the screen; the evidence
+was simply false. `e2e/authoring.spec.ts` now asserts `<html>`'s class beside every shot
+(`expectTheme`), which both closes the window and makes the claim the file's name is making. Worth
+copying wherever a suite photographs a theme it did not assert.
+
 ### 2026-09-23 — Status banners became toasts, and the tier rule moved into the checklist
 
 The owner, pointing at the green "Saved “parla”." bar under a page title: *"estas cosas pueden
