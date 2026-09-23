@@ -58,6 +58,11 @@ async function mountPanel(props: Partial<PanelProps> = {}) {
               busy: false,
               writeMessage: null,
               announcement: '',
+              // A permission prop defaults to *denied* on the component
+              // (Vue casts an absent boolean prop to `false`, and that is
+              // the right way round for a grant), so every test that is
+              // not about the denial states it.
+              canComment: true,
               ...props,
             }),
         }),
@@ -211,8 +216,25 @@ describe('CommentThreadPanel', () => {
       const pending = body().querySelector<HTMLElement>('[data-testid="comment-pending"]')!;
       expect(pending.textContent).toContain('Posting');
       expect(pending.getAttribute('role')).toBe('status');
-      expect(body().querySelectorAll('[data-testid="comment-reply-submit"]')).toHaveLength(1);
+      // The confirmed thread keeps its reply affordance and its resolve;
+      // the pending one, which has no server id yet, has neither.
+      expect(body().querySelectorAll('[data-testid="comment-reply-composer"]')).toHaveLength(1);
       expect(body().querySelectorAll('[data-testid="comment-resolve"]')).toHaveLength(1);
     });
+  });
+
+  // docs/UI-CHECKLIST.md §3: a caller who may read a conversation but not
+  // add to it gets the conversation and no affordance at all. Today the API
+  // answers `{ threads: [] }` to a caller without `comment`, so this state
+  // is not reachable from the server — it is the component's answer for the
+  // moment a `read`-only caller can see threads, and it is held here rather
+  // than left to be improvised then (Review Log, 2026-09-23).
+  test('a caller who may not comment sees every thread and nothing that would write', async () => {
+    await mountPanel({ canComment: false });
+
+    expect(quotes()).toHaveLength(4);
+    expect(body().querySelectorAll('[data-testid="comment-reply-composer"]')).toHaveLength(0);
+    expect(body().querySelectorAll('[data-testid="comment-resolve"]')).toHaveLength(0);
+    expect(body().querySelector('[data-testid="comments-start-here"]')).toBeNull();
   });
 });
