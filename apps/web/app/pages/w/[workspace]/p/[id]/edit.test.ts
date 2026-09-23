@@ -136,8 +136,10 @@ function mockDefaults(
 ) {
   useLockHeartbeatMock.mockReturnValue({ status: ref(saveOverrides.heartbeatStatus ?? 'idle'), start: vi.fn(async () => {}), stop: vi.fn() });
   const save = vi.fn(async () => {});
+  /** Returned so a test can drive the transition into success, which is what the confirmation toast watches. */
+  const saveStatus = ref(saveOverrides.status ?? 'idle');
   useSavePageMock.mockReturnValue({
-    status: ref(saveOverrides.status ?? 'idle'),
+    status: saveStatus,
     contentHash: ref('hash-1'),
     canonical: ref(saveOverrides.canonical ?? null),
     corrected: ref(saveOverrides.corrected ?? null),
@@ -148,7 +150,7 @@ function mockDefaults(
   mockPresence();
   mockFrame();
   const confirm = mockConfirm(false);
-  return { save, confirm };
+  return { save, confirm, saveStatus };
 }
 
 const READY_SESSION = { markdown: '# Hi\n', title: 'A Page', workspaceId: 'ws-1', lock: { holderUserId: 'me', acquiredAt: 'x', heartbeatAt: 'x' } };
@@ -837,42 +839,63 @@ describe('edit-mode page', () => {
     expect(save).toHaveBeenCalledTimes(1);
   });
 
-  // §3 "Success": "Saved." is the exact weak example this rule names.
-  // This must name what was saved, and must stop claiming it once the
-  // document is dirty again. Scoped to `main`: the contextual bar carries
-  // a live region of its own since 2026-09-15 (the sidebar toggle's), and
-  // the save banner is the screen's, in the column.
+  /**
+   * §3 "Success": "Saved." is the exact weak example that rule names, so
+   * the confirmation names what was saved. Since 2026-09-23 it is a toast
+   * rather than a chip under the title (the owner: "estas cosas pueden
+   * manejarse como toasts"), which also answers the other half of that
+   * rule by construction — a notice that removes itself cannot keep
+   * claiming a document is saved while it is being edited again, which is
+   * what the chip had to be computed away to avoid.
+   */
   describe('the success confirmation', () => {
-    test('names what was saved, not a bare "Saved."', async () => {
-      mockDefaults({ status: 'success' });
+    function savedToasts(): { title?: string; role?: string }[] {
+      return (useToast().toasts.value as unknown as { title?: string; role?: string }[]).filter((toast) => /Saved/.test(toast.title ?? ''));
+    }
+
+    test('a save that worked names what was saved, in a toast, once', async () => {
+      const { saveStatus } = mockDefaults();
       mockSession({
         status: 'ready',
         session: { markdown: '# Hi\n', title: 'My Page', workspaceId: 'ws-1', lock: { holderUserId: 'me', acquiredAt: 'x', heartbeatAt: 'x' } },
       });
       const component = await mountSuspended(PageInApp, { global: { stubs: { EditorSurface: true, WorkspaceSidebar: true } } });
+      expect(savedToasts()).toHaveLength(0);
+      // Nothing on the page says it: the chip under the title is gone.
+      expect(component.find('main').text()).not.toMatch(/Saved/);
 
-      const banner = component.get('main [role="status"][aria-live="polite"]');
-      expect(banner.text()).not.toBe('Saved.');
-      expect(banner.text()).toMatch(/My Page/);
+      saveStatus.value = 'success';
+      await component.vm.$nextTick();
+      await nextTick();
+
+      const toasts = savedToasts();
+      expect(toasts).toHaveLength(1);
+      expect(toasts[0]!.title).toBe('Saved “My Page”.');
+      expect(toasts[0]!.title).not.toBe('Saved.');
+      expect(toasts[0]!.role).toBe('status');
+      expect(component.find('main').text()).not.toMatch(/Saved “My Page”/);
     });
 
-    test('stops claiming "Saved" once the document is dirty again', async () => {
-      mockDefaults({ status: 'success' });
+    test('a status that stays `success` between saves does not confirm twice', async () => {
+      const { saveStatus } = mockDefaults();
       mockSession({
         status: 'ready',
         session: { markdown: '# Hi\n', title: 'My Page', workspaceId: 'ws-1', lock: { holderUserId: 'me', acquiredAt: 'x', heartbeatAt: 'x' } },
       });
       const component = await mountSuspended(PageInApp, { global: { stubs: { EditorSurface: true, WorkspaceSidebar: true } } });
-      // The banner, by what it says: the view toggle's own live region
-      // (2026-09-17) is always in the DOM beside it.
-      const savedBanner = () => component.findAll('main [role="status"][aria-live="polite"]').filter((el) => /Saved/.test(el.text()));
-      expect(savedBanner()).toHaveLength(1);
 
-      const editorStub = component.findComponent({ name: 'EditorSurface' });
-      editorStub.vm.$emit('update', '# Hi\n\nedited again\n');
+      saveStatus.value = 'success';
       await component.vm.$nextTick();
+      await nextTick();
+      const first = savedToasts().length;
 
-      expect(savedBanner()).toHaveLength(0);
+      // The document is edited again: `useSavePage` keeps `success` until
+      // the next save resolves, and the confirmation must not be re-made.
+      component.findComponent({ name: 'EditorSurface' }).vm.$emit('update', '# Hi\n\nedited again\n');
+      await component.vm.$nextTick();
+      await nextTick();
+
+      expect(savedToasts()).toHaveLength(first);
     });
   });
 
@@ -1051,10 +1074,16 @@ describe('edit-mode page', () => {
 describe('edit-mode page — source mode', () => {
   const SOURCE_STUBS = { global: { stubs: { EditorSurface: true, WorkspaceSidebar: true } } };
 
-  /** The real probe and converters, as the mount chunk hands them to the screen. */
-  async function mockEditorModule() {
+  /** The real probe, converters and formatter, as the mount chunk hands them to the screen. */
+  async function mockEditorModule(overrides: Record<string, unknown> = {}) {
     const editor = await import('@deep-wiki/editor');
-    loadEditorMountMock.mockResolvedValue({ probe: editor.probe, fromMarkdown: editor.fromMarkdown, toMarkdown: editor.toMarkdown });
+    loadEditorMountMock.mockResolvedValue({
+      probe: editor.probe,
+      fromMarkdown: editor.fromMarkdown,
+      toMarkdown: editor.toMarkdown,
+      roundTrip: editor.roundTrip,
+      ...overrides,
+    });
   }
 
   function readySession(markdown = '# Hi\n\nA paragraph.\n') {
@@ -1177,6 +1206,95 @@ describe('edit-mode page — source mode', () => {
     area.dispatchEvent(new Event('input', { bubbles: true }));
     await component.vm.$nextTick();
     expect(component.find('[data-testid="editor-view-refusal"]').exists()).toBe(false);
+  });
+
+  /**
+   * The owner's second report of 2026-09-23: the notice read "As typed: —
+   * canonical:" with nothing after either colon. The divergence was on a
+   * blank line — one blank line too many at the end of the buffer is the
+   * commonest way to write a non-canonical document — so there were no
+   * two spellings to show, and the sentence promised two anyway. It now
+   * names the line and stops.
+   */
+  test('a refusal with no two spellings to show names the line and promises no example', async () => {
+    await mockEditorModule();
+    useEditorView().set('source');
+    mockDefaults();
+    readySession('# Hi\n\nA paragraph.\n');
+    const component = await mountSuspended(PageInApp, SOURCE_STUBS);
+    const area = component.get('[data-testid="editor-source"]').element as HTMLTextAreaElement;
+    area.value = '# Hi\n\nA paragraph.\n\n\n';
+    area.dispatchEvent(new Event('input', { bubbles: true }));
+    await component.vm.$nextTick();
+
+    await viewButton(component, 'Visual').trigger('click');
+    await flushPromises();
+    await component.vm.$nextTick();
+
+    const notice = component.get('[data-testid="editor-view-refusal"]');
+    expect(notice.text()).toMatch(/line 4/i);
+    expect(notice.text()).not.toContain('As typed');
+    expect(notice.findAll('code')).toHaveLength(0);
+    expect(notice.find('[data-testid="editor-format"]').exists()).toBe(true);
+  });
+
+  /**
+   * The state machine the owner asked for: non-canonical → Format →
+   * canonical → the visual view opens. The buffer the person is looking
+   * at is the thing that changes, which is how they see what Format did.
+   */
+  test('Format rewrites the buffer to its canonical form, opens the visual view on it, and Save sends those bytes', async () => {
+    await mockEditorModule();
+    useEditorView().set('source');
+    const { save } = mockDefaults();
+    readySession('# Hi\n\nA paragraph.\n');
+    const component = await mountSuspended(PageInApp, SOURCE_STUBS);
+    const area = component.get('[data-testid="editor-source"]').element as HTMLTextAreaElement;
+    area.value = '# Hi\n\nSay **bold** here.\n\n\n';
+    area.dispatchEvent(new Event('input', { bubbles: true }));
+    await component.vm.$nextTick();
+
+    await viewButton(component, 'Visual').trigger('click');
+    await flushPromises();
+    await component.vm.$nextTick();
+    expect(component.find('[data-testid="editor-view-refusal"]').exists()).toBe(true);
+
+    await component.get('[data-testid="editor-format"]').trigger('click');
+    await flushPromises();
+    await component.vm.$nextTick();
+
+    const editorStub = component.findComponent({ name: 'EditorSurface' });
+    expect(editorStub.exists()).toBe(true);
+    expect(editorStub.props('markdown')).toBe('# Hi\n\nSay __bold__ here.\n');
+    expect(component.find('[data-testid="editor-view-refusal"]').exists()).toBe(false);
+    expect(viewButton(component, 'Visual').attributes('aria-pressed')).toBe('true');
+    expect(component.get('[data-testid="editor-view-status"]').text()).toMatch(/Formatted/);
+
+    await buttonNamed(component, /^Save/)!.trigger('click');
+    expect(save).toHaveBeenCalledWith('# Hi\n\nSay __bold__ here.\n', 'h1');
+  });
+
+  /**
+   * Formatting is about spelling; the visual view is about what the
+   * schema models. A construct it does not model cannot be spelled into
+   * existence, so the wall stays and no action pretends otherwise
+   * (`formatSource` refuses to rewrite anything in that case).
+   */
+  test('a construct the visual view does not support is refused without a Format action', async () => {
+    await mockEditorModule({ probe: () => ({ ok: false, reason: 'unsupported_construct', construct: 'a footnote definition', line: 3 }) });
+    useEditorView().set('source');
+    mockDefaults();
+    readySession('# Hi\n\nA paragraph.\n');
+    const component = await mountSuspended(PageInApp, SOURCE_STUBS);
+
+    await viewButton(component, 'Visual').trigger('click');
+    await flushPromises();
+    await component.vm.$nextTick();
+
+    const notice = component.get('[data-testid="editor-view-refusal"]');
+    expect(notice.text()).toContain('a footnote definition');
+    expect(notice.find('[data-testid="editor-format"]').exists()).toBe(false);
+    expect(component.find('[data-testid="editor-source"]').exists()).toBe(true);
   });
 
   test('opens in the view the cookie remembers', async () => {

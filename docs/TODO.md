@@ -615,6 +615,114 @@ makes conventions portable across projects.
 
 Discoveries and constraints. Newest first.
 
+### 2026-09-23 — Two toasts are one tier working, and a screenshot that claims a theme has to assert it
+
+Two things the e2e suite taught this batch after the toasts landed, both worth keeping.
+
+**A toast stays for a few seconds, so a test that acts twice sees two.** `e2e/editor.spec.ts`'s
+`saveAndConfirm` saved, bolded, and saved again inside five seconds, and its
+`getByRole('status').filter({ hasText: /Saved/ })` then resolved to two elements — a Playwright
+strict-mode violation, and the first thing the banner-to-toast move broke. That is the tier working
+(each save is confirmed, and the confirmations stack up to the cap) rather than something to assert
+away, so the helper waits for the first. The same shape in `e2e/tree-writes.spec.ts`: a created
+row's sentence is now in *two* places on purpose — the tree's always-present live region and the
+toast — so a `toHaveCount(1)` that used to mean "announced once" now means "announced in one place
+only", which is not what the rule says (`docs/UI-CHECKLIST.md` §4.12). It names both.
+
+**A screenshot that claims a theme proves nothing unless the theme is asserted.** The review
+material for this batch is shot at 1280 light, 1280 dark and 320 light, and the dark shot of the
+read screen came out **light**: the theme preference is applied by color-mode's own client plugin,
+and `waitForHydration` does not wait for it — the page was photographed in the window between the
+server's light document and the client's dark one. Nothing was wrong with the screen; the evidence
+was simply false. `e2e/authoring.spec.ts` now asserts `<html>`'s class beside every shot
+(`expectTheme`), which both closes the window and makes the claim the file's name is making. Worth
+copying wherever a suite photographs a theme it did not assert.
+
+### 2026-09-23 — Status banners became toasts, and the tier rule moved into the checklist
+
+The owner, pointing at the green "Saved “parla”." bar under a page title: *"estas cosas pueden
+manejarse como toasts."*
+
+**What moved.** Exactly the transient, successful confirmations: "Saved “X”." (edit mode),
+"Created <kind> “X” in “Y”." and "Moved “X” to the trash." (the tree), and "Invitation sent to
+<address>." (members). Each is now one sentence in a toast through `useStatusToast()`, which is the
+one place the tier's role, politeness, dismissal, icon and duration are chosen — a product where
+each call site picks its own is a fourth notice shape per screen, which is the defect the three
+`InlineNotice` tiers already exist to prevent.
+
+**What deliberately did not move**, because a toast removes itself: every error and refusal, "your
+work is preserved" after a failed save, the lock-lost notice, the not-canonical and dead-anchor
+exits, the tree's refused drag, create, rename and delete reasons, and every `PageNotice` panel —
+those are states the screen is in. The auth screens' success bars stay bars: they replace the form
+the person submitted and carry the next step, which is not transient at all.
+
+**Two surfaces on purpose.** Where a screen already kept an always-present live region — the tree's
+and the members screen's — the region still says the sentence and the toast is what a sighted
+person reads. That pairing was already the case for the trash chip (Review Log, 2026-09-18, which
+records the double announcement as known), so nothing regressed; the visible half simply stopped
+being a chip that stayed. The members screen's region is now `sr-only` in every state rather than
+becoming a hand-rolled success chip — a fifth notice shape nobody had noticed.
+
+**The saved confirmation is now correct by construction.** `useSavePage`'s status legitimately stays
+`success` until the next save resolves, so the chip had to be computed away with
+`showSavedBanner = success && !isDirty` or it went on claiming a document was saved while it was
+being edited again. A notice that removes itself cannot make that claim: the toast fires on the
+*transition* into success, exactly once per save, and `edit.test.ts` holds both halves.
+
+**Where the rules live now.** The four shapes are stated in `InlineNotice.vue`, as the three were;
+the rule for *choosing* between them is new `docs/UI-CHECKLIST.md` §4.12, because which surface a
+message takes is a correctness matter and the checklist wins on those. `docs/DESIGN-SYSTEM.md` §9.6
+loses its "snackbars keep `inverse-surface`" line — that ruling rested on snackbars being rare, and
+a toast on every save is not rare — with the reasoning and both measurements in its §14.
+
+**Not moved because it does not exist yet:** "restored". Trash restore is Phase 9 and the screen is
+not built; when it is, its confirmation is a toast by this rule. A rename from the page's own title
+field is also not confirmed by a toast: the heading the person just typed into is the confirmation.
+
+### 2026-09-23 — The page title is edited on the page, and a second tree instance silently undid the rename
+
+The owner: *"El title, se edita y es el mismo title del page, como en obsidian."* What shipped is
+the half that needs no change to a single stored byte: the title is editable in place at the top of
+read and edit mode, and editing it renames the node through `PATCH /nodes/:id` — the tree's own
+rename path, classified by the tree's own `classifyWriteRefusal`, so one write has one rule
+wherever it is asked from. The half that was **not** built — the title living in the markdown body
+as the document's first heading — is in Open Questions with the argument, because it would rewrite
+the canonical bytes of every page, shift every block anchor, and give one fact two writers.
+
+**Found on the way: two instances of `useWorkspaceTree` were not coherent.** The sidebar holds one
+and the page now holds another; both mirror their transport's refs into the one shared `useState`
+record, and each was *seeded* from that record exactly once, at creation. So a write through one
+left the other's own refs on the pre-write tree, and the next write through that second instance
+rebuilt the tree from what it last saw — silently undoing the first. Reproduced as a unit test: a
+page renamed from the page, then a rename through the sidebar's instance, and the first rename was
+gone. Each transport now follows the record in both directions (`nodes` and `rootId` only; status,
+message, `manageable` and ownership are `load()`'s). Nothing in the tree's own behaviour changes:
+the optimistic-write contract and its "zero `GET /tree` after a successful PATCH" e2e are
+untouched.
+
+**Decisions worth naming, because a reviewer will ask:**
+
+- **The field is inside the `<h1>`, not instead of it.** The screen keeps exactly one `<h1>` in
+  every state it has (checklist §4.4), and the field carries its own accessible name because a
+  heading is not a label.
+- **No box, and the caret is the indicator.** The reviewed precedent is the source view's text
+  area (`DESIGN-SYSTEM.md` §14, 2026-09-17): a text surface that *is* the document takes the
+  document's treatment, and WCAG 2.4.7 counts the text cursor as a text field's focus indicator.
+  A 56px outlined field where the title stands would be a form control wearing the heading's
+  place.
+- **Two ways in.** The title itself opens the field, as in Obsidian; the pencil beside it is the
+  keyboard's way in and the one with a name and a tooltip, drawn quiet and revealed on hover or
+  focus — the comment gutter's "+" treatment, never out of the tab order.
+- **Optimistic, with the whole screen agreeing.** The heading, the breadcrumb and the tab title
+  read one computed name, so there is no window in which the screen says two things; a refusal
+  puts all three back together.
+
+**Known gaps:** a caller who may only `read` is offered the field and refused by the server — the
+standing "no per-node `write` signal reaches the client" gap the app bar's "Edit" has carried since
+2026-09-14, and fixing it here alone would make this control disagree with the two beside it. The
+title field has no `F2`, which the tree's row has; the pencil is the keyboard path. A rename does
+not stale the page's *history* screen, which shows revision rows rather than titles.
+
 ### 2026-09-23 — Task lists were four layers of nothing, and code had no colour (branch `feat/task-lists-and-highlighting`)
 
 Two owner reports: *"creo que no se soporta ok el task list"*, and code blocks with no syntax
@@ -777,6 +885,53 @@ the 2026-09-16 entry on the same file.
 a selection works on any page, canonical or not; a refused comment save is a typed 409 or 404 the
 client can render, never a 500; and a comment's excerpt indexes the bytes that were actually
 stored. GATE-2 stays at 182.
+
+### 2026-09-23 — The source-mode refusal promised two spellings it did not have, and was a wall where a formatter belonged
+
+Two defects in one notice, both reported by the owner on the same screen: *"Line 6 is not in
+canonical form. As typed: — canonical: Write it the canonical way to open the visual view, or keep
+editing here."*
+
+**Why both examples were empty.** `probe()` reports the line at which the *bytes* first diverge
+(`packages/editor/src/probe.ts`, `firstDivergenceLine`), and `describeRefusal` read that line out
+of both texts. For the commonest non-canonical document a person produces — one blank line too
+many, or two newlines at the end of the buffer — the byte that differs is a newline, so the line
+it lands on is **blank in both texts** and both "spellings" were the empty string. Measured
+against the real pipeline: `"# T\n\nA\n\nB\n\n\n\n"` refuses at line 6, and line 6 of the text and
+line 6 of its canonical form are both `""`. A second shape had the same effect: a divergence past
+the end of the canonical text (`lineOf` answers `''` by design), and a third promised a difference
+it could not show — a missing trailing newline diverges on a line whose two spellings are the same
+word ("As typed: A — canonical: A").
+
+**Impact.** The two spellings now travel together in one `spellings` object and are `null`
+together, so the notice cannot render one without the other or render two empty code spans; it
+names the line and stops when there is no example to give. Five cases are unit-tested in
+`apps/web/app/utils/editor-view.test.ts`.
+
+**The wall.** The owner: *"es mejor trabajar con un formateador o algo así para que me permita
+manejarlo."* `formatSource` (same file) is the second decision the toggle makes — the buffer is
+rewritten to its canonical form and the visual view opens on it, in one click on a control that
+says what it does. The bytes it writes are `roundTrip` from `@deep-wiki/editor/mount`
+(`toMarkdown(fromMarkdown(md))`), which is the same function `probe` compares against, so the
+action and the check cannot disagree about what canonical means. Measured against the real
+pipeline on ten non-canonical samples, `roundTrip` is byte-identical to `packages/markdown`'s
+`canonicalise` on every one of them, is idempotent, and the probe accepts its output — but the
+implementation re-probes the formatted text rather than assuming it, because the two conditions
+are not the same one.
+
+**Where the wall stays, and why that is the whole answer to "would formatting lose something".**
+`fromMarkdown` **throws** `UnsupportedConstructError` for a construct the schema does not model
+rather than dropping it (`packages/editor/src/from-markdown.ts`), so a canonicaliser that would
+lose content cannot return — it raises. `formatSource` answers a throw by rewriting nothing and
+keeping the refusal, and the notice offers no Format action when the probe named a construct
+(`refusal.formattable`). There is no case in which a successful format returns a document with
+less in it than it was given: it changes spelling, never content.
+
+**Left open:** the refused-document panel's unbuilt exit is still called "Normalise this document"
+while the live action is "Format" — two words for one idea, and the owner's call which survives.
+A line whose only non-canonical feature is trailing whitespace shows two code spans that look
+identical, because the difference is invisible characters; the same whitespace-glyph follow-up the
+diff screens already carry (2026-09-17).
 
 ### 2026-09-23 — The vacuous-negative sweep: 85 candidates, six real, and why there is no thirteenth check
 
@@ -5993,6 +6148,42 @@ Fixtures kept permanently at `scripts/checks/__fixtures__/test-coverage/`:
 
 Decisions still owed. Move an entry out of this section once answered and record the answer
 in Findings.
+
+- **Should a page's title live in its markdown, as the document's first heading?** The owner
+  asked for the title to be edited on the page, "como en obsidian" (2026-09-23), and half of
+  that shipped: the title is editable in place at the top of read and edit, and editing it
+  renames the node (`PageTitle`, `usePageTitle`). The other half — the title *being* the
+  document's first `#` heading, the way Obsidian's title is its filename and many wikis' is
+  their `h1` — was deliberately **not** built, and this is the argument, for the owner to
+  answer.
+
+  **What it would cost.** Markdown is the source of truth and the round trip through the
+  editor is byte-identical (`PRODUCT.md`); a page's title is `nodes.title`
+  (`docs/SPECS.md`). Making the body carry the title means:
+  - **Every page's canonical bytes change.** A `# Title` line and a blank line are prepended
+    to every stored document in every workspace — a migration over `page_content` and every
+    `page_revision` row, or a divergence between what the editor writes and what history
+    holds. GATE-2's 182 fixtures are all about bytes, and each would need its own answer.
+  - **Every block anchor shifts.** Anchors are per block and stable across edits, which is
+    what comments, diffs, RAG chunk provenance and AI selections all hang off. Inserting a
+    block at the top of every document changes what the first anchor is about, and a
+    comment's "moved, not deleted and inserted" claim is about exactly that.
+  - **Two writers for one fact.** The tree renames a node, the editor edits a document. If
+    the title is in both, then either the editor's first heading is authoritative (and the
+    tree's rename becomes a document edit, taking a revision, a lock and a changeset with it)
+    or `nodes.title` is (and the document's own first line is a lie the renderer has to
+    suppress). Obsidian has neither problem because its title *is* the filename and the body
+    never repeats it.
+  - **The read screen renders the title twice** until the renderer learns to drop the first
+    heading — which is a rule about content that the sanitising render pipeline does not have
+    and that every export, chunk and diff would have to share.
+
+  **What the smaller half already buys.** The person edits the title where they read it, in
+  one field, and the name changes everywhere at once. Nothing about the document's bytes
+  moves. If the owner wants the heading in the body as well, the cheapest honest shape is
+  probably the reverse of the intuition: keep `nodes.title` authoritative and *offer* to
+  insert a matching `# Title` block on the first save of a new page, as content the author
+  then owns — no migration, no anchor shift, and no second writer.
 
 - ~~**Should every frame screen's bar condense, or edit mode's alone?**~~ **Answered
   2026-09-17: edit mode's alone.** `AppShell`'s `condensed` folds the breadcrumb to its last

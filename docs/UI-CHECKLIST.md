@@ -199,6 +199,43 @@ knows which time it is.
       nothing. Prefer a pair whose offset crosses a calendar day, so a whole-day error is caught
       and not just a clock offset.
 
+### 4.12 Notice tiers — which surface a message takes
+
+Added 2026-09-23, when the toast became the product's fourth notice surface (the owner, pointing at
+the green "Saved “parla”." bar under a page title: *"estas cosas pueden manejarse como toasts"*).
+The three inline tiers were consolidated in `InlineNotice.vue` on 2026-09-14 after an audit counted
+five shapes across nineteen hand-rolled copies, and that file's table is where the shapes are
+stated; this is the **rule for choosing between them**, which is a correctness matter and therefore
+lives here.
+
+| Tier | Where it is | Use it for | Never for |
+| --- | --- | --- | --- |
+| **Panel** | `PageNotice` — replaces the screen's content | A state the screen *is* in: denied, missing, locked, empty, the request failed | Anything the screen can show *beside* its content |
+| **Bar** | `InlineNotice tier="bar"` — stands in for, or beside, a form | A result that replaces the control the person was on; a refusal they must read | A running commentary above live content |
+| **Chip** | `InlineNotice tier="chip"` — one line above the thing it is about | An error or refusal about the thing directly below it, with at most one action | A success that is already over |
+| **Toast** | `useStatusToast().confirmed()` | A **transient, successful** confirmation of something the person just did: saved, created, moved to trash, restored, invitation sent | Anything that must still be there when the person looks back |
+
+- [ ] **A toast is the only tier that removes itself, so nothing that must be read lives in it.** An
+      error stays until it is read; a refusal that names a conflict stays; "your work is preserved"
+      after a failed save stays; and any state the screen itself is in is the panel's. A message
+      that a person could miss and then need is not transient, whatever its tone.
+- [ ] **An error is never *only* a toast.** The screen that failed keeps its own notice, so looking
+      away does not destroy the only copy of what happened. A toast may accompany one; it may not
+      replace it.
+- [ ] **A toast is announced, dismissible, and one sentence.** `role="status"` on the toast itself,
+      a polite announcement (a confirmation is not an interruption), the close control kept, an icon
+      beside the words rather than instead of them (§4.3), and colour as a second signal rather than
+      the only one (§5). At most one action, as a chip has at most one.
+- [ ] **A toast says what happened to what.** "Saved." is §3's own example of a confirmation too
+      weak to act on: "Saved “Handbook”." is the shape. The same sentence may also stand in a live
+      region the screen keeps, and on the surfaces that already had one it does — the region is
+      what is reliably announced, the toast is what a sighted person reads.
+- [ ] **A few at once, never a column of them.** The toaster is capped (`app.vue`), and a flow that
+      would produce four confirmations is a flow with too many confirmations, not a taller stack.
+- [ ] **A destructive or irreversible action still gets more than a toast** (§3). The question asked
+      before it is where the weight goes — a typed-name dialog, for the trash — and the toast that
+      follows carries the way back rather than being the only trace.
+
 ---
 
 ## 5. Accessibility floor
@@ -2163,6 +2200,92 @@ that is not done, and a tick surviving a real save and a reload. Screenshots
   a diagram renderer will consume, and nothing renders them yet.
 - The two-icon-pack requirement (§4.3) remains untested; everything earlier entries carried
   forward and this batch did not touch stands.
+
+---
+
+### 2026-09-23 — A formatter instead of a refusal, the title edited on the page, and the status banners as toasts — awaiting the owner's eye
+
+**Reviewer:** none yet — this entry is what was shipped for review, not a review.
+**Verdict:** Pending
+
+Three of the owner's requests of 2026-09-23, one commit each on `feat/format-title-toasts`;
+`docs/TODO.md` Findings, same date, carries the measurements and what was found on the way.
+
+**Pre-build contract (§2), all three.** *Who:* a member with `write`, in the room — editing a page,
+reading one they have just created, or looking after the tree beside it. *Goal, in their words:*
+"let me fix this instead of telling me it is wrong", "the title is the page's title, edit it here",
+"get these bars out of the way". *Primary action:* unchanged on every screen — Save in edit mode,
+none on the read screen, `New…` in the tree; each control added here is in-place editing or a
+confirmation, never a second primary. *Data:* the edit session's buffer and the probe's answer;
+`nodes.title` and `PATCH /nodes/:id`; nothing new from the server anywhere. *Not:* moving the title
+into the markdown body (the argument is in `docs/TODO.md` Open Questions, for the owner), a syntax
+highlighter for the source view, a toast for anything that is not a transient success. *Empty / too
+much:* a document whose canonical form is itself needs no Format and is offered none; a 12,000-word
+page formats in one pass; a person who saves four times in a minute sees at most three toasts,
+because the toaster is capped.
+
+**What to look at**
+
+1. **Source mode's notice names the line, shows the two spellings only when it has two, and carries
+   Format.** The owner's report was "As typed: — canonical:" with nothing after either colon: the
+   probe reports where the *bytes* diverge, and for one blank line too many that is a blank line in
+   both texts. The two spellings now travel together in one object and are absent together (§3 — a
+   notice that promises an example it cannot give is worse than one that names the line and stops).
+   **Format** is the chip's one action, Filled in the notice's own `error` role (§9.1): it rewrites
+   the buffer to its canonical form **in front of the person** and opens the visual view on it.
+   Nothing is rewritten behind them, which is what the 2026-09-17 refusal existed to protect. The
+   wall stays exactly where formatting cannot help — a construct the schema does not model — and
+   there the notice offers no action at all.
+2. **The page's title is editable where it is read, and editing it renames the node.** The title
+   itself opens the field, as in Obsidian; the pencil beside it is the keyboard's way in, named and
+   tooltipped (§4.3), quiet until the heading is hovered or it is focused and never out of the tab
+   order (§4.4, §5) — the comment gutter's own treatment. The field stands **inside** the `<h1>` so
+   the screen keeps exactly one heading in every state (§4.4), at the heading's own type role, with
+   no box: the caret in `primary` is its indicator, the treatment `DESIGN-SYSTEM.md` §14 already
+   gives the source view's text area for the same reason. Enter renames, Escape cancels and returns
+   focus to the control that opened the field (§5), and moving focus away commits, as Obsidian does.
+   The rename is optimistic — heading, breadcrumb, tab title and the sidebar's row all follow at
+   once — and a name already taken reopens the field with the typed text and the server's sentence,
+   wired with `aria-describedby`; anything typing cannot fix stands under the heading as the
+   `error-container` chip the tree's row editor already uses.
+3. **The transient successes are toasts, and the tier rule is written down.** "Saved “X”.",
+   "Created <kind> “X” in “Y”.", "Moved “X” to the trash." (carrying "Restore from Trash") and
+   "Invitation sent to <address>." are now `useStatusToast()`: `role="status"`, politely announced,
+   dismissible, one sentence, at most one action, at most three at a time. Everything that must be
+   read stayed where it was — every error, every refusal that names a conflict, "your work is
+   preserved" after a failed save, and every `PageNotice` panel. The new **§4.12** above is the rule
+   for choosing between the four surfaces; the shapes stay stated in `InlineNotice.vue`, and
+   `DESIGN-SYSTEM.md` §9.6 and §14 carry the one deviation this took (a toast is `bg-accented` like
+   every other overlay, not M3's `inverse-surface`).
+
+**Measured** in `apps/web`'s own suite (1172 tests) and, against the real backend, in
+`e2e/editor-source.spec.ts` (the refusal, Format, and a refusal with no example to give),
+`e2e/tree-writes.spec.ts` (the title renamed on the page, the tree row following, the server
+agreeing after a reload, and a duplicate name refused with the field kept) and `e2e/onboarding.spec.ts`
+(the invitation's two surfaces). `expectNoHorizontalOverflow` on the pane and the document at every
+width shot. Screenshots `authoring-{source-format,title-editing,title-refused,toast}-*.png` in the
+session scratchpad (`DEEPWIKI_AUTHORING_SHOTS`).
+
+**Known before review, not fixed**
+
+- **The half of request 2 that was not built:** the title living in the markdown body as the
+  document's first heading. It would rewrite the canonical bytes of every page, shift every block
+  anchor, and give one fact two writers; the full argument and a cheaper alternative are in
+  `docs/TODO.md` Open Questions, 2026-09-23, for the owner to answer.
+- A `read`-only member is offered the title field and refused by the server — the standing gap the
+  app bar's "Edit" has carried since 2026-09-14 (no per-node `write` signal reaches the client).
+  Fixing it here alone would make this control disagree with the two beside it.
+- The title field has no `F2`, which the tree's row editor does have; the pencil is the keyboard
+  path. If the owner wants the key, it is one line.
+- The refused-document panel's unbuilt exit is still called "Normalise this document" while the live
+  action is "Format" — two words for one idea, and the owner's call which survives.
+- A line whose only non-canonical feature is trailing whitespace shows two code spans that look
+  identical: the difference is invisible characters. The same visible-space follow-up the diff
+  screens carry (2026-09-17).
+- Where a screen already kept a live region — the tree's, the members screen's — the sentence is
+  said twice for a screen-reader user, as it was before this batch (2026-09-18 records it).
+- The two-icon-pack requirement (§4.3) remains untested; everything the 2026-09-23 entries above
+  carried forward and this batch did not touch stands.
 
 ---
 

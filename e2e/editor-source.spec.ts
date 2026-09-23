@@ -33,6 +33,7 @@ interface EditorFixtures {
 const seed: SeedFixtures = JSON.parse(readFileSync(new URL('.auth-fixtures.json', import.meta.url), 'utf8'));
 const REPO_ROOT = join(import.meta.dirname, '..');
 const SHOTS = process.env.DEEPWIKI_FRAME_SHOTS ?? '';
+const AUTHORING_SHOTS = process.env.DEEPWIKI_AUTHORING_SHOTS ?? '';
 
 let editorFixtures: EditorFixtures;
 
@@ -44,6 +45,16 @@ test.beforeAll(() => {
 async function shot(page: Page, name: string): Promise<void> {
   if (!SHOTS) return;
   await page.screenshot({ path: `${SHOTS}/fb-editor2-${name}.png`, fullPage: false });
+}
+
+/**
+ * The 2026-09-23 batch's own review material (the formatter, the inline
+ * title, the toasts), under its own variable so the 2026-09-17 set above
+ * keeps its names and neither batch overwrites the other's shots.
+ */
+async function authoringShot(page: Page, name: string): Promise<void> {
+  if (!AUTHORING_SHOTS) return;
+  await page.screenshot({ path: `${AUTHORING_SHOTS}/authoring-${name}.png`, fullPage: false });
 }
 
 async function signInAs(page: Page, token: string): Promise<void> {
@@ -261,7 +272,7 @@ test.describe('source mode', () => {
     await expect(page.getByTestId('editor-source')).toHaveValue(expectedSource);
   });
 
-  test('a non-canonical source is refused: the view stays, the text is untouched, and the notice names the line by its two spellings', async ({ page }) => {
+  test('a non-canonical source is refused, and Format is the way out: the buffer becomes canonical and the visual view opens on it', async ({ page }) => {
     test.setTimeout(90000);
     await signInAs(page, editorFixtures.writerSessionToken);
     await useTheme(page, 'light');
@@ -292,13 +303,59 @@ test.describe('source mode', () => {
     await expect(bar.getByRole('button', { name: 'Source' })).toHaveAttribute('aria-pressed', 'true');
     await expectNoHorizontalOverflow(page, 'source refusal 1280 light');
     await shot(page, 'source-refused-1280-light');
+    await authoringShot(page, 'source-format-1280-light');
 
-    // Written the canonical way, the same key opens the visual view.
-    await source.fill(`${initial}\nSay __bold__ here.\n`);
-    await page.keyboard.press('Control+E');
+    // Format (owner decision, 2026-09-23): the text in front of the
+    // person becomes its canonical form — so they see what changed — and
+    // the visual view opens on it. Nothing is rewritten behind them: this
+    // is one click on a control that says what it does.
+    await notice.getByRole('button', { name: 'Format' }).click();
     await expect(page.getByTestId('editor-surface')).toBeVisible();
     await expect(page.getByTestId('editor-surface').locator('strong')).toHaveText('bold');
     await expect(notice).toHaveCount(0);
+    await expect(page.getByTestId('editor-view-status')).toContainText(/Formatted/);
+
+    // And the buffer really is the canonical bytes, not a rendering of
+    // them: the same text area, asked again.
+    await page.keyboard.press('Control+E');
+    await expect(page.getByTestId('editor-source')).toHaveValue(`${initial}\nSay __bold__ here.\n`);
+    await page.keyboard.press('Control+E');
+    await expect(page.getByTestId('editor-surface')).toBeVisible();
+  });
+
+  /**
+   * The other half of the owner's report: "As typed: — canonical:" with
+   * nothing after either colon. A blank line too many is the commonest
+   * non-canonical document there is, and the line it diverges on is blank
+   * in both texts — so there is no example to give, the notice says so by
+   * not promising one, and Format is still the way out.
+   */
+  test('a refusal with no two spellings names the line, shows no empty example, and still formats', async ({ page }) => {
+    test.setTimeout(90000);
+    await signInAs(page, editorFixtures.writerSessionToken);
+    await useTheme(page, 'light');
+    await openEditor(page);
+
+    await page.locator('#content-bar').getByRole('button', { name: 'Source' }).click();
+    const source = page.getByTestId('editor-source');
+    await expect(source).toBeFocused();
+    const initial = await source.inputValue();
+    await page.keyboard.press('Control+End');
+    await page.keyboard.type('\n\n');
+    await expect(source).toHaveValue(`${initial}\n\n`);
+
+    await page.keyboard.press('Control+E');
+    const notice = page.getByRole('alert').filter({ hasText: /not in canonical form/ });
+    await expect(notice).toBeVisible();
+    await expect(notice).toContainText(`Line ${initial.split('\n').length}`);
+    await expect(notice).not.toContainText('As typed');
+    await expect(notice.locator('code')).toHaveCount(0);
+
+    await notice.getByRole('button', { name: 'Format' }).click();
+    await expect(page.getByTestId('editor-surface')).toBeVisible();
+    await expect(notice).toHaveCount(0);
+    await page.keyboard.press('Control+E');
+    await expect(page.getByTestId('editor-source')).toHaveValue(initial);
   });
 
   test('the choice persists per browser: a reload opens in the source view', async ({ page }) => {

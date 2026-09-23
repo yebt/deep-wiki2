@@ -44,6 +44,12 @@ async function signInAs(context: BrowserContext, token: string): Promise<void> {
 }
 
 test('a reader sees the cached content, and the response never reaches the ProseMirror/Milkdown bundle', async ({ page, context }) => {
+  // The budget the rest of this file already takes (and for the same
+  // reason: a dev-server first compile on a loaded host). This test waits
+  // for hydration since 2026-09-23, and hydration is the slow half — it
+  // timed out at the 30s default on a four-core host at load average 25
+  // while nothing about the screen was wrong (2026-09-23).
+  test.setTimeout(240_000);
   await signInAs(context, fixtures.readerSessionToken);
 
   const editorRequests: string[] = [];
@@ -71,6 +77,7 @@ test('a reader sees the cached content, and the response never reaches the Prose
 });
 
 test('an outsider with no read grant sees a coherent permission-denied state, not a crash or an empty page', async ({ page, context }) => {
+  test.setTimeout(240_000);
   await signInAs(context, fixtures.outsiderSessionToken);
 
   await page.goto(pageUrl(fixtures.workspaceSlug, fixtures.readPageId));

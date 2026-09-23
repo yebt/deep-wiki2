@@ -131,7 +131,13 @@ test('a fresh user creates a workspace by clicking, is handed the members screen
   // it, and the confirmation is announced from the screen.
   await expect(dialog).toBeHidden();
   await expect(inviteButton).toBeFocused();
-  await expect(page.getByRole('status').filter({ hasText: /invitation sent/i })).toContainText(fixtures.colleagueEmail);
+  // Two surfaces, on purpose (owner decision, 2026-09-23): the toast a
+  // person reads, and the screen's always-present live region, which is
+  // the half §5 relies on. Both name the address, because "Invitation
+  // sent." on a screen that invites people all day says nothing about
+  // which one.
+  await expect(page.getByRole('status').filter({ hasText: /invitation sent/i }).first()).toContainText(fixtures.colleagueEmail);
+  await expect(page.getByRole('status').filter({ hasText: /invitation sent/i })).toHaveCount(2);
   const pending = page.getByRole('heading', { level: 2, name: /pending invitations/i }).locator('..');
   await expect(pending).toContainText(fixtures.colleagueEmail);
   await expect(pending).toContainText(/write/i);

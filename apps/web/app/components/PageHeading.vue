@@ -42,14 +42,43 @@ defineProps<{
   heading: string;
   description?: string;
 }>();
+
+/**
+ * The `<h1>`'s type role, bound rather than written twice: the block has
+ * two shapes — with and without a control beside the heading — and a
+ * heading whose role depended on which shape it took would be §4.4's
+ * failure by another route.
+ */
+const HEADING_CLASS = 'text-headline-medium text-highlighted';
 </script>
 
 <template>
+  <!--
+    The default slot carries the heading's *content*, so a screen can put
+    something editable where the text stands (`PageTitle`, 2026-09-23)
+    without restating this block's rhythm. The `trailing` slot is for a
+    control that acts on the heading, and it is a sibling of the `<h1>`
+    rather than inside it, because anything inside a heading joins its
+    accessible name. Both wrappers exist only when a screen fills the
+    slot, so every screen that does not renders exactly the DOM it
+    rendered before the slots existed.
+  -->
   <div class="mb-8 max-w-measure">
     <p v-if="eyebrow" class="text-label-large text-muted">{{ eyebrow }}</p>
-    <h1 class="text-headline-medium text-highlighted" :class="eyebrow ? 'mt-2' : undefined">
-      {{ heading }}
+    <!-- `group/heading`: a control in the `trailing` slot may draw itself
+         quiet and reveal on hover of the heading it acts on (§4.4), which
+         is the comment gutter's own treatment and needs a named group to
+         hang off. -->
+    <div v-if="$slots.trailing" class="group/heading flex items-start gap-2" :class="eyebrow ? 'mt-2' : undefined">
+      <h1 :class="[HEADING_CLASS, 'min-w-0 flex-1']">
+        <slot>{{ heading }}</slot>
+      </h1>
+      <slot name="trailing" />
+    </div>
+    <h1 v-else :class="[HEADING_CLASS, eyebrow ? 'mt-2' : undefined]">
+      <slot>{{ heading }}</slot>
     </h1>
+    <slot name="under" />
     <p v-if="description" class="text-body-large text-muted mt-3">
       {{ description }}
     </p>

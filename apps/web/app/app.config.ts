@@ -501,5 +501,23 @@ export default defineAppConfig({
     // `ConfirmDialog` takes the rung above this one.
     modal: { slots: { overlay: 'z-60', content: 'z-60 bg-accented', title: 'text-2xl font-normal text-highlighted' } },
     popover: { slots: { content: 'bg-accented' } },
+    // A toast is one more floating surface, so it takes the same rung
+    // every other overlay in this product was retargeted to —
+    // `bg-accented`, M3's `surface-container-high` (§9.6) — and keeps the
+    // library's `shadow-lg` and `rounded-lg`: it floats, and it holds a
+    // control, which is the container rung (§3.4, §4.3). M3 puts a
+    // snackbar on `inverse-surface`; this product does not, for the same
+    // reason §9.6 keeps `UTooltip` on `bg-default`, and the reason is
+    // recorded in that file's §14: a toast here carries an accent-coloured
+    // icon and sometimes an action, and `inverse-primary` — the role M3
+    // gives a snackbar's action label — has no alias in this stack, exactly
+    // as `tertiary` does not.
+    //
+    // The sentence is M3's snackbar supporting text, `body-medium`
+    // (§2.3's "Chrome" table), spelled in the library's own scale for the
+    // tailwind-merge reason documented on `modal.title` above: a project
+    // `--text-*` role written into a slot override is read as a colour and
+    // dropped. 14px on a 20px line either way.
+    toast: { slots: { root: 'bg-accented', title: 'text-sm font-normal text-highlighted' } },
   },
 });

@@ -20,7 +20,7 @@
  *   separate empty state to design for beyond that.
  */
 import { loadEditorMount } from '~/utils/editor-mount';
-import { EDITOR_VIEWS, requestView, type EditorViewMode, type SourceRefusal } from '~/utils/editor-view';
+import { EDITOR_VIEWS, formatSource, requestView, type EditorViewMode, type SourceRefusal } from '~/utils/editor-view';
 import { formatRevisionDate } from '~/utils/format-revision-date';
 import { pageUrl, workspacesUrl } from '~/utils/routes';
 
@@ -78,13 +78,22 @@ const isDirty = ref(false);
 // was a modal of its own on this page.
 const { confirm } = useConfirm();
 
-// docs/UI-CHECKLIST.md §3: "Saved." persisting over a document the user
-// has since kept editing is worse than no confirmation at all — it claims
-// something that stopped being true the moment `onEditorUpdate` fired.
-// `useSavePage`'s own status legitimately stays `success` until the next
-// save resolves (documented there as the page component's call, not the
-// composable's); this is that call.
-const showSavedBanner = computed(() => saveStatus.value === 'success' && !isDirty.value);
+// A save that worked is a transient confirmation, so it is a toast (the
+// owner, 2026-09-23, pointing at the green bar under the title: "estas
+// cosas pueden manejarse como toasts"). The tier and everything about it
+// — the status role, the polite announcement, the dismissal, how long it
+// stays — is `useStatusToast`'s; this only says what happened to what,
+// because "Saved." alone is §3's own example of a confirmation too weak
+// to act on.
+//
+// It fires on the *transition* into success rather than being drawn from
+// the status: `useSavePage`'s status legitimately stays `success` until
+// the next save resolves (documented there as the page component's call,
+// not the composable's), and a banner drawn from that kept claiming a
+// document had been saved while it was being edited again. A toast that
+// removes itself cannot make that claim, and the watcher makes sure it is
+// made exactly once per save.
+const { confirmed } = useStatusToast();
 // Bumped to force `EditorSurface` to remount with `currentMarkdown` as its
 // initial doc — it only reads its `markdown` prop once, on mount (see its
 // own header comment) — after the author accepts the corrected document
@@ -181,7 +190,13 @@ function onEditorUpdate(markdown: string): void {
  * `~/utils/editor-view`'s decision: leaving the visual view is always
  * granted, leaving the source view only when the probe says the text is
  * canonical — otherwise the person stays in source with the offending
- * line named by its two spellings, and nothing they typed is rewritten.
+ * line named, and nothing they typed is rewritten behind them.
+ *
+ * Since 2026-09-23 that refusal carries the way out with it: **Format**
+ * (`formatBuffer`) rewrites the buffer to its canonical form in front of
+ * the person and opens the visual view on it. The owner asked for a
+ * formatter rather than a wall, and the wall now stands only where
+ * formatting cannot help — a construct the schema does not model.
  */
 const { view, set: setView } = useEditorView();
 const { getKbdKey } = useKbd();
@@ -197,19 +212,61 @@ async function showView(target: EditorViewMode): Promise<void> {
   if (status.value !== 'ready') return;
   if (view.value === 'visual') editorSurface.value?.flush?.();
   const mod = await loadEditorMount();
-  const decision = requestView(target, view.value, currentMarkdown.value, mod.probe, (markdown) => mod.toMarkdown(mod.fromMarkdown(markdown)));
+  const decision = requestView(target, view.value, currentMarkdown.value, mod.probe, mod.roundTrip);
   viewRefusal.value = decision.refusal;
   if (decision.view === view.value) {
     if (decision.refusal) viewAnnouncement.value = `Still in the source view: line ${decision.refusal.line} is not in canonical form.`;
     return;
   }
-  setView(decision.view);
+  await enterView(decision.view);
+}
+
+/** Puts the view up, says so, and hands focus to the surface that is now showing. */
+async function enterView(next: EditorViewMode): Promise<void> {
+  setView(next);
   const modifier = getKbdKey('meta');
-  viewAnnouncement.value =
-    decision.view === 'source' ? `Source view. Press ${modifier}E for the visual view.` : `Visual view. Press ${modifier}E for the source view.`;
+  viewAnnouncement.value = next === 'source' ? `Source view. Press ${modifier}E for the visual view.` : `Visual view. Press ${modifier}E for the source view.`;
   await nextTick();
-  if (decision.view === 'source') sourceSurface.value?.focus();
+  if (next === 'source') sourceSurface.value?.focus();
   else editorSurface.value?.focus?.();
+}
+
+/**
+ * Format (owner decision, 2026-09-23: "es mejor trabajar con un
+ * formateador"): the buffer is rewritten to its canonical form and the
+ * visual view opens on it. The rewrite is the *shown* text — the source
+ * surface is remounted on the new bytes, exactly as the canonical and
+ * corrected documents from a refused save are — so the person reads what
+ * changed instead of being told about it, and nothing happens behind
+ * their back.
+ *
+ * Offered only where it is a way out (`refusal.formattable`): a construct
+ * the schema does not model cannot be spelled canonically, and
+ * `formatSource` refuses to rewrite anything in that case (`~/utils/
+ * editor-view`).
+ */
+async function formatBuffer(): Promise<void> {
+  if (status.value !== 'ready' || view.value !== 'source') return;
+  const mod = await loadEditorMount();
+  const decision = formatSource(currentMarkdown.value, mod.probe, mod.roundTrip);
+  if (decision.markdown !== null) {
+    currentMarkdown.value = decision.markdown;
+    isDirty.value = decision.markdown !== savedMarkdown.value;
+    // Both surfaces read `markdown` once, on mount (their own notes); the
+    // key is what makes the new bytes the text on screen.
+    editorRemountKey.value += 1;
+  }
+  viewRefusal.value = decision.refusal;
+  if (decision.view === view.value) {
+    viewAnnouncement.value = decision.refusal
+      ? `Formatted, and still in the source view: line ${decision.refusal.line} cannot open in the visual view.`
+      : 'Formatted.';
+    await nextTick();
+    sourceSurface.value?.focus();
+    return;
+  }
+  await enterView(decision.view);
+  viewAnnouncement.value = `Formatted. ${viewAnnouncement.value}`;
 }
 
 function toggleView(): void {
@@ -359,12 +416,28 @@ function onBeforeUnload(event: BeforeUnloadEvent): void {
 onMounted(() => window.addEventListener('beforeunload', onBeforeUnload));
 onBeforeUnmount(() => window.removeEventListener('beforeunload', onBeforeUnload));
 
+/**
+ * The name `PageTitle` is showing: the session's until someone renames
+ * the page here, then theirs (optimistic), and the session's again if the
+ * rename is refused. The breadcrumb and the tab title read this, so the
+ * screen never says two names at once.
+ */
+const renamedTitle = ref<string | null>(null);
+const shownTitle = computed(() => renamedTitle.value ?? session.value?.title ?? '');
+
+// Declared here, below the name it reads: a save's confirmation says which
+// page was saved, and the name a person has just changed is the one it has
+// to use.
+watch(saveStatus, (now, before) => {
+  if (now === 'success' && before !== 'success') confirmed({ message: `Saved “${shownTitle.value}”.` });
+});
+
 useHead({ htmlAttrs: { lang: 'en' } });
-useSeoMeta({ title: () => (session.value?.title ? `Editing ${session.value.title} — deep-wiki` : 'deep-wiki') });
+useSeoMeta({ title: () => (shownTitle.value ? `Editing ${shownTitle.value} — deep-wiki` : 'deep-wiki') });
 </script>
 
 <template>
-  <AppShell :workspace-id="session?.workspaceId ?? null" :node-id="nodeId" :location="location" :title="session?.title || undefined" :trail="[{ label: 'Editing' }]" condensed>
+  <AppShell :workspace-id="session?.workspaceId ?? null" :node-id="nodeId" :location="location" :title="shownTitle || undefined" :trail="[{ label: 'Editing' }]" condensed>
     <!-- `condensed`: the lighter bar, because here the document must
          outrank the chrome — the breadcrumb keeps the page and "Editing"
          and folds the path above them into an overflow menu; the tree
@@ -627,8 +700,17 @@ useSeoMeta({ title: () => (session.value?.title ? `Editing ${session.value.title
            screen renders it in, so the text under it does not move when
            the mode changes. No eyebrow and no supporting sentence: the
            breadcrumb already says "Editing", and a heading block repeating
-           it would title the page twice. -->
-      <PageHeading :heading="session?.title ?? ''" />
+           it would title the page twice.
+
+           Since 2026-09-23 it is editable here as it is on the read
+           screen, and by the same component: a page's name is one thing,
+           changed in one way, wherever the person is standing. -->
+      <PageTitle
+        :node-id="nodeId"
+        :title="session?.title ?? ''"
+        :workspace-id="session?.workspaceId ?? null"
+        @update:title="renamedTitle = $event"
+      />
 
       <!-- The notices about the editor stand in the pane, directly above
            it, never in the contextual bar: measured at 320×900 with the
@@ -704,25 +786,33 @@ useSeoMeta({ title: () => (session.value?.title ? `Editing ${session.value.title
           <UButton size="xs" variant="outline" color="error" icon="i-lucide-refresh-cw" @click="onSave">Retry</UButton>
         </template>
       </InlineNotice>
-      <!-- `success`: "Saved." is §3's own example of a confirmation too
-           weak to act on ("Saved as revision 12 · 2 min ago" is the bar).
-           This names what was saved, and — `showSavedBanner` — stops
-           claiming it once the document is dirty again, since a stale
-           "Saved." next to unsaved edits is worse than no confirmation. -->
-      <InlineNotice v-else-if="showSavedBanner" tier="chip" tone="success" class="mb-4">
-        Saved “{{ session?.title }}”.
-      </InlineNotice>
       <!-- The source view's refusal: the chip tier, above the text area
-           it is about. The line is named by example — as typed beside as
-           the pipeline would write it — because "not canonical" alone is
-           not something a person can act on (§3, "recoverable"). -->
+           it is about. It names the line, shows the two spellings *when
+           it has two to show* — `spellings` is null for a divergence on a
+           blank line, which is what "As typed: — canonical:" with nothing
+           after either colon was (owner's report, 2026-09-23; the cause
+           and the fix are in `~/utils/editor-view`) — and carries Format
+           as its one action, because "not canonical" is not something a
+           person can act on and "write it the canonical way" was asking
+           them to be the formatter (§3, "recoverable … offers a real next
+           action"). Keeping the text as it is needs no control: the
+           editor is right below, and the sentence says so. -->
       <InlineNotice v-if="viewRefusal" tier="chip" tone="error" role="alert" class="mb-4" data-testid="editor-view-refusal">
         <template v-if="viewRefusal.construct">
           Line {{ viewRefusal.line }} holds {{ viewRefusal.construct }}, which the visual view does not support yet. Change it, or keep editing here.
         </template>
         <template v-else>
-          Line {{ viewRefusal.line }} is not in canonical form. As typed: <code class="font-mono">{{ viewRefusal.typed }}</code> — canonical:
-          <code class="font-mono">{{ viewRefusal.canonical }}</code> Write it the canonical way to open the visual view, or keep editing here.
+          Line {{ viewRefusal.line }} is not in canonical form.<template v-if="viewRefusal.spellings">
+            As typed: <code class="font-mono">{{ viewRefusal.spellings.typed }}</code> — canonical:
+            <code class="font-mono">{{ viewRefusal.spellings.canonical }}</code></template>
+          Format the page to open the visual view, or keep editing here.
+        </template>
+        <template v-if="viewRefusal.formattable" #actions>
+          <!-- The one action of a chip (§4.1's tier table, in
+               `InlineNotice`), Filled in the notice's own `error` role so
+               it reads as the way out rather than as one more thing on an
+               error-coloured row (§9.1). -->
+          <UButton size="xs" variant="solid" color="error" icon="i-lucide-wand-2" data-testid="editor-format" @click="formatBuffer">Format</UButton>
         </template>
       </InlineNotice>
       <p data-testid="editor-view-status" role="status" aria-live="polite" class="sr-only">{{ viewAnnouncement }}</p>
