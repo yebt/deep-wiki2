@@ -123,6 +123,28 @@ onBeforeUnmount(() => presence.stop());
 const offersPageSurfaces = computed(() => status.value !== 'forbidden' && status.value !== 'not-found');
 
 /**
+ * The page exists, is readable, and has nothing on it — a page the tree
+ * created that nobody has saved yet, or one whose author cleared it and
+ * saved (`markdown: ''` is a legal document; `savePage()` stores exactly
+ * those bytes). Both are the same thing to a reader: an empty document.
+ *
+ * Until 2026-09-23 the API answered `404 not found` for the first of the
+ * two, so this screen said "This page does not exist" about a page whose
+ * title the breadcrumb directly above it was showing — the owner's report
+ * (docs/TODO.md Findings, 2026-09-23). Absence and emptiness are different
+ * states with different next actions, which is §3's whole point about
+ * empty states: this one names the object in the product's vocabulary and
+ * carries the one path forward.
+ *
+ * It replaces the article rather than standing beside an empty one,
+ * because the article is what the comment overlay measures its marks
+ * against and a page with no content has no block to put one on. The
+ * page's own `<h1>` stays above it in either case, so the heading keeps
+ * one type role across every state this screen has (checklist §4.4).
+ */
+const isEmpty = computed(() => status.value === 'success' && html.value.trim() === '');
+
+/**
  * The comment overlay (comment-overlay spec: "The Client Composes
  * Indicators Onto Unchanged Cached HTML"; tasks.md 10.7 and 10.9). Three
  * pieces, each owned elsewhere and only wired here:
@@ -608,103 +630,123 @@ useSeoMeta({ title: () => (title.value ? `${title.value} — deep-wiki` : 'deep-
     <template v-else>
       <PageHeading :heading="title" />
 
-      <!-- The overlay's degraded states, above the article they are about
-           (see the script's own note). `role="status"` on the two the user
-           navigated into; `alert` on the one that failed. -->
-      <div
-        v-if="comments.orphaned.value.length > 0 || (unplacedThreadCount > 0 && !commentsHidden) || comments.status.value === 'network-error'"
-        class="mb-4 space-y-2"
-      >
-        <InlineNotice v-if="comments.orphaned.value.length > 0" data-testid="comments-orphaned" tier="chip" tone="warning">
-          {{ plural(comments.orphaned.value.length, 'comment') }} point{{ comments.orphaned.value.length === 1 ? 's' : '' }} at text that is no longer on this page.
-          <template #actions>
-            <UButton size="sm" variant="ghost" color="neutral" icon="i-lucide-message-square" @click="openAll">Show</UButton>
-          </template>
-        </InlineNotice>
-        <InlineNotice v-if="unplacedThreadCount > 0 && !commentsHidden" data-testid="comments-unplaced" tier="chip" tone="warning">
-          {{ plural(unplacedThreadCount, 'comment') }} can't be shown beside {{ unplacedThreadCount === 1 ? 'its' : 'their' }} text until this page is re-rendered.
-          <template #actions>
-            <UButton size="sm" variant="ghost" color="neutral" icon="i-lucide-message-square" @click="openAll">Show</UButton>
-          </template>
-        </InlineNotice>
-        <InlineNotice v-if="comments.status.value === 'network-error'" data-testid="comments-error" tier="chip" tone="error" role="alert">
-          {{ comments.message.value }}
-          <template #actions>
-            <UButton size="sm" variant="ghost" color="neutral" icon="i-lucide-refresh-cw" @click="comments.load">Retry</UButton>
-          </template>
-        </InlineNotice>
-      </div>
-
-      <!-- `relative isolate`: the marks are placed and the highlight is
-           drawn against this box, and `isolate` keeps the highlight's
-           `-z-10` behind the article rather than behind the page. The
-           article gives up 40px of end padding for the marks only below
-           `md` and only while a mark exists — from `md` up they stand in
-           the margin outside the column (see `CommentGutter`). -->
-      <div ref="overlayEl" class="relative isolate" @mouseover="onArticleMouseover" @mouseleave="hoveredBlockId = null">
-        <div
-          v-if="highlight"
-          data-testid="comment-highlight"
-          aria-hidden="true"
-          class="absolute -inset-x-2 -z-10 rounded-md bg-secondary-container"
-          :style="{ top: `${highlight.top}px`, height: `${highlight.height}px` }"
-        />
-        <!-- `html` is server-produced by remark-rehype + rehype-sanitize with an explicit allowlist (design.md D12); it is never client-supplied or user-editable at this route. -->
-        <!-- eslint-disable-next-line vue/no-v-html -->
-        <article ref="articleEl" class="doc-body text-doc-body text-default" :class="(placed.length > 0 || canStart) && !commentsHidden ? 'pe-10 md:pe-0' : undefined" v-html="html" />
-        <CommentGutter
-          v-if="!commentsHidden"
-          :marks="placed"
-          :blocks="blocks"
-          :active-block-id="panelOpen ? focusBlockId : null"
-          :hovered-block-id="hoveredBlockId"
-          :can-start="canStart"
-          @open="openBlock"
-          @start="startThreadOnBlock"
-        />
-        <!-- The floating "Comment" beside a selection (see the script's
-             note): a small tonal action — icon and word both (§4.3) —
-             at the selection's own place. `mousedown.prevent` keeps the
-             selection alive across the click that uses it. -->
-        <div v-if="selectionTarget" data-testid="comment-selection-action" class="absolute z-10" :style="{ top: `${selectionTarget.top}px`, left: `${selectionTarget.left}px` }">
-          <UButton size="sm" variant="soft" color="primary" icon="i-lucide-message-square-plus" @mousedown.prevent @click="startThreadOnSelection">
-            Comment
+      <!-- Nothing on the page yet (see `isEmpty`): the empty state §3 asks
+           for — genuinely empty, named in the product's vocabulary, with a
+           path forward — in place of the article, at `level="2"` because
+           the page's own `<h1>` stands above it. "Start editing" is the
+           history screen's own never-saved action, verbatim and at the same
+           emphasis (Filled tonal, docs/DESIGN-SYSTEM.md §9.1): checklist
+           §4.1 asks a new control to match the nearest existing one, and
+           the nearest one is the other screen this node has that can be
+           empty for exactly this reason. -->
+      <PageNotice v-if="isEmpty" icon="i-lucide-file-pen-line" heading="This page is empty" :level="2">
+        Nothing has been written on it yet. Open the editor to write the first paragraph.
+        <template #actions>
+          <UButton :to="pageEditUrl(workspaceSlug, nodeId)" variant="soft" color="primary" icon="i-lucide-pencil">
+            Start editing
           </UButton>
-        </div>
-      </div>
-
-      <CommentThreadPanel
-        :open="panelOpen"
-        :threads="comments.threads.value"
-        :focus-block-id="focusBlockId"
-        :unplaced-block-ids="unplaced"
-        :busy="busy"
-        :write-message="comments.writeMessage.value"
-        :announcement="announcement"
-        :pending-thread-ids="comments.pendingThreadIds.value"
-        :composing="composing"
-        :can-start="canStart"
-        @update:open="onPanelOpen"
-        @show-all="focusBlockId = null"
-        @reply="onReply"
-        @resolve="onResolve"
-        @locate="locate"
-        @start="startThreadOnBlock"
-      >
-        <template #composer>
-          <CommentComposer
-            v-if="newThread.target.value && workspaceId"
-            v-model:body="newThread.body.value"
-            v-model:mentions="newThread.mentions.value"
-            :target="newThread.target.value"
-            :status="newThread.status.value"
-            :workspace-id="workspaceId"
-            :page-id="nodeId"
-            @post="onPost"
-            @cancel="onCancel"
-          />
         </template>
-      </CommentThreadPanel>
+      </PageNotice>
+
+      <template v-else>
+        <!-- The overlay's degraded states, above the article they are about
+             (see the script's own note). `role="status"` on the two the user
+             navigated into; `alert` on the one that failed. -->
+        <div
+          v-if="comments.orphaned.value.length > 0 || (unplacedThreadCount > 0 && !commentsHidden) || comments.status.value === 'network-error'"
+          class="mb-4 space-y-2"
+        >
+          <InlineNotice v-if="comments.orphaned.value.length > 0" data-testid="comments-orphaned" tier="chip" tone="warning">
+            {{ plural(comments.orphaned.value.length, 'comment') }} point{{ comments.orphaned.value.length === 1 ? 's' : '' }} at text that is no longer on this page.
+            <template #actions>
+              <UButton size="sm" variant="ghost" color="neutral" icon="i-lucide-message-square" @click="openAll">Show</UButton>
+            </template>
+          </InlineNotice>
+          <InlineNotice v-if="unplacedThreadCount > 0 && !commentsHidden" data-testid="comments-unplaced" tier="chip" tone="warning">
+            {{ plural(unplacedThreadCount, 'comment') }} can't be shown beside {{ unplacedThreadCount === 1 ? 'its' : 'their' }} text until this page is re-rendered.
+            <template #actions>
+              <UButton size="sm" variant="ghost" color="neutral" icon="i-lucide-message-square" @click="openAll">Show</UButton>
+            </template>
+          </InlineNotice>
+          <InlineNotice v-if="comments.status.value === 'network-error'" data-testid="comments-error" tier="chip" tone="error" role="alert">
+            {{ comments.message.value }}
+            <template #actions>
+              <UButton size="sm" variant="ghost" color="neutral" icon="i-lucide-refresh-cw" @click="comments.load">Retry</UButton>
+            </template>
+          </InlineNotice>
+        </div>
+
+        <!-- `relative isolate`: the marks are placed and the highlight is
+             drawn against this box, and `isolate` keeps the highlight's
+             `-z-10` behind the article rather than behind the page. The
+             article gives up 40px of end padding for the marks only below
+             `md` and only while a mark exists — from `md` up they stand in
+             the margin outside the column (see `CommentGutter`). -->
+        <div ref="overlayEl" class="relative isolate" @mouseover="onArticleMouseover" @mouseleave="hoveredBlockId = null">
+          <div
+            v-if="highlight"
+            data-testid="comment-highlight"
+            aria-hidden="true"
+            class="absolute -inset-x-2 -z-10 rounded-md bg-secondary-container"
+            :style="{ top: `${highlight.top}px`, height: `${highlight.height}px` }"
+          />
+          <!-- `html` is server-produced by remark-rehype + rehype-sanitize with an explicit allowlist (design.md D12); it is never client-supplied or user-editable at this route. -->
+          <!-- eslint-disable-next-line vue/no-v-html -->
+          <article ref="articleEl" class="doc-body text-doc-body text-default" :class="(placed.length > 0 || canStart) && !commentsHidden ? 'pe-10 md:pe-0' : undefined" v-html="html" />
+          <CommentGutter
+            v-if="!commentsHidden"
+            :marks="placed"
+            :blocks="blocks"
+            :active-block-id="panelOpen ? focusBlockId : null"
+            :hovered-block-id="hoveredBlockId"
+            :can-start="canStart"
+            @open="openBlock"
+            @start="startThreadOnBlock"
+          />
+          <!-- The floating "Comment" beside a selection (see the script's
+               note): a small tonal action — icon and word both (§4.3) —
+               at the selection's own place. `mousedown.prevent` keeps the
+               selection alive across the click that uses it. -->
+          <div v-if="selectionTarget" data-testid="comment-selection-action" class="absolute z-10" :style="{ top: `${selectionTarget.top}px`, left: `${selectionTarget.left}px` }">
+            <UButton size="sm" variant="soft" color="primary" icon="i-lucide-message-square-plus" @mousedown.prevent @click="startThreadOnSelection">
+              Comment
+            </UButton>
+          </div>
+        </div>
+
+        <CommentThreadPanel
+          :open="panelOpen"
+          :threads="comments.threads.value"
+          :focus-block-id="focusBlockId"
+          :unplaced-block-ids="unplaced"
+          :busy="busy"
+          :write-message="comments.writeMessage.value"
+          :announcement="announcement"
+          :pending-thread-ids="comments.pendingThreadIds.value"
+          :composing="composing"
+          :can-start="canStart"
+          @update:open="onPanelOpen"
+          @show-all="focusBlockId = null"
+          @reply="onReply"
+          @resolve="onResolve"
+          @locate="locate"
+          @start="startThreadOnBlock"
+        >
+          <template #composer>
+            <CommentComposer
+              v-if="newThread.target.value && workspaceId"
+              v-model:body="newThread.body.value"
+              v-model:mentions="newThread.mentions.value"
+              :target="newThread.target.value"
+              :status="newThread.status.value"
+              :workspace-id="workspaceId"
+              :page-id="nodeId"
+              @post="onPost"
+              @cancel="onCancel"
+            />
+          </template>
+        </CommentThreadPanel>
+      </template>
     </template>
   </AppShell>
 </template>

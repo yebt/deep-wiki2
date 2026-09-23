@@ -16,8 +16,14 @@ export interface EditSessionReady {
    * first Save on an already-saved page sends a real
    * `expectedContentHash` instead of `null` (docs/TODO.md Finding, this
    * task).
+   *
+   * `null` when the page has no content row yet — a page the tree created
+   * that nobody has saved. That is the same `null` `savePage()` reads as
+   * "the first save", so the value travels from the session response into
+   * `PUT /pages/:id` untouched rather than being coerced into a string that
+   * would match nothing (docs/TODO.md Findings, 2026-09-23).
    */
-  readonly contentHash: string;
+  readonly contentHash: string | null;
   readonly lock: { readonly holderUserId: string; readonly acquiredAt: string; readonly heartbeatAt: string };
 }
 

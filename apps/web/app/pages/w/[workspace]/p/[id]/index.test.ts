@@ -292,6 +292,65 @@ describe('read-mode page', () => {
     expect(component.text()).toMatch(/deliberately doesn't say which/);
   });
 
+  /**
+   * A page the tree has created but nobody has saved yet
+   * (docs/TODO.md Findings, 2026-09-23). The API answered `404 not found`
+   * for exactly this until that date, so the screen said "This page does
+   * not exist" about a page whose title the breadcrumb above it was
+   * showing. An empty document is a state of this screen, not the absence
+   * of one: the page's own `<h1>` stands, and below it the empty state
+   * §3 asks for — named in the product's vocabulary, with a path forward,
+   * and the same path the history screen's never-saved state already
+   * offers ("Start editing", checklist §4.1: match the nearest screen).
+   */
+  describe('a page with nothing on it yet', () => {
+    test('keeps the page title and shows an empty state instead of a not-found notice', async () => {
+      mockRead({ status: 'success', title: 'A Page', html: '', workspaceId: 'ws-1' });
+      const component = await mount();
+
+      expect(component.get('h1').text()).toBe('A Page');
+      expect(component.text()).not.toMatch(/does not exist/i);
+      expect(component.text()).toMatch(/empty/i);
+    });
+
+    test('offers "Start editing", pointing at this page’s editor', async () => {
+      mockRead({ status: 'success', title: 'A Page', html: '', workspaceId: 'ws-1' });
+      const component = await mount();
+
+      const start = component.findAll('a').find((anchor) => /start editing/i.test(anchor.text()));
+      expect(start).toBeDefined();
+      expect(start!.attributes('href')).toBe('/w/acme/p/page-1/edit');
+    });
+
+    // §4.4: the screen's `<h1>` keeps one type role across every state it
+    // has, so the empty notice is the page's `<h2>`, not a second `<h1>`.
+    test('the empty notice is an h2 under the page’s one h1', async () => {
+      mockRead({ status: 'success', title: 'A Page', html: '', workspaceId: 'ws-1' });
+      const component = await mount();
+
+      expect(component.findAll('h1')).toHaveLength(1);
+      expect(component.findAll('h2').some((heading) => /empty/i.test(heading.text()))).toBe(true);
+    });
+
+    // The article is what the comment overlay measures itself against, and
+    // a page with no content has no block to comment on: the notice stands
+    // in its place rather than beside an empty one.
+    test('renders no empty article for the overlay to measure', async () => {
+      mockRead({ status: 'success', title: 'A Page', html: '', workspaceId: 'ws-1' });
+      const component = await mount();
+
+      expect(component.find('article').exists()).toBe(false);
+    });
+
+    test('a page with content renders the article and no empty state', async () => {
+      mockRead({ status: 'success', title: 'A Page', html: '<p>Hello from cache</p>', workspaceId: 'ws-1' });
+      const component = await mount();
+
+      expect(component.get('article').text()).toContain('Hello from cache');
+      expect(component.text()).not.toMatch(/nothing has been written/i);
+    });
+  });
+
   test('renders a recoverable error state with a retry action that reloads', async () => {
     const load = mockRead({ status: 'network-error', message: 'Cannot reach the server.' });
     const component = await mount();

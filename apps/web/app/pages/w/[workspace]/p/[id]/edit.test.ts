@@ -310,6 +310,50 @@ describe('edit-mode page', () => {
     expect(save).toHaveBeenCalledWith('# Hi\n\nedited\n', 'server-hash');
   });
 
+  /**
+   * The other half of the never-saved page (docs/TODO.md Findings,
+   * 2026-09-23). `GET /pages/:id/edit-session` answers `contentHash: null`
+   * for a page whose `page_content` row does not exist yet, which is
+   * exactly what `savePage()` reads as "the first save" — so the value is
+   * forwarded as it arrives and nothing coerces it to a string. The test
+   * above is the mirror of this one: seeding a real hash must not become
+   * "seed something, anything".
+   */
+  test('forwards a null edit-session content hash to the first Save on a page that has never been saved', async () => {
+    useLockHeartbeatMock.mockReturnValue({ status: ref('idle'), start: vi.fn(async () => {}), stop: vi.fn() });
+    const save = vi.fn(async () => {});
+    useSavePageMock.mockReturnValue({
+      status: ref('idle'),
+      contentHash: ref<string | null>(null),
+      canonical: ref(null),
+      corrected: ref(null),
+      anchors: ref([]),
+      message: ref(''),
+      save,
+    });
+    mockPresence();
+    mockFrame();
+    mockSession({
+      status: 'ready',
+      session: {
+        markdown: '',
+        title: 'A Page',
+        workspaceId: 'ws-1',
+        contentHash: null,
+        lock: { holderUserId: 'me', acquiredAt: 'x', heartbeatAt: 'x' },
+      },
+    });
+    const component = await mountSuspended(PageInApp, { global: { stubs: { EditorSurface: true, WorkspaceSidebar: true } } });
+    const editorStub = component.findComponent({ name: 'EditorSurface' });
+    editorStub.vm.$emit('update', '# First\n');
+    await component.vm.$nextTick();
+
+    const saveButton = component.findAll('button').find((button) => /Save/.test(button.text()))!;
+    await saveButton.trigger('click');
+
+    expect(save).toHaveBeenCalledWith('# First\n', null);
+  });
+
   // The cause of "sometimes an empty history entry is saved" on the
   // client side (docs/TODO.md Findings, 2026-09-17): every editor
   // transaction marked the buffer dirty, including one that left the
