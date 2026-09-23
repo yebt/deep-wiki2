@@ -389,12 +389,16 @@ export const pageTags = pgTable('page_tags', {
  * The soft lock (content-and-editor design.md "The soft lock, coherent
  * without presence"). No expiry column: a lock is held iff
  * `heartbeat_at > now() - PAGE_LOCK_TTL_SECONDS`, computed on read by
- * `packages/db/src/locks/page-lock.ts`. The composite FK into
- * `page_content` is declared only in the migration SQL.
+ * `packages/db/src/locks/page-lock.ts`. The composite FK into `nodes`
+ * — `(node_id, workspace_id, node_type) -> (id, workspace_id, type)`, and
+ * deliberately not into `page_content`, so an author can lock a page
+ * before its first save (0023) — is declared only in the migration SQL,
+ * as is `node_type`'s CHECK pinning it to 'page'.
  */
 export const pageLocks = pgTable('page_locks', {
   nodeId: uuid('node_id').primaryKey(),
   workspaceId: uuid('workspace_id').notNull(),
+  nodeType: nodeType('node_type').notNull().default('page'),
   holderUserId: uuid('holder_user_id')
     .notNull()
     .references(() => users.id, { onDelete: 'cascade' }),

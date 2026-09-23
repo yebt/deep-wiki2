@@ -166,17 +166,40 @@ describe('after migrate: hand-written objects exist', () => {
     expect(tagUnique).toHaveLength(1);
   });
 
-  test('page_locks exists with its composite foreign key into page_content', async () => {
+  /**
+   * 0023 moved this key off `page_content` and onto `nodes`. The old
+   * spelling pinned the lock to the content row, which made "content
+   * exists" a precondition for holding a lock — invisible until the read
+   * route stopped answering 404 for a page that had never been saved
+   * (docs/TODO.md Findings, 2026-09-23), at which point taking the first
+   * lock on a brand-new page became a constraint violation. Both halves are
+   * asserted: the old constraint is gone, and the new one pins tenancy AND
+   * node type, so a lock on a chapter stays unrepresentable.
+   */
+  test('page_locks exists with its composite foreign key into nodes, not into page_content', async () => {
     const tables = await sql<{ tablename: string }[]>`
       SELECT tablename FROM pg_tables WHERE tablename = 'page_locks'
     `;
     expect(tables).toHaveLength(1);
 
-    const fk = await sql<{ conname: string }[]>`
+    const retired = await sql<{ conname: string }[]>`
       SELECT conname FROM pg_constraint
-      WHERE conrelid = 'page_locks'::regclass AND conname = 'page_locks_page_fk' AND contype = 'f'
+      WHERE conrelid = 'page_locks'::regclass AND conname = 'page_locks_page_fk'
+    `;
+    expect(retired).toHaveLength(0);
+
+    const fk = await sql<{ conname: string; definition: string }[]>`
+      SELECT conname, pg_get_constraintdef(oid) AS definition FROM pg_constraint
+      WHERE conrelid = 'page_locks'::regclass AND conname = 'page_locks_node_fk' AND contype = 'f'
     `;
     expect(fk).toHaveLength(1);
+    expect(fk[0]!.definition).toContain('REFERENCES nodes(id, workspace_id, type)');
+
+    const check = await sql<{ conname: string }[]>`
+      SELECT conname FROM pg_constraint
+      WHERE conrelid = 'page_locks'::regclass AND conname = 'page_locks_node_type_chk' AND contype = 'c'
+    `;
+    expect(check).toHaveLength(1);
   });
 
   test('page_blocks carries the split_from column and its composite self-referential foreign key', async () => {

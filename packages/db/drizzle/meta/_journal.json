@@ -162,6 +162,13 @@
       "when": 1735689600022,
       "tag": "0022_trash",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1735689600023,
+      "tag": "0023_page_lock_before_first_save",
+      "breakpoints": true
     }
   ]
 }

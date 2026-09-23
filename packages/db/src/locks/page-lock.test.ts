@@ -62,6 +62,21 @@ async function seedPageWithContent(): Promise<{ workspaceId: string; nodeId: str
   return { workspaceId: workspace!.id as string, nodeId: page!.id as string, userA: userA!.id as string, userB: userB!.id as string };
 }
 
+/**
+ * The same tree with no `page_content` row at all — a page the navigation
+ * tree has created and nobody has saved yet. `page_locks` pointed its
+ * composite foreign key at `page_content` until 0023, so seeding this shape
+ * and taking a lock on it raised a foreign-key violation; no fixture in
+ * this file could produce it, which is why the coupling survived until the
+ * read route stopped answering 404 for a never-saved page (docs/TODO.md
+ * Findings, 2026-09-23).
+ */
+async function seedPageNeverSaved(): Promise<{ workspaceId: string; nodeId: string; userA: string; userB: string }> {
+  const seeded = await seedPageWithContent();
+  await sql`DELETE FROM page_content WHERE node_id = ${seeded.nodeId}`;
+  return seeded;
+}
+
 // document-modes: Edit Mode Acquires A Soft Lock On Entry; Heartbeat Keeps
 // The Lock Alive; Lock Expiry Is Evaluated Server-Side On Read.
 describe('acquireLock', () => {
@@ -74,6 +89,31 @@ describe('acquireLock', () => {
     if (result.outcome === 'acquired') {
       expect(result.holderUserId).toBe(userA);
     }
+  });
+
+  test('a page that has never been saved can still be locked', async () => {
+    const { workspaceId, nodeId, userA } = await seedPageNeverSaved();
+
+    const result = await acquireLock(sql, { nodeId, workspaceId, userId: userA, ttlSeconds: TTL_SECONDS });
+
+    expect(result.outcome).toBe('acquired');
+    const [row] = await sql<{ holder_user_id: string }[]>`SELECT holder_user_id FROM page_locks WHERE node_id = ${nodeId}`;
+    expect(row!.holder_user_id).toBe(userA);
+  });
+
+  // The lock is on the node, but only on a node that may hold content: the
+  // key 0023 moved to still pins the node's type, so a chapter cannot be
+  // locked even though it is a perfectly good node.
+  test('a node that is not a page cannot be locked', async () => {
+    const { workspaceId, nodeId, userA } = await seedPageNeverSaved();
+    const [chapter] = await sql<{ id: string }[]>`
+      INSERT INTO nodes (workspace_id, parent_id, type, path, position, slug, title)
+      SELECT ${workspaceId}, parent_id, 'chapter', '', 1, ${`chapter-${crypto.randomUUID()}`}, 'A Chapter'
+        FROM nodes WHERE id = ${nodeId}
+      RETURNING id
+    `;
+
+    await expect(acquireLock(sql, { nodeId: chapter!.id, workspaceId, userId: userA, ttlSeconds: TTL_SECONDS })).rejects.toThrow();
   });
 
   test('a second user cannot silently seize an active lock', async () => {
