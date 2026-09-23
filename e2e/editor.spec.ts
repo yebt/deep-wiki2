@@ -136,6 +136,19 @@ async function caretToEnd(editor: Locator): Promise<void> {
   await expect(editor, 'ProseMirror has read the caret the click placed').not.toHaveAttribute('data-transactions', before);
 }
 
+/**
+ * The right edge of the tree header's *content* box — the header carries
+ * its own horizontal padding, so the row's bounding box ends outside the
+ * last control by exactly that much. Read rather than hardcoded: the
+ * padding is a token and this test is about the layout, not the token.
+ */
+async function treeHeaderContentRight(scope: Locator): Promise<number> {
+  const header = scope.getByRole('group', { name: 'Tree actions' });
+  const box = (await header.boundingBox())!;
+  const paddingRight = await header.evaluate((el) => Number.parseFloat(getComputedStyle(el).paddingRight));
+  return box.x + box.width - paddingRight;
+}
+
 async function signInAs(page: Page, token: string): Promise<void> {
   await page.context().addCookies([{ name: 'session', value: token, domain: 'localhost', path: '/', httpOnly: true, secure: true, sameSite: 'Lax' }]);
 }
@@ -1016,22 +1029,23 @@ for (const theme of ['light', 'dark'] as const) {
       await expect(page.locator(`#${describedBy}`)).toContainText('\\');
       await page.keyboard.press('Escape');
 
-      // The sidebar's toolbar row fills the pane: New… grows, the other two
-      // keep their natural widths, and nothing is left empty to the right.
-      // The row's last control has been the icon-only Delete since
-      // 2026-09-18; this assertion still named Rename… and had been failing
-      // by exactly Delete's 36px ever since (docs/TODO.md Findings,
-      // 2026-09-23). It asks for the row's *last* control now, so a fourth
-      // one cannot silently walk past the edge either.
+      // The sidebar's header row fills the pane: New… grows, the two
+      // icon-only controls keep their natural widths, and nothing is left
+      // empty to the right. This assertion asks for the row's **last**
+      // control by name rather than naming the second one: it named
+      // Rename… and failed by exactly Delete's 36px from 2026-09-18, and
+      // Rename… and Delete both left the header on 2026-09-23 when the
+      // tree moved them onto the row menu (docs/TODO.md Findings,
+      // 2026-09-23). The last control is Collapse all.
       const createBox = (await sidebar.getByTestId('tree-create-open').boundingBox())!;
-      const renameBox = (await sidebar.getByTestId('tree-rename-open').boundingBox())!;
-      const deleteBox = (await sidebar.getByTestId('tree-delete-open').boundingBox())!;
-      const rowBox = (await sidebar.getByTestId('tree-create-open').locator('..').boundingBox())!;
-      expect(createBox.width, 'New… grows past its natural width').toBeGreaterThan(renameBox.width);
-      expect(Math.abs(deleteBox.x + deleteBox.width - (rowBox.x + rowBox.width)), 'the last control ends at the row\'s edge').toBeLessThanOrEqual(1);
+      const filterBox = (await sidebar.getByTestId('tree-filter-toggle').boundingBox())!;
+      const lastBox = (await sidebar.getByTestId('tree-collapse-all').boundingBox())!;
+      const rowRight = await treeHeaderContentRight(sidebar);
+      expect(createBox.width, 'New… grows past its natural width').toBeGreaterThan(filterBox.width);
+      expect(Math.abs(lastBox.x + lastBox.width - rowRight), 'the last control ends at the row\'s edge').toBeLessThanOrEqual(1);
       expect(Math.round(createBox.height)).toBe(32);
-      expect(Math.round(renameBox.height)).toBe(32);
-      expect(Math.round(deleteBox.height)).toBe(32);
+      expect(Math.round(filterBox.height)).toBe(32);
+      expect(Math.round(lastBox.height)).toBe(32);
 
       // The same title in the same box, and the prose on the same column:
       // the text does not move under the cursor when the mode changes.
@@ -1237,20 +1251,18 @@ test.describe('inside the workspace frame, 320x900 light', () => {
     // the geometry is polled until the row has settled at its width.
     await expect
       .poll(async () => {
-        const last = (await drawer.getByTestId('tree-delete-open').boundingBox())!;
-        const row = (await drawer.getByTestId('tree-create-open').locator('..').boundingBox())!;
-        return Math.abs(last.x + last.width - (row.x + row.width));
+        const last = (await drawer.getByTestId('tree-collapse-all').boundingBox())!;
+        return Math.abs(last.x + last.width - (await treeHeaderContentRight(drawer)));
       })
       .toBeLessThanOrEqual(1);
     const createBox = (await drawer.getByTestId('tree-create-open').boundingBox())!;
-    const renameBox = (await drawer.getByTestId('tree-rename-open').boundingBox())!;
-    const deleteBox = (await drawer.getByTestId('tree-delete-open').boundingBox())!;
-    const rowBox = (await drawer.getByTestId('tree-create-open').locator('..').boundingBox())!;
-    expect(createBox.width, 'New… grows past its natural width').toBeGreaterThan(renameBox.width);
-    expect(Math.abs(deleteBox.x + deleteBox.width - (rowBox.x + rowBox.width)), 'the last control ends at the row\'s edge').toBeLessThanOrEqual(1);
+    const filterBox = (await drawer.getByTestId('tree-filter-toggle').boundingBox())!;
+    const lastBox = (await drawer.getByTestId('tree-collapse-all').boundingBox())!;
+    expect(createBox.width, 'New… grows past its natural width').toBeGreaterThan(filterBox.width);
+    expect(Math.abs(lastBox.x + lastBox.width - (await treeHeaderContentRight(drawer))), 'the last control ends at the row\'s edge').toBeLessThanOrEqual(1);
     expect(Math.round(createBox.height)).toBe(32);
-    expect(Math.round(renameBox.height)).toBe(32);
-    expect(Math.round(deleteBox.height)).toBe(32);
+    expect(Math.round(filterBox.height)).toBe(32);
+    expect(Math.round(lastBox.height)).toBe(32);
     await expectNoHorizontalOverflow(page, 'drawer 320');
     await shotShell(page, 'sidebar-320-light');
   });

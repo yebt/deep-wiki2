@@ -63,26 +63,33 @@ function row(page: Page, title: string): Locator {
 }
 
 /**
- * One pass of the toolbar's "New…" dialog: pick the kind, name it, submit,
- * and wait for the row the response drew. `parentTitle` is `null` for the
- * top level, where the hierarchy leaves exactly one location and the
- * dialog offers no choice of it.
+ * One pass of the tree header's "New…": choose where, choose the kind when
+ * the hierarchy leaves a choice, type the name in the row itself, Enter.
+ * `parentTitle` is `null` for the top level.
  *
  * Focus, not a click, selects the parent row: a click on a container folds
  * it (`e2e/tree-writes.spec.ts`'s own note), and the tree's focus is its
  * selection — which is what "New…" reads to decide where the new node goes.
+ *
+ * `LEGAL_PARENT_TYPES` decides whether a menu opens at all: the workspace
+ * root takes only a shelf and a shelf only a book, so those two go straight
+ * to the draft row; a book takes a chapter or a page, so that one asks.
+ * There is no creation dialog any more (2026-09-23, `feat/tree-like-vscode`).
  */
-async function createFromToolbar(page: Page, parentTitle: string | null, kind: 'Shelf' | 'Book' | 'Chapter' | 'Page', title: string): Promise<void> {
+async function createInTree(page: Page, parentTitle: string | null, kind: 'Shelf' | 'Book' | 'Chapter' | 'Page', title: string): Promise<void> {
   if (parentTitle) await row(page, parentTitle).focus();
   await page.getByRole('button', { name: 'New…' }).click();
 
-  const location = page.getByTestId('tree-create-location-fixed').or(page.getByTestId('tree-create-location'));
-  await expect(location).toContainText(parentTitle ?? 'top level');
-  await page.getByTestId('tree-create-type').getByLabel(kind, { exact: true }).check();
-  await page.getByTestId('tree-create-title').fill(title);
-  await page.getByTestId('tree-create-submit').click();
+  const menu = page.getByRole('menu');
+  if (await menu.isVisible().catch(() => false)) await menu.getByRole('menuitem', { name: kind, exact: true }).click();
+
+  const field = page.locator('[data-row-editor] input');
+  await expect(field).toBeFocused({ timeout: 30_000 });
+  await field.fill(title);
+  await field.press('Enter');
 
   await expect(row(page, title)).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByTestId('tree-draft-row')).toHaveCount(0);
 }
 
 /** The four titles one run of the journey makes, unique per run so `(parent_id, slug)` never collides. */
@@ -106,10 +113,10 @@ async function buildBranch(page: Page, fixtures: CreateOpenFixtures, label: stri
   // The dev server compiles the dashboard route on first visit; everything after is warm.
   await expect(page.getByRole('button', { name: 'New…' })).toBeVisible({ timeout: 180_000 });
 
-  await createFromToolbar(page, null, 'Shelf', built.shelf);
-  await createFromToolbar(page, built.shelf, 'Book', built.book);
-  await createFromToolbar(page, built.book, 'Chapter', built.chapter);
-  await createFromToolbar(page, built.chapter, 'Page', built.page);
+  await createInTree(page, null, 'Shelf', built.shelf);
+  await createInTree(page, built.shelf, 'Book', built.book);
+  await createInTree(page, built.book, 'Chapter', built.chapter);
+  await createInTree(page, built.chapter, 'Page', built.page);
   return built;
 }
 
