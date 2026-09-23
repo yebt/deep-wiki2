@@ -56,11 +56,17 @@
  *   elsewhere it stays in the menu, disabled, with the reason on show.
  */
 import type { ContextMenuItem } from '@nuxt/ui';
-import NavigationTreeActions from '~/components/NavigationTreeActions.vue';
+import type { NodeType } from '@deep-wiki/contracts';
 import type { TreeNode } from '~/composables/useTree';
 import { deleteNode, type ForceDeleteFetcher, type TrashFetcher } from '~/composables/useTrash';
 import { useTreeFilter } from '~/composables/useTreeFilter';
-import { deleteRowAction, treeRowActions, type TreeRowAction } from '~/composables/useTreeRowActions';
+import { NODE_TYPE_LABELS, deleteRowAction, treeRowActions, type TreeRowAction } from '~/composables/useTreeRowActions';
+import {
+  useTreeRowEditor,
+  type CreateNodeFetcher,
+  type RenameNodeFetcher,
+  type TreeRowEditorBinding,
+} from '~/composables/useTreeRowEditor';
 import { pageUrl, trashUrl } from '~/utils/routes';
 
 const props = defineProps<{
@@ -72,10 +78,12 @@ const props = defineProps<{
   /** Injected in tests, exactly as `useTree` takes its fetchers. */
   trashFetcher?: TrashFetcher;
   forceDeleteFetcher?: ForceDeleteFetcher;
+  createFetcher?: CreateNodeFetcher;
+  renameFetcher?: RenameNodeFetcher;
 }>();
 
 const tree = useWorkspaceTree(() => props.workspaceId);
-const { status, nodes, rootId, message, manageable, isOwner, collapsedIds, selectedId, load, reorder, applyCreated, applyRenamed, removeNode, reveal } = tree;
+const { status, nodes, rootId, message, manageable, isOwner, collapsedIds, selectedId, load, reorder, applyCreated, applyRenamed, removeNode, reveal, pathTo } = tree;
 
 /**
  * The filter owns which rows are shown and which folds apply: the
@@ -83,7 +91,7 @@ const { status, nodes, rootId, message, manageable, isOwner, collapsedIds, selec
  * below that draws or walks the tree reads these two, never `nodes` and
  * `collapsedIds` directly.
  */
-const filter = useTreeFilter(nodes, collapsedIds, tree.toggleCollapsed);
+const filter = useTreeFilter(nodes, collapsedIds, tree.toggleCollapsed, tree.collapseAll);
 const shownNodes = filter.shownNodes;
 const shownCollapsedIds = filter.effectiveCollapsedIds;
 const toggleCollapsed = filter.toggleCollapsed;
@@ -236,6 +244,13 @@ function onKeydown({ event, node, parentId, index }: { event: KeyboardEvent; nod
   }
 
   switch (event.key) {
+    // The two writes the header no longer carries (owner criterion,
+    // 2026-09-23): both products put rename on `F2` and delete on the
+    // `Delete` key, and both keep them out of the title bar.
+    case 'F2':
+      event.preventDefault();
+      startRename(node.id);
+      break;
     case 'Delete':
       event.preventDefault();
       void deleteRow(node.id);
@@ -298,7 +313,116 @@ function onToggle(nodeId: string): void {
 }
 
 const KEYBOARD_HELP =
-  'Arrow keys move through the tree, Enter opens a page or folds a shelf, book or chapter, Alt with the arrow keys moves an item among its siblings, Delete moves an item to the trash, and Shift+F10 opens a row’s menu.';
+  'Arrow keys move through the tree, Enter opens a page or folds a shelf, book or chapter, Alt with the arrow keys moves an item among its siblings, F2 renames an item where it stands, Delete moves an item to the trash, and Shift+F10 opens a row’s menu.';
+
+/* ─── Naming a row, in the row ────────────────────────────────────────
+ * The owner rejected the tree's create and rename dialogs on 2026-09-23.
+ * Both are now a field drawn in the tree — a draft row under the parent a
+ * creation names, the title replaced in place for a rename — and both run
+ * through the one state machine (`useTreeRowEditor`), so the two surfaces
+ * that can start them (the header's `New…`, and the row's own menu or
+ * `F2`) cannot drift apart.
+ *
+ * The write stays optimistic in the sense the rest of this file already
+ * is: the row is drawn from the response of the request that made it
+ * (`applyCreated`, `applyRenamed`), never by asking for the tree again.
+ */
+const rowEditor = useTreeRowEditor({ createFetcher: props.createFetcher, renameFetcher: props.renameFetcher });
+
+/** The reason a write was refused in a way the field could not fix — beside the tree, where a refused drag's reason already stands. */
+const writeError = ref<string | null>(null);
+/** The row focus goes back to when the field closes. */
+let editorReturnId: string | null = null;
+
+/** A creation at the top level: its draft row belongs to the tree's own list, not to any row. */
+const rootDraft = computed(() => {
+  const draft = rowEditor.state.value?.draft;
+  return draft?.mode === 'create' && draft.parentId === (rootId.value ?? '');
+});
+
+const editorBinding = computed<TreeRowEditorBinding | null>(() =>
+  rowEditor.state.value
+    ? { snapshot: rowEditor.state.value, setValue: rowEditor.setValue, commit: onEditorCommit, cancel: onEditorCancel }
+    : null,
+);
+
+/** Start naming a new node under `parentId`. The parent is unfolded first, or the draft row would be typed into behind a fold. */
+function startCreate(target: { parentId: string; type: NodeType }): void {
+  writeError.value = null;
+  const trail = pathTo(target.parentId);
+  const parent = trail[trail.length - 1] ?? null;
+  if (parent && shownCollapsedIds.value.has(parent.id)) toggleCollapsed(parent.id);
+  editorReturnId = activeId.value;
+  rowEditor.startCreate({
+    parentId: target.parentId,
+    type: target.type,
+    depth: trail.length,
+    parentTitle: parent?.title ?? null,
+  });
+}
+
+function startRename(nodeId: string): void {
+  const node = nodeById(nodeId);
+  if (!node) return;
+  writeError.value = null;
+  editorReturnId = nodeId;
+  activeId.value = nodeId;
+  selectedId.value = nodeId;
+  rowEditor.startRename({ id: node.id, type: node.type, title: node.title });
+}
+
+async function onEditorCommit(): Promise<void> {
+  const outcome = await rowEditor.commit();
+  switch (outcome.kind) {
+    case 'created': {
+      applyCreated(outcome.node);
+      const where = outcome.node.parentId === (rootId.value ?? '') ? 'the top level' : `“${pathTo(outcome.node.parentId).at(-1)?.title ?? ''}”`;
+      announcement.value = `Created ${NODE_TYPE_LABELS[outcome.node.type].toLowerCase()} “${outcome.node.title}” in ${where}.`;
+      // Selected and opened: the thing just made is the thing being worked
+      // on. A page has a screen to go to; a shelf, book or chapter has
+      // none, so being picked and focused is all "opened" can mean for it.
+      selectedId.value = outcome.node.id;
+      await nextTick();
+      focusNode(outcome.node.id);
+      if (outcome.node.type === 'page') void navigateTo(pageUrl(props.workspaceSlug ?? '', outcome.node.id));
+      break;
+    }
+    case 'renamed':
+      applyRenamed(outcome.node);
+      announcement.value = `Renamed to “${outcome.node.title}”.`;
+      await nextTick();
+      focusNode(outcome.node.id);
+      break;
+    case 'unchanged':
+      await nextTick();
+      focusNode(outcome.nodeId);
+      break;
+    case 'abandoned':
+      writeError.value = outcome.message;
+      await nextTick();
+      focusNode(editorReturnId ?? undefined);
+      break;
+    default:
+      // `kept` leaves the field open with the refusal in it; `ignored` was
+      // a blank name or a second Enter. Neither closes anything.
+      break;
+  }
+}
+
+function onEditorCancel(): void {
+  const outcome = rowEditor.cancel();
+  if (outcome.kind !== 'cancelled') return;
+  const back = outcome.draft.mode === 'rename' ? outcome.draft.nodeId : editorReturnId;
+  void nextTick(() => focusNode(back ?? undefined));
+}
+
+/** Fold every container the tree is showing, and say so — the header's third control. */
+function collapseAllRows(): void {
+  if (!filter.canCollapseAll.value) return;
+  const folded = filter.collapsibleIds.value.length;
+  filter.collapseAll();
+  announcement.value = `Collapsed ${folded} ${folded === 1 ? 'item' : 'items'}.`;
+}
 
 /* ─── Delete ──────────────────────────────────────────────────────────
  * One flow for the menu, the toolbar and the key (`useTrash.deleteNode`):
@@ -371,7 +495,6 @@ async function deleteRow(nodeId: string): Promise<void> {
  * The `⋯` button and the keyboard both go through the same event, so
  * there is exactly one way a menu opens.
  */
-const actionsRef = ref<InstanceType<typeof NavigationTreeActions> | null>(null);
 const menuEntry = ref<FlatNode | null>(null);
 const menuOpen = ref(false);
 /** What the menu asked for once it has closed and focus is back on the row — a dialog opened before that would return focus to a menu item that no longer exists. */
@@ -447,10 +570,12 @@ function runAction(entry: FlatNode, action: TreeRowAction): void {
   const { node, parentId, index, siblings } = entry;
   switch (action.kind) {
     case 'create':
-      afterMenuClose = () => actionsRef.value?.openCreate(action.childType);
+      // The invocation named the kind ("New page…" on a book), so there is
+      // nothing left to ask: the draft row opens under this row at once.
+      if (action.childType) afterMenuClose = () => startCreate({ parentId: node.id, type: action.childType! });
       break;
     case 'rename':
-      afterMenuClose = () => actionsRef.value?.openRename();
+      afterMenuClose = () => startRename(node.id);
       break;
     case 'move-up':
       if (index > 0) void onReorder({ draggedId: node.id, newParentId: parentId, newIndex: index - 1 });
@@ -548,61 +673,46 @@ const menuItems = computed<ContextMenuItem[][]>(() => {
 
 <template>
   <div ref="rootEl" class="flex min-h-0 flex-1 flex-col gap-2">
-    <!-- The write affordances, above the tree and outside it: a control
-         inside a row would sit on top of the row's drag-and-drop and its
-         `Alt`-arrow reorder. -->
+    <!-- The section headline of a navigation drawer, and beside it the one
+         piece of documentation the pane carries: `title-small` on
+         `on-surface-variant` (docs/DESIGN-SYSTEM.md §9.2). The `?` is not
+         an action on the tree — it states the keys, which
+         docs/UI-CHECKLIST.md §5 requires to be named in the UI and not only
+         in a comment — so it stands with the label rather than in the
+         header's action group below. -->
+    <div class="flex items-center justify-between gap-2 px-2">
+      <span id="navigation-tree-heading" class="text-title-small text-muted">Contents</span>
+      <UTooltip :text="KEYBOARD_HELP" :ui="{ content: 'max-w-64 h-auto py-2 text-wrap' }">
+        <UButton
+          icon="i-lucide-circle-help"
+          variant="ghost"
+          color="neutral"
+          size="xs"
+          square
+          aria-label="Keyboard help"
+          aria-describedby="navigation-tree-keyboard-help"
+        />
+      </UTooltip>
+      <p id="navigation-tree-keyboard-help" class="sr-only">{{ KEYBOARD_HELP }}</p>
+    </div>
+
+    <!-- The header: New…, Filter, Collapse all. Nothing destructive,
+         nothing that renames — both live on the row's own menu and on the
+         keyboard (owner criterion, 2026-09-23; `NavigationTreeActions` has
+         the reasoning and the two precedents). -->
     <NavigationTreeActions
       v-if="status === 'success'"
-      ref="actionsRef"
       :nodes="nodes"
       :root-id="rootId"
       :selected-id="selectedId"
-      :manageable="manageable"
-      :is-owner="isOwner"
-      @created="applyCreated"
-      @renamed="applyRenamed"
-      @delete="deleteRow"
+      :filter-open="filter.open.value"
+      :filter-box-id="FILTER_BOX_ID"
+      :can-filter="nodes.length > 0"
+      :can-collapse-all="filter.canCollapseAll.value"
+      @create="startCreate"
+      @toggle-filter="toggleFilter"
+      @collapse-all="collapseAllRows"
     />
-
-    <div class="flex items-center justify-between gap-2 px-2">
-      <!-- The section headline of a navigation drawer: `title-small` on
-           `on-surface-variant` (docs/DESIGN-SYSTEM.md §9.2). -->
-      <span id="navigation-tree-heading" class="text-title-small text-muted">Contents</span>
-      <span class="flex items-center gap-1">
-        <!-- The filter's toggle: icon-only, so a name and a tooltip
-             (§4.3); `aria-expanded` and `aria-controls` say what it does
-             to what. Offered only once there is a tree to filter. -->
-        <UTooltip v-if="status === 'success' && nodes.length > 0" text="Filter tree" :kbds="['meta', 'shift', 'F']">
-          <UButton
-            icon="i-lucide-filter"
-            variant="ghost"
-            color="neutral"
-            size="xs"
-            square
-            aria-label="Filter tree"
-            :aria-expanded="filter.open.value"
-            :aria-controls="FILTER_BOX_ID"
-            :class="filter.open.value ? 'text-secondary' : undefined"
-            @click="toggleFilter"
-          />
-        </UTooltip>
-        <!-- The keyboard contract is one tooltip away rather than a paragraph
-             on every screen; the same sentence is the tree's description for
-             assistive technology, always in the DOM. -->
-        <UTooltip :text="KEYBOARD_HELP" :ui="{ content: 'max-w-64 h-auto py-2 text-wrap' }">
-          <UButton
-            icon="i-lucide-circle-help"
-            variant="ghost"
-            color="neutral"
-            size="xs"
-            square
-            aria-label="Keyboard help"
-            aria-describedby="navigation-tree-keyboard-help"
-          />
-        </UTooltip>
-      </span>
-      <p id="navigation-tree-keyboard-help" class="sr-only">{{ KEYBOARD_HELP }}</p>
-    </div>
 
     <!-- The filter box, only while asked for. A text field in chrome:
          `h-10`, the tree row's own height (docs/DESIGN-SYSTEM.md §7.2),
@@ -625,6 +735,13 @@ const menuItems = computed<ContextMenuItem[][]>(() => {
     </div>
     <!-- The count, announced: always in the DOM, only its text changes (§5). -->
     <p data-testid="tree-filter-status" role="status" aria-live="polite" class="sr-only">{{ filter.announcement.value }}</p>
+    <!-- What the last write came to — a creation, a rename, a fold of
+         everything, a copied link, a delete. Always in the DOM for the
+         same reason the count is: a region inserted at the moment its text
+         appears is frequently not announced at all (§5). It moved out of
+         the rows' own branch when creation moved into the tree, because a
+         first shelf is created on a tree that has no rows to hold it. -->
+    <p data-testid="tree-menu-status" role="status" aria-live="polite" class="sr-only">{{ announcement }}</p>
 
     <!-- Loading: rows the shape of the rows that will replace them. -->
     <div v-if="status === 'idle' || status === 'loading'" data-testid="tree-skeleton" class="space-y-1 px-2" aria-hidden="true">
@@ -654,20 +771,32 @@ const menuItems = computed<ContextMenuItem[][]>(() => {
 
     <template v-else>
       <!-- First-run empty state, in the product's vocabulary (checklist
-           §3); the toolbar above it is the path forward. -->
-      <p v-if="nodes.length === 0" data-testid="tree-empty" class="px-2 text-body-medium text-muted">
+           §3); the header above it is the path forward. It gives way the
+           moment a name is being typed, because the tree is no longer
+           empty — it holds the row being made. -->
+      <p v-if="nodes.length === 0 && !rowEditor.isEditing.value" data-testid="tree-empty" class="px-2 text-body-medium text-muted">
         No shelves yet. Use New… above to create the first shelf, then fill it with books, chapters and pages.
       </p>
 
       <!-- Filtered-empty is not first-run empty (§3): the tree has rows,
            none match, and the way out is to clear the filter. -->
-      <div v-else-if="filter.active.value && shownNodes.length === 0" data-testid="tree-filter-empty" class="space-y-2 px-2">
+      <div
+        v-else-if="filter.active.value && shownNodes.length === 0 && !rowEditor.isEditing.value"
+        data-testid="tree-filter-empty"
+        class="space-y-2 px-2"
+      >
         <p class="text-body-medium text-muted">No shelves, books, chapters or pages match “{{ filter.query.value.trim() }}”.</p>
         <UButton size="sm" variant="outline" color="neutral" icon="i-lucide-x" @click="filter.clear()">Clear filter</UButton>
       </div>
 
       <template v-else>
         <InlineNotice v-if="reorderError" tier="chip" tone="error" role="alert">{{ reorderError }}</InlineNotice>
+        <!-- A create or rename the field could not fix — no permission, a
+             parent that has gone, a dead connection. The draft row is gone
+             with it, so the reason stands where a refused drag's does
+             (§3, recoverable, with a real reason). A name that is merely
+             taken never reaches here: it stays beside the field. -->
+        <InlineNotice v-if="writeError" tier="chip" tone="error" role="alert" data-testid="tree-write-error">{{ writeError }}</InlineNotice>
         <!-- A delete's outcome, in the chip tier beside the tree (§3):
              a refusal with its reason, or the success with the way back —
              a destructive action gets more than a toast that vanishes. -->
@@ -717,6 +846,7 @@ const menuItems = computed<ContextMenuItem[][]>(() => {
               :collapsed-ids="shownCollapsedIds"
               :current-id="currentNodeId ?? null"
               :highlight="filter.active.value ? filter.query.value : undefined"
+              :editor="editorBinding"
               @reorder="onDrop"
               @activate="onActivate"
               @open="onOpen"
@@ -746,9 +876,17 @@ const menuItems = computed<ContextMenuItem[][]>(() => {
                 </UTooltip>
               </template>
             </NavigationTreeNode>
+            <!-- A shelf being made: the top level's own draft row, at the
+                 end, where `POST /nodes` will put the real one. -->
+            <NavigationTreeDraftRow
+              v-if="rootDraft && editorBinding"
+              :editor="editorBinding"
+              :depth="0"
+              :posinset="shownNodes.length + 1"
+              :set-size="shownNodes.length + 1"
+            />
           </ul>
         </UContextMenu>
-        <p data-testid="tree-menu-status" role="status" aria-live="polite" class="sr-only">{{ announcement }}</p>
       </template>
     </template>
   </div>

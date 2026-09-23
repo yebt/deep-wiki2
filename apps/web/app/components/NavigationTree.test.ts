@@ -5,6 +5,7 @@ import { computed, defineComponent, h, nextTick, ref } from 'vue';
 import NavigationTreeActions from '~/components/NavigationTreeActions.vue';
 import type { TreeNode } from '~/composables/useTree';
 import type { ForceDeleteFetcher, TrashFetcher } from '~/composables/useTrash';
+import type { CreateNodeFetcher, RenameNodeFetcher } from '~/composables/useTreeRowEditor';
 import NavigationTree from './NavigationTree.vue';
 
 /**
@@ -67,10 +68,26 @@ function mockTree(overrides: { status?: string; nodes?: unknown[]; message?: str
       else next.add(id);
       collapsed.value = next;
     },
+    collapseAll: (ids: readonly string[]) => {
+      collapsed.value = new Set([...collapsed.value, ...ids]);
+    },
     reveal,
-    pathTo: () => [],
+    // The real walk, not a stub: the inline editor reads it for the draft
+    // row's indent and for the name of the place the new node went, so a
+    // `() => []` here would hide both.
+    pathTo: (nodeId: string) => {
+      const walk = (list: TreeNode[], trail: TreeNode[]): TreeNode[] | null => {
+        for (const node of list) {
+          if (node.id === nodeId) return [...trail, node];
+          const found = walk(node.children as TreeNode[], [...trail, node]);
+          if (found) return found;
+        }
+        return null;
+      };
+      return walk(nodes.value as TreeNode[], []) ?? [];
+    },
   });
-  return { load, reorder, applyCreated, applyRenamed, reveal, selectedId, removeNode, nodes };
+  return { load, reorder, applyCreated, applyRenamed, reveal, selectedId, removeNode, nodes, collapsed };
 }
 
 // Attached to the document: focus and the menu's focus return are real
@@ -90,6 +107,8 @@ async function mount(
     currentNodeId?: string | null;
     trashFetcher?: TrashFetcher;
     forceDeleteFetcher?: ForceDeleteFetcher;
+    createFetcher?: CreateNodeFetcher;
+    renameFetcher?: RenameNodeFetcher;
   } = { workspaceId: 'ws-1' },
 ) {
   const props = { workspaceSlug: given.workspaceId ? 'acme' : null, ...given };
@@ -316,8 +335,19 @@ describe('NavigationTree', () => {
     });
   });
 
-  describe('creating and renaming', () => {
-    test('the toolbar renders with the loaded tree, outside the tree itself', async () => {
+  /*
+   * Creating and renaming, in the row (owner criterion, 2026-09-23). The
+   * dialogs are gone: `New…` puts a draft row under the target parent with
+   * its name editable, `F2` and the menu's "Rename…" replace a row's title
+   * with the same field, Enter confirms and Escape cancels.
+   */
+  describe('naming a row, in the row', () => {
+    /** The field the draft or the rename is typed into. */
+    function editorField(component: Awaited<ReturnType<typeof mount>>) {
+      return component.find('[data-row-editor] input');
+    }
+
+    test('the header renders with the loaded tree, outside the tree itself', async () => {
       mockTree({ status: 'success', nodes: NODES });
       const component = await mount();
 
@@ -326,23 +356,7 @@ describe('NavigationTree', () => {
       expect(component.find('[role="tree"]').element.contains(actions.element)).toBe(false);
     });
 
-    test('a created or renamed node is drawn from the server’s response, never by reloading the tree', async () => {
-      const { load, applyCreated, applyRenamed } = mockTree({ status: 'success', nodes: NODES });
-      const component = await mount();
-      const before = load.mock.calls.length;
-
-      const created = { id: 'page-3', parentId: 'book-1', type: 'page', slug: 'three', title: 'Third page', position: 2 };
-      component.findComponent(NavigationTreeActions).vm.$emit('created', created);
-      const renamed = { id: 'page-1', slug: 'first', title: 'First page, renamed' };
-      component.findComponent(NavigationTreeActions).vm.$emit('renamed', renamed);
-      await nextTick();
-
-      expect(applyCreated).toHaveBeenCalledWith(created);
-      expect(applyRenamed).toHaveBeenCalledWith(renamed);
-      expect(load.mock.calls.length).toBe(before);
-    });
-
-    test('the toolbar has no selection until the user picks a row; picking one hands it over and marks it', async () => {
+    test('the header has no selection until the user picks a row; picking one hands it over and marks it', async () => {
       mockTree({ status: 'success', nodes: NODES });
       const component = await mount();
 
@@ -355,6 +369,178 @@ describe('NavigationTree', () => {
 
       expect(actions.props('selectedId')).toBe('shelf-1');
       expect(component.findAll('[aria-selected="true"]')[0]!.attributes('data-node-id')).toBe('shelf-1');
+    });
+
+    test('New… puts a draft row where the new node will land — no dialog opens', async () => {
+      mockTree({ status: 'success', nodes: NODES });
+      const component = await mount();
+
+      component.findComponent(NavigationTreeActions).vm.$emit('create', { parentId: 'book-1', type: 'page' });
+      await nextTick();
+
+      const draft = component.find('[data-testid="tree-draft-row"]');
+      expect(draft.exists()).toBe(true);
+      expect(editorField(component).attributes('aria-label')).toBe('Name of the new page');
+      // Last among the book's children, where `POST /nodes` puts it.
+      const book = component.findAll('[role="treeitem"]').find((item) => item.attributes('data-node-id') === 'book-1')!;
+      const rows = book.findAll(':scope > [role="group"] > [role="treeitem"]');
+      expect(rows[rows.length - 1]!.attributes('data-testid')).toBe('tree-draft-row');
+      expect(document.body.querySelector('[role="dialog"]'), 'nothing modal opened').toBeNull();
+    });
+
+    test('a first shelf is created on a tree with no rows to hold it', async () => {
+      mockTree({ status: 'success', nodes: [] });
+      const component = await mount();
+      expect(component.find('[data-testid="tree-empty"]').exists()).toBe(true);
+
+      component.findComponent(NavigationTreeActions).vm.$emit('create', { parentId: 'root-1', type: 'shelf' });
+      await nextTick();
+
+      expect(component.find('[data-testid="tree-draft-row"]').exists()).toBe(true);
+      expect(component.find('[data-testid="tree-empty"]').exists(), 'the tree is no longer empty').toBe(false);
+      expect(editorField(component).attributes('aria-label')).toBe('Name of the new shelf');
+    });
+
+    test('Enter writes the name, the row is drawn from the response, and no reload follows', async () => {
+      const { load, applyCreated } = mockTree({ status: 'success', nodes: NODES });
+      const created = { id: 'page-3', parentId: 'book-1', type: 'page' as const, slug: 'three', title: 'Third page', position: 2 };
+      const createFetcher = vi.fn(async () => created);
+      const component = await mount({ workspaceId: 'ws-1', createFetcher });
+      const before = load.mock.calls.length;
+
+      component.findComponent(NavigationTreeActions).vm.$emit('create', { parentId: 'book-1', type: 'page' });
+      await nextTick();
+      const field = editorField(component);
+      await field.setValue('Third page');
+      await field.trigger('keydown', { key: 'Enter' });
+      await nextTick();
+
+      expect(createFetcher).toHaveBeenCalledWith({ parentId: 'book-1', type: 'page', title: 'Third page' });
+      expect(applyCreated).toHaveBeenCalledWith(created);
+      expect(load.mock.calls.length, 'the tree is never asked for again').toBe(before);
+      expect(component.get('[data-testid="tree-menu-status"]').text()).toBe('Created page “Third page” in “Handbook”.');
+    });
+
+    test('Escape cancels and leaves no row behind', async () => {
+      const createFetcher = vi.fn();
+      mockTree({ status: 'success', nodes: NODES });
+      const component = await mount({ workspaceId: 'ws-1', createFetcher });
+
+      component.findComponent(NavigationTreeActions).vm.$emit('create', { parentId: 'book-1', type: 'page' });
+      await nextTick();
+      await editorField(component).trigger('keydown', { key: 'Escape' });
+      await nextTick();
+
+      expect(component.find('[data-testid="tree-draft-row"]').exists()).toBe(false);
+      expect(createFetcher).not.toHaveBeenCalled();
+    });
+
+    test('a name already taken keeps the field, with the reason beside it and the text still in it', async () => {
+      const createFetcher = vi.fn(async () => {
+        throw { response: { status: 409 }, data: { error: 'Something here already has that name. Choose another.' } };
+      });
+      mockTree({ status: 'success', nodes: NODES });
+      const component = await mount({ workspaceId: 'ws-1', createFetcher });
+
+      component.findComponent(NavigationTreeActions).vm.$emit('create', { parentId: 'book-1', type: 'page' });
+      await nextTick();
+      const field = editorField(component);
+      await field.setValue('First page');
+      await field.trigger('keydown', { key: 'Enter' });
+      await nextTick();
+      await nextTick();
+
+      expect(component.find('[data-testid="tree-draft-row"]').exists()).toBe(true);
+      expect((editorField(component).element as HTMLInputElement).value, 'never renamed behind the person’s back').toBe('First page');
+      expect(component.get('[data-testid="tree-row-editor-error"]').text()).toContain('already has that name');
+    });
+
+    test('a refusal the field cannot fix takes the draft away and says why beside the tree', async () => {
+      const createFetcher = vi.fn(async () => {
+        throw { response: { status: 403 }, data: {} };
+      });
+      mockTree({ status: 'success', nodes: NODES });
+      const component = await mount({ workspaceId: 'ws-1', createFetcher });
+
+      component.findComponent(NavigationTreeActions).vm.$emit('create', { parentId: 'book-1', type: 'page' });
+      await nextTick();
+      const field = editorField(component);
+      await field.setValue('Third page');
+      await field.trigger('keydown', { key: 'Enter' });
+      await nextTick();
+      await nextTick();
+
+      expect(component.find('[data-testid="tree-draft-row"]').exists()).toBe(false);
+      expect(component.get('[data-testid="tree-write-error"]').text()).toMatch(/permission/i);
+    });
+
+    test('F2 on a focused row renames it where it stands, on its current title', async () => {
+      mockTree({ status: 'success', nodes: NODES });
+      const component = await mount();
+
+      const row = component.findAll('[role="treeitem"]').find((item) => item.attributes('data-node-id') === 'page-1')!;
+      await row.trigger('keydown', { key: 'F2' });
+      await nextTick();
+
+      const field = editorField(component);
+      expect(field.attributes('aria-label')).toBe('Rename “First page”');
+      expect((field.element as HTMLInputElement).value).toBe('First page');
+      // The row is the field: it draws no title link beside it.
+      expect(row.find('a').exists()).toBe(false);
+    });
+
+    test('a rename writes the new name and patches the row from the response', async () => {
+      const { applyRenamed, load } = mockTree({ status: 'success', nodes: NODES });
+      const renamed = { id: 'page-1', slug: 'first', title: 'First page, renamed' };
+      const renameFetcher = vi.fn(async () => renamed);
+      const component = await mount({ workspaceId: 'ws-1', renameFetcher });
+      const before = load.mock.calls.length;
+
+      const row = component.findAll('[role="treeitem"]').find((item) => item.attributes('data-node-id') === 'page-1')!;
+      await row.trigger('keydown', { key: 'F2' });
+      await nextTick();
+      const field = editorField(component);
+      await field.setValue('First page, renamed');
+      await field.trigger('keydown', { key: 'Enter' });
+      await nextTick();
+
+      expect(renameFetcher).toHaveBeenCalledWith('page-1', { title: 'First page, renamed' });
+      expect(applyRenamed).toHaveBeenCalledWith(renamed);
+      expect(load.mock.calls.length).toBe(before);
+      expect(component.get('[data-testid="tree-menu-status"]').text()).toBe('Renamed to “First page, renamed”.');
+    });
+
+    test('while a row is a field the tree hears none of its keys', async () => {
+      mockTree({ status: 'success', nodes: NODES });
+      const component = await mount();
+
+      const row = component.findAll('[role="treeitem"]').find((item) => item.attributes('data-node-id') === 'page-1')!;
+      await row.trigger('keydown', { key: 'F2' });
+      await nextTick();
+
+      // ArrowDown would move the tree's focus, and Enter would open the
+      // page: inside the field both are the field's alone.
+      const field = editorField(component);
+      await field.trigger('keydown', { key: 'ArrowDown' });
+      await nextTick();
+      expect(component.find('[data-row-editor]').exists(), 'the field is still open').toBe(true);
+      expect(navigateToMock).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('collapse all', () => {
+    test('folds every container the tree is showing, and says how many', async () => {
+      const { collapsed } = mockTree({ status: 'success', nodes: NODES });
+      const component = await mount();
+      expect(component.findComponent(NavigationTreeActions).props('canCollapseAll')).toBe(true);
+
+      component.findComponent(NavigationTreeActions).vm.$emit('collapse-all');
+      await nextTick();
+
+      expect([...collapsed.value].sort()).toEqual(['book-1', 'shelf-1']);
+      expect(component.findAll('[role="treeitem"]')).toHaveLength(1);
+      expect(component.get('[data-testid="tree-menu-status"]').text()).toBe('Collapsed 2 items.');
+      expect(component.findComponent(NavigationTreeActions).props('canCollapseAll')).toBe(false);
     });
   });
 
@@ -618,7 +804,7 @@ describe('NavigationTree', () => {
       expect(component.get('[data-node-id="shelf-1"]').attributes('aria-selected')).toBe('true');
     });
 
-    test('"Rename…" from the menu opens the toolbar’s own rename dialog for that row — one path, not a second one', async () => {
+    test('"Rename…" from the menu edits the row in place — the same field `F2` opens, not a second path', async () => {
       const { selectedId } = mockTree({ status: 'success', nodes: NODES });
       const component = await mount();
 
@@ -629,10 +815,25 @@ describe('NavigationTree', () => {
       await settle();
 
       expect(selectedId.value).toBe('page-2');
-      const dialog = document.body.querySelector('[role="dialog"]');
-      expect(dialog).not.toBeNull();
-      expect(dialog!.textContent).toContain('Second page');
-      expect(document.body.querySelector('[data-testid="tree-rename-title"]')).not.toBeNull();
+      expect(document.body.querySelector('[role="dialog"]'), 'nothing modal opens any more').toBeNull();
+      const field = component.get('[data-node-id="page-2"] [data-row-editor] input');
+      expect(field.attributes('aria-label')).toBe('Rename “Second page”');
+      expect((field.element as HTMLInputElement).value).toBe('Second page');
+    });
+
+    test('"New page…" from a book’s menu opens the draft row under it, with no kind to pick', async () => {
+      mockTree({ status: 'success', nodes: NODES });
+      const component = await mount();
+
+      await component.get('[data-node-id="book-1"] [draggable="true"]').trigger('contextmenu', { clientX: 40, clientY: 40 });
+      await settle();
+      const create = menuItems().find((item) => item.textContent?.includes('New page…'))!;
+      create.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      await settle();
+
+      expect(component.get('[data-row-editor] input').attributes('aria-label')).toBe('Name of the new page');
+      const book = component.get('[data-node-id="book-1"]');
+      expect(book.find('[data-testid="tree-draft-row"]').exists()).toBe(true);
     });
 
     test('"Move down" from the menu is the same reorder the keyboard makes', async () => {
@@ -763,17 +964,24 @@ describe('NavigationTree', () => {
         useConfirm().settle(false);
       });
 
-      test('the toolbar\'s Delete acts on the selected row through the same flow', async () => {
+      /**
+       * The toolbar's trash control is gone (owner criterion, 2026-09-23):
+       * the owner read a red trash beside "New" as *delete the workspace*.
+       * Delete now has exactly two ways in — the row's own menu and the
+       * `Delete` key, both tested above — and this test is what keeps a
+       * third from coming back to the header.
+       */
+      test('no control anywhere outside the tree deletes anything', async () => {
         const { selectedId } = mockTree({ status: 'success', nodes: NODES, manageable: ['page-2'] });
         const component = await mount({ workspaceId: 'ws-1', trashFetcher: vi.fn(async () => TRASHED) });
         selectedId.value = 'page-2';
         await settle();
 
-        component.get('[data-testid="tree-delete-open"]').element.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-        await settle();
-
-        expect(useConfirm().pending.value?.title).toBe('Delete “Second page”?');
-        useConfirm().settle(false);
+        expect(component.find('[data-testid="tree-delete-open"]').exists()).toBe(false);
+        const header = component.get('[role="group"][aria-label="Tree actions"]');
+        const names = header.findAll('button').map((button) => button.attributes('aria-label') ?? button.text());
+        expect(names.join(' ').toLowerCase()).not.toMatch(/delete|trash/);
+        expect(useConfirm().pending.value, 'nothing was even asked').toBeNull();
       });
     });
 

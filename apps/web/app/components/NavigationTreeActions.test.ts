@@ -1,30 +1,29 @@
 import { UApp } from '#components';
 import { mountSuspended } from '@nuxt/test-utils/runtime';
-import { afterEach, describe, expect, test, vi } from 'vitest';
+import { afterEach, describe, expect, test } from 'vitest';
 import { defineComponent, h, nextTick } from 'vue';
-import { legalChildTypes } from '@deep-wiki/contracts';
+import { legalChildTypes, type NodeType } from '@deep-wiki/contracts';
 import type { TreeNode } from '~/composables/useTree';
-import NavigationTreeActions, { type CreateNodeFetcher, type RenameNodeFetcher } from './NavigationTreeActions.vue';
+import NavigationTreeActions from './NavigationTreeActions.vue';
 
 /**
- * The tree's write affordances: create a shelf, book, chapter or page,
- * and rename one.
+ * The tree's header, and the one question it is allowed to ask.
  *
- * Two things this file exists to hold, neither of which a
- * screenshot-shaped test would catch:
+ * The owner rejected this header on 2026-09-23: it carried `New…`,
+ * `Rename…` and a red trash button, and the trash beside "New" read as
+ * *delete the workspace*. Two properties are what the correction turns on,
+ * and both are held here rather than in a screenshot:
  *
- * 1. **The type choices are derived from `LEGAL_PARENT_TYPES`, never
- *    listed.** A client that types out "shelf, book, chapter, page" is a
- *    second copy of the table the server enforces — docs/TODO.md's own
- *    named recurring defect, recorded five times. The first tests below
- *    compare what is offered against `legalChildTypes()` itself, and they
- *    do it at three different depths, because a test that only ever
- *    creates under the workspace root exercises the table not at all:
- *    `shelf` is the root's only legal child, so any implementation passes.
- * 2. **Every refusal the server can return has its own state.** A name
- *    collision, a permission denial and a dead connection are three
- *    different next actions (docs/UI-CHECKLIST.md §3), and the dialog
- *    must keep what the user typed in all three.
+ * 1. **The item set is exactly New…, Filter, Collapse all — and nothing
+ *    destructive can come back.** The first test does not enumerate what is
+ *    absent; it asserts the group's whole contents, so a fourth control of
+ *    any kind fails it.
+ * 2. **A question with one answer is never asked.** The type menu appears
+ *    only where the one `LEGAL_PARENT_TYPES` table leaves more than one
+ *    legal child, and the tests read that table rather than restating it —
+ *    at three different depths, because a test that only ever creates at
+ *    the top level exercises the table not at all (`shelf` is the root's
+ *    only legal child, so any implementation passes).
  */
 function node(overrides: Partial<TreeNode> & { id: string }): TreeNode {
   return { type: 'page', slug: overrides.id, title: overrides.id, position: 0, children: [], ...overrides };
@@ -40,468 +39,136 @@ const NODES: TreeNode[] = [
         id: 'book-1',
         type: 'book',
         title: 'Handbook',
-        children: [
-          node({ id: 'chapter-1', type: 'chapter', title: 'Onboarding', children: [node({ id: 'page-1', title: 'Day one' })] }),
-        ],
+        children: [node({ id: 'chapter-1', type: 'chapter', title: 'Onboarding', children: [node({ id: 'page-1', title: 'Day one' })] })],
       }),
     ],
   }),
 ];
 
-interface Mounted {
-  wrapper: Awaited<ReturnType<typeof mountSuspended>>;
-  /** The component's own markup and the modal content it teleports into `document.body` are two roots; every query walks both. */
-  roots: HTMLElement[];
-}
-
-let mounted: Mounted | null = null;
+let wrapper: Awaited<ReturnType<typeof mountSuspended>> | null = null;
+let created: { parentId: string; type: NodeType }[] = [];
 
 afterEach(() => {
-  mounted?.wrapper.unmount();
-  mounted = null;
+  wrapper?.unmount();
+  wrapper = null;
+  created = [];
 });
 
-async function mountActions(
-  overrides: {
-    nodes?: TreeNode[];
-    selectedId?: string | null;
-    createFetcher?: CreateNodeFetcher;
-    renameFetcher?: RenameNodeFetcher;
-    manageable?: string[];
-    isOwner?: boolean;
-  } = {},
-): Promise<Mounted> {
-  const wrapper = await mountSuspended(
-    defineComponent({
-      name: 'ActionsHarness',
-      setup: () => () =>
-        h(UApp, null, {
-          default: () =>
-            h(NavigationTreeActions, {
-              nodes: overrides.nodes ?? NODES,
-              rootId: 'root-1',
-              selectedId: overrides.selectedId === undefined ? null : overrides.selectedId,
-              createFetcher: overrides.createFetcher,
-              renameFetcher: overrides.renameFetcher,
-              manageable: new Set(overrides.manageable ?? []),
-              isOwner: overrides.isOwner ?? false,
-            }),
-        }),
-    }),
-  );
-  mounted = { wrapper, roots: [wrapper.element as HTMLElement, document.body] };
-  return mounted;
-}
-
-function byTestId(m: Mounted, id: string): HTMLElement | null {
-  for (const root of m.roots) {
-    const found = root.querySelector<HTMLElement>(`[data-testid="${id}"]`);
-    if (found) return found;
-  }
-  return null;
-}
-
-function radioValues(m: Mounted, testId: string): string[] {
-  const group = byTestId(m, testId);
-  if (!group) return [];
-  return Array.from(group.querySelectorAll('[role="radio"]')).map((el) => el.getAttribute('value') ?? '');
-}
-
-function checkedRadio(m: Mounted, testId: string): string | null {
-  const group = byTestId(m, testId);
-  return group?.querySelector('[role="radio"][aria-checked="true"]')?.getAttribute('value') ?? null;
-}
-
-async function settle(): Promise<void> {
+async function mountHeader(props: Record<string, unknown> = {}) {
+  created = [];
+  const host = defineComponent({
+    setup: () => () =>
+      h(UApp, null, {
+        default: () =>
+          h(NavigationTreeActions, {
+            nodes: NODES,
+            rootId: 'root-1',
+            selectedId: null,
+            filterOpen: false,
+            filterBoxId: 'filter-box',
+            canFilter: true,
+            canCollapseAll: true,
+            onCreate: (target: { parentId: string; type: NodeType }) => created.push(target),
+            ...props,
+          }),
+      }),
+  });
+  wrapper = await mountSuspended(host, { attachTo: document.body });
   await nextTick();
-  await nextTick();
-  await nextTick();
+  return wrapper.element as HTMLElement;
 }
 
-async function openCreate(m: Mounted): Promise<void> {
-  byTestId(m, 'tree-create-open')!.click();
-  await settle();
+/** Every control the header offers, by its accessible name, in the order it is drawn. */
+function controlNames(root: HTMLElement): string[] {
+  const group = root.querySelector('[role="group"][aria-label="Tree actions"]');
+  if (!group) throw new Error('the header rendered no named action group');
+  return [...group.querySelectorAll('button')].map((button) => button.getAttribute('aria-label') ?? button.textContent?.trim() ?? '');
 }
 
-async function typeAndSubmit(m: Mounted, testId: string, submitId: string, value: string): Promise<void> {
-  const input = byTestId(m, testId) as HTMLInputElement;
-  input.value = value;
-  input.dispatchEvent(new Event('input', { bubbles: true }));
-  await settle();
-  byTestId(m, submitId)!.click();
-  await settle();
-}
-
-function fetchError(status: number, body: unknown): unknown {
-  return Object.assign(new Error('fetch failed'), { response: { status }, data: body });
-}
-
-describe('NavigationTreeActions — what may be created, and where', () => {
-  test('under a book, exactly the book’s legal children are offered', async () => {
-    const mounted = await mountActions({ selectedId: 'book-1' });
-    await openCreate(mounted);
-
-    expect(radioValues(mounted, 'tree-create-type')).toEqual(legalChildTypes('book'));
-    expect(radioValues(mounted, 'tree-create-type')).toEqual(['chapter', 'page']);
-    expect(checkedRadio(mounted, 'tree-create-location')).toBe('book-1');
+describe('the tree header', () => {
+  test('carries exactly three controls: New…, Filter, Collapse all', async () => {
+    const root = await mountHeader();
+    expect(controlNames(root)).toEqual(['New…', 'Filter tree', 'Collapse all']);
   });
 
-  test('under a chapter, only a page is offered — a different answer from the same table', async () => {
-    const mounted = await mountActions({ selectedId: 'chapter-1' });
-    await openCreate(mounted);
-
-    expect(radioValues(mounted, 'tree-create-type')).toEqual(legalChildTypes('chapter'));
-    expect(radioValues(mounted, 'tree-create-type')).toEqual(['page']);
+  test('nothing in it deletes or renames — the two the owner found beside New', async () => {
+    const root = await mountHeader();
+    const names = controlNames(root).join(' | ').toLowerCase();
+    expect(names).not.toMatch(/delete|trash|remove/);
+    expect(names).not.toMatch(/rename/);
+    // And no error-coloured control of any kind: a destructive action is
+    // the one thing this header may never carry (DESIGN-SYSTEM §9.1 gives
+    // a destructive action the `error` role and a visible boundary).
+    const group = root.querySelector('[role="group"][aria-label="Tree actions"]')!;
+    expect(group.innerHTML).not.toMatch(/-error\b/);
   });
 
-  test('at the top level only a shelf is offered', async () => {
-    const mounted = await mountActions({ nodes: [], selectedId: null });
-    await openCreate(mounted);
-
-    expect(radioValues(mounted, 'tree-create-type')).toEqual(legalChildTypes('workspace'));
-    expect(radioValues(mounted, 'tree-create-type')).toEqual(['shelf']);
-    // With nothing in the tree there is only one place to create, so the
-    // choice is stated rather than offered.
-    expect(byTestId(mounted, 'tree-create-location')).toBeNull();
-    expect(byTestId(mounted, 'tree-create-location-fixed')!.textContent).toMatch(/top level/i);
+  test('an empty tree offers creation and nothing to look through', async () => {
+    const root = await mountHeader({ nodes: [], canFilter: false, canCollapseAll: false });
+    expect(controlNames(root)).toEqual(['New…']);
   });
 
-  test('a page is never a location; the chapter holding it is, and the top level is always reachable', async () => {
-    const mounted = await mountActions({ selectedId: 'page-1' });
-    await openCreate(mounted);
+  test('"Collapse all" stays in the header with its reason when everything is already folded', async () => {
+    const root = await mountHeader({ canCollapseAll: false });
+    const collapse = root.querySelector('[data-testid="tree-collapse-all"]');
+    expect(collapse?.getAttribute('aria-disabled')).toBe('true');
+    expect(collapse?.hasAttribute('disabled'), 'never the attribute — it removes the reason from the keyboard').toBe(false);
+    expect(root.querySelector('#tree-collapse-all-reason')?.textContent).toContain('already collapsed');
+  });
 
-    const locations = radioValues(mounted, 'tree-create-location');
-    expect(locations).not.toContain('page-1');
-    expect(locations).toEqual(['chapter-1', 'root-1']);
-    expect(checkedRadio(mounted, 'tree-create-location')).toBe('chapter-1');
-    // The location reads as a place, not an id.
-    expect(byTestId(mounted, 'tree-create-location')!.textContent).toContain('Onboarding');
+  test('the filter toggle says what it controls and whether it is open', async () => {
+    const root = await mountHeader({ filterOpen: true });
+    const toggle = root.querySelector('[data-testid="tree-filter-toggle"]');
+    expect(toggle?.getAttribute('aria-expanded')).toBe('true');
+    expect(toggle?.getAttribute('aria-controls')).toBe('filter-box');
   });
 });
 
-describe('NavigationTreeActions — creating', () => {
-  test('posts the location, the type and the title, then reports the change', async () => {
-    const createFetcher = vi.fn(async () => ({
-      id: 'new-1',
-      parentId: 'chapter-1',
-      type: 'page' as const,
-      slug: 'day-two',
-      title: 'Day two',
-      position: 1,
-    }));
-    const mounted = await mountActions({ selectedId: 'chapter-1', createFetcher });
-    await openCreate(mounted);
-    await typeAndSubmit(mounted, 'tree-create-title', 'tree-create-submit', 'Day two');
+describe('New… asks the hierarchy, never the person, when there is one answer', () => {
+  test('with nothing picked it creates the top level’s only child outright', async () => {
+    const root = await mountHeader();
+    expect(legalChildTypes('workspace'), 'the table still leaves one answer here').toEqual(['shelf']);
 
-    expect(createFetcher).toHaveBeenCalledWith({ parentId: 'chapter-1', type: 'page', title: 'Day two' });
-    // The response is the row: the tree draws it from this, not from a reload.
-    expect(mounted.wrapper.findComponent(NavigationTreeActions).emitted('created')).toEqual([
-      [{ id: 'new-1', parentId: 'chapter-1', type: 'page', slug: 'day-two', title: 'Day two', position: 1 }],
-    ]);
+    root.querySelector<HTMLElement>('[data-testid="tree-create-open"]')!.click();
+    await nextTick();
+
+    expect(created).toEqual([{ parentId: 'root-1', type: 'shelf' }]);
+    expect(root.querySelector('[aria-haspopup="menu"]'), 'no menu was opened to ask one question').toBeNull();
   });
 
-  test('success is announced specifically, naming what was created and where it went', async () => {
-    const createFetcher = vi.fn(async () => ({
-      id: 'new-1',
-      parentId: 'chapter-1',
-      type: 'page' as const,
-      slug: 'day-two',
-      title: 'Day two',
-      position: 1,
-    }));
-    const mounted = await mountActions({ selectedId: 'chapter-1', createFetcher });
-    await openCreate(mounted);
-    await typeAndSubmit(mounted, 'tree-create-title', 'tree-create-submit', 'Day two');
-
-    const live = byTestId(mounted, 'tree-actions-status')!;
-    expect(live.getAttribute('aria-live')).toBe('polite');
-    expect(live.textContent).toContain('Day two');
-    expect(live.textContent).toContain('Onboarding');
-  });
-
-  test('a name that collides is reported on the name field, and nothing typed is lost', async () => {
-    const createFetcher = vi.fn(async () => {
-      throw fetchError(409, { error: 'a sibling named "Day one" already exists here' });
-    });
-    const mounted = await mountActions({ selectedId: 'chapter-1', createFetcher });
-    await openCreate(mounted);
-    await typeAndSubmit(mounted, 'tree-create-title', 'tree-create-submit', 'Day one');
-
-    expect(byTestId(mounted, 'tree-create-title-field')!.textContent).toMatch(/already exists here/i);
-    const input = byTestId(mounted, 'tree-create-title') as HTMLInputElement;
-    expect(input.value).toBe('Day one');
-    expect(input.getAttribute('aria-invalid')).toBe('true');
-    expect(input.getAttribute('aria-describedby')).toBeTruthy();
-  });
-
-  test('a permission refusal says what is missing, and is not a field error', async () => {
-    const createFetcher = vi.fn(async () => {
-      throw fetchError(403, { error: 'forbidden' });
-    });
-    const mounted = await mountActions({ selectedId: 'chapter-1', createFetcher });
-    await openCreate(mounted);
-    await typeAndSubmit(mounted, 'tree-create-title', 'tree-create-submit', 'Day two');
-
-    const alert = byTestId(mounted, 'tree-create-error')!;
-    expect(alert.getAttribute('role')).toBe('alert');
-    expect(alert.textContent).toMatch(/permission/i);
-    expect(byTestId(mounted, 'tree-create-title-field')!.textContent).not.toMatch(/permission/i);
-  });
-
-  test('a dead connection says so and leaves the retry in reach', async () => {
-    const createFetcher = vi.fn(async () => {
-      // ofetch always defines `response`, setting it to undefined when
-      // nothing came back — the exact shape `app/utils/fetch-error.ts`
-      // exists to classify, and the one four hand-written guards got wrong.
-      throw Object.assign(new Error('fetch failed'), { response: undefined });
-    });
-    const mounted = await mountActions({ selectedId: 'chapter-1', createFetcher });
-    await openCreate(mounted);
-    await typeAndSubmit(mounted, 'tree-create-title', 'tree-create-submit', 'Day two');
-
-    expect(byTestId(mounted, 'tree-create-error')!.textContent).toMatch(/connection/i);
-    expect(byTestId(mounted, 'tree-create-submit')).not.toBeNull();
-    expect((byTestId(mounted, 'tree-create-title') as HTMLInputElement).value).toBe('Day two');
-  });
-});
-
-describe('NavigationTreeActions — renaming', () => {
-  test('is aria-disabled with a reason when no row is selected, and stays in the tab order', async () => {
-    const mounted = await mountActions({ selectedId: null });
-    const button = byTestId(mounted, 'tree-rename-open')!;
-
-    // `aria-disabled`, never the attribute: the attribute removes the
-    // control from the tab order, which puts its own explanation behind a
-    // hover a keyboard user cannot perform (docs/UI-CHECKLIST.md §5).
-    expect(button.getAttribute('aria-disabled')).toBe('true');
-    expect(button.hasAttribute('disabled')).toBe(false);
-    const describedBy = button.getAttribute('aria-describedby');
-    expect(describedBy).toBeTruthy();
-    // Looked up across the component's own roots rather than through
-    // `document`: `mountSuspended` mounts into a detached element, and
-    // only teleported content reaches `document.body`.
-    const reason = mounted.roots.map((root) => root.querySelector(`#${describedBy}`)).find(Boolean);
-    expect(reason?.textContent).toMatch(/select a row/i);
-  });
-
-  test('names its target, sends the new title, and reports the change', async () => {
-    const renameFetcher = vi.fn(async () => ({ id: 'page-1', slug: 'day-zero', title: 'Day zero' }));
-    const mounted = await mountActions({ selectedId: 'page-1', renameFetcher });
-    const button = byTestId(mounted, 'tree-rename-open')!;
-    expect(button.getAttribute('aria-disabled')).toBeNull();
-    // The target is in the accessible name; the visible label stays short
-    // enough for a 280px pane.
-    expect(button.getAttribute('aria-label')).toBe('Rename “Day one”…');
-    expect(button.textContent).toContain('Rename…');
-
-    button.click();
-    await settle();
-    expect((byTestId(mounted, 'tree-rename-title') as HTMLInputElement).value).toBe('Day one');
-    await typeAndSubmit(mounted, 'tree-rename-title', 'tree-rename-submit', 'Day zero');
-
-    expect(renameFetcher).toHaveBeenCalledWith('page-1', { title: 'Day zero' });
-    expect(mounted.wrapper.findComponent(NavigationTreeActions).emitted('renamed')).toEqual([[{ id: 'page-1', slug: 'day-zero', title: 'Day zero' }]]);
-  });
-
-  test('a rename that collides is reported on the field, exactly as creation reports it', async () => {
-    const renameFetcher = vi.fn(async () => {
-      throw fetchError(409, { error: 'a sibling named "Overview" already exists here' });
-    });
-    const mounted = await mountActions({ selectedId: 'page-1', renameFetcher });
-    byTestId(mounted, 'tree-rename-open')!.click();
-    await settle();
-    await typeAndSubmit(mounted, 'tree-rename-title', 'tree-rename-submit', 'Overview');
-
-    expect(byTestId(mounted, 'tree-rename-title-field')!.textContent).toMatch(/already exists here/i);
-  });
-});
-
-describe('NavigationTreeActions — the tree’s keyboard contract', () => {
-  test('nothing here is a tree row, so no new control sits inside one', async () => {
-    const mounted = await mountActions({ selectedId: 'page-1' });
-
-    expect(mounted.wrapper.find('[role="treeitem"]').exists()).toBe(false);
-    expect(mounted.wrapper.find('[role="tree"]').exists()).toBe(false);
-  });
-});
-
-/*
- * The toolbar's row, 2026-09-16: "+ New…" sat beside "Rename…" at its
- * natural width and left the rest of the 280px pane empty to the right
- * (the owner's screenshot). The row fills: New… grows, Rename… keeps its
- * natural width. Geometry is the screenshots' to show; what a unit test
- * can hold is the class that makes it so, and that both stay 32px chrome
- * controls (docs/DESIGN-SYSTEM.md §7.2) — never below the 24px floor.
- */
-describe('NavigationTreeActions — the toolbar row', () => {
-  test('New… grows to fill the row and Rename… keeps its natural width, both at the 32px chrome height', async () => {
-    const mounted = await mountActions({ selectedId: 'page-1' });
-
-    const create = byTestId(mounted, 'tree-create-open')!;
-    const rename = byTestId(mounted, 'tree-rename-open')!;
-    expect(create.className).toMatch(/\bflex-1\b/);
-    expect(rename.className).not.toMatch(/\bflex-1\b/);
-    expect(create.className).toMatch(/\bmin-h-8\b/);
-    expect(rename.className).toMatch(/\bmin-h-8\b/);
-  });
-});
-
-/**
- * The creation dialog asks only what it does not know (owner decision,
- * 2026-09-17). Opened from a row's context menu — "New page…" on a
- * chapter — the location and the type are already answered by the
- * invocation, so the dialog is titled for the thing being made, leads
- * with the name field, focused, and states the two answers in one line
- * with a "Change…" disclosure that reveals the radios. Opened from the
- * toolbar, where the type is not known (and, with no row picked, neither
- * is the place), the radios show as before.
- */
-describe('NavigationTreeActions — the dialog asks only what it does not know', () => {
-  function actions(m: Mounted) {
-    return m.wrapper.findComponent(NavigationTreeActions).vm as unknown as { openCreate: (type?: string) => void };
-  }
-
-  function dialogTitle(m: Mounted): string {
-    for (const root of m.roots) {
-      const heading = root.querySelector('.dw-create-dialog-title');
-      if (heading) return heading.textContent?.trim() ?? '';
+  test('inside a shelf it creates a book outright, and inside a chapter a page', async () => {
+    for (const [selectedId, parentId, type] of [
+      ['shelf-1', 'shelf-1', 'book'],
+      ['chapter-1', 'chapter-1', 'page'],
+    ] as const) {
+      const root = await mountHeader({ selectedId });
+      root.querySelector<HTMLElement>('[data-testid="tree-create-open"]')!.click();
+      await nextTick();
+      expect(created, selectedId).toEqual([{ parentId, type }]);
+      wrapper?.unmount();
+      wrapper = null;
     }
-    return '';
-  }
-
-  test('from a row’s "New page…": titled "New page", the name first and focused, the answers summarised, no radios', async () => {
-    const mounted = await mountActions({ selectedId: 'chapter-1' });
-    actions(mounted).openCreate('page');
-    await settle();
-
-    expect(dialogTitle(mounted)).toBe('New page');
-    expect(byTestId(mounted, 'tree-create-location')).toBeNull();
-    expect(byTestId(mounted, 'tree-create-type')).toBeNull();
-    const summary = byTestId(mounted, 'tree-create-summary')!;
-    expect(summary.textContent).toContain('Page in “Onboarding”');
-
-    const title = byTestId(mounted, 'tree-create-title') as HTMLInputElement;
-    // `UInput`'s `autofocus` focuses on a macrotask after mount, after
-    // Reka's own initial focus has landed on the first tabbable control.
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(document.activeElement).toBe(title);
-    // The name field precedes the summary and its disclosure in the dialog's order.
-    const dialog = title.closest('[role="dialog"]')!;
-    const order = Array.from(dialog.querySelectorAll<HTMLElement>('[data-testid="tree-create-title"], [data-testid="tree-create-summary"]'));
-    expect(order.map((el) => el.dataset.testid)).toEqual(['tree-create-title', 'tree-create-summary']);
   });
 
-  test('"Change…" reveals the radios with the invocation’s answers checked, and says it is expanded', async () => {
-    const mounted = await mountActions({ selectedId: 'chapter-1' });
-    actions(mounted).openCreate('page');
-    await settle();
-
-    const change = byTestId(mounted, 'tree-create-change')!;
-    expect(change.getAttribute('aria-expanded')).toBe('false');
-    change.click();
-    await settle();
-
-    expect(change.getAttribute('aria-expanded')).toBe('true');
-    expect(checkedRadio(mounted, 'tree-create-location')).toBe('chapter-1');
-    expect(radioValues(mounted, 'tree-create-type')).toEqual(legalChildTypes('chapter'));
-    expect(checkedRadio(mounted, 'tree-create-type')).toBe('page');
-    expect(byTestId(mounted, 'tree-create-summary')).toBeNull();
-    // The region the button controls is the one holding the radios.
-    const controls = change.getAttribute('aria-controls')!;
-    const region = mounted.roots.map((root) => root.querySelector(`#${controls}`)).find(Boolean)!;
-    expect(region.querySelector('[data-testid="tree-create-type"]')).not.toBeNull();
-
-    // Collapsing brings the summary back, reflecting the radios as they stand.
-    change.click();
-    await settle();
-    expect(change.getAttribute('aria-expanded')).toBe('false');
-    expect(byTestId(mounted, 'tree-create-summary')!.textContent).toContain('Page in “Onboarding”');
+  test('a page cannot hold anything, so New… points at the chapter above it', async () => {
+    const root = await mountHeader({ selectedId: 'page-1' });
+    root.querySelector<HTMLElement>('[data-testid="tree-create-open"]')!.click();
+    await nextTick();
+    expect(created).toEqual([{ parentId: 'chapter-1', type: 'page' }]);
   });
 
-  test('the pre-answered dialog posts the invocation’s location and type with the name', async () => {
-    const createFetcher = vi.fn(async () => ({ id: 'new-2', parentId: 'book-1', type: 'chapter' as const, slug: 'two', title: 'Chapter two', position: 1 }));
-    const mounted = await mountActions({ selectedId: 'book-1', createFetcher });
-    actions(mounted).openCreate('chapter');
-    await settle();
-    expect(dialogTitle(mounted)).toBe('New chapter');
+  test('a book holds two kinds, so — and only so — the control asks first', async () => {
+    expect(legalChildTypes('book'), 'the table still leaves two answers here').toEqual(['chapter', 'page']);
+    const root = await mountHeader({ selectedId: 'book-1' });
 
-    await typeAndSubmit(mounted, 'tree-create-title', 'tree-create-submit', 'Chapter two');
+    const trigger = root.querySelector<HTMLElement>('[data-testid="tree-create-open"]')!;
+    expect(trigger.getAttribute('aria-haspopup')).toBe('menu');
+    trigger.click();
+    await nextTick();
+    await nextTick();
 
-    expect(createFetcher).toHaveBeenCalledWith({ parentId: 'book-1', type: 'chapter', title: 'Chapter two' });
-  });
-
-  test('from the toolbar the type is not known, so the radios show — with a row picked and with none', async () => {
-    const withRow = await mountActions({ selectedId: 'book-1' });
-    await openCreate(withRow);
-    expect(dialogTitle(withRow)).toBe('New item');
-    expect(byTestId(withRow, 'tree-create-type')).not.toBeNull();
-    expect(byTestId(withRow, 'tree-create-location')).not.toBeNull();
-    expect(byTestId(withRow, 'tree-create-summary')).toBeNull();
-    withRow.wrapper.unmount();
-    mounted = null;
-
-    const withNone = await mountActions({ nodes: [], selectedId: null });
-    await openCreate(withNone);
-    expect(dialogTitle(withNone)).toBe('New item');
-    expect(byTestId(withNone, 'tree-create-type')).not.toBeNull();
-    expect(byTestId(withNone, 'tree-create-summary')).toBeNull();
-  });
-
-  test('a type the row cannot hold is not pre-answered: the radios show with the first legal type', async () => {
-    const mounted = await mountActions({ selectedId: 'chapter-1' });
-    actions(mounted).openCreate('book');
-    await settle();
-
-    expect(dialogTitle(mounted)).toBe('New item');
-    expect(byTestId(mounted, 'tree-create-type')).not.toBeNull();
-    expect(checkedRadio(mounted, 'tree-create-type')).toBe('page');
-  });
-});
-
-/**
- * Delete in the toolbar (design.md Decision 8): the third control, icon-only
- * — a 280px pane holds "New…" and "Rename…" and not a third word (checklist
- * §4.3: a name and a tooltip, both) — acting on the picked row through the
- * same decision the row's menu makes (`deleteRowAction`), and asking the
- * tree to run the flow: the flow lives beside the tree that draws the row.
- */
-describe('NavigationTreeActions — deleting', () => {
-  test('is aria-disabled with a reason when no row is selected, and stays in the tab order', async () => {
-    const mounted = await mountActions({ selectedId: null, manageable: ['page-1'] });
-    const button = byTestId(mounted, 'tree-delete-open')!;
-    expect(button.getAttribute('aria-disabled')).toBe('true');
-    expect(button.hasAttribute('disabled')).toBe(false);
-    const reason = mounted.roots.map((root) => root.querySelector(`#${button.getAttribute('aria-describedby')}`)).find(Boolean);
-    expect(reason?.textContent).toMatch(/select a row/i);
-  });
-
-  test('is aria-disabled with the row\'s own reason when the picked row cannot be deleted', async () => {
-    const mounted = await mountActions({ selectedId: 'page-1', manageable: [] });
-    const button = byTestId(mounted, 'tree-delete-open')!;
-    expect(button.getAttribute('aria-disabled')).toBe('true');
-    const reason = mounted.roots.map((root) => root.querySelector(`#${button.getAttribute('aria-describedby')}`)).find(Boolean);
-    expect(reason?.textContent).toMatch(/manage access/i);
-
-    const nonEmpty = await mountActions({ selectedId: 'chapter-1', manageable: ['chapter-1'] });
-    const chapterButton = byTestId(nonEmpty, 'tree-delete-open')!;
-    expect(chapterButton.getAttribute('aria-disabled')).toBe('true');
-    expect(nonEmpty.roots.map((root) => root.querySelector(`#${chapterButton.getAttribute('aria-describedby')}`)).find(Boolean)?.textContent).toMatch(/empty this chapter first/i);
-  });
-
-  test('names its target, and asks the tree to delete it', async () => {
-    const mounted = await mountActions({ selectedId: 'page-1', manageable: ['page-1'] });
-    const button = byTestId(mounted, 'tree-delete-open')!;
-    expect(button.getAttribute('aria-disabled')).toBeNull();
-    expect(button.getAttribute('aria-label')).toBe('Delete “Day one”…');
-
-    button.click();
-    await settle();
-
-    expect(mounted.wrapper.findComponent(NavigationTreeActions).emitted('delete')).toEqual([['page-1']]);
-  });
-
-  test('the owner may delete any row, children and all', async () => {
-    const mounted = await mountActions({ selectedId: 'chapter-1', manageable: [], isOwner: true });
-    expect(byTestId(mounted, 'tree-delete-open')!.getAttribute('aria-disabled')).toBeNull();
+    const items = [...document.querySelectorAll('[role="menuitem"]')].map((item) => item.textContent?.trim());
+    expect(items).toEqual(['Chapter', 'Page']);
+    expect(created, 'nothing is created until the kind is picked').toEqual([]);
   });
 });

@@ -1,115 +1,89 @@
 <script setup lang="ts">
 /**
- * Creating, renaming and deleting a node, from the navigation tree.
+ * The navigation tree's header: **New…, Filter, Collapse all.** Three
+ * controls, none destructive, none that renames.
  *
- * ── Where it stands, and why not in a row ──────────────────────────────
+ * ── What the owner rejected, and why this is the shape ─────────────────
  *
- * `NavigationTreeNode` carries native drag-and-drop *and* the keyboard
- * reorder that is this screen's accessibility contract, and a `keydown`
- * bug there — one press arriving at `tree.vue` once per ancestor — was
- * fixed by guarding on `event.target.closest('[role="treeitem"]') !==
- * event.currentTarget`. Every control here therefore lives **outside**
- * the tree, in a toolbar above it. Nothing new is placed inside a row, so
- * there is no new way for a press to be swallowed or duplicated, and
- * `NavigationTreeActions.test.ts` asserts this component renders no
- * `treeitem` and no `tree` at all.
+ * On 2026-09-23 the owner rejected the tree this component used to draw.
+ * It carried `New…`, `Rename…` and a red trash button in one row, and the
+ * trash beside "New" read as *delete the workspace* — the misreading is
+ * the defect, not the person. Both reference products agree, and agree
+ * without exception:
  *
- * ── Where a new node goes ──────────────────────────────────────────────
+ * - **VS Code's Explorer title bar** registers exactly four actions
+ *   against `MenuId.ViewTitle` — New File, New Folder, Refresh, Collapse
+ *   Folders (`explorerView.ts`). Zero destructive actions are registered
+ *   there. Delete and Rename are `MenuId.ExplorerContext` and keybindings
+ *   only (`fileActions.contribution.ts`).
+ * - **Obsidian's file explorer** toolbar is New note, New folder, Sort,
+ *   Auto-reveal, Expand all, Collapse all; Delete and Rename live in the
+ *   right-click menu and the command palette.
  *
- * The location is the row the user picked — the one that shows the
- * selected fill — resolved up to the nearest node that can legally hold
- * children — so "New" means "here", which is how a tree is read. The only
- * other offer is the top level, because a second shelf would otherwise
- * be unreachable once the first one exists. Until the user has picked a
- * row there is no "here": the location is the top level, and Rename says
- * plainly that it needs a row first. Before 2026-09-14 the toolbar acted
- * on the row that happened to hold the roving tab stop, which defaults
- * to the first row on load — so "Rename “Engineering”…" read before the
- * user had touched the tree and the "select a row first" state was
- * unreachable (audit defect 8). Two radios rather than a picker of every container: the
- * tree itself is the picker, and arrowing to a row is cheaper than
- * finding it again in a list (docs/UI-CHECKLIST.md §4.4 — this is a tool
- * people live in all day, so the chrome stays quiet).
+ * So: creation and view controls here, everything that changes or destroys
+ * a node in the row's own context menu and on the keyboard (`F2` renames,
+ * `Delete` trashes — `NavigationTree`). This batch's research report, in
+ * the session scratchpad, carries both sources.
  *
- * ── What may be created ────────────────────────────────────────────────
+ * **There is no Refresh, deliberately.** VS Code needs one because its
+ * tree mirrors a filesystem other processes write to. This tree is drawn
+ * from the response of the request that changed it — a create, a rename, a
+ * reorder and a delete each redraw the row they touched without asking for
+ * the tree again (`useTree`, 2026-09-16) — so a Refresh button would be a
+ * control with nothing to do, which docs/UI-CHECKLIST.md §6 counts as
+ * observable breakage.
  *
- * `legalChildTypes()` — the inverse of the one `LEGAL_PARENT_TYPES` table
- * in `packages/core`, re-exported through `@deep-wiki/contracts`. The
- * menu the user sees and the rule the server enforces are the same fact;
- * a list typed out here would be the sixth instance of docs/TODO.md's own
- * named recurring defect.
+ * ── Never a question with one answer ───────────────────────────────────
  *
- * ── Failure ────────────────────────────────────────────────────────────
+ * `New…` asks the one `LEGAL_PARENT_TYPES` table what may go under the
+ * picked row (`newRowChoice`, derived, never a second list). One legal
+ * child — a shelf at the top level, a book in a shelf, a page in a chapter
+ * — and it simply starts naming one, with no question asked. Several — a
+ * book holds chapters *and* pages — and a short menu picks the kind first.
+ * The dialog this replaces asked with a `Type` radio group that held a
+ * single "Shelf" option, which is what the owner objected to.
  *
- * Classified through `~/utils/fetch-error` — the shared guard, never an
- * eleventh hand-written copy. A collision is a *field* error, because the
- * user fixes it by changing the name; a refusal or a dead connection is a
- * form-level alert, because they do not. Both keep the dialog open with
- * what was typed still in it (§3 — an error is never a dead end).
+ * Nothing here opens a dialog any more: the name is typed in the row
+ * (`NavigationTreeRowEditor`).
  */
+import type { DropdownMenuItem } from '@nuxt/ui';
 import { legalChildTypes, type NodeType } from '@deep-wiki/contracts';
-import type { CreatedNode, RenamedNode, TreeNode } from '~/composables/useTree';
-import { deleteRowAction } from '~/composables/useTreeRowActions';
-
-interface CreateNodeBody {
-  readonly parentId: string;
-  readonly type: NodeType;
-  readonly title: string;
-}
-
-interface CreatedNodePayload extends CreatedNode {
-  readonly type: NodeType;
-}
-
-type RenamedNodePayload = RenamedNode;
-
-export type CreateNodeFetcher = (body: CreateNodeBody) => Promise<CreatedNodePayload>;
-export type RenameNodeFetcher = (nodeId: string, body: { title: string }) => Promise<RenamedNodePayload>;
+import type { TreeNode } from '~/composables/useTree';
+import { NODE_TYPE_ICONS, NODE_TYPE_LABELS, newRowChoice } from '~/composables/useTreeRowActions';
 
 const props = defineProps<{
   nodes: readonly TreeNode[];
   rootId: string | null;
-  /** The row the user picked — the "here" a new node goes under, and the one Rename and Delete act on. `null` until they pick one. */
+  /** The row the person picked — the "here" a new node goes under. `null` until they pick one, which means the top level. */
   selectedId: string | null;
-  /** Ids the caller holds `manage` on, and whether they own the workspace — the tree response's, for Delete (design.md Decision 8). */
-  manageable: ReadonlySet<string>;
-  isOwner: boolean;
-  /** Injected in tests, exactly as `useTree` takes its fetchers. */
-  createFetcher?: CreateNodeFetcher;
-  renameFetcher?: RenameNodeFetcher;
+  /** Whether the filter box is on screen, for `aria-expanded`. */
+  filterOpen: boolean;
+  /** The element the filter toggle controls, for `aria-controls`. */
+  filterBoxId: string;
+  /** There is a tree to filter: an empty tree offers no filter (checklist §3 — first-run empty is its own state). */
+  canFilter: boolean;
+  /** At least one container is open, so "Collapse all" has something to do. */
+  canCollapseAll: boolean;
 }>();
 
-/**
- * The server's answer, handed to the tree to draw: the row appears from
- * the one request that made it, not from a second `GET /tree` (2026-09-16;
- * until then the tree reloaded on `changed`, and the new row landed on the
- * second round trip). `delete` is different: it names the row and asks
- * the tree to run the flow (`useTrash`), because the flow takes the row
- * out before the server answers and puts it back on a refusal — the
- * tree's own edits, beside the tree that draws them.
+const emit = defineEmits<{
+  /** Start naming a new node of `type` under `parentId`, in the row. */
+  create: [target: { parentId: string; type: NodeType }];
+  'toggle-filter': [];
+  'collapse-all': [];
+}>();
+
+/* ─── Where a new node goes ───────────────────────────────────────────
+ * The row the person picked, resolved up to the nearest node that can
+ * legally hold children — so "New" means "here", which is how a tree is
+ * read. With nothing picked there is no "here" and the answer is the top
+ * level, which is also the only way a second shelf is ever reachable.
  */
-const emit = defineEmits<{ created: [node: CreatedNodePayload]; renamed: [node: RenamedNodePayload]; delete: [nodeId: string] }>();
-
-const config = useRuntimeConfig();
-
-const createNode: CreateNodeFetcher = (body) =>
-  props.createFetcher
-    ? props.createFetcher(body)
-    : $fetch(`${config.public.apiBaseUrl}/nodes`, { method: 'POST', credentials: 'include', body });
-
-const renameNode: RenameNodeFetcher = (nodeId, body) =>
-  props.renameFetcher
-    ? props.renameFetcher(nodeId, body)
-    : $fetch(`${config.public.apiBaseUrl}/nodes/${nodeId}`, { method: 'PATCH', credentials: 'include', body });
-
-/* ─── The tree, indexed ─────────────────────────────────────────────── */
 
 interface Indexed {
   readonly node: TreeNode;
   readonly parentId: string;
 }
-
-const ROOT_LABEL = 'the top level';
 
 const index = computed<Map<string, Indexed>>(() => {
   const map = new Map<string, Indexed>();
@@ -130,12 +104,7 @@ function typeOf(nodeId: string): NodeType {
   return (index.value.get(nodeId)?.node.type ?? 'workspace') as NodeType;
 }
 
-function titleOf(nodeId: string): string {
-  return index.value.get(nodeId)?.node.title ?? ROOT_LABEL;
-}
-
-/** The nearest ancestor-or-self that may legally hold children; the root when there is none. */
-const nearestContainerId = computed(() => {
+const targetId = computed(() => {
   let current = props.selectedId;
   while (current) {
     const entry = index.value.get(current);
@@ -146,440 +115,110 @@ const nearestContainerId = computed(() => {
   return rootLocationId.value;
 });
 
-const locationOptions = computed(() => {
-  const ids = nearestContainerId.value === rootLocationId.value ? [rootLocationId.value] : [nearestContainerId.value, rootLocationId.value];
-  return ids.map((id) => ({
-    value: id,
-    label: id === rootLocationId.value ? 'At the top level' : `In “${titleOf(id)}”`,
-  }));
+const targetType = computed(() => typeOf(targetId.value));
+const choice = computed(() => newRowChoice(targetType.value));
+
+/** Where the new row will land, for the control's own tooltip: a person should know before pressing it. */
+const targetLabel = computed(() => {
+  const id = targetId.value;
+  if (id === rootLocationId.value) return 'at the top level';
+  return `in “${index.value.get(id)?.node.title ?? ''}”`;
 });
 
-/* ─── Create ────────────────────────────────────────────────────────── */
+const newTooltip = computed(() => {
+  if (choice.value.kind === 'one') return `New ${NODE_TYPE_LABELS[choice.value.type].toLowerCase()} ${targetLabel.value}`;
+  if (choice.value.kind === 'many') return `New item ${targetLabel.value}`;
+  return 'There is nowhere to create anything here.';
+});
 
-const createOpen = ref(false);
-const createParentId = ref('');
-const createType = ref<NodeType>('shelf');
-const createTitle = ref('');
-const createNameError = ref<string | null>(null);
-const createFormError = ref<string | null>(null);
-const createSubmitting = ref(false);
-const announcement = ref('');
-
-const createTypeOptions = computed(() =>
-  legalChildTypes(typeOf(createParentId.value)).map((type) => ({ value: type, label: TYPE_LABELS[type] })),
+/** The kinds a book admits — the menu shown only when the hierarchy leaves more than one answer. */
+const typeItems = computed<DropdownMenuItem[]>(() =>
+  choice.value.kind === 'many'
+    ? choice.value.types.map((type) => ({
+        label: NODE_TYPE_LABELS[type],
+        icon: NODE_TYPE_ICONS[type],
+        onSelect: () => emit('create', { parentId: targetId.value, type }),
+      }))
+    : [],
 );
 
-/**
- * When the hierarchy leaves exactly one answer, the single radio needs to
- * say *why* it is single — otherwise it reads as a control that forgot its
- * other options. The sentence is composed from the same table, never from
- * a written-out list of what holds what.
- */
-const createTypeHelp = computed(() => {
-  if (createTypeOptions.value.length !== 1) return undefined;
-  const only = TYPE_LABELS[createTypeOptions.value[0]!.value].toLowerCase();
-  if (createParentId.value === rootLocationId.value) return `Only a ${only} can sit at the top level.`;
-  return `Only a ${only} can go directly inside a ${TYPE_LABELS[typeOf(createParentId.value)].toLowerCase()}.`;
-});
-
-const TYPE_LABELS: Record<NodeType, string> = {
-  workspace: 'Workspace',
-  shelf: 'Shelf',
-  book: 'Book',
-  chapter: 'Chapter',
-  page: 'Page',
-};
-
-// A location the user changes may not permit the type they had chosen —
-// a chapter holds only pages. Falling back to the first legal type keeps
-// the form in a state the server would accept.
-watch(createTypeOptions, (options) => {
-  if (!options.some((option) => option.value === createType.value)) {
-    createType.value = (options[0]?.value ?? 'shelf') as NodeType;
-  }
-});
-
-/** The toolbar's New…: the first legal type at the picked row. */
-function openCreate(): void {
-  openCreateAs();
-}
-
-/**
- * The dialog asks only what it does not know (owner decision,
- * 2026-09-17). Opened from a row's context menu — "New page…" on a
- * chapter — the invocation has answered both the place and the kind, so
- * `answered` is true: the dialog is titled for the thing being made,
- * leads with the name, and states the two answers in one line with a
- * "Change…" disclosure (`choicesShown`) that reveals the radios. Opened
- * from the toolbar the kind is a guess (the first legal one) and the
- * radios show as before, whether or not a row is picked.
- */
-const answered = ref(false);
-const choicesShown = ref(false);
-
-/**
- * `type` is the row's context menu asking for a specific child ("New
- * page…" on a chapter); the toolbar asks for none and gets the first
- * legal one. Either way the location is the picked row, so the menu
- * selects its row before calling this and lands in the same dialog.
- */
-function openCreateAs(type?: NodeType): void {
-  createParentId.value = nearestContainerId.value;
-  const legal = legalChildTypes(typeOf(createParentId.value));
-  const known = type !== undefined && legal.includes(type);
-  createType.value = (known ? type : (legal[0] ?? 'shelf')) as NodeType;
-  answered.value = known;
-  choicesShown.value = !known;
-  createTitle.value = '';
-  createNameError.value = null;
-  createFormError.value = null;
-  createOpen.value = true;
-}
-
-/** "New page" when the invocation named the kind; "New item" when the dialog is about to ask. */
-const createDialogTitle = computed(() => (answered.value ? `New ${TYPE_LABELS[createType.value].toLowerCase()}` : 'New item'));
-
-/** The one line that stands in for the two radio groups: "Page in “Onboarding”", or "Shelf at the top level". */
-const createSummary = computed(() => {
-  const kind = TYPE_LABELS[createType.value];
-  return createParentId.value === rootLocationId.value ? `${kind} at ${ROOT_LABEL}` : `${kind} in “${titleOf(createParentId.value)}”`;
-});
-
-const canSubmitCreate = computed(() => createTitle.value.trim().length > 0 && createTypeOptions.value.length > 0);
-
-async function submitCreate(): Promise<void> {
-  if (!canSubmitCreate.value || createSubmitting.value) return;
-  createNameError.value = null;
-  createFormError.value = null;
-  createSubmitting.value = true;
-  const where = createParentId.value === rootLocationId.value ? ROOT_LABEL : `“${titleOf(createParentId.value)}”`;
-  try {
-    const created = await createNode({
-      parentId: createParentId.value,
-      type: createType.value,
-      title: createTitle.value.trim(),
-    });
-    // Specific, not "Saved": the user can act on which object went where
-    // (docs/UI-CHECKLIST.md §3).
-    announcement.value = `Created ${TYPE_LABELS[created.type].toLowerCase()} “${created.title}” in ${where}.`;
-    createOpen.value = false;
-    createTitle.value = '';
-    emit('created', created);
-  } catch (error) {
-    applyWriteError(error, createNameError, createFormError, 'create');
-  } finally {
-    createSubmitting.value = false;
-  }
-}
-
-/* ─── Rename ────────────────────────────────────────────────────────── */
-
-const renameOpen = ref(false);
-const renameTitle = ref('');
-const renameNameError = ref<string | null>(null);
-const renameFormError = ref<string | null>(null);
-const renameSubmitting = ref(false);
-
-const renameTarget = computed(() => (props.selectedId ? (index.value.get(props.selectedId)?.node ?? null) : null));
-
-function openRename(): void {
-  if (!renameTarget.value) return;
-  renameTitle.value = renameTarget.value.title;
-  renameNameError.value = null;
-  renameFormError.value = null;
-  renameOpen.value = true;
-}
-
-const canSubmitRename = computed(() => renameTitle.value.trim().length > 0 && renameTarget.value !== null);
-
-async function submitRename(): Promise<void> {
-  const target = renameTarget.value;
-  if (!target || !canSubmitRename.value || renameSubmitting.value) return;
-  renameNameError.value = null;
-  renameFormError.value = null;
-  renameSubmitting.value = true;
-  try {
-    const renamed = await renameNode(target.id, { title: renameTitle.value.trim() });
-    announcement.value = `Renamed to “${renamed.title}”.`;
-    renameOpen.value = false;
-    emit('renamed', renamed);
-  } catch (error) {
-    applyWriteError(error, renameNameError, renameFormError, 'rename');
-  } finally {
-    renameSubmitting.value = false;
-  }
-}
-
-/* ─── Delete ────────────────────────────────────────────────────────── */
-
-/** The one decision the row's menu makes, for the picked row; `null` until a row is picked. */
-const deleteAction = computed(() => (renameTarget.value ? deleteRowAction(renameTarget.value, { manageable: props.manageable, isOwner: props.isOwner }) : null));
-const deleteReason = computed(() => (deleteAction.value ? deleteAction.value.reason : 'Select a row in the tree to delete it.'));
-const canDelete = computed(() => deleteAction.value !== null && !deleteAction.value.disabled);
-
-function requestDelete(): void {
-  if (!canDelete.value || !renameTarget.value) return;
-  emit('delete', renameTarget.value.id);
-}
-
-/**
- * The row's context menu (`NavigationTree`) opens these same two dialogs:
- * one create, one rename, one classification of failure, whichever
- * surface asked. A second copy of either dialog is how the toolbar and
- * the menu would drift apart.
- */
-defineExpose({ openCreate: openCreateAs, openRename });
-
-/* ─── One classification of failure, for both writes ────────────────── */
-
-function applyWriteError(
-  error: unknown,
-  nameError: Ref<string | null>,
-  formError: Ref<string | null>,
-  action: 'create' | 'rename',
-): void {
-  const status = httpStatusOf(error);
-  const body = responseBodyOf(error) as { error?: string } | undefined;
-
-  if (status === 409) {
-    // The only failure the user fixes by editing the field, so it is the
-    // only one attached to it.
-    nameError.value = body?.error ?? 'Something here already has that name. Choose another.';
-    return;
-  }
-  if (status === 403) {
-    formError.value =
-      action === 'create'
-        ? "You don't have permission to create anything here. Ask a workspace admin for write access."
-        : "You don't have permission to rename this. Ask a workspace admin for write access.";
-    return;
-  }
-  if (status === 404) {
-    formError.value = 'That place is no longer there. Reload the tree and try again.';
-    return;
-  }
-  if (status === 400) {
-    formError.value = body?.error ?? 'That is not something that can go here.';
-    return;
-  }
-  formError.value = 'Cannot reach the server. Check your connection and try again.';
+function onNew(): void {
+  if (choice.value.kind !== 'one') return;
+  emit('create', { parentId: targetId.value, type: choice.value.type });
 }
 </script>
 
 <template>
-  <div>
-    <!-- 12px between two actions and 16px below them: the 4dp grid
-         (DESIGN-SYSTEM §7.3). `flex-wrap` so 320px never scrolls
-         sideways (checklist §6). This is a toolbar, so its controls are
-         §7.2's 32px chrome height (`size="sm"`), not the 40px of a
-         content-area action — measured at 40px on 2026-09-14. -->
-    <!-- Tonal, not filled: since 2026-09-15 this toolbar stands in the
-         sidebar on every screen, and a filled button there would be a
-         second primary beside whatever the screen's own is (checklist §2,
-         one primary per view). The two read as one group — tonal and
-         outlined — apart from the screen's actions in the top bar.
-         The row fills the pane: New… grows (`flex-1`), Rename… takes its
-         natural width — measured on 2026-09-16, the two at their natural
-         widths left the right third of the 280px pane empty. -->
-    <div class="mb-2 flex flex-wrap items-center gap-2">
-      <UButton size="sm" variant="soft" icon="i-lucide-plus" class="flex-1" data-testid="tree-create-open" @click="openCreate">New…</UButton>
-
-      <!-- `aria-disabled`, never `disabled`: the attribute would take the
-           control out of the tab order and put its own explanation behind
-           a hover a keyboard user cannot perform (checklist §5). -->
-      <UTooltip v-if="!renameTarget" text="Select a row in the tree first.">
-        <UButton
-          size="sm"
-          variant="outline"
-          color="neutral"
-          icon="i-lucide-pencil-line"
-          aria-disabled="true"
-          aria-describedby="tree-rename-reason"
-          data-testid="tree-rename-open"
-        >
-          Rename…
-        </UButton>
-      </UTooltip>
-      <!-- The target is in the control's name and its tooltip, not in its
-           visible label: "Rename “A long page title”…" wrapped onto two
-           lines in a 280px pane (measured 2026-09-15), and the row it
-           names is already the one drawn with the fill. -->
-      <UTooltip v-else :text="`Rename “${renameTarget.title}”`">
-        <UButton
-          size="sm"
-          variant="outline"
-          color="neutral"
-          icon="i-lucide-pencil-line"
-          :aria-label="`Rename “${renameTarget.title}”…`"
-          data-testid="tree-rename-open"
-          @click="openRename"
-        >
-          Rename…
-        </UButton>
-      </UTooltip>
-      <p id="tree-rename-reason" class="sr-only">Select a row in the tree to rename it.</p>
-
-      <!-- Delete: icon-only, since the pane holds two words and not three
-           (measured at 280px), so both halves of §4.3 — a name that carries
-           the target and a tooltip. The tooltip carries the reason while
-           the control is unavailable (§3 "Disabled") and the target when it
-           is; `aria-describedby` says the reason to assistive technology.
-           Outlined `error`: a destructive action keeps a visible boundary
-           (DESIGN-SYSTEM §9.1), quieter than the tonal New… beside it. -->
-      <UTooltip :text="canDelete ? `Delete “${renameTarget?.title}”` : deleteReason">
-        <UButton
-          size="sm"
-          variant="outline"
-          color="error"
-          icon="i-lucide-trash-2"
-          square
-          :aria-label="renameTarget ? `Delete “${renameTarget.title}”…` : 'Delete…'"
-          :aria-disabled="canDelete ? undefined : 'true'"
-          :aria-describedby="canDelete ? undefined : 'tree-delete-reason'"
-          data-testid="tree-delete-open"
-          @click="requestDelete"
-        />
-      </UTooltip>
-      <p v-if="!canDelete" id="tree-delete-reason" class="sr-only">{{ deleteReason }}</p>
-    </div>
-
-    <!-- Success is confirmed visibly *and* announced (checklist §3, §5),
-         and it is specific rather than "Saved": it names the object and
-         the place it went, which is what the user can act on.
-         The live region is always in the DOM — a region inserted at the
-         same moment its text appears is frequently not announced at all —
-         and only its styling changes, from `sr-only` to a success chip. -->
-    <p
-      data-testid="tree-actions-status"
-      role="status"
-      aria-live="polite"
-      :class="
-        announcement
-          ? 'mb-4 rounded-md bg-success-container px-3 py-2 text-body-small text-on-success-container'
-          : 'sr-only'
-      "
+  <!-- A named group, so the header's item set is one thing a review and a
+       test can both point at. `role="group"` and not `role="toolbar"`: a
+       toolbar owes arrow-key navigation between its controls, and these
+       three are ordinary tab stops beside a tree that already owns the
+       arrow keys. -->
+  <div role="group" aria-label="Tree actions" class="mb-2 flex flex-wrap items-center gap-2 px-2">
+    <!-- Tonal, not filled: this stands in the sidebar on every screen, and
+         a filled button here would be a second primary beside whatever the
+         screen's own is (checklist §2). 32px, the chrome height
+         (DESIGN-SYSTEM §7.2). It keeps its label — it is the one thing a
+         person comes to this header to do. -->
+    <UDropdownMenu
+      v-if="choice.kind === 'many'"
+      :items="typeItems"
+      :content="{ align: 'start', collisionPadding: 8 }"
+      :ui="{ content: 'bg-accented max-w-(--reka-dropdown-menu-content-available-width)' }"
     >
-      {{ announcement }}
-    </p>
+      <UTooltip :text="newTooltip">
+        <UButton size="sm" variant="soft" icon="i-lucide-plus" class="flex-1" aria-haspopup="menu" data-testid="tree-create-open">New…</UButton>
+      </UTooltip>
+    </UDropdownMenu>
+    <UTooltip v-else :text="newTooltip">
+      <UButton
+        size="sm"
+        variant="soft"
+        icon="i-lucide-plus"
+        class="flex-1"
+        :aria-disabled="choice.kind === 'none' ? 'true' : undefined"
+        data-testid="tree-create-open"
+        @click="onNew"
+      >
+        New…
+      </UButton>
+    </UTooltip>
 
-    <!-- Titled for the thing being made when the invocation named it;
-         "New item" when the dialog is about to ask. `:ui.title` carries a
-         test id so a test reads the heading and not the whole dialog. -->
-    <UModal
-      v-model:open="createOpen"
-      :title="createDialogTitle"
-      :description="answered ? 'Give it a name. The address is made from the name.' : 'Add a shelf, book, chapter or page to this workspace.'"
-      :ui="{ title: 'dw-create-dialog-title' }"
-    >
-      <template #body>
-        <div class="space-y-6">
-          <p v-if="createFormError" role="alert" data-testid="tree-create-error" class="rounded-md bg-error-container px-3 py-2 text-body-small text-on-error-container">
-            {{ createFormError }}
-          </p>
+    <!-- Icon-only, so both halves of §4.3 — a name and a tooltip — and
+         `aria-expanded`/`aria-controls` say what it does to what. -->
+    <UTooltip v-if="canFilter" text="Filter tree" :kbds="['meta', 'shift', 'F']">
+      <UButton
+        icon="i-lucide-filter"
+        variant="ghost"
+        color="neutral"
+        size="sm"
+        square
+        aria-label="Filter tree"
+        :aria-expanded="filterOpen"
+        :aria-controls="filterBoxId"
+        :class="filterOpen ? 'text-secondary' : undefined"
+        data-testid="tree-filter-toggle"
+        @click="emit('toggle-filter')"
+      />
+    </UTooltip>
 
-          <!-- The name first and focused when the place and the kind are
-               already answered (the invocation was "New page…" on a row);
-               after the choices when they are still to be made, so the
-               form reads in the order it is filled. `autofocus` is what
-               Reka's dialog honours for its initial focus. -->
-          <UFormField v-if="answered" label="Name" required :error="createNameError ?? undefined" data-testid="tree-create-title-field">
-            <UInput
-              v-model="createTitle"
-              class="w-full"
-              autocomplete="off"
-              autofocus
-              data-testid="tree-create-title"
-              @keydown.enter.prevent="submitCreate"
-            />
-          </UFormField>
-
-          <!-- The two answers in one line, with the disclosure that turns
-               them back into questions. A text button (`link`), named for
-               what it reveals, `aria-expanded` and `aria-controls` on the
-               region below (§5). -->
-          <p v-if="answered" class="flex flex-wrap items-baseline gap-x-3 text-body-medium text-default">
-            <span v-if="!choicesShown" data-testid="tree-create-summary">{{ createSummary }}</span>
-            <UButton
-              variant="link"
-              size="sm"
-              class="p-0"
-              :aria-expanded="choicesShown ? 'true' : 'false'"
-              aria-controls="tree-create-choices"
-              data-testid="tree-create-change"
-              @click="choicesShown = !choicesShown"
-            >
-              {{ choicesShown ? 'Hide the choices' : 'Change…' }}
-            </UButton>
-          </p>
-
-          <div v-if="choicesShown" id="tree-create-choices" class="space-y-6">
-            <UFormField v-if="locationOptions.length > 1" label="Location" required>
-              <URadioGroup v-model="createParentId" :items="locationOptions" data-testid="tree-create-location" />
-            </UFormField>
-            <p v-else data-testid="tree-create-location-fixed" class="text-body-medium text-muted">
-              This will be created at the top level of the workspace.
-            </p>
-
-            <UFormField label="Type" required :help="createTypeHelp">
-              <URadioGroup v-model="createType" :items="createTypeOptions" data-testid="tree-create-type" />
-            </UFormField>
-          </div>
-
-          <UFormField v-if="!answered" label="Name" required :error="createNameError ?? undefined" data-testid="tree-create-title-field">
-            <UInput
-              v-model="createTitle"
-              class="w-full"
-              autocomplete="off"
-              data-testid="tree-create-title"
-              @keydown.enter.prevent="submitCreate"
-            />
-          </UFormField>
-
-          <p v-if="!answered" class="text-body-small text-muted">All fields are required. The address is made from the name.</p>
-        </div>
-      </template>
-      <template #footer>
-        <UButton variant="outline" color="neutral" @click="createOpen = false">Cancel</UButton>
-        <UButton
-          :loading="createSubmitting"
-          :aria-disabled="!canSubmitCreate || undefined"
-          data-testid="tree-create-submit"
-          @click="submitCreate"
-        >
-          Create
-        </UButton>
-      </template>
-    </UModal>
-
-    <UModal v-model:open="renameOpen" title="Rename" :description="`Give “${renameTarget?.title ?? ''}” a new name.`">
-      <template #body>
-        <div class="space-y-6">
-          <p v-if="renameFormError" role="alert" data-testid="tree-rename-error" class="rounded-md bg-error-container px-3 py-2 text-body-small text-on-error-container">
-            {{ renameFormError }}
-          </p>
-          <UFormField label="Name" required :error="renameNameError ?? undefined" data-testid="tree-rename-title-field">
-            <UInput
-              v-model="renameTitle"
-              class="w-full"
-              autocomplete="off"
-              data-testid="tree-rename-title"
-              @keydown.enter.prevent="submitRename"
-            />
-          </UFormField>
-          <p class="text-body-small text-muted">The address changes with the name.</p>
-        </div>
-      </template>
-      <template #footer>
-        <UButton variant="outline" color="neutral" @click="renameOpen = false">Cancel</UButton>
-        <UButton
-          :loading="renameSubmitting"
-          :aria-disabled="!canSubmitRename || undefined"
-          data-testid="tree-rename-submit"
-          @click="submitRename"
-        >
-          Rename
-        </UButton>
-      </template>
-    </UModal>
+    <!-- `aria-disabled`, never the attribute: the attribute would take the
+         control out of the tab order and put its own explanation behind a
+         hover a keyboard user cannot perform (checklist §5). -->
+    <UTooltip v-if="canFilter" :text="canCollapseAll ? 'Collapse all' : 'Everything is already collapsed.'">
+      <UButton
+        icon="i-lucide-chevrons-down-up"
+        variant="ghost"
+        color="neutral"
+        size="sm"
+        square
+        aria-label="Collapse all"
+        :aria-disabled="canCollapseAll ? undefined : 'true'"
+        :aria-describedby="canCollapseAll ? undefined : 'tree-collapse-all-reason'"
+        data-testid="tree-collapse-all"
+        @click="canCollapseAll && emit('collapse-all')"
+      />
+    </UTooltip>
+    <p v-if="canFilter && !canCollapseAll" id="tree-collapse-all-reason" class="sr-only">Everything is already collapsed.</p>
   </div>
 </template>
