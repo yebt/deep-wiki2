@@ -106,6 +106,64 @@ describe('mintAnchorAtBlock — reserved ids', () => {
   });
 });
 
+/**
+ * The whole reason both functions in this module are canonicalising rather
+ * than purely splicing (docs/TODO.md, 2026-09-23). A block whose canonical
+ * spelling depends on what follows its last byte cannot be edited by byte
+ * offset: the splice lands beside the spelling and invalidates it.
+ *
+ * The real-world input below is the byte content of the page the project
+ * owner hit this on. A paragraph ending in a space is canonically spelled
+ * with the space escaped — `&#x20;` — because unescaped trailing
+ * whitespace does not survive a reparse. Append ` ^id` and the space is no
+ * longer trailing, so its canonical spelling is a literal space again;
+ * remove the anchor and the space stops being representable at all. Either
+ * direction hands `savePage()` bytes it refuses as non-canonical, which is
+ * how a person commenting on a selection got a 500.
+ */
+const TRAILING_SPACE_PARAGRAPH = 'This is a content @Seed Owner&#x20;\n';
+
+describe('the anchor splice preserves the canonical-form invariant', () => {
+  test('a mint on a block whose trailing space is escaped returns canonical markdown', () => {
+    expect(canonicalise(TRAILING_SPACE_PARAGRAPH)).toBe(TRAILING_SPACE_PARAGRAPH);
+    const [block] = sliceBlocks(parse(TRAILING_SPACE_PARAGRAPH), TRAILING_SPACE_PARAGRAPH);
+
+    const result = mintAnchorAtBlock(TRAILING_SPACE_PARAGRAPH, block!.id);
+
+    expect(result).not.toBeNull();
+    // The property, stated as itself: `savePage()` asserts exactly this.
+    expect(canonicalise(result!.markdown)).toBe(result!.markdown);
+    // And the escape is gone, so this is the respelling rather than a
+    // document that merely happened to survive: the space is now literal.
+    expect(result!.markdown).toBe(`This is a content @Seed Owner  ^${result!.blockId}\n`);
+    // The minted id still resolves in the markdown the caller is handed.
+    const [reparsed] = sliceBlocks(parse(result!.markdown), result!.markdown);
+    expect(reparsed!.anchorId).toBe(result!.blockId);
+  });
+
+  test('stripping that anchor again returns canonical markdown the author can re-save', () => {
+    const anchored = 'This is a content @Seed Owner  ^DEADAAAAAA\n';
+    expect(canonicalise(anchored)).toBe(anchored);
+
+    const stripped = stripBlockAnchors(anchored, new Set(['DEADAAAAAA']));
+
+    expect(canonicalise(stripped)).toBe(stripped);
+    // A space that nothing follows is not representable in canonical form,
+    // so the correction drops it rather than handing back `Owner \n`, which
+    // the save path would refuse all over again.
+    expect(stripped).toBe('This is a content @Seed Owner\n');
+  });
+
+  test('a mint leaves a block whose canonical spelling the splice does not touch byte-identical apart from the anchor', () => {
+    const markdown = 'A plain paragraph.\n\nAnd a second one.\n';
+    const [, second] = sliceBlocks(parse(markdown), markdown);
+
+    const result = mintAnchorAtBlock(markdown, second!.id);
+
+    expect(result!.markdown).toBe(`A plain paragraph.\n\nAnd a second one. ^${result!.blockId}\n`);
+  });
+});
+
 // The inverse of the mint, used by the save transaction's refusal to hand
 // back a document the author can re-submit.
 describe('stripBlockAnchors', () => {

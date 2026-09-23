@@ -6,9 +6,31 @@
  * (GATE-2) — this inserts the same literal ` ^id` text directly at the
  * block's own end offset rather than constructing a second path to the
  * same output.
+ *
+ * **The splice is not canonical by itself.** Both directions here edit
+ * Markdown *source* by byte offset, and a block's last bytes are exactly
+ * where a spelling can depend on what follows them. A paragraph ending in a
+ * space is canonically spelled with that space escaped —
+ * `This is a content&#x20;` — because unescaped trailing whitespace does not
+ * survive a reparse. Append ` ^id` and the space is no longer trailing, so
+ * canonical form spells it literally; remove the anchor and the space stops
+ * being representable at all. The splice cannot know either, so both
+ * functions return `canonicalise()` of their spliced result rather than
+ * assuming the splice preserved canonical form.
+ *
+ * That is not cosmetic. `savePage()` refuses Markdown that is not its own
+ * fixed point (design.md D1), so a splice returning non-canonical bytes is a
+ * refusal of its own caller's write: it surfaced as a 500 on
+ * `POST /pages/:id/comments` for any page whose commented block ended in an
+ * escaped space, and as an unsavable `corrected` document on the dead-anchor
+ * refusal (docs/TODO.md, 2026-09-23). `canonicalise` is idempotent by
+ * construction, so the result is a fixed point for any input; when the input
+ * was canonical — which stored page Markdown is, by construction — the only
+ * bytes that differ from the raw splice are the ones whose spelling the
+ * splice itself invalidated.
  */
 import { mintBlockId } from './match-blocks';
-import { parse } from './pipeline';
+import { canonicalise, parse } from './pipeline';
 import { sliceBlocks, type BlockSlice } from './blocks';
 
 export interface MintAnchorResult {
@@ -48,17 +70,20 @@ export function mintAnchorAtBlock(markdown: string, targetBlockId: string, reser
 
   const node = tree.children[index]!;
   const end = node.position!.end.offset!;
-  const mutated = `${markdown.slice(0, end)} ^${newId}${markdown.slice(end)}`;
+  const spliced = `${markdown.slice(0, end)} ^${newId}${markdown.slice(end)}`;
 
-  return { markdown: mutated, blockId: newId };
+  // Canonicalised, never returned raw — see "the splice is not canonical by
+  // itself" in this file's header.
+  return { markdown: canonicalise(spliced), blockId: newId };
 }
 
 /**
  * Removes the trailing ` ^<id>` anchor from every block whose anchor is in
- * `ids`, leaving every other byte of `markdown` untouched. The exact
- * inverse of the splice `mintAnchorAtBlock` performs above, deliberately in
- * the same module: the literal on-disk shape of an anchor is known in one
- * place, so the two directions cannot drift apart.
+ * `ids`, leaving every other byte of `markdown` untouched *except* where
+ * removing the anchor changed a spelling's canonical form — see the header.
+ * The exact inverse of the splice `mintAnchorAtBlock` performs above,
+ * deliberately in the same module: the literal on-disk shape of an anchor is
+ * known in one place, so the two directions cannot drift apart.
  *
  * This is the correction the save path hands back when a document
  * reintroduces an id the registry has already retired
@@ -90,5 +115,8 @@ export function stripBlockAnchors(markdown: string, ids: ReadonlySet<string>): s
 
     result = result.slice(0, start) + result.slice(end);
   }
-  return result;
+  // Canonicalised for the same reason the mint is, and it matters more here:
+  // this document is handed straight back to a client as the version to
+  // re-submit, so non-canonical bytes would make the correction unsavable.
+  return canonicalise(result);
 }
