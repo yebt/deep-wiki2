@@ -86,14 +86,36 @@ const input = ref<{ inputRef?: HTMLInputElement | null } | null>(null);
  * whole name selected so typing replaces it — VS Code selects the basename
  * of a file and the whole name of a directory, and a wiki title has no
  * extension to exclude.
+ *
+ * **Why it insists.** One `focus()` on mount is not enough, and the way it
+ * failed is worth writing down: a creation started from the header's type
+ * menu mounts this field *while Reka's menu is still open*, and a modal
+ * Reka menu marks the rest of the page `inert` — where `focus()` is
+ * silently a no-op. Then the menu unmounts, its own focus restore runs,
+ * and the field is left showing a cursor it does not have. Measured in the
+ * browser on 2026-09-23: the input rendered and stayed `inactive` through
+ * thirteen polls (`e2e/tree-writes.spec.ts`).
+ *
+ * So focus is re-asserted on the next few macrotasks until it lands —
+ * bounded, and it stops the moment the field has it. The window is a few
+ * milliseconds, far inside the time it takes a person to Tab away
+ * deliberately, and the alternative — hanging the creation itself off the
+ * menu's own close event — makes the write depend on a library event that
+ * does not fire in every environment.
  */
+const FOCUS_ATTEMPTS = 5;
+
 onMounted(() => {
-  void nextTick(() => {
+  let left = FOCUS_ATTEMPTS;
+  const take = (): void => {
     const el = input.value?.inputRef;
-    if (!el) return;
+    if (!el || document.activeElement === el) return;
     el.focus();
     el.select();
-  });
+    left -= 1;
+    if (left > 0 && document.activeElement !== el) window.setTimeout(take, 0);
+  };
+  void nextTick(take);
 });
 </script>
 

@@ -171,4 +171,24 @@ describe('New… asks the hierarchy, never the person, when there is one answer'
     expect(items).toEqual(['Chapter', 'Page']);
     expect(created, 'nothing is created until the kind is picked').toEqual([]);
   });
+
+  /**
+   * The creation does not wait on the menu's own close event. Reka's
+   * `onCloseAutoFocus` does not fire in this environment at all, and a
+   * create queued behind it would be silently dropped here — and wherever
+   * else it is absent. The menu's focus restore is *suppressed* instead
+   * (see the component), which degrades the right way.
+   */
+  test('picking a kind creates it at once, without waiting on the menu’s own close event', async () => {
+    const root = await mountHeader({ selectedId: 'book-1' });
+    root.querySelector<HTMLElement>('[data-testid="tree-create-open"]')!.click();
+    await nextTick();
+    await nextTick();
+
+    const item = [...document.querySelectorAll('[role="menuitem"]')].find((el) => el.textContent?.trim() === 'Page') as HTMLElement;
+    item.click();
+    await nextTick();
+
+    expect(created).toEqual([{ parentId: 'book-1', type: 'page' }]);
+  });
 });

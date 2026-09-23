@@ -137,10 +137,46 @@ const typeItems = computed<DropdownMenuItem[]>(() =>
     ? choice.value.types.map((type) => ({
         label: NODE_TYPE_LABELS[type],
         icon: NODE_TYPE_ICONS[type],
-        onSelect: () => emit('create', { parentId: targetId.value, type }),
+        onSelect: () => chooseType(type),
       }))
     : [],
 );
+
+/**
+ * Picking a kind creates it at once — and tells the menu not to take the
+ * focus back on its way out.
+ *
+ * Reka's `FocusScope` returns focus to the trigger when a menu closes, and
+ * it does so around the time whatever the selection opened is mounting, so
+ * the draft row's field took focus and the `New…` button took it straight
+ * back: measured in the browser on 2026-09-23, the field rendered and
+ * stayed `inactive` (`e2e/tree-writes.spec.ts`). The row's own context
+ * menu answers this the same way (`NavigationTree.onMenuCloseAutoFocus`):
+ * prevent the restore, because the field that just opened is where focus
+ * belongs, not the button that opened it.
+ *
+ * The creation is **not** queued behind that event. `onCloseAutoFocus` is
+ * the library's, it does not fire in every environment (it does not fire
+ * under the component tests at all), and a create that depends on it would
+ * be silently dropped wherever it is absent. Emitting first and merely
+ * *suppressing* the restore degrades the right way: without the event the
+ * node is still created and the field is focused by its own mount, since
+ * nothing came to take the focus away.
+ */
+let restoreFocusOnClose = true;
+
+function chooseType(type: NodeType): void {
+  restoreFocusOnClose = false;
+  emit('create', { parentId: targetId.value, type });
+}
+
+function onMenuCloseAutoFocus(event: Event): void {
+  // Closed without picking: Reka puts focus back on `New…`, which is then
+  // exactly right (checklist §5, focus returned to what opened it).
+  if (restoreFocusOnClose) return;
+  restoreFocusOnClose = true;
+  event.preventDefault();
+}
 
 function onNew(): void {
   if (choice.value.kind !== 'one') return;
@@ -163,7 +199,7 @@ function onNew(): void {
     <UDropdownMenu
       v-if="choice.kind === 'many'"
       :items="typeItems"
-      :content="{ align: 'start', collisionPadding: 8 }"
+      :content="{ align: 'start', collisionPadding: 8, onCloseAutoFocus: onMenuCloseAutoFocus }"
       :ui="{ content: 'bg-accented max-w-(--reka-dropdown-menu-content-available-width)' }"
     >
       <UTooltip :text="newTooltip">
