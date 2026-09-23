@@ -743,6 +743,27 @@ describe('GET /pages/:id/comments', () => {
     expect(((await indicators.json()) as { indicators: unknown[] }).indicators).toEqual([]);
   });
 
+  /**
+   * The page has no blocks, so there is nothing to anchor a thread to —
+   * but the page itself is perfectly readable (2026-09-23: `GET /pages/:id`
+   * renders it as an empty document). Answering "not found" here would say
+   * the page is gone to a caller the read route just served, so the answer
+   * is the same stale-block 409 a block that no longer resolves gets.
+   */
+  test('starting a thread on a page that has never been saved is a block conflict, not a missing page', async () => {
+    const fixture = await buildFixture();
+    const app = buildApp();
+
+    const res = await app.request(`/pages/${fixture.pageId}/comments`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie: fixture.commenterCookie },
+      body: JSON.stringify({ blockId: 'd:whatever#1', offsetStart: 0, offsetEnd: 1, quote: 'x', body: 'first' }),
+    });
+
+    expect(res.status).toBe(409);
+    expect((await res.json()) as { error: string }).toEqual({ error: 'that block has changed since this page was loaded' });
+  });
+
   test('a subject with comment sees a root thread with its nested replies, ordered by creation', async () => {
     const fixture = await buildFixture();
     await sql`

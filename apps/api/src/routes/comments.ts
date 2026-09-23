@@ -75,6 +75,15 @@ function notFound(c: Context): Response {
   return c.json(ErrorResponseSchema.parse({ error: 'not found' }), 404);
 }
 
+/**
+ * What a page that has never been saved reads as here: no markdown, so no
+ * blocks, so no anchor — and no content hash, which is what `savePage()`
+ * reads as "the first save" if the mint ever does have something to write
+ * (`apps/api/src/routes/pages.ts`'s `NEVER_SAVED_MARKDOWN`, the same value
+ * under the same rule).
+ */
+const EMPTY_DOCUMENT = { markdown: '', contentHash: null } as const;
+
 export function createCommentRoutes(deps: CommentRouteDeps): Hono<{ Variables: SessionVariables }> {
   const app = new Hono<{ Variables: SessionVariables }>();
   const auth = sessionMiddleware(deps.sql, { idleTimeoutMinutes: deps.sessionIdleTimeoutMinutes });
@@ -217,8 +226,14 @@ export function createCommentRoutes(deps: CommentRouteDeps): Hono<{ Variables: S
         return c.json(ErrorResponseSchema.parse({ error: 'blockId is required for a new thread' }), 400);
       }
 
-      const content = await readPageMarkdown(deps.sql, { nodeId: pageId, workspaceId: node.workspace_id });
-      if (!content) return notFound(c);
+      // A page with no `page_content` row has no block to anchor to — and
+      // is not missing: `GET /pages/:id` renders it as an empty document
+      // (2026-09-23). Answering "not found" here would tell a caller the
+      // read route has just served that the page is gone, so the empty
+      // document takes the same exit a block that no longer resolves does,
+      // one branch below: `mintAnchorAtBlock('')` finds nothing and the
+      // 409 says so.
+      const content = (await readPageMarkdown(deps.sql, { nodeId: pageId, workspaceId: node.workspace_id })) ?? EMPTY_DOCUMENT;
 
       // The page's full id registry, every status — the mint must avoid a
       // tombstoned or superseded id the current markdown no longer shows,
