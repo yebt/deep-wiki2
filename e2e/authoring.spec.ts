@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
+import { waitForHydration } from './hydration';
 import { expectNoHorizontalOverflow } from './overflow';
 import { pageUrl } from '../apps/web/app/utils/routes';
 
@@ -108,7 +109,9 @@ for (const shape of CASES) {
     // opens on it.
     await format.click();
     await expect(page.getByTestId('editor-surface')).toBeVisible();
-    await expect(page.getByTestId('editor-surface').locator('em')).toContainText('word');
+    // `.last()`: this file is serial and saves for real, so a run at the
+    // next width finds the emphasis the previous one left on the page.
+    await expect(page.getByTestId('editor-surface').locator('em').last()).toHaveText('word');
     await expect(refusal).toHaveCount(0);
 
     /* ── 2. The toast, in place of the banner under the title ────────── */
@@ -130,9 +133,11 @@ for (const shape of CASES) {
     /* ── 3. The title, edited where the page is read ─────────────────── */
     await page.goto(pageUrl(seed.workspaceSlug, fixtures.editablePageId));
     await expect(page.getByRole('heading', { level: 1, name: fixtures.editablePageTitle })).toBeVisible({ timeout: 60_000 });
-    // The tree row proves the client has attached; below `lg` the sidebar
-    // is a drawer and the row is not on screen, so the field's own focus
-    // is the proof there instead.
+    // The heading above is in the document the *server* sent (the read
+    // layer), and the control beside it with it — so a click before
+    // hydration reaches nothing at all (`e2e/hydration.ts`, and the
+    // management drawer that opened nothing on 2026-09-16).
+    await waitForHydration(page);
     const renameControl = page.getByRole('button', { name: 'Rename this page' });
     await expect(renameControl).toBeAttached();
     await renameControl.click();
