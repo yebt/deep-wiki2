@@ -76,6 +76,24 @@ function press(state: EditorState, key: string): EditorState {
   return next;
 }
 
+/** Puts the caret at the end of the first text node containing `text`, the way clicking past a line's last character does. */
+function caretAfter(state: EditorState, text: string): EditorState {
+  let at: number | undefined;
+  state.doc.descendants((node, pos) => {
+    if (at !== undefined || !node.isText) return true;
+    const offset = (node.text ?? '').indexOf(text);
+    if (offset >= 0) at = pos + offset + text.length;
+    return true;
+  });
+  if (at === undefined) throw new Error(`caretAfter: "${text}" is not in the document`);
+  return state.apply(state.tr.setSelection(TextSelection.create(state.doc, at)));
+}
+
+/** Types `text` at the caret, the way a person continuing a line does. */
+function type(state: EditorState, text: string): EditorState {
+  return state.apply(state.tr.insertText(text));
+}
+
 /** `delete` has no key binding and no input rule; it only ever arrives from a parsed document, so a case that needs one applies the same `toggleMark` command factory the bindings use. */
 function strike(state: EditorState): EditorState {
   let next: EditorState | undefined;
@@ -168,6 +186,40 @@ const CASES: readonly Case[] = [
     opens: 'a\\\nb\n',
     edit: (state) => press(selectAll(state), 'Mod-b'),
     saves: '__a\\\nb__\n',
+  },
+  // GFM task items (the owner's 2026-09-23 report). Ticking a box is an
+  // attribute change on a `listItem`, which is exactly the kind of edit no
+  // parsed fixture can produce — `modelled/task-list.md` proves the bytes
+  // survive a parse, and proved nothing about an edit.
+  {
+    name: 'ticking a task item',
+    opens: '- [ ] not done yet\n',
+    edit: (state) => press(select(state, 'not'), 'Mod-Enter'),
+    saves: '- [x] not done yet\n',
+  },
+  {
+    name: 'unticking a task item',
+    opens: '- [x] already done\n',
+    edit: (state) => press(select(state, 'already'), 'Mod-Enter'),
+    saves: '- [ ] already done\n',
+  },
+  {
+    name: 'ticking a nested task item, leaving its parent alone',
+    opens: '- [ ] outer\n  - [ ] inner\n',
+    edit: (state) => press(select(state, 'inner'), 'Mod-Enter'),
+    saves: '- [ ] outer\n  - [x] inner\n',
+  },
+  {
+    name: 'continuing a checklist after a done item',
+    opens: '- [x] done\n',
+    edit: (state) => type(press(caretAfter(state, 'done'), 'Enter'), 'next'),
+    saves: '- [x] done\n- [ ] next\n',
+  },
+  {
+    name: 'continuing a checklist after an item that is not done',
+    opens: '- [ ] first\n',
+    edit: (state) => type(press(caretAfter(state, 'first'), 'Enter'), 'second'),
+    saves: '- [ ] first\n- [ ] second\n',
   },
 ];
 

@@ -142,6 +142,52 @@ async function seedFixtures(sql: postgres.Sql, CHANGESET_WINDOW_MINUTES: number)
     expectedContentHash: null, changesetWindowMinutes: CHANGESET_WINDOW_MINUTES,
   });
 
+  // e2e/read.spec.ts (2026-09-23, the owner's two reports): a page whose
+  // body is the two constructs those reports are about — a GFM task list
+  // and fenced code in three languages — saved through `savePage()` like
+  // any other, so what the read screen serves is the real cached,
+  // highlighted `rendered_html` and not a fixture built beside it. Its own
+  // page, not more content on `readPage`, because the read suite measures
+  // that one's geometry and its comment overlay counts its blocks.
+  const MARKDOWN_PAGE_MARKDOWN = [
+    '## Checklist',
+    '',
+    '- [ ] Not done yet',
+    '- [x] Already done',
+    '- A plain bullet, in the same list',
+    '',
+    '## Code',
+    '',
+    '```ts',
+    "const greeting: string = 'hello'; // a comment",
+    'export function greet(name: string): string {',
+    '  return `${greeting}, ${name}`;',
+    '}',
+    '```',
+    '',
+    '```sql',
+    '-- a comment',
+    'SELECT id, title FROM nodes WHERE workspace_id = $1;',
+    '```',
+    '',
+    '```wat',
+    'A language this build cannot highlight renders as plain text.',
+    '```',
+    '',
+  ].join('\n');
+  const [markdownPage] = await sql<{ id: string }[]>`
+    INSERT INTO nodes (workspace_id, parent_id, type, path, position, slug, title)
+    VALUES (${ws!.id}, ${root!.id}, 'page', '', 6, ${`e2e-markdown-${randomUUID()}`}, 'E2E Markdown Page')
+    RETURNING id
+  `;
+  await savePage(sql, {
+    nodeId: markdownPage!.id,
+    workspaceId: ws!.id,
+    markdown: MARKDOWN_PAGE_MARKDOWN,
+    expectedContentHash: null,
+    changesetWindowMinutes: CHANGESET_WINDOW_MINUTES,
+  });
+
   const [readerUser] = await sql<{ id: string }[]>`
     INSERT INTO users (email, password_hash, display_name)
     VALUES (${`e2e-reader-${randomUUID()}@example.com`}, 'unused', 'E2E Reader') RETURNING id
@@ -149,7 +195,10 @@ async function seedFixtures(sql: postgres.Sql, CHANGESET_WINDOW_MINUTES: number)
   // insertGrants, not a raw INSERT: packages/db/src/permissions/ is the
   // sole directory allowed to reference `permissions`
   // (scripts/checks/query-boundaries.ts).
-  await insertGrants(sql, ws!.id, 'user', readerUser!.id, [{ resourceId: readPage!.id, action: 'read', effect: 'allow' }]);
+  await insertGrants(sql, ws!.id, 'user', readerUser!.id, [
+    { resourceId: readPage!.id, action: 'read', effect: 'allow' },
+    { resourceId: markdownPage!.id, action: 'read', effect: 'allow' },
+  ]);
   const { token: readerSessionToken } = await createSession(sql, {
     userId: readerUser!.id,
     idleTimeoutMinutes: 30,
@@ -391,6 +440,8 @@ async function seedFixtures(sql: postgres.Sql, CHANGESET_WINDOW_MINUTES: number)
     resetEmail,
     resetToken,
     readPageId: readPage!.id,
+    markdownPageId: markdownPage!.id,
+    markdownPageMarkdown: MARKDOWN_PAGE_MARKDOWN,
     historyPageId: historyPage!.id,
     historyFirstRevisionId,
     historySecondRevisionId,

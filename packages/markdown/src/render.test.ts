@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { canonicalise, parse, stringify } from './index';
+import { HIGHLIGHT_CLASSES } from './highlight';
 import { CURRENT_PIPELINE_VERSION, render } from './render';
 import { sliceBlocks } from './blocks';
 
@@ -471,11 +472,24 @@ describe('raw HTML sanitisation', () => {
 
   // `span: ['className']` existed only so `wikiLinkHandler`/`tagHandler`
   // could carry their own class. Raw HTML now reaches the same rule, so it
-  // is narrowed to those two literal values rather than left open.
+  // is narrowed to those two literal values — plus the closed highlight
+  // vocabulary `codeHandler` mints (`highlight.ts`'s `HIGHLIGHT_CLASSES`)
+  // — rather than left open.
   test('raw HTML cannot borrow an arbitrary class on a span, but the span itself renders', () => {
-    const html = render('<span class="hl">highlighted</span>\n');
+    const html = render('<span class="app-chrome">borrowed</span>\n');
 
-    expect(html).toContain('highlighted');
+    expect(html).toContain('borrowed');
+    expect(html).not.toContain('class="app-chrome"');
+  });
+
+  test('a class that merely starts like a highlight token is not a highlight token', () => {
+    // The allowlist is the closed list, never a `hl-` prefix match — a
+    // prefix would admit whatever a future Shiki release decided to mint.
+    const html = render('<span class="hl-not-a-token">a</span> <span class="hl">b</span>\n');
+
+    expect(html).toContain('>a</span>');
+    expect(html).toContain('>b</span>');
+    expect(html).not.toContain('hl-not-a-token');
     expect(html).not.toContain('class="hl"');
   });
 
@@ -494,7 +508,7 @@ describe('raw HTML sanitisation', () => {
     expect(html).toContain('class="tag"');
   });
 
-  test('raw HTML cannot borrow any class outside the two this file itself mints', () => {
+  test('raw HTML cannot borrow any class outside the ones this pipeline itself mints', () => {
     const html = render('<span class="doc-body">a</span> <span class="wiki-link extra">b</span>\n');
 
     expect(html).toContain('>a</span>');
@@ -531,5 +545,116 @@ describe('raw HTML sanitisation', () => {
 
     expect(html).toContain('>x</p>');
     expect(html).not.toContain('data-block-id');
+  });
+});
+
+// The owner asked for highlighted code (2026-09-23). Read mode serves
+// cached, sanitised HTML and loads no highlighter, so the colouring is
+// decided here, at render time, and stored — docs/SPECS.md §5.3 and
+// `packages/markdown/src/highlight.ts`'s header. These tests assert at the
+// layer the reader actually meets: the cached HTML.
+describe('fenced code blocks are highlighted at render time', () => {
+  const LANGUAGES: ReadonlyArray<readonly [string, string, string]> = [
+    ['ts', 'const x: number = 1; // c', 'const'],
+    ['js', 'const x = 1; // c', 'const'],
+    ['python', '# c\ndef f():\n    return 1', 'def'],
+    ['go', '// c\nfunc f() int { return 1 }', 'func'],
+    ['rust', '// c\nfn main() { let x = 1; }', 'fn'],
+    ['sql', '-- c\nSELECT a FROM t;', 'SELECT'],
+    ['bash', '# c\nset -e', 'set'],
+    ['json', '{ "a": 1 }', '"a"'],
+    ['yaml', '# c\na: 1', 'a'],
+    ['html', '<p class="x">a</p>', 'p'],
+    ['css', '/* c */\n.a { color: red }', 'color'],
+    ['java', '// c\nclass A {}', 'class'],
+    ['diff', '-a\n+b', 'a'],
+  ];
+
+  test.each(LANGUAGES)('a %s fence renders token spans around its source', (lang, source, expected) => {
+    const html = render(`\`\`\`${lang}\n${source}\n\`\`\`\n`);
+
+    expect(html).toContain(`<pre><code class="language-${lang}">`);
+    expect(html).toContain('class="hl-line"');
+    expect(html).toMatch(/<span class="hl-[a-z-]+">/);
+    // The source itself is still there, whatever the tokenisation did to it.
+    expect(html.replace(/<[^>]*>/g, '')).toContain(expected);
+  });
+
+  test('a fence with no info string renders exactly as it did before highlighting existed', () => {
+    expect(render('```\nplain text\n```\n')).toBe('<pre><code>plain text\n</code></pre>');
+  });
+
+  test('a fence naming a language this build cannot highlight renders as plain text, and does not throw', () => {
+    expect(render('```wat\nplain text\n```\n')).toBe('<pre><code class="language-wat">plain text\n</code></pre>');
+  });
+
+  test('a diagram fence is left alone — its content is a renderer\'s source, not prose to colour', () => {
+    const html = render('```mermaid\ngraph TD;\n  a --> b\n```\n');
+
+    expect(html).toContain('<pre><code class="language-mermaid">');
+    expect(html.replace(/<[^>]*>/g, '')).toContain('graph TD;');
+    expect(html).not.toContain('hl-');
+  });
+
+  test('highlighting a block twice gives byte-identical HTML, so a save and a later backfill agree', () => {
+    const markdown = '```ts\nconst x: number = 1; // c\n```\n\n```sql\nSELECT a FROM t;\n```\n';
+
+    expect(render(markdown)).toBe(render(markdown));
+  });
+
+  test('highlighting changes the rendered HTML and never the Markdown', () => {
+    const markdown = '```ts\nconst x = 1;\n```\n';
+
+    expect(canonicalise(markdown)).toBe(markdown);
+    expect(render(markdown)).toContain('hl-keyword');
+  });
+
+  test('CURRENT_PIPELINE_VERSION moved past highlighting so the backfill re-renders every older row', () => {
+    // The Markdown of a page with a code fence did not change, so
+    // `content_hash` is identical and nothing but this bump can tell
+    // `backfillStaleRenders` that its cached HTML is now stale.
+    expect(CURRENT_PIPELINE_VERSION).toBeGreaterThanOrEqual(5);
+  });
+
+  describe('a highlighted fence is still only text to the reader\'s DOM', () => {
+    test('a script element inside a fenced block stays escaped text, tokenised or not', () => {
+      const highlighted = render('```html\n<script>alert(1)</script>\n```\n');
+      const plain = render('```\n<script>alert(1)</script>\n```\n');
+
+      for (const html of [highlighted, plain]) {
+        expect(html).not.toContain('<script');
+        expect(html).not.toContain('</script>');
+        // The source is readable — it is a code sample, and a reader must
+        // be able to read it — but only as text.
+        expect(html.replace(/<[^>]*>/g, '')).toContain('&#x3C;script>alert(1)&#x3C;/script>');
+      }
+    });
+
+    test('a script element inside a fenced block survives the raw-HTML reparse rehypeRaw performs', () => {
+      // `rehype-raw` reserialises and reparses the whole document between
+      // the handler above and the sanitiser. `<pre>` is not a raw-text
+      // element, so escaped text inside it stays escaped text — this test
+      // is what would notice if that ever stopped being true.
+      const html = render('Before.\n\n```html\n<script>alert(1)</script>\n```\n\n<p>after</p>\n');
+
+      expect(html).not.toContain('<script');
+      expect(html).toContain('<p>after</p>');
+    });
+
+    test('an onerror attribute written inside a fenced block is text, not an attribute', () => {
+      const html = render('```html\n<img src="x" onerror="alert(1)">\n```\n');
+
+      expect(html).not.toContain('<img');
+      expect(html.replace(/<[^>]*>/g, '')).toContain('onerror=');
+    });
+
+    test('a fenced block cannot mint a class outside the highlight vocabulary', () => {
+      const html = render('```html\n<span class="doc-body">a</span>\n```\n');
+      const classes = [...html.matchAll(/class="([^"]*)"/g)].flatMap((match) => match[1]!.split(/\s+/));
+
+      for (const name of classes) {
+        expect(name === 'language-html' || HIGHLIGHT_CLASSES.includes(name)).toBe(true);
+      }
+    });
   });
 });

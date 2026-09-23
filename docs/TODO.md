@@ -615,6 +615,77 @@ makes conventions portable across projects.
 
 Discoveries and constraints. Newest first.
 
+### 2026-09-23 — Task lists were four layers of nothing, and code had no colour (branch `feat/task-lists-and-highlighting`)
+
+Two owner reports: *"creo que no se soporta ok el task list"*, and code blocks with no syntax
+highlighting. The first one's diagnosis is the interesting half, because the layer everybody
+would have checked first was already correct.
+
+**What was actually wrong with task lists, layer by layer.**
+
+| Layer | State before | Evidence |
+| --- | --- | --- |
+| Parser / round trip | **Correct.** `- [ ] a` / `- [x] b` parse to `listItem{checked}` and serialise byte-identically; `modelled/task-list.md` has been inside GATE-2 since the `checked` attribute was added. `*` normalises to `-` and `[X]` to `[x]`, which is the pinned canonical spelling doing its job. | `canonicalise('- [ ] a\n- [x] b\n')` is a fixed point |
+| Editor — input rule | **Missing.** Typing `- [ ] Ship it` produced a BULLET whose text was the literal `[ ] Ship it`, which `toMarkdown` then escaped to `- \[ ] Ship it`. | no rule for it existed; the live set was `#`, `>`, `-`, `1.`, `**`, `_`, `` ` ``, `~~`, `*`, `__`, links, autolinks |
+| Editor — the box | **Missing.** `schema.ts`'s `toDOM` rendered a task item as an ordinary `<li>` carrying `data-checked`, an attribute no stylesheet read. `- [ ] a` and `- a` drew identically. | nothing in `main.css` matched `data-checked`, `task-list-item` or `contains-task-list` |
+| Editor — ticking | **Impossible.** `/task-list` could set `checked: false`; no command, keystroke or click could ever set it to `true`. | `taskListCommand` returns `false` when `checked !== null` |
+| Read mode | **Half right.** `render()` already emitted `<li class="task-list-item"><input type="checkbox" disabled>` and the sanitiser already let it through — so the boxes were there, inert (correct: read mode serves cached HTML and has no write path), and completely undressed: a disc bullet with a browser checkbox beside it. | `render('- [ ] a\n')` |
+| Styling | **Nothing.** No rule in `main.css` had ever mentioned a task list. | as above |
+
+So the owner was reporting the *only* layer a person can see, and the pipeline — the layer a
+maintainer checks first — was never the problem.
+
+**The known GFM limit still holds, and is still not fixable below the pipeline.** GFM cannot
+spell an EMPTY task item: `listItem{checked:false}` with no text serialises to `-`, and `- [ ]`
+alone re-parses as literal text (`canonicalise('- [ ]\n')` → `'- \\[ ]\n'`). A task list created
+on an empty line and saved before anything is typed comes back a bullet. It is not what the
+owner hit — every layer above was broken for a task item that *did* have text — but it is the
+one thing a fix cannot reach.
+
+**Highlighting: two measured findings worth keeping.**
+
+- **Shiki's tokenisation is not deterministic at its defaults.** It inherits VS Code's
+  `tokenizeTimeLimit`, 500 ms per line, and `vscode-textmate` honours it by giving up mid-line
+  and emitting the remainder as one undifferentiated token. A grammar's first line pays for
+  compiling its rules, which crosses that budget regularly on this host — so the same block
+  rendered coarse once and complete afterwards: `const x: number = 1; // c` returned 3, then 6,
+  8, 9 and 10 style spans across five consecutive calls, still climbing. Two to five of the
+  thirty languages disagreed with themselves between consecutive calls, under both regex
+  engines and every `target`. `rendered_html` is a cache, so that would have made a save and a
+  later backfill of the same bytes disagree, and any test asserting on the output flaky by
+  construction. `tokenizeTimeLimit: 0` fixes it, and the output then matches the WebAssembly
+  Oniguruma engine token for token — the independent check that lifting the limit restores the
+  *correct* tokenisation and not merely a consistent one. `tokenizeMaxLineLength` (VS Code's
+  own 20 000) takes over the guard, bounded by the input rather than by the clock.
+- **A double-click was not two clicks.** With only `handleClickOn` bound, ticking a box and
+  immediately unticking it left it ticked: ProseMirror routes the second press to
+  `handleDoubleClickOn` by the event's own `detail`, and nothing was listening there. Found by
+  an e2e test doing what a person does.
+
+**Costs, measured on this host (Bun 1.4.2).** Importing the thirty grammar modules: ~180 ms and
+~20 MB RSS, once per process, at module load. Building the highlighter: ~80 ms, once, on the
+first highlighted fence. Compiling one grammar: 0–300 ms, once per language a document uses.
+Highlighting: ~1.7 ms per line. All of it lazy past the import, all of it server-side;
+`CURRENT_PIPELINE_VERSION` went 4 → 5 so `backfillStaleRenders` carries the colouring to the
+corpus cached before it shipped.
+
+**Found on the way, recorded rather than fixed: a list item's first paragraph carries a 16px top
+margin in the editor and not in read mode's tight lists.** `.doc-body p { margin-top: 1rem }`
+matches a list item's paragraph, and the editor always wraps an item's content in one while read
+mode's *tight* list does not — so a two-item checklist stands ~42 px apart in edit mode and ~4 px
+apart in read mode, and the same is true of every ordinary bullet list. It predates this branch
+and is visible in this batch's screenshots only because task lists are now visible at all. The
+fix is one rule (`li > p:first-child { margin-top: 0 }`), but it changes what a *loose* list
+looks like in read mode as well, which is a typography ruling for `docs/DESIGN-SYSTEM.md` §2.3
+to make once rather than a rule improvised inside this batch (checklist §1's standing rule).
+
+**Also recorded: the editor names almost none of its key bindings anywhere.** `Mod-B`, `Mod-I`,
+`Alt`+arrows, `Tab`/`Shift-Tab`, `Mod-E` and now `Mod-Enter` are discoverable only by knowing
+them. The navigation tree solved this with a "Keyboard help" icon carrying a `UTooltip` and an
+`sr-only` paragraph (`NavigationTree.vue`); edit mode has no equivalent. This batch names
+`Mod-Enter` on the checkbox itself (`aria-label`/`title`, so it is announced and shown where the
+manipulation happens) and leaves the general surface owed.
+
 ### 2026-09-23 — Commenting on a selection answered 500: the anchor mint spliced its way out of canonical form
 
 The project owner selected text on one of their pages, wrote a comment, and got a 500.

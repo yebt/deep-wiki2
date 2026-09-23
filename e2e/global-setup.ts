@@ -54,6 +54,9 @@ export interface SeedResult {
   readonly resetEmail: string;
   readonly resetToken: string;
   readonly readPageId: string;
+  /** The page whose body is a GFM task list and three fenced code blocks (e2e/read.spec.ts). */
+  readonly markdownPageId: string;
+  readonly markdownPageMarkdown: string;
   readonly historyPageId: string;
   readonly historyFirstRevisionId: string;
   readonly historySecondRevisionId: string;

@@ -26,6 +26,16 @@ import { Schema, type MarkSpec, type NodeSpec } from 'prosemirror-model';
 
 const blockAnchorAttr = { blockAnchor: { default: null as string | null } };
 
+/**
+ * The accessible name and the hover text a task item's checkbox carries.
+ * "Done" is the box's own label — the state is the checkbox's, announced by
+ * the control itself — and the keystroke is named because the box is not a
+ * tab stop and `Mod-Enter` at the caret is its keyboard equivalent
+ * (docs/UI-CHECKLIST.md §5). Both modifiers are spelled out: this schema is
+ * built once, before any platform is known.
+ */
+export const TASK_CHECKBOX_LABEL = 'Done — Ctrl/⌘+Enter';
+
 const nodes: Record<string, NodeSpec> = {
   doc: { content: 'block+' },
 
@@ -69,10 +79,57 @@ const nodes: Record<string, NodeSpec> = {
   // canonical input. (A paragraph followed by another paragraph survives
   // either way, which is why the looser `list-loose.md` fixture never
   // caught this.)
+  //
+  // A task item renders a real checkbox, in the same markup read mode gets:
+  // `mdast-util-to-hast` emits `<li class="task-list-item"><input
+  // type="checkbox" [checked] disabled>` for a GFM task item, so one set of
+  // `.doc-body` rules in apps/web's stylesheet dresses both surfaces and the
+  // text sits at the same x in read and edit mode — the property
+  // docs/UI-CHECKLIST.md's 2026-09-07 review spent a follow-up on.
+  //
+  // Before this, a task item was an ordinary `<li>` carrying a
+  // `data-checked` attribute no stylesheet read: indistinguishable from a
+  // bullet, and with nothing to tick (the owner's 2026-09-23 report). The
+  // attribute is kept anyway, because it states which state the box is in
+  // without asking the DOM about a control's live property, which is what
+  // the e2e suite asserts on.
+  //
+  // `contenteditable: 'false'` makes the box a widget rather than something
+  // the caret walks into, and the content hole moves into a wrapper `<div>`
+  // because a ProseMirror DOM spec's hole must be the last thing in its
+  // element while the box has to precede it. `mount/task-item.ts` owns the
+  // click and the keystroke that flip it.
+  //
+  // `title`/`aria-label` name the box and, with it, the keystroke: the box
+  // is not a tab stop (see `tabindex`), so `Mod-Enter` at the caret is the
+  // keyboard route, and docs/UI-CHECKLIST.md §5 requires a pointer-only
+  // manipulation's keyboard equivalent be named in the UI rather than only
+  // in a comment. Both modifiers are spelled because the schema is built
+  // once, before any platform is known. The label is the box's job
+  // ("Done", not-checked / checked), never the item's text, which is the
+  // content beside it.
   listItem: {
     content: 'block+',
     attrs: { checked: { default: null as boolean | null }, spread: { default: false }, ...blockAnchorAttr },
-    toDOM: (node) => ['li', node.attrs.checked === null ? {} : { 'data-checked': String(node.attrs.checked) }, 0],
+    toDOM: (node) =>
+      node.attrs.checked === null
+        ? ['li', 0]
+        : [
+            'li',
+            { class: 'task-list-item', 'data-checked': String(node.attrs.checked) },
+            [
+              'input',
+              {
+                type: 'checkbox',
+                contenteditable: 'false',
+                tabindex: '-1',
+                'aria-label': TASK_CHECKBOX_LABEL,
+                title: TASK_CHECKBOX_LABEL,
+                ...(node.attrs.checked ? { checked: 'checked' } : {}),
+              },
+            ],
+            ['div', { class: 'task-list-item-content' }, 0],
+          ],
   },
   code: {
     content: 'text*',

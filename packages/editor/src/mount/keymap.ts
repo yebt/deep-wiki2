@@ -17,6 +17,7 @@ import { liftListItem, sinkListItem, splitListItem } from 'prosemirror-schema-li
 import { schema } from '../schema';
 import { moveBlockDown, moveBlockUp } from './block-commands';
 import { toggleMarkCommand } from './editor-commands';
+import { splitDoneTaskItem, toggleTaskChecked } from './task-item';
 
 /**
  * Every binding the editing surface installs, keyed exactly as
@@ -34,10 +35,28 @@ export const EDITOR_KEY_BINDINGS: Readonly<Record<string, Command>> = {
   'Mod-z': undo,
   'Shift-Mod-z': redo,
   'Mod-y': redo,
-  Enter: chainCommands(splitListItem(schema.nodes.listItem!), baseKeymap.Enter!),
+  // `splitDoneTaskItem` first: `splitListItem` copies the item's attrs, so
+  // Enter at the end of `- [x] done` used to produce a second `- [x]` item —
+  // a checklist ticking its own next line. It refuses on anything but a done
+  // task item, so every other Enter is the plain `splitListItem` it was.
+  Enter: chainCommands(splitDoneTaskItem, splitListItem(schema.nodes.listItem!), baseKeymap.Enter!),
   Tab: sinkListItem(schema.nodes.listItem!),
   'Shift-Tab': liftListItem(schema.nodes.listItem!),
-  'Mod-Enter': exitCode,
+  // The keyboard half of a task item's checkbox, on the binding Obsidian
+  // uses for the same thing. Chained after `exitCode`, which applies only
+  // inside a code block and refuses everywhere else, so the two never
+  // compete: `Mod-Enter` leaves a fence where the caret is in one, and ticks
+  // the box where the caret is in a task item.
+  //
+  // A checkbox inside a contenteditable cannot be the keyboard route on its
+  // own. It is document content rather than a control in the tab order, and
+  // a hundred-item checklist would otherwise put a hundred tab stops inside
+  // one document. The caret is the keyboard's position in a document and
+  // this is the operation performed at it — the model VS Code and Obsidian
+  // both use. docs/UI-CHECKLIST.md §5 requires the keys be named in the UI
+  // and not only in a comment: apps/web's block-handle menu carries a "Mark
+  // done" row with this binding printed beside it.
+  'Mod-Enter': chainCommands(exitCode, toggleTaskChecked),
   // The keyboard half of the block drag handle (block-commands.ts): the
   // same idiom the navigation tree already uses for reordering.
   'Alt-ArrowUp': moveBlockUp,

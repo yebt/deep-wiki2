@@ -6,12 +6,13 @@
  * and the reducer never needs a `setCandidates` action.
  */
 import { lift, wrapIn } from 'prosemirror-commands';
-import type { Attrs, Node as PMNode, NodeType, ResolvedPos } from 'prosemirror-model';
+import type { Attrs, Node as PMNode, NodeType } from 'prosemirror-model';
 import { type Command, EditorState, Plugin, PluginKey, Selection, TextSelection, type Transaction } from 'prosemirror-state';
 import { liftListItem, wrapInList } from 'prosemirror-schema-list';
 import { schema } from '../schema';
 import type { SlashCommandSummary, SlashState } from '../types';
 import { moveSelection } from './mention-plugin';
+import { listItemDepth } from './task-item';
 import { isInsideCodeBlock, matchTrigger } from './trigger';
 
 export type { SlashCommandSummary, SlashState };
@@ -100,12 +101,6 @@ function typeOf(name: string): NodeType {
   const type = schema.nodes[name];
   if (!type) throw new Error(`slash command references unknown node type "${name}"`);
   return type;
-}
-
-/** The depth of the nearest `listItem` ancestor of `$pos`, or `null`. */
-function listItemDepth($pos: ResolvedPos): number | null {
-  for (let depth = $pos.depth; depth >= 1; depth--) if ($pos.node(depth).type === typeOf('listItem')) return depth;
-  return null;
 }
 
 /**
@@ -231,7 +226,7 @@ export const SLASH_COMMANDS: readonly SlashCommand[] = [
     description: 'A list with numbering',
     run: (s, d) => wrapInList(typeOf('list'), { ordered: true, start: 1 })(s, d),
   },
-  { id: 'task-list', label: 'Task list', description: 'A list with checkboxes', run: taskListCommand },
+  { id: 'task-list', label: 'Task list', description: 'Checkboxes you can tick', run: taskListCommand },
   { id: 'quote', label: 'Quote', description: 'A blockquote', run: (s, d) => wrapIn(typeOf('blockquote'))(s, d) },
   // A code block keeps the attr too, but `to-markdown.ts` has no anchor
   // spelling for a fence, so it is dropped at serialisation — see the

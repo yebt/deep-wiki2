@@ -109,3 +109,64 @@ describe('buildEditorPlugins: the drop cursor', () => {
     for (const pluginView of destroyers) pluginView.destroy?.();
   });
 });
+
+describe('buildEditorPlugins: the task checkbox', () => {
+  /** A one-item task list, with the plugin list installed exactly as `createEditorView` does. */
+  function taskList(plugins: readonly Plugin[], checked: boolean | null): EditorState {
+    const paragraph = schema.node('paragraph', { blockAnchor: null }, schema.text('Ship it'));
+    const item = schema.node('listItem', { checked, spread: false, blockAnchor: null }, paragraph);
+    const doc = schema.node('doc', null, [schema.node('list', { ordered: false }, item)]);
+    return EditorState.create({ schema, doc, plugins: plugins as Plugin[] });
+  }
+
+  /** Offers the click to every plugin's click prop in list order, exactly as `EditorView` does for a click of that `detail`. */
+  function clickOn(
+    view: FakeView,
+    plugins: readonly Plugin[],
+    nodePos: number,
+    target: unknown,
+    prop: 'handleClickOn' | 'handleDoubleClickOn' | 'handleTripleClickOn' = 'handleClickOn',
+  ): boolean {
+    const node = view.state.doc.nodeAt(nodePos)!;
+    for (const plugin of plugins) {
+      const handler = plugin.props[prop] as
+        | ((view: FakeView, pos: number, node: unknown, nodePos: number, event: unknown, direct: boolean) => boolean | void)
+        | undefined;
+      if (handler && handler.call(plugin, view, nodePos + 1, node, nodePos, { target }, true)) return true;
+    }
+    return false;
+  }
+
+  const checkbox = { nodeName: 'INPUT', getAttribute: (name: string) => (name === 'type' ? 'checkbox' : null) };
+
+  test('a click on a task item’s checkbox ticks it, through the installed plugin list', () => {
+    const plugins = buildEditorPlugins();
+    const view = fakeView(taskList(plugins, false));
+
+    expect(clickOn(view, plugins, 1, checkbox)).toBe(true);
+    expect(toMarkdown(view.state.doc)).toBe('- [x] Ship it\n');
+  });
+
+  test('a second, faster click unticks it: ProseMirror routes that one by the event’s own detail', () => {
+    // With only `handleClickOn` bound, ticking and then immediately
+    // unticking left the box ticked — the second press was a double-click
+    // and reached nothing. A native checkbox toggles on every press.
+    const plugins = buildEditorPlugins();
+    const view = fakeView(taskList(plugins, false));
+
+    expect(clickOn(view, plugins, 1, checkbox)).toBe(true);
+    expect(clickOn(view, plugins, 1, checkbox, 'handleDoubleClickOn')).toBe(true);
+    expect(toMarkdown(view.state.doc)).toBe('- [ ] Ship it\n');
+
+    expect(clickOn(view, plugins, 1, checkbox, 'handleTripleClickOn')).toBe(true);
+    expect(toMarkdown(view.state.doc)).toBe('- [x] Ship it\n');
+  });
+
+  test('a click on a plain bullet item’s content reaches no handler, so the caret lands as usual', () => {
+    const plugins = buildEditorPlugins();
+    const view = fakeView(taskList(plugins, null));
+
+    expect(clickOn(view, plugins, 1, checkbox)).toBe(false);
+    expect(toMarkdown(view.state.doc)).toBe('- Ship it\n');
+  });
+});

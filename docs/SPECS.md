@@ -328,6 +328,38 @@ read mode injects the cached HTML with `v-html`. That allowlist is the security 
 recorded in design.md D12 and asserted in `packages/markdown/src/render.test.ts`; **Verbatim
 means the *markdown* survives byte-identical, never that arbitrary HTML executes.**
 
+**`render()` decides presentation the reader's browser then only displays (added 2026-09-23).**
+Since the pipeline highlights fenced code, `rendered_html` carries `<span class="hl-…">` token
+spans that the Markdown does not and never will. Three constraints fall out of putting that
+decision at save time, and all three are load-bearing:
+
+- **The colour is not in the HTML.** Each token arrives as one class from a closed vocabulary
+  (`packages/markdown/src/highlight.ts`'s `HIGHLIGHT_CLASSES`) and the colour lives in
+  `apps/web/app/assets/css/main.css`, so a light/dark switch is a stylesheet change rather than
+  a re-render of every cached page. A highlighter that baked hex colours in would put a theme
+  into ten thousand rows.
+- **The highlighter never reaches the browser.** Read mode serves the cached HTML and boots no
+  editor code (§5.3); it must not boot a highlighter either. `packages/markdown`'s `"."` barrel
+  is server-side only — `packages/editor` and `apps/web` take the crypto-free, highlighter-free
+  `"./pipeline"` export instead, and `scripts/checks/bundle-isolation.ts` enforces both halves.
+- **The render must be a function of its input alone.** `rendered_html` is a cache: the same
+  Markdown has to produce the same bytes on the save that wrote it and on the backfill that
+  re-renders it later, or the two disagree for no reason a reader could explain. Shiki's default
+  per-line time limit broke exactly that property and is disabled for it; `highlight.ts`'s
+  header carries the measurement.
+
+The sanitiser allowlist grows by exactly that closed class list and nothing else — never a
+prefix match — and `render.test.ts` holds a `<script>` written inside a fenced block to escaped
+text on both the highlighted and the unhighlighted path.
+
+**A construct the editor accepts must also be *usable* to the reader, not merely present.** The
+2026-09-23 task-list report is the second instance of the rule above, one level further in:
+`render()` had emitted a GFM task list's `<input type="checkbox" disabled>` correctly all along,
+the sanitiser let it through, and no stylesheet had ever mentioned it — so a checklist rendered
+as a bullet with an undressed browser control beside it, and in the editor as a bullet with
+nothing at all. A render-side test naming the visible output is the minimum; for anything a
+person operates, the minimum is an e2e that operates it.
+
 ### 5.2 Editor capabilities
 
 - **Typora-like live preview** — WYSIWYG rendering in place, not a split pane
@@ -343,7 +375,7 @@ distinction is load-bearing, not cosmetic:
 
 | Mode | Behaviour |
 | --- | --- |
-| **Read** | Markdown rendered to HTML **at save time**, cached and served statically. ProseMirror is never booted. This is the mode ~95% of traffic uses, and it keeps the wiki fast at 10,000 pages |
+| **Read** | Markdown rendered to HTML **at save time** — sanitised, block-identified and syntax-highlighted there, never in the browser — cached and served statically. ProseMirror is never booted, and neither is a highlighter. This is the mode ~95% of traffic uses, and it keeps the wiki fast at 10,000 pages |
 | **Edit** | Acquires a **soft lock** with a heartbeat. Surfaces "Ana is editing, opened 4 minutes ago" with **"take over"** and **"open read-only"** as explicit options |
 
 The soft lock is deliberately not a hard lock. It covers the real collision rate of a

@@ -2074,4 +2074,96 @@ chip the `error-container` pair already in use.
 
 ---
 
+### 2026-09-23 — Task lists, and code with no colour (read mode and edit mode)
+
+**Reviewer:** Eduardo (reported; this entry records the work, the review is pending)
+**Verdict:** Presented for review
+
+Two reports, both about what a document *looks like*: *"creo que no se soporta ok el task
+list"*, and code blocks with no syntax highlighting.
+
+**Findings** (ordered by user impact)
+
+1. **A GFM task list was invisible as one in both modes, and could not be ticked at all.**
+   - *Observable evidence:* in read mode at 1280 in both themes, `- [ ] a` rendered as a disc
+     bullet with an undressed browser checkbox beside it — no rule in `main.css` had ever
+     mentioned `task-list-item`, `contains-task-list` or `data-checked`. In edit mode it
+     rendered as a plain bullet, indistinguishable from `- a`: the schema's `toDOM` emitted an
+     `<li>` carrying a `data-checked` attribute nothing read, and no box at all. There was no
+     command, keystroke or click in the product that could set an item to done — `/task-list`
+     could only set `checked: false`. Typing `- [ ] Ship it` produced a bullet whose text was
+     the literal `[ ] Ship it`.
+   - *Root cause:* four independent gaps, one per layer, with the layer everyone checks first
+     — the parser — already correct. `docs/TODO.md` Findings, 2026-09-23, has the table.
+   - *Correction applied:* an input rule for `- [ ] ` / `- [x] `; a real checkbox in the
+     editor's `toDOM`, in the same markup `mdast-util-to-hast` already gave read mode, so one
+     set of `.doc-body` rules dresses both and the text sits at the same x in either mode; a
+     click and `Mod-Enter` that flip it; and `main.css` §12 drawing the box from tokens rather
+     than leaving it to the browser (this project's dark mode is class-driven, so a native
+     control renders its light chrome on a dark page — §4.2 — and read mode's `disabled` box
+     would be dimmed by the UA on top of that, exactly where a reader's only question is
+     whether the thing is done).
+   - *Read mode's boxes stay inert, deliberately.* The cached HTML is served statically and
+     there is no write path from it, so an enabled-looking box that did nothing would be §6's
+     "no inert interactions" failure. Inert, full contrast, `cursor: not-allowed`.
+   - *Rule added:* none — §4.5 and §6 already covered both halves. What was missing was a test
+     that operated the thing: `docs/SPECS.md` §5.1 now says that for anything a person
+     operates, a render-side test naming the visible output is the minimum and an e2e that
+     operates it is the bar.
+
+2. **Fenced code had no highlighting, and adding it must not put a highlighter on the read path.**
+   - *Observable evidence:* every `<pre>` on every page rendered one flat colour.
+   - *Root cause:* nothing had ever tokenised it.
+   - *Correction applied:* `packages/markdown` tokenises at render time, on the server, and
+     stores the result; `CURRENT_PIPELINE_VERSION` 4 → 5 carries it to the corpus. Each token
+     is one class from a closed vocabulary and the colour is decided in `main.css` §3 per theme
+     — so a light/dark switch is a stylesheet change and never a re-render of every cached page
+     (§4.2). One token kind per existing alias: no new palette to author and measure, the same
+     argument `docs/DESIGN-SYSTEM.md` §14's 2026-09-17 entry makes for carrying M3's `tertiary`
+     on the `success` alias. Every value is a 56–60 tone gap against `bg-emphasized`, so each
+     clears §5's 4.5:1 by construction — and `e2e/read.spec.ts` measures **every token span's
+     computed colour against the block's computed background in the running browser, in both
+     themes**, rather than trusting that argument.
+   - *Colour is not the sole carrier here.* Highlighting carries no meaning a reader needs: the
+     code's own text is the content and colour only helps scan it. In a `diff` fence, where it
+     would carry meaning, the `+`/`-` characters are in the text beside it; a URL token takes
+     an underline as well.
+   - *Rule added:* none. `docs/SPECS.md` §5.3 and §5.1 now state that read mode boots no
+     highlighter either, and `scripts/checks/bundle-isolation.ts` gained the rule that makes
+     that a mechanism rather than a sentence.
+
+**Measured** in `e2e/read.spec.ts` and `e2e/editor.spec.ts` against the real API: the token
+spans and their contrast at 1280 in both themes; the two checkboxes disabled, one checked and
+one not, drawn differently, with the list marker gone on the task items and kept on the plain
+bullet in the same list; an unknown language rendering as plain text with no token and no
+crash; `expectNoHorizontalOverflow` at 1280 light, 1280 dark and 320 light. In the editor:
+`- [ ] ` and `- [x] ` converting, the box ticked with the mouse and with `Mod-Enter`, a click
+on the item's text placing the caret without ticking, Enter after a done item starting one
+that is not done, and a tick surviving a real save and a reload. Screenshots
+`md-read-{1280-light,1280-dark,320-light}.png` and
+`fb-editor-ui-task-list-1280-light.png` in the session scratchpad
+(`DEEPWIKI_FRAME_SHOTS`).
+
+**Known before review, not fixed**
+
+- **The keyboard route to the checkbox is `Mod-Enter` at the caret, and the box is not a tab
+  stop.** A task item's box is document content, not a control in the tab order; a hundred-item
+  checklist as a hundred tab stops inside one document would be a §5 focus-order problem of its
+  own, and it is the model VS Code and Obsidian both use. §5 requires the keys be named in the
+  UI: the box carries them as its `aria-label` and `title`, which is where the manipulation
+  happens. **The general gap remains owed** — edit mode names almost none of its bindings
+  (`Mod-B`, `Mod-I`, `Alt`+arrows, `Tab`, `Mod-E`), and the tree's "Keyboard help" control has
+  no counterpart there. Recorded in `docs/TODO.md`.
+- **A list item's first paragraph carries a 16px top margin in the editor and not in read
+  mode's tight lists**, so a two-item checklist stands ~42px apart in edit mode and ~4px apart
+  in read mode. It predates this branch and affects every bullet list; the fix is one rule but
+  it changes loose lists in read mode too, which is a §2.3 typography ruling to make once
+  rather than improvise here (§1's standing rule). Recorded in `docs/TODO.md`.
+- Diagram fences (`mermaid`, `d2`) are deliberately not highlighted: their content is a source
+  a diagram renderer will consume, and nothing renders them yet.
+- The two-icon-pack requirement (§4.3) remains untested; everything earlier entries carried
+  forward and this batch did not touch stands.
+
+---
+
 *The next entry goes below this one.*

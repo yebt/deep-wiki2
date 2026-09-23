@@ -10,6 +10,11 @@
  *      only a dynamic `import()` (typically inside
  *      `defineAsyncComponent()`) is allowed, so the eager Milkdown chunk
  *      never reaches the read-mode bundle by accident.
+ *   3. No `apps/web` file may import `@deep-wiki/markdown`'s barrel at
+ *      all — only its `"./pipeline"` subpath. The barrel reaches
+ *      `render()`, and through it the syntax highlighter's grammars and
+ *      `node:crypto`; read mode serves the HTML `render()` produced at
+ *      save time and must not also ship the machine that produced it.
  *
  * Walks imports with `Bun.Transpiler().scanImports()`, exactly as
  * `core-purity.ts` does — no bundler, no `node_modules` resolution. It
@@ -257,11 +262,57 @@ function checkNoEagerMountImport(root: string, errors: string[]): void {
   }
 }
 
+/**
+ * The markdown BARREL, in any static or dynamic form, and never the
+ * crypto-free `"./pipeline"` subpath beside it — the `/` is what the
+ * negative lookahead refuses.
+ */
+const MARKDOWN_BARREL_IMPORT_PATTERN =
+  /(?:\b(?:import|export)\s+(?:type\s+)?[^;()]*\bfrom\s*|\bimport\s*\(?\s*|\brequire\s*\(\s*)['"`]@deep-wiki\/markdown['"`]/;
+
+/**
+ * No `apps/web` file may reach `@deep-wiki/markdown`'s barrel — only its
+ * `"./pipeline"` subpath, which `packages/editor` already uses.
+ *
+ * Same property as the two rules above, at the other end of the same
+ * boundary: the `"."` barrel reaches `render()`, and since 2026-09-23
+ * `render()` reaches the syntax highlighter — thirty TextMate grammar
+ * modules and a regex engine, ~20 MB resident, all of it decided at save
+ * time and baked into `page_content.rendered_html`. Read mode serves that
+ * cached HTML and must not also ship the machine that produced it
+ * (docs/SPECS.md §5.3). The barrel reaches `node:crypto` too, which has no
+ * browser build at all.
+ *
+ * `apps/web` does not declare `@deep-wiki/markdown` as a dependency, but
+ * Bun hoists every workspace package into one `node_modules`, so the
+ * specifier resolves from there whether or not the manifest asks for it —
+ * which is precisely the kind of accident a structural check exists to
+ * catch rather than trust. A *dynamic* import is no exemption here, unlike
+ * the editor's mount: `"./pipeline"` is the subpath a browser-side
+ * consumer wants, and it has been there since the split that created it.
+ *
+ * **Reversal condition**: `render()` becoming something read mode
+ * legitimately runs in the browser, which would contradict §5.3's whole
+ * reason for a cache.
+ */
+function checkNoMarkdownBarrelInWeb(root: string, errors: string[]): void {
+  const webDir = join(root, 'apps', 'web');
+  for (const file of findSourceFiles(webDir)) {
+    if (!MARKDOWN_BARREL_IMPORT_PATTERN.test(readFileSync(file, 'utf8'))) continue;
+    errors.push(
+      `${relative(root, file)}: imports "@deep-wiki/markdown" (the barrel) — it reaches render(), and with it the ` +
+        `syntax highlighter's grammars and node:crypto. Read mode serves cached HTML and must not ship the ` +
+        `machine that produced it; import "@deep-wiki/markdown/pipeline" instead`,
+    );
+  }
+}
+
 export function checkBundleIsolation(root: string): BundleIsolationResult {
   const errors: string[] = [];
 
   checkEditorClosure(root, errors);
   checkNoEagerMountImport(root, errors);
+  checkNoMarkdownBarrelInWeb(root, errors);
 
   return { ok: errors.length === 0, errors };
 }

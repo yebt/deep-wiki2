@@ -91,6 +91,120 @@ describe('buildInputRules', () => {
     expect(next.doc.firstChild!.attrs.start).toBe(1);
   });
 
+  /**
+   * The task-item rule, and the sequence it is really part of. `- ` fires
+   * first and leaves a bullet list, so what `[ ] ` matches is the start of
+   * a list ITEM — see `taskItemInputRule`. Typing the whole prefix is
+   * therefore two rules in order, and that is what these tests drive.
+   */
+  describe('"- [ ] " and "- [x] "', () => {
+    /** A one-item bullet list whose item's paragraph holds `text`, caret at its end. */
+    function stateWithListItem(text: string, checked: boolean | null = null): EditorState {
+      const paragraph = schema.node('paragraph', { blockAnchor: null }, text ? schema.text(text) : undefined);
+      const item = schema.node('listItem', { checked, spread: false, blockAnchor: null }, paragraph);
+      const doc = schema.node('doc', null, [schema.node('list', { ordered: false }, item)]);
+      return EditorState.create({ schema, doc, selection: TextSelection.create(doc, 3 + text.length) });
+    }
+
+    /** Applies the rule matching `sample` to `state` over the document range `[start, end)`. */
+    function apply(state: EditorState, sample: string, start: number, end: number): EditorState | null {
+      const rule = findRule(buildInputRules(schema), sample);
+      expect(rule).toBeDefined();
+      const match = internals(rule!).match.exec(sample)!;
+      const tr = internals(rule!).handler(state, match, start, end);
+      return tr ? state.apply(tr) : null;
+    }
+
+    test('typing the whole "- [ ] " prefix leaves a task item, not a bullet holding literal brackets', () => {
+      // Step 1: `- ` wraps the paragraph in a bullet list.
+      const wrapped = apply(stateWithParagraph('- '), '- ', 1, 3)!;
+      expect(wrapped.doc.firstChild!.type.name).toBe('list');
+      // Step 2: the person types `[ ] `, and the task rule claims it.
+      const typed = wrapped.apply(wrapped.tr.insertText('[ ] '));
+      const next = apply(typed, '[ ] ', 3, 7)!;
+
+      expect(next.doc.firstChild!.firstChild!.attrs.checked).toBe(false);
+      expect(next.doc.textContent).toBe('');
+      expect(toMarkdown(next.apply(next.tr.insertText('Ship it')).doc)).toBe('- [ ] Ship it\n');
+    });
+
+    test('"[x] " marks the item done', () => {
+      const next = apply(stateWithListItem('[x] '), '[x] ', 3, 7)!;
+
+      expect(next.doc.firstChild!.firstChild!.attrs.checked).toBe(true);
+      expect(toMarkdown(next.apply(next.tr.insertText('Shipped')).doc)).toBe('- [x] Shipped\n');
+    });
+
+    test('"[X] " is accepted and written in the pipeline\'s canonical lower-case spelling', () => {
+      const next = apply(stateWithListItem('[X] '), '[X] ', 3, 7)!;
+
+      expect(toMarkdown(next.apply(next.tr.insertText('Shipped')).doc)).toBe('- [x] Shipped\n');
+    });
+
+    test('the brackets are consumed, never left in the text', () => {
+      const next = apply(stateWithListItem('[ ] '), '[ ] ', 3, 7)!;
+
+      expect(next.doc.textContent).toBe('');
+    });
+
+    test('mid-block brackets are prose, and stay prose', () => {
+      // `A [ ] b` is a sentence about brackets in GFM too.
+      const state = stateWithListItem('A [ ] ');
+      expect(apply(state, '[ ] ', 5, 9)).toBeNull();
+    });
+
+    test('an item that is already a task types the second pair as text', () => {
+      expect(apply(stateWithListItem('[x] ', false), '[x] ', 3, 7)).toBeNull();
+    });
+
+    test('brackets at the start of a paragraph outside a list are prose', () => {
+      expect(apply(stateWithParagraph('[ ] '), '[ ] ', 1, 5)).toBeNull();
+    });
+
+    test('brackets at the start of a list item\'s SECOND block are prose', () => {
+      // GFM's task marker belongs to the item, not to a paragraph inside
+      // it, so `- a` followed by an indented `[ ] b` is text there too.
+      const first = schema.node('paragraph', { blockAnchor: null }, schema.text('a'));
+      const second = schema.node('paragraph', { blockAnchor: null }, schema.text('[ ] '));
+      const item = schema.node('listItem', { checked: null, spread: true, blockAnchor: null }, [first, second]);
+      const doc = schema.node('doc', null, [schema.node('list', { ordered: false }, item)]);
+      // The second paragraph's content runs 6..10; the caret sits at its end.
+      const state = EditorState.create({ schema, doc, selection: TextSelection.create(doc, 10) });
+
+      expect(apply(state, '[ ] ', 6, 10)).toBeNull();
+    });
+
+    test('the item\'s block anchor survives the conversion', () => {
+      const paragraph = schema.node('paragraph', { blockAnchor: null }, schema.text('[ ] '));
+      const item = schema.node('listItem', { checked: null, spread: false, blockAnchor: 'abc123' }, paragraph);
+      const doc = schema.node('doc', null, [schema.node('list', { ordered: false }, item)]);
+      const state = EditorState.create({ schema, doc, selection: TextSelection.create(doc, 7) });
+      const next = apply(state, '[ ] ', 3, 7)!;
+
+      expect(next.doc.firstChild!.firstChild!.attrs.blockAnchor).toBe('abc123');
+      expect(next.doc.firstChild!.firstChild!.attrs.checked).toBe(false);
+    });
+
+    test('an ordered list item can be a task too', () => {
+      const paragraph = schema.node('paragraph', { blockAnchor: null }, schema.text('[ ] '));
+      const item = schema.node('listItem', { checked: null, spread: false, blockAnchor: null }, paragraph);
+      const doc = schema.node('doc', null, [schema.node('list', { ordered: true, start: 1 }, item)]);
+      const state = EditorState.create({ schema, doc, selection: TextSelection.create(doc, 7) });
+      const next = apply(state, '[ ] ', 3, 7)!;
+
+      expect(toMarkdown(next.apply(next.tr.insertText('a')).doc)).toBe('1. [ ] a\n');
+    });
+
+    test('the result survives toMarkdown → fromMarkdown unchanged', () => {
+      const next = apply(stateWithListItem('[ ] '), '[ ] ', 3, 7)!;
+      const withText = next.apply(next.tr.insertText('not done yet'));
+      const written = toMarkdown(withText.doc);
+
+      expect(written).toBe('- [ ] not done yet\n');
+      expect(fromMarkdown(written).eq(withText.doc)).toBe(true);
+    });
+  });
+
   test('"**bold**" applies the strong mark and consumes both marker pairs', () => {
     const text = 'Say **bold**';
     const state = stateWithParagraph(text);

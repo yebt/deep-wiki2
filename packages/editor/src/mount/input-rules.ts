@@ -2,8 +2,9 @@
  * Markdown-shortcut input rules (document-editor spec: "Live Preview
  * Renders In Place"). Typing `**bold**`, `__strong__`, `_em_`, `*em*`,
  * `~~gone~~`, `` `code` ``, `[text](url)`, a bare URL closed by a space,
- * `# `, `> `, `- ` or `1. ` converts the typed syntax into the real
- * schema node/mark at the cursor, consuming the markdown punctuation —
+ * `# `, `> `, `- `, `1. `, `- [ ] ` or `- [x] ` converts the typed syntax
+ * into the real schema node/mark at the cursor, consuming the markdown
+ * punctuation —
  * there is no separate preview pane because the editable ProseMirror
  * document *is* the rendered result. Every rule's `handler` is a pure
  * `(state, match, start, end) => Transaction | null` function, matching
@@ -107,6 +108,54 @@ function bareUrlInputRule(regexp: RegExp, linkType: MarkType): InputRule {
 }
 
 /**
+ * `[ ] ` / `[x] ` at the very start of a list item's first block: the item
+ * becomes a GFM task item and the typed brackets are consumed.
+ *
+ * This is how `- [ ] ` converts, and it has to be spelled this way rather
+ * than as one rule for the whole prefix. `- ` has already fired by the time
+ * the bracket is typed — `wrappingInputRule` above turned the paragraph
+ * into a bullet list — so what remains in the document is `[ ] ` at the
+ * start of a list item, and that is what this rule matches. Typing
+ * `- [ ] Ship it` therefore produces the task item GFM spells the same way;
+ * before this rule existed it produced a *bullet* whose text was the
+ * literal `[ ] Ship it`, which `toMarkdown` then had to escape to
+ * `- \[ ] Ship it` — the owner's 2026-09-23 report, at its root.
+ *
+ * Three refusals, each load-bearing:
+ *
+ * - **Not at the start of the block.** `A [ ] b` is prose about brackets,
+ *   and GFM reads it as prose too.
+ * - **Not in a list item's first block.** GFM's task marker is a property
+ *   of the item, not of any paragraph inside it, so `- a\n\n  [ ] b` is
+ *   text in both the pipeline and here.
+ * - **Not on an item that is already a task.** `- [ ] [x] a` types the
+ *   second pair as text, which is what it is.
+ *
+ * `X` is accepted as well as `x` because GFM accepts it; `canonicalise()`
+ * writes `[x]` either way (`packages/markdown`'s pinned spelling), and so
+ * does this rule, since it stores a boolean rather than the typed letter.
+ */
+function taskItemInputRule(regexp: RegExp, listItem: NodeType): InputRule {
+  return new InputRule(regexp, (state: EditorState, match: RegExpMatchArray, start: number, end: number): Transaction | null => {
+    const box = match[1];
+    if (box === undefined) return null;
+
+    const $start = state.doc.resolve(start);
+    if ($start.parentOffset !== 0) return null;
+    const itemDepth = $start.depth - 1;
+    if (itemDepth < 1) return null;
+    if ($start.node(itemDepth).type !== listItem) return null;
+    if ($start.index(itemDepth) !== 0) return null;
+    const item = $start.node(itemDepth);
+    if (item.attrs.checked !== null) return null;
+
+    return state.tr
+      .delete(start, end)
+      .setNodeMarkup($start.before(itemDepth), undefined, { ...item.attrs, checked: box !== ' ' });
+  });
+}
+
+/**
  * The capture group of a mark rule: one or more characters that are not
  * the marker character, neither beginning nor ending with whitespace.
  * `marker` is one of `*`, `_`, `~`, `` ` `` — none needs escaping inside
@@ -120,12 +169,16 @@ export function buildInputRules(schema: Schema): InputRule[] {
   const heading = schema.nodes.heading as NodeType;
   const blockquote = schema.nodes.blockquote as NodeType;
   const list = schema.nodes.list as NodeType;
+  const listItem = schema.nodes.listItem as NodeType;
 
   return [
     textblockTypeInputRule(/^(#{1,6})\s$/, heading, (match) => ({ level: match[1]!.length })),
     wrappingInputRule(/^\s*>\s$/, blockquote),
     wrappingInputRule(/^\s*[-+]\s$/, list, () => ({ ordered: false })),
     wrappingInputRule(/^(\d+)\.\s$/, list, (match) => ({ ordered: true, start: Number(match[1]) })),
+    // After the bullet/ordered rules, because it acts on the item one of
+    // them has just created — see `taskItemInputRule`.
+    taskItemInputRule(/^\[([ xX])\]\s$/, listItem),
     // The double markers before the single ones: `[^*]+` / `[^_]+` keep a
     // single-marker rule from claiming half of a double one (`**bold*`),
     // and the order keeps the whole `**bold**` from being read as `*` +
