@@ -334,3 +334,143 @@ test.describe('the comments toggle', () => {
     }
   });
 });
+
+/* ────────────────────────────────────────────────────────────────────
+ * The owner's two reports, 2026-09-23: task lists "not properly
+ * supported", and code blocks with no syntax highlighting.
+ *
+ * Both are properties of what READ MODE serves, which is the cached,
+ * sanitised `page_content.rendered_html` written at save time — so the
+ * seeded page below goes through the real `savePage()` and these tests
+ * measure the real cached bytes in a real browser, not a fixture built
+ * beside them. The md-prefixed screenshots are the owner's review
+ * material.
+ * ──────────────────────────────────────────────────────────────────── */
+
+const MD_SHOTS = process.env.DEEPWIKI_FRAME_SHOTS ?? '';
+
+async function mdShot(page: Page, name: string): Promise<void> {
+  if (!MD_SHOTS) return;
+  await page.screenshot({ path: `${MD_SHOTS}/md-${name}.png`, fullPage: false });
+}
+
+interface MarkdownFixtures {
+  readonly markdownPageId: string;
+}
+
+const markdownFixtures: MarkdownFixtures = JSON.parse(readFileSync(new URL('.auth-fixtures.json', import.meta.url), 'utf8'));
+
+test.describe('task lists and highlighted code on the read screen', () => {
+  async function openMarkdownPage(page: Page, context: BrowserContext, theme: 'light' | 'dark'): Promise<void> {
+    await signInAs(context, fixtures.readerSessionToken);
+    await useTheme(page, theme);
+    await page.goto(pageUrl(fixtures.workspaceSlug, markdownFixtures.markdownPageId));
+    await expect(page.getByRole('heading', { level: 1, name: 'E2E Markdown Page' })).toBeVisible({ timeout: 30000 });
+    await expect(page.locator('html')).toHaveClass(theme === 'dark' ? /dark/ : /light/);
+  }
+
+  for (const theme of ['light', 'dark'] as const) {
+    test(`a fenced block carries highlight spans and reads correctly in the ${theme} theme`, async ({ page, context }) => {
+      await openMarkdownPage(page, context, theme);
+
+      const fence = page.locator('article pre').first();
+      await expect(fence).toBeVisible();
+
+      // The colouring is classes, never inline style: that is what makes a
+      // theme switch a stylesheet change rather than a re-render of every
+      // cached page.
+      await expect(fence.locator('.hl-keyword').first()).toBeVisible();
+      await expect(fence.locator('.hl-comment').first()).toHaveText('// a comment');
+      await expect(fence.locator('[style]')).toHaveCount(0);
+
+      // The code still READS — highlighting must not eat, reorder or
+      // duplicate a character of it.
+      await expect(fence).toContainText("const greeting: string = 'hello'; // a comment");
+      await expect(fence).toContainText('export function greet(name: string): string {');
+
+      // Every token is legible against the block it sits on: §5's 4.5:1
+      // body-text floor, measured in the running browser in both themes
+      // rather than argued from the tone table.
+      const ratios = await fence.evaluate((pre) => {
+        function parse(colour: string): [number, number, number] {
+          const canvas = document.createElement('canvas');
+          canvas.width = canvas.height = 1;
+          const context2d = canvas.getContext('2d')!;
+          context2d.fillStyle = colour;
+          context2d.fillRect(0, 0, 1, 1);
+          const [r, g, b] = context2d.getImageData(0, 0, 1, 1).data;
+          return [r!, g!, b!];
+        }
+        function luminance(rgb: [number, number, number]): number {
+          const [r, g, b] = rgb.map((channel) => {
+            const value = channel / 255;
+            return value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+          }) as [number, number, number];
+          return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+        }
+        const background = luminance(parse(getComputedStyle(pre).backgroundColor));
+        return [...pre.querySelectorAll('span[class^="hl-"]')]
+          .filter((span) => (span.textContent ?? '').trim().length > 0)
+          .map((span) => {
+            const foreground = luminance(parse(getComputedStyle(span).color));
+            const [light, dark] = foreground > background ? [foreground, background] : [background, foreground];
+            return (light + 0.05) / (dark + 0.05);
+          });
+      });
+
+      expect(ratios.length).toBeGreaterThan(3);
+      for (const ratio of ratios) expect(ratio).toBeGreaterThanOrEqual(4.5);
+
+      await expectNoHorizontalOverflow(page, `markdown page 1280 ${theme}`);
+      await mdShot(page, `read-1280-${theme}`);
+    });
+
+    test(`a task list renders as checkboxes, inert but legible, in the ${theme} theme`, async ({ page, context }) => {
+      await openMarkdownPage(page, context, theme);
+
+      const boxes = page.locator('article li.task-list-item input[type="checkbox"]');
+      await expect(boxes).toHaveCount(2);
+
+      // Read mode serves cached HTML and has no write path, so an
+      // enabled-looking box that did nothing would be checklist §6's
+      // "no inert interactions" failure. Inert, and still legible as done
+      // or not done — which is the only thing a reader came to the list
+      // for (docs/UI-CHECKLIST.md §5: colour is never the sole carrier;
+      // the box's fill and its tick are the signal, not a hue).
+      await expect(boxes.nth(0)).toBeDisabled();
+      await expect(boxes.nth(1)).toBeDisabled();
+      await expect(boxes.nth(0)).not.toBeChecked();
+      await expect(boxes.nth(1)).toBeChecked();
+
+      // The list marker is gone where a box replaced it, and only there:
+      // the plain bullet in the same list keeps its disc.
+      const markers = await page.locator('article li').evaluateAll((items) =>
+        items.map((item) => ({ marker: getComputedStyle(item).listStyleType, task: item.classList.contains('task-list-item') })),
+      );
+      expect(markers.filter((item) => item.task).every((item) => item.marker === 'none')).toBe(true);
+      expect(markers.filter((item) => !item.task).every((item) => item.marker === 'disc')).toBe(true);
+
+      // A ticked box and an unticked one are drawn differently, not merely
+      // labelled differently.
+      const fills = await boxes.evaluateAll((inputs) => inputs.map((input) => getComputedStyle(input).backgroundColor));
+      expect(fills[0]).not.toBe(fills[1]);
+    });
+  }
+
+  test('a language this build cannot highlight renders as plain text, with no tokens and no crash', async ({ page, context }) => {
+    await openMarkdownPage(page, context, 'light');
+
+    const unknown = page.locator('article pre', { hasText: 'A language this build cannot highlight' });
+    await expect(unknown).toBeVisible();
+    await expect(unknown.locator('[class^="hl-"]')).toHaveCount(0);
+    await expect(unknown).toContainText('A language this build cannot highlight renders as plain text.');
+  });
+
+  test('a wide code block scrolls inside its own container rather than widening the page', async ({ page, context }) => {
+    await openMarkdownPage(page, context, 'light');
+    await page.setViewportSize({ width: 320, height: 900 });
+
+    await expectNoHorizontalOverflow(page, 'markdown page 320 light');
+    await mdShot(page, 'read-320-light');
+  });
+});

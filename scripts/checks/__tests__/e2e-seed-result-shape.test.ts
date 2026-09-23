@@ -37,6 +37,8 @@ describe('SeedResult matches e2e/seed.bun.ts’s real output', () => {
       resetEmail: 'e2e-reset@example.com',
       resetToken: 'reset-token',
       readPageId: 'read-page-1',
+      markdownPageId: 'markdown-page-1',
+      markdownPageMarkdown: '- [ ] a\n',
       historyPageId: 'history-page-1',
       historyFirstRevisionId: 'history-rev-1',
       historySecondRevisionId: 'history-rev-2',

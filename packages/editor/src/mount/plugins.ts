@@ -41,6 +41,7 @@ import { dropCursor } from 'prosemirror-dropcursor';
 import { gapCursor } from 'prosemirror-gapcursor';
 import { inputRules } from 'prosemirror-inputrules';
 import { Plugin as PMPlugin, type Plugin } from 'prosemirror-state';
+import type { EditorProps } from 'prosemirror-view';
 import { schema } from '../schema';
 import { buildInputRules } from './input-rules';
 import { buildHistory, buildKeymap } from './keymap';
@@ -58,18 +59,23 @@ export const DROP_CURSOR_CLASS = 'editor-drop-cursor';
 
 /**
  * The mouse half of a task item's checkbox (`task-item.ts`). A plugin with
- * nothing but a `handleClickOn` prop: ProseMirror walks the clicked path
- * from the outermost node inwards and offers each node with its position,
- * so the box's document position never has to be resolved from the DOM.
- * The logic lives in `task-item.ts` and is unit-tested there against a
- * plain `EditorState`; this is only the wiring.
+ * nothing but click props: ProseMirror walks the clicked path from the
+ * outermost node inwards and offers each node with its position, so the
+ * box's document position never has to be resolved from the DOM. The logic
+ * lives in `task-item.ts` and is unit-tested there against a plain
+ * `EditorState`; this is only the wiring.
+ *
+ * All three click props, not just the single one. ProseMirror routes a
+ * click to `handleDoubleClickOn` or `handleTripleClickOn` by the event's
+ * own `detail`, so with only `handleClickOn` bound, ticking and then
+ * immediately unticking a box left it ticked: the second click was a
+ * double-click and reached nothing. A native checkbox toggles on every
+ * press however fast they come, and so does this one.
  */
 export function createTaskCheckboxPlugin(): Plugin {
-  return new PMPlugin({
-    props: {
-      handleClickOn: (view, _pos, node, nodePos, event) => handleTaskCheckboxClick(view, node, nodePos, event),
-    },
-  });
+  const onClick: NonNullable<EditorProps['handleClickOn']> = (view, _pos, node, nodePos, event) =>
+    handleTaskCheckboxClick(view, node, nodePos, event);
+  return new PMPlugin({ props: { handleClickOn: onClick, handleDoubleClickOn: onClick, handleTripleClickOn: onClick } });
 }
 
 export interface BuildEditorPluginsOptions {

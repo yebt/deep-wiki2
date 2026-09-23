@@ -1394,3 +1394,125 @@ for (const { theme, width } of [
     }
   });
 }
+
+/* ────────────────────────────────────────────────────────────────────
+ * GFM task items (the owner's 2026-09-23 report: "creo que no se soporta
+ * ok el task list").
+ *
+ * Every layer under this one is unit-tested DOM-free in
+ * `packages/editor/src/mount/task-item.test.ts` and driven through the
+ * real key bindings in GATE-2b. What only a browser can answer is
+ * whether the box is *there*, whether a pointer can hit it, and whether
+ * what it does survives a save and a reload.
+ * ──────────────────────────────────────────────────────────────────── */
+test.describe('task items', () => {
+  const TASK_BOX = 'li.task-list-item input[type="checkbox"]';
+
+  test('typing "- [ ] " converts into a task item, not a bullet holding literal brackets', async ({ page }) => {
+    test.setTimeout(60000);
+    const editor = await openMockedEditor(page, 'Start.\n', 'Task List Test');
+    await expect(editor).toContainText('Start.', { timeout: 30000 });
+
+    await caretToEnd(editor);
+    await page.keyboard.press('Enter');
+    await page.keyboard.type('- [ ] Ship it');
+
+    const item = editor.locator('li.task-list-item');
+    await expect(item).toHaveCount(1);
+    await expect(item).toHaveAttribute('data-checked', 'false');
+    await expect(item).toHaveText('Ship it');
+    // The brackets were consumed, never left as text.
+    await expect(editor).not.toContainText('[ ]');
+  });
+
+  test('typing "- [x] " converts into an item that is already done', async ({ page }) => {
+    test.setTimeout(60000);
+    const editor = await openMockedEditor(page, 'Start.\n', 'Task List Test');
+    await expect(editor).toContainText('Start.', { timeout: 30000 });
+
+    await caretToEnd(editor);
+    await page.keyboard.press('Enter');
+    await page.keyboard.type('- [x] Shipped');
+
+    await expect(editor.locator('li.task-list-item')).toHaveAttribute('data-checked', 'true');
+    await expect(editor.locator(TASK_BOX)).toBeChecked();
+  });
+
+  test('the box can be ticked with the mouse', async ({ page }) => {
+    test.setTimeout(60000);
+    const editor = await openMockedEditor(page, '- [ ] Not done yet\n', 'Task List Test');
+    await expect(editor).toContainText('Not done yet', { timeout: 30000 });
+
+    const box = editor.locator(TASK_BOX);
+    await expect(box).not.toBeChecked();
+    await box.click();
+
+    await expect(editor.locator('li.task-list-item')).toHaveAttribute('data-checked', 'true');
+    await expect(box).toBeChecked();
+
+    // And back again — a tick is a toggle, not a one-way door.
+    await box.click();
+    await expect(editor.locator('li.task-list-item')).toHaveAttribute('data-checked', 'false');
+  });
+
+  test('the box can be ticked from the keyboard alone', async ({ page }) => {
+    test.setTimeout(60000);
+    const editor = await openMockedEditor(page, '- [ ] Not done yet\n', 'Task List Test');
+    await expect(editor).toContainText('Not done yet', { timeout: 30000 });
+
+    // The caret goes into the item's text; the box itself is not a tab
+    // stop (it is document content, not a control in the tab order), so
+    // `Mod-Enter` at the caret is the keyboard route, and the box names it.
+    await caretToEnd(editor);
+    await page.keyboard.press('ControlOrMeta+Enter');
+
+    await expect(editor.locator('li.task-list-item')).toHaveAttribute('data-checked', 'true');
+    await expect(editor.locator(TASK_BOX)).toBeChecked();
+    await expect(editor.locator(TASK_BOX)).toHaveAttribute('aria-label', /Enter/);
+  });
+
+  test('clicking the item’s text places the caret and does not tick it', async ({ page }) => {
+    test.setTimeout(60000);
+    const editor = await openMockedEditor(page, '- [ ] Not done yet\n', 'Task List Test');
+    await expect(editor).toContainText('Not done yet', { timeout: 30000 });
+
+    await editor.getByText('Not done yet').click();
+
+    await expect(editor.locator('li.task-list-item')).toHaveAttribute('data-checked', 'false');
+  });
+
+  test('a ticked box round-trips through a real save and a reload', async ({ page }) => {
+    test.setTimeout(90000);
+    const block = await seedBlockPage(page, '- [ ] Not done yet\n- [ ] Nor this one\n');
+    const editor = await openBlockPage(page, block, 'Not done yet');
+
+    await editor.locator(TASK_BOX).first().click();
+    await expect(editor.locator('li.task-list-item').first()).toHaveAttribute('data-checked', 'true');
+    await saveAndConfirm(page);
+
+    expect(await savedMarkdown(page, block.pageId)).toBe('- [x] Not done yet\n- [ ] Nor this one\n');
+
+    await page.reload();
+    const reopened = page.getByTestId('editor-surface');
+    await expect(reopened).toContainText('Not done yet', { timeout: 30000 });
+    await expect(reopened.locator(TASK_BOX).first()).toBeChecked();
+    await expect(reopened.locator(TASK_BOX).nth(1)).not.toBeChecked();
+
+    await shotUi(page, 'task-list-1280-light');
+  });
+
+  test('Enter after a done item starts an item that is not done', async ({ page }) => {
+    test.setTimeout(60000);
+    const editor = await openMockedEditor(page, '- [x] Already done\n', 'Task List Test');
+    await expect(editor).toContainText('Already done', { timeout: 30000 });
+
+    await caretToEnd(editor);
+    await page.keyboard.press('Enter');
+    await page.keyboard.type('Next');
+
+    const items = editor.locator('li.task-list-item');
+    await expect(items).toHaveCount(2);
+    await expect(items.nth(0)).toHaveAttribute('data-checked', 'true');
+    await expect(items.nth(1)).toHaveAttribute('data-checked', 'false');
+  });
+});
