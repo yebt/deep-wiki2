@@ -39,6 +39,12 @@ export { toMarkdown } from '../to-markdown';
 // the edit-session route already applies before opening a page.
 export { probe } from '../probe';
 export type { ProbeResult } from '../probe';
+// And the round trip itself, which is source mode's Format action (owner
+// decision, 2026-09-23): the canonical form of a buffer is by definition
+// the text `probe` compares against, so the action that writes it and the
+// check that reads it are one function rather than two spellings of one
+// idea. GATE-2's own harness, used as a formatter.
+export { roundTrip } from '../round-trip';
 
 export { createMentionPlugin, insertMention, mentionPluginKey, moveSelection, reduceMentionState, INACTIVE_MENTION_STATE } from './mention-plugin';
 export type { MentionAction, MentionCandidate, MentionPluginOptions, MentionState } from './mention-plugin';

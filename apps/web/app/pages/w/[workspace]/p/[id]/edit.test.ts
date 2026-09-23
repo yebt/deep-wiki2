@@ -1051,10 +1051,16 @@ describe('edit-mode page', () => {
 describe('edit-mode page — source mode', () => {
   const SOURCE_STUBS = { global: { stubs: { EditorSurface: true, WorkspaceSidebar: true } } };
 
-  /** The real probe and converters, as the mount chunk hands them to the screen. */
-  async function mockEditorModule() {
+  /** The real probe, converters and formatter, as the mount chunk hands them to the screen. */
+  async function mockEditorModule(overrides: Record<string, unknown> = {}) {
     const editor = await import('@deep-wiki/editor');
-    loadEditorMountMock.mockResolvedValue({ probe: editor.probe, fromMarkdown: editor.fromMarkdown, toMarkdown: editor.toMarkdown });
+    loadEditorMountMock.mockResolvedValue({
+      probe: editor.probe,
+      fromMarkdown: editor.fromMarkdown,
+      toMarkdown: editor.toMarkdown,
+      roundTrip: editor.roundTrip,
+      ...overrides,
+    });
   }
 
   function readySession(markdown = '# Hi\n\nA paragraph.\n') {
@@ -1177,6 +1183,95 @@ describe('edit-mode page — source mode', () => {
     area.dispatchEvent(new Event('input', { bubbles: true }));
     await component.vm.$nextTick();
     expect(component.find('[data-testid="editor-view-refusal"]').exists()).toBe(false);
+  });
+
+  /**
+   * The owner's second report of 2026-09-23: the notice read "As typed: —
+   * canonical:" with nothing after either colon. The divergence was on a
+   * blank line — one blank line too many at the end of the buffer is the
+   * commonest way to write a non-canonical document — so there were no
+   * two spellings to show, and the sentence promised two anyway. It now
+   * names the line and stops.
+   */
+  test('a refusal with no two spellings to show names the line and promises no example', async () => {
+    await mockEditorModule();
+    useEditorView().set('source');
+    mockDefaults();
+    readySession('# Hi\n\nA paragraph.\n');
+    const component = await mountSuspended(PageInApp, SOURCE_STUBS);
+    const area = component.get('[data-testid="editor-source"]').element as HTMLTextAreaElement;
+    area.value = '# Hi\n\nA paragraph.\n\n\n';
+    area.dispatchEvent(new Event('input', { bubbles: true }));
+    await component.vm.$nextTick();
+
+    await viewButton(component, 'Visual').trigger('click');
+    await flushPromises();
+    await component.vm.$nextTick();
+
+    const notice = component.get('[data-testid="editor-view-refusal"]');
+    expect(notice.text()).toMatch(/line 4/i);
+    expect(notice.text()).not.toContain('As typed');
+    expect(notice.findAll('code')).toHaveLength(0);
+    expect(notice.find('[data-testid="editor-format"]').exists()).toBe(true);
+  });
+
+  /**
+   * The state machine the owner asked for: non-canonical → Format →
+   * canonical → the visual view opens. The buffer the person is looking
+   * at is the thing that changes, which is how they see what Format did.
+   */
+  test('Format rewrites the buffer to its canonical form, opens the visual view on it, and Save sends those bytes', async () => {
+    await mockEditorModule();
+    useEditorView().set('source');
+    const { save } = mockDefaults();
+    readySession('# Hi\n\nA paragraph.\n');
+    const component = await mountSuspended(PageInApp, SOURCE_STUBS);
+    const area = component.get('[data-testid="editor-source"]').element as HTMLTextAreaElement;
+    area.value = '# Hi\n\nSay **bold** here.\n\n\n';
+    area.dispatchEvent(new Event('input', { bubbles: true }));
+    await component.vm.$nextTick();
+
+    await viewButton(component, 'Visual').trigger('click');
+    await flushPromises();
+    await component.vm.$nextTick();
+    expect(component.find('[data-testid="editor-view-refusal"]').exists()).toBe(true);
+
+    await component.get('[data-testid="editor-format"]').trigger('click');
+    await flushPromises();
+    await component.vm.$nextTick();
+
+    const editorStub = component.findComponent({ name: 'EditorSurface' });
+    expect(editorStub.exists()).toBe(true);
+    expect(editorStub.props('markdown')).toBe('# Hi\n\nSay __bold__ here.\n');
+    expect(component.find('[data-testid="editor-view-refusal"]').exists()).toBe(false);
+    expect(viewButton(component, 'Visual').attributes('aria-pressed')).toBe('true');
+    expect(component.get('[data-testid="editor-view-status"]').text()).toMatch(/Formatted/);
+
+    await buttonNamed(component, /^Save/)!.trigger('click');
+    expect(save).toHaveBeenCalledWith('# Hi\n\nSay __bold__ here.\n', 'h1');
+  });
+
+  /**
+   * Formatting is about spelling; the visual view is about what the
+   * schema models. A construct it does not model cannot be spelled into
+   * existence, so the wall stays and no action pretends otherwise
+   * (`formatSource` refuses to rewrite anything in that case).
+   */
+  test('a construct the visual view does not support is refused without a Format action', async () => {
+    await mockEditorModule({ probe: () => ({ ok: false, reason: 'unsupported_construct', construct: 'a footnote definition', line: 3 }) });
+    useEditorView().set('source');
+    mockDefaults();
+    readySession('# Hi\n\nA paragraph.\n');
+    const component = await mountSuspended(PageInApp, SOURCE_STUBS);
+
+    await viewButton(component, 'Visual').trigger('click');
+    await flushPromises();
+    await component.vm.$nextTick();
+
+    const notice = component.get('[data-testid="editor-view-refusal"]');
+    expect(notice.text()).toContain('a footnote definition');
+    expect(notice.find('[data-testid="editor-format"]').exists()).toBe(false);
+    expect(component.find('[data-testid="editor-source"]').exists()).toBe(true);
   });
 
   test('opens in the view the cookie remembers', async () => {

@@ -778,6 +778,53 @@ a selection works on any page, canonical or not; a refused comment save is a typ
 client can render, never a 500; and a comment's excerpt indexes the bytes that were actually
 stored. GATE-2 stays at 182.
 
+### 2026-09-23 — The source-mode refusal promised two spellings it did not have, and was a wall where a formatter belonged
+
+Two defects in one notice, both reported by the owner on the same screen: *"Line 6 is not in
+canonical form. As typed: — canonical: Write it the canonical way to open the visual view, or keep
+editing here."*
+
+**Why both examples were empty.** `probe()` reports the line at which the *bytes* first diverge
+(`packages/editor/src/probe.ts`, `firstDivergenceLine`), and `describeRefusal` read that line out
+of both texts. For the commonest non-canonical document a person produces — one blank line too
+many, or two newlines at the end of the buffer — the byte that differs is a newline, so the line
+it lands on is **blank in both texts** and both "spellings" were the empty string. Measured
+against the real pipeline: `"# T\n\nA\n\nB\n\n\n\n"` refuses at line 6, and line 6 of the text and
+line 6 of its canonical form are both `""`. A second shape had the same effect: a divergence past
+the end of the canonical text (`lineOf` answers `''` by design), and a third promised a difference
+it could not show — a missing trailing newline diverges on a line whose two spellings are the same
+word ("As typed: A — canonical: A").
+
+**Impact.** The two spellings now travel together in one `spellings` object and are `null`
+together, so the notice cannot render one without the other or render two empty code spans; it
+names the line and stops when there is no example to give. Five cases are unit-tested in
+`apps/web/app/utils/editor-view.test.ts`.
+
+**The wall.** The owner: *"es mejor trabajar con un formateador o algo así para que me permita
+manejarlo."* `formatSource` (same file) is the second decision the toggle makes — the buffer is
+rewritten to its canonical form and the visual view opens on it, in one click on a control that
+says what it does. The bytes it writes are `roundTrip` from `@deep-wiki/editor/mount`
+(`toMarkdown(fromMarkdown(md))`), which is the same function `probe` compares against, so the
+action and the check cannot disagree about what canonical means. Measured against the real
+pipeline on ten non-canonical samples, `roundTrip` is byte-identical to `packages/markdown`'s
+`canonicalise` on every one of them, is idempotent, and the probe accepts its output — but the
+implementation re-probes the formatted text rather than assuming it, because the two conditions
+are not the same one.
+
+**Where the wall stays, and why that is the whole answer to "would formatting lose something".**
+`fromMarkdown` **throws** `UnsupportedConstructError` for a construct the schema does not model
+rather than dropping it (`packages/editor/src/from-markdown.ts`), so a canonicaliser that would
+lose content cannot return — it raises. `formatSource` answers a throw by rewriting nothing and
+keeping the refusal, and the notice offers no Format action when the probe named a construct
+(`refusal.formattable`). There is no case in which a successful format returns a document with
+less in it than it was given: it changes spelling, never content.
+
+**Left open:** the refused-document panel's unbuilt exit is still called "Normalise this document"
+while the live action is "Format" — two words for one idea, and the owner's call which survives.
+A line whose only non-canonical feature is trailing whitespace shows two code spans that look
+identical, because the difference is invisible characters; the same whitespace-glyph follow-up the
+diff screens already carry (2026-09-17).
+
 ### 2026-09-23 — The vacuous-negative sweep: 85 candidates, six real, and why there is no thirteenth check
 
 The entry below ends with a suggestion: *every `toHaveCount(0)` and `not.toBeVisible()` in `e2e/`
