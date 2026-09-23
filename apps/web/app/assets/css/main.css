@@ -251,6 +251,32 @@
   --ui-border-muted: var(--ui-color-neutral-200);
   --ui-border-accented: var(--ui-color-neutral-500);
   --ui-border-inverted: var(--ui-color-neutral-800);
+
+  /* Code-token roles (2026-09-23). `packages/markdown` highlights a fenced
+     block at render time and stores the result, emitting one class per
+     token kind out of a closed vocabulary (`highlight.ts`'s
+     `HIGHLIGHT_CLASSES`) and no colour at all. The colour is decided here,
+     which is what makes a light/dark switch a stylesheet change rather
+     than a re-render of every cached page.
+
+     One token kind per EXISTING alias — no new palette to author and
+     measure, the same argument §14's 2026-09-17 diff-marks entry makes for
+     carrying M3's `tertiary` on the `success` alias. Every value is tone 30
+     against `bg-emphasized`'s tone 90, a 60-tone gap, so each clears
+     §10.1's 4.5:1 by construction. Highlighting carries no meaning a
+     reader needs — the code's own text is the content, and colour only
+     helps scan it — so §5's "colour is never the sole carrier" is not at
+     stake; in a `diff` fence, where it would be, the `+`/`-` characters
+     are in the text beside it. */
+  --dw-code-keyword: var(--ui-color-primary-700);
+  --dw-code-parameter: var(--ui-color-secondary-700);
+  --dw-code-string: var(--ui-color-success-700);
+  --dw-code-function: var(--ui-color-info-700);
+  --dw-code-constant: var(--ui-color-warning-700);
+  --dw-code-deleted: var(--ui-color-error-700);
+  /* A comment and a separator are supporting text, which is exactly what
+     M3's `on-surface-variant` is for — the role `text-muted` carries. */
+  --dw-code-muted: var(--ui-text-muted);
 }
 
 .dark {
@@ -331,6 +357,19 @@
   --ui-border-muted: var(--ui-color-neutral-700);
   --ui-border-accented: var(--ui-color-neutral-400);
   --ui-border-inverted: var(--ui-color-neutral-100);
+
+  /* Code-token roles — tone 80 against `bg-emphasized`'s tone 24, a
+     56-tone gap, so each clears §10.1's 4.5:1 by construction. Shade 200
+     (tone 80) rather than `--ui-primary`, whose dark deviation above puts
+     it at tone 70: the gap argument has to hold for every token the same
+     way, and only a large filled surface needed that deviation's chroma. */
+  --dw-code-keyword: var(--ui-color-primary-200);
+  --dw-code-parameter: var(--ui-color-secondary-200);
+  --dw-code-string: var(--ui-color-success-200);
+  --dw-code-function: var(--ui-color-info-200);
+  --dw-code-constant: var(--ui-color-warning-200);
+  --dw-code-deleted: var(--ui-color-error-200);
+  --dw-code-muted: var(--ui-text-muted);
 }
 
 /* ─────────────────────────────────────────────────────────────
@@ -665,6 +704,102 @@ body {
     margin-top: 0.25rem;
   }
 
+  /* ── GFM task items ──────────────────────────────────────────
+     The owner reported (2026-09-23) that task lists were not properly
+     supported. One half of that was here: nothing in this file had ever
+     mentioned them, so a `- [ ]` item rendered as a disc bullet with an
+     unstyled browser checkbox sitting beside it in read mode, and as a
+     plain bullet — indistinguishable from `- item` — in the editor.
+
+     One rule set serves both surfaces, because they now emit the same
+     markup: `mdast-util-to-hast` gives read mode
+     `<li class="task-list-item"><input type="checkbox" disabled>`, and
+     `packages/editor/src/schema.ts` gives the editing surface the same
+     `<li>` and the same `<input>` (enabled, and flipped by a click or
+     `Mod-Enter`). The box is drawn from tokens rather than left to the
+     browser: this project's dark mode is class-driven, so a native
+     control would render its light-mode chrome on a dark page — §4.2's
+     "nothing depends on the background being light or dark" — and a
+     `disabled` box in read mode would be dimmed by the UA on top of
+     that, when a reader's whole question is whether the thing is done. */
+  & li.task-list-item {
+    list-style: none;
+    position: relative;
+  }
+
+  /* `position: absolute` with no `top`: the box keeps its static vertical
+     position, which is the line it sits on. That is what lets one rule
+     serve a tight item (`<li><input> text</li>`), a loose one
+     (`<li><p><input> text</p></li>`) and the editor's own
+     `<li><input><div><p>text</p></div></li>` — in all three the box lands
+     on the item's first line and the text starts at the content edge,
+     where any other list item's text starts. Out of flow also means the
+     single space `mdast-util-to-hast` writes after the box begins a line
+     and is therefore collapsed away. */
+  & li.task-list-item > input[type='checkbox'],
+  & li.task-list-item > p > input[type='checkbox'] {
+    position: absolute;
+    inset-inline-start: -1.5rem; /* the `ul`/`ol` marker gutter, above */
+    /* Centred on the document's own line box, computed from the type
+       token rather than measured by eye. */
+    margin-block-start: calc((var(--text-doc-body--line-height) - 1rem) / 2);
+    appearance: none;
+    width: 1rem;
+    height: 1rem;
+    margin-inline: 0;
+    border: 1px solid var(--ui-border-accented); /* M3 `outline`, §10.1's 3:1 control boundary */
+    border-radius: var(--radius-xs); /* corner-extra-small, §3.3 */
+    background-color: var(--ui-bg);
+  }
+
+  & li.task-list-item > input[type='checkbox']:checked,
+  & li.task-list-item > p > input[type='checkbox']:checked {
+    border-color: var(--ui-primary);
+    background-color: var(--ui-primary);
+  }
+
+  /* The tick. A mask, so the glyph's colour is the `on-primary` pair
+     (`text-inverted`, §1.4) and not a literal; the `#000` inside the data
+     URI is a shape's stroke, never a colour decision — a mask reads only
+     alpha. Lucide's `check` path, the icon set this app already uses. */
+  & li.task-list-item > input[type='checkbox']:checked::before,
+  & li.task-list-item > p > input[type='checkbox']:checked::before {
+    content: '';
+    display: block;
+    width: 100%;
+    height: 100%;
+    background-color: var(--ui-text-inverted);
+    mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E");
+    mask-size: 0.75rem;
+    mask-position: center;
+    mask-repeat: no-repeat;
+  }
+
+  /* Read mode's boxes are `disabled`: the cached HTML is served statically
+     and there is no write path from it, so an enabled-looking box that did
+     nothing would be checklist §6's "no inert interactions" failure. Being
+     inert must not make them illegible, though — which state a task is in
+     is the only thing a reader came to the list for — so the disabled box
+     keeps its full contrast and takes the `not-allowed` cursor rather than
+     the UA's dimming. */
+  & li.task-list-item input[type='checkbox']:disabled {
+    cursor: not-allowed;
+    opacity: 1;
+  }
+
+  /* Edit mode's box is a control the pointer operates. */
+  & li.task-list-item input[type='checkbox']:not(:disabled) {
+    cursor: pointer;
+  }
+
+  /* The editor's `<div class="task-list-item-content">` (schema.ts) needs no
+     rule of its own: a ProseMirror DOM spec's content hole must be the last
+     thing in its element, so the box cannot be a sibling of the paragraphs
+     without a wrapper, and an unstyled `div` around a `<p>` draws nothing
+     and collapses its margins straight through. Deliberately not
+     `display: contents`, which would take the element out of the box tree
+     the view measures positions against. */
+
   & blockquote {
     margin-top: 1.5rem;
     padding-inline-start: 1rem;
@@ -696,6 +831,55 @@ body {
       background-color: transparent;
       padding-inline: 0;
     }
+  }
+
+  /* ── Highlighted code tokens ─────────────────────────────────
+     `packages/markdown` tokenises a fenced block at render time and stores
+     the result as classes only — one per token kind, from the closed
+     vocabulary in `highlight.ts` — so the colour lives here and a theme
+     switch costs a stylesheet, not a re-render of ten thousand pages
+     (§4.2). The roles are set per theme in §3; this is where they land.
+
+     `hl-line` wraps one source line and is deliberately colourless: it
+     exists so a stylesheet can address a line without addressing a token. */
+  & .hl-keyword {
+    color: var(--dw-code-keyword);
+  }
+
+  & .hl-parameter {
+    color: var(--dw-code-parameter);
+  }
+
+  & .hl-string,
+  & .hl-string-expression,
+  & .hl-inserted {
+    color: var(--dw-code-string);
+  }
+
+  & .hl-function {
+    color: var(--dw-code-function);
+  }
+
+  & .hl-constant,
+  & .hl-changed {
+    color: var(--dw-code-constant);
+  }
+
+  & .hl-deleted {
+    color: var(--dw-code-deleted);
+  }
+
+  & .hl-comment,
+  & .hl-punctuation {
+    color: var(--dw-code-muted);
+  }
+
+  /* A URL inside code reads as a URL. The underline is the second signal
+     §5 asks of anything colour would otherwise carry alone. */
+  & .hl-link {
+    color: var(--dw-code-function);
+    text-decoration: underline;
+    text-underline-offset: 0.15em;
   }
 
   & table {
