@@ -377,13 +377,15 @@ async function onEditorCommit(): Promise<void> {
     case 'created': {
       applyCreated(outcome.node);
       const where = outcome.node.parentId === (rootId.value ?? '') ? 'the top level' : `“${pathTo(outcome.node.parentId).at(-1)?.title ?? ''}”`;
-      announcement.value = `Created ${NODE_TYPE_LABELS[outcome.node.type].toLowerCase()} “${outcome.node.title}” in ${where}.`;
-      // Transient and successful, so the toast tier (2026-09-23). It is
+      // Said twice, in the two places §5 and §4.12 ask for: the region a
+      // screen reader hears, and the toast a sighted person reads. It is
       // worth saying at all — rather than leaving the new row to speak for
       // itself — because creating a page navigates away from the screen the
       // person was on, and a shelf, book or chapter may be created under a
       // parent the scroll has left behind.
-      confirmed({ message: `Created ${NODE_TYPE_LABELS[outcome.node.type].toLowerCase()} “${outcome.node.title}” in ${where}.` });
+      const made = `Created ${NODE_TYPE_LABELS[outcome.node.type].toLowerCase()} “${outcome.node.title}” in ${where}.`;
+      announcement.value = made;
+      confirmed({ message: made });
       // Selected and opened: the thing just made is the thing being worked
       // on. A page has a screen to go to; a shelf, book or chapter has
       // none, so being picked and focused is all "opened" can mean for it.
@@ -819,9 +821,12 @@ const menuItems = computed<ContextMenuItem[][]>(() => {
              (§3, recoverable, with a real reason). A name that is merely
              taken never reaches here: it stays beside the field. -->
         <InlineNotice v-if="writeError" tier="chip" tone="error" role="alert" data-testid="tree-write-error">{{ writeError }}</InlineNotice>
-        <!-- A delete's outcome, in the chip tier beside the tree (§3):
-             a refusal with its reason, or the success with the way back —
-             a destructive action gets more than a toast that vanishes. -->
+        <!-- A delete's refusal, in the chip tier beside the tree, where a
+             refused drag's reason already stands (§3). Its success is not
+             here: that one is over the moment it happens, so it is the
+             toast tier (§4.12), and the question that preceded it was a
+             typed-name dialog — §3's "a destructive action gets more than
+             a toast" is answered before the delete, not after it. -->
         <InlineNotice v-if="deleteError" tier="chip" tone="error" role="alert" data-testid="tree-delete-error">{{ deleteError }}</InlineNotice>
         <!-- The list scrolls inside the pane: a 400-page book scrolls the
              tree, not the room. One context menu around it, for every

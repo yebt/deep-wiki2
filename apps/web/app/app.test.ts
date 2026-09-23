@@ -74,6 +74,21 @@ describe('app root', () => {
     expect(hosts).toHaveLength(1);
   });
 
+  /**
+   * The toaster is `UApp`'s own, and the one thing this product states
+   * about it is how many confirmations may stand at once: a stack four
+   * deep stops being a confirmation and becomes a wall over the document,
+   * which is the opposite of what moving the banners into toasts was for
+   * (owner decision, 2026-09-23; docs/UI-CHECKLIST.md §4.12). Everything
+   * else about the tier — the status role, the politeness, the dismissal,
+   * the duration — is `useStatusToast`'s and is asserted there.
+   */
+  test('caps how many toasts may stand at once', async () => {
+    const component = await mountApp();
+
+    expect(component.findComponent(UApp).props('toaster')).toMatchObject({ max: 3 });
+  });
+
   test('the routed screen really is the one the router resolved', async () => {
     const component = await mountApp();
 

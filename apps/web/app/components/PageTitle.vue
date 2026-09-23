@@ -159,7 +159,7 @@ function commit(): void {
         class="dw-title-editor w-full min-w-0 border-0 bg-transparent p-0 text-headline-medium text-highlighted"
         data-testid="page-title-field"
         :value="title.value.value"
-        :aria-label="`Title of this page`"
+        aria-label="Title of this page"
         :aria-describedby="title.error.value ? errorId : hintId"
         :aria-invalid="title.error.value ? 'true' : undefined"
         autocomplete="off"
