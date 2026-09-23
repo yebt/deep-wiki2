@@ -87,6 +87,29 @@ function dialog(page: Page) {
   return page.getByRole('dialog', { name: 'Comments' });
 }
 
+/**
+ * The toast tier (owner request, 2026-09-23: "Reply posted." must be a
+ * toast). `UApp`'s toaster is portalled outside the panel, so a toast is
+ * looked for on the page and never inside the dialog — which is the whole
+ * point: it is no longer a bar standing over the conversation it is about.
+ *
+ * The panel's own live region says the same sentence and is also a
+ * `status` (§4.12: the region is what is announced, the toast is what a
+ * sighted person reads), so the toast is told apart by the close control
+ * §4.12 requires it to keep — the region has none.
+ */
+function toast(page: Page, sentence: string) {
+  return page
+    .getByRole('status')
+    .filter({ hasText: sentence })
+    .filter({ has: page.getByRole('button', { name: /close/i }) });
+}
+
+/** The green bar this batch removed: it painted `bg-success-container` inside the panel. */
+async function expectNoSuccessBar(page: Page): Promise<void> {
+  await expect(page.locator('[role="dialog"] .bg-success-container')).toHaveCount(0);
+}
+
 test('a commenter opens a thread from the mark beside its block, replies, and resolves it — by clicking', async ({ page, context }) => {
   await signInAs(context, fixtures.commenterSessionToken);
 
@@ -141,15 +164,22 @@ test('a commenter opens a thread from the mark beside its block, replies, and re
   // accessibility tree, so the mark is located by attribute here.
   await expect(page.locator('button[aria-label="2 comments on this block"]')).toHaveAttribute('aria-pressed', 'true');
 
-  // Reply.
-  await panel.getByLabel('Reply').fill('Checked: the date is right.');
+  // Reply. The field is one quiet line until it is used: focusing it is what
+  // brings the Reply control out (the owner's first request, 2026-09-23).
+  const replyField = panel.getByLabel(/^Reply to /);
+  await replyField.click();
+  await replyField.fill('Checked: the date is right.');
   await panel.getByRole('button', { name: 'Reply' }).click();
-  await expect(panel.getByRole('status').filter({ hasText: 'Reply posted.' })).toBeVisible({ timeout: 30000 });
+  // The confirmation is a toast, outside the panel, naming the thread it is
+  // about — and no bar is painted over the conversation (§4.12).
+  await expect(toast(page, 'Reply posted on')).toBeVisible({ timeout: 30000 });
+  await expectNoSuccessBar(page);
   await expect(panel).toContainText('Checked: the date is right.');
 
   // Resolve: the word and an icon, and the control flips to Reopen.
   await panel.getByRole('button', { name: 'Resolve' }).click();
-  await expect(panel.getByRole('status').filter({ hasText: 'Thread resolved.' })).toBeVisible({ timeout: 30000 });
+  await expect(toast(page, 'Thread resolved on')).toBeVisible({ timeout: 30000 });
+  await expectNoSuccessBar(page);
   await expect(panel.getByText('Resolved', { exact: true })).toBeVisible();
   await expect(panel.getByRole('button', { name: 'Reopen' })).toBeVisible();
 
@@ -262,7 +292,8 @@ test('a commenter starts a thread from a block’s "+": hover, type, Post — th
   // Optimistic, then confirmed: the composer closes, the live region
   // says so, the thread is in the panel, and the mark is beside the
   // block — placed under the anchor the server minted, before any reload.
-  await expect(panel.getByRole('status').filter({ hasText: 'Comment posted.' })).toBeVisible({ timeout: 30000 });
+  await expect(toast(page, 'Comment posted on')).toBeVisible({ timeout: 30000 });
+  await expectNoSuccessBar(page);
   await expect(composer).toHaveCount(0);
   await expect(panel).toContainText('Started from read mode.');
   await expect(panel.getByTestId('comment-pending')).toHaveCount(0);
@@ -340,7 +371,7 @@ test('a commenter selects words inside a block and starts a thread on them — t
   await expect(composer.getByTestId('comment-composer-excerpt')).toHaveText('“a few words”');
   await panel.getByLabel('Comment', { exact: true }).fill('These words specifically.');
   await panel.getByRole('button', { name: 'Post' }).click();
-  await expect(panel.getByRole('status').filter({ hasText: 'Comment posted.' })).toBeVisible({ timeout: 30000 });
+  await expect(toast(page, 'Comment posted on')).toBeVisible({ timeout: 30000 });
 
   // The server located the words in the block's source: the excerpt the
   // thread keeps is the selection, not the whole paragraph.
@@ -393,7 +424,7 @@ test('a commenter comments on a selection in a paragraph that ends in an escaped
   await panel.getByRole('button', { name: 'Post' }).click();
   // The refusal surfaced here, as an error the composer showed instead of a
   // posted thread — so this is the assertion of record.
-  await expect(panel.getByRole('status').filter({ hasText: 'Comment posted.' })).toBeVisible({ timeout: 30000 });
+  await expect(toast(page, 'Comment posted on')).toBeVisible({ timeout: 30000 });
   await expect(panel.locator('[data-comment-placement="anchored"]', { hasText: 'A note on a paragraph that ends in a space.' })).toBeVisible();
   await expect(panel.getByRole('alert')).toHaveCount(0);
 
