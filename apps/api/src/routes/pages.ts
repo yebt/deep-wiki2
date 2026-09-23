@@ -7,15 +7,11 @@
 import {
   acquireLock,
   can,
-  DeadAnchorError,
   heartbeatLock,
-  NotCanonicalError,
-  PageNotFoundError,
   readPageHtml,
   readPageMarkdown,
   readTrashedPageHtml,
   savePage,
-  StaleContentError,
   takeOverLock,
   trashLookup,
 } from '@deep-wiki/db';
@@ -25,6 +21,7 @@ import { ErrorResponseSchema, SavePageRequestSchema, SavePageResponseSchema } fr
 import { Hono } from 'hono';
 import type postgres from 'postgres';
 import { sessionMiddleware, type SessionVariables } from '../middleware/session';
+import { savePageRefusal } from './save-page-refusal';
 
 export interface PageRouteDeps {
   readonly sql: postgres.Sql;
@@ -171,22 +168,13 @@ export function createPageRoutes(deps: PageRouteDeps): Hono<{ Variables: Session
       });
       return c.json(SavePageResponseSchema.parse({ contentHash: result.contentHash, unchanged: result.unchanged }));
     } catch (error) {
-      if (error instanceof StaleContentError) {
-        return c.json(ErrorResponseSchema.parse({ error: 'stale content: reload before saving again' }), 409);
-      }
-      if (error instanceof NotCanonicalError) {
-        return c.json({ error: 'not canonical', canonical: error.canonical }, 409);
-      }
-      if (error instanceof DeadAnchorError) {
-        return c.json({ error: 'dead anchor', corrected: error.corrected, anchors: error.anchors }, 409);
-      }
-      // Defence in depth: the live_nodes lookup above already refuses a
-      // trashed or unknown page before this point, but savePage() carries
-      // the same check for its other callers (comments.ts's anchor mint),
-      // so a race between the two never surfaces as a raw 500.
-      if (error instanceof PageNotFoundError) {
-        return c.json(ErrorResponseSchema.parse({ error: 'not found' }), 404);
-      }
+      // One mapping, shared with the comment route's own savePage() call —
+      // see `save-page-refusal.ts`. Includes the defence-in-depth 404: the
+      // live_nodes lookup above already refuses a trashed or unknown page,
+      // but savePage() carries the same check for its other callers, so a
+      // race between the two never surfaces as a raw 500.
+      const refusal = savePageRefusal(error);
+      if (refusal) return c.json(refusal.body, refusal.status);
       throw error;
     }
   });

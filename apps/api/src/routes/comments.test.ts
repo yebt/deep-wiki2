@@ -483,6 +483,99 @@ describe('POST /pages/:id/comments — anchor minting', () => {
     expect(commentRow!.block_id).toBe(created.blockId);
   });
 
+  /**
+   * The bytes a real page of the project owner's carried when commenting on
+   * a selection answered 500 (docs/TODO.md, 2026-09-23). The paragraph ends
+   * in a space, whose canonical spelling is the escape `&#x20;` — unescaped
+   * trailing whitespace does not survive a reparse. The page is canonical:
+   * it was written by the editor through `savePage()` like any other. But
+   * appending ` ^id` at the block's end offset makes the space non-trailing,
+   * so canonical form spells it literally, and the mint's spliced bytes were
+   * no longer their own fixed point — which `savePage()` refuses.
+   */
+  test('a comment on a block whose trailing space is escaped opens a thread instead of failing the save', async () => {
+    const fixture = await buildFixture();
+    const markdown = 'This is a content @Seed Owner&#x20;\n';
+    await savePage(sql, {
+      nodeId: fixture.pageId,
+      workspaceId: fixture.workspaceId,
+      markdown,
+      expectedContentHash: null,
+      updatedBy: fixture.commenterUserId,
+      changesetWindowMinutes: 30,
+    });
+    const [derivedBlock] = sliceBlocks(parse(markdown), markdown);
+    expect(derivedBlock!.anchorId).toBeNull();
+
+    const app = buildApp();
+    const res = await app.request(`/pages/${fixture.pageId}/comments`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie: fixture.commenterCookie },
+      body: JSON.stringify({
+        blockId: derivedBlock!.id,
+        offsetStart: 0,
+        offsetEnd: 17,
+        quote: 'This is a content',
+        body: 'Commenting on a selection of this paragraph.',
+      }),
+    });
+
+    // Storage first, and on its own terms — the save either happened or the
+    // route refused it, and a status assertion alone cannot say which.
+    const [row] = await sql<{ markdown: string }[]>`SELECT markdown FROM page_content WHERE node_id = ${fixture.pageId}`;
+    const [savedBlock] = sliceBlocks(parse(row!.markdown), row!.markdown);
+    expect(savedBlock!.anchorId).not.toBeNull();
+    expect(row!.markdown).toBe(`This is a content @Seed Owner  ^${savedBlock!.anchorId}\n`);
+
+    expect(res.status).toBe(201);
+    const created = (await res.json()) as { id: string; blockId: string };
+    expect(created.blockId).toBe(savedBlock!.anchorId!);
+
+    // The excerpt's offsets index the bytes that were actually stored, not
+    // the pre-mint spelling they were located against.
+    const [commentRow] = await sql<{ offset_start: number; offset_end: number; quote: string }[]>`
+      SELECT offset_start, offset_end, quote FROM comments WHERE id = ${created.id}
+    `;
+    expect(commentRow!.quote).toBe('This is a content');
+    expect(savedBlock!.text.slice(commentRow!.offset_start, commentRow!.offset_end)).toBe(commentRow!.quote);
+  });
+
+  /**
+   * Stored page Markdown is canonical *by construction* (design.md D1) —
+   * `savePage()` refuses anything else — but "by construction" is a claim
+   * about one write path, and a row written around it (a direct INSERT, a
+   * backfill, a seed) does not honour it. A commenter holds `comment`, not
+   * `write`: they cannot repair such a page and must not be the one who is
+   * told about it. So the mint normalises, which is the save path's own
+   * documented remedy for a non-canonical document, and the thread opens.
+   */
+  test('a comment on a page whose stored markdown was never canonical still opens a thread, and normalises the page', async () => {
+    const fixture = await buildFixture();
+    // `*emphasis*` is not this pipeline's spelling (`PINNED_OPTIONS.emphasis`
+    // is `_`), so this row could not have come from `savePage()`.
+    const stored = 'A paragraph with *emphasis*.\n';
+    await sql`
+      INSERT INTO page_content (node_id, workspace_id, markdown, content_hash)
+      VALUES (${fixture.pageId}, ${fixture.workspaceId}, ${stored}, 'hash')
+    `;
+    const [derivedBlock] = sliceBlocks(parse(stored), stored);
+
+    const app = buildApp();
+    const res = await app.request(`/pages/${fixture.pageId}/comments`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie: fixture.commenterCookie },
+      body: JSON.stringify({ blockId: derivedBlock!.id, quote: 'A paragraph', body: 'A note on a page nobody normalised.' }),
+    });
+
+    const [row] = await sql<{ markdown: string }[]>`SELECT markdown FROM page_content WHERE node_id = ${fixture.pageId}`;
+    const [savedBlock] = sliceBlocks(parse(row!.markdown), row!.markdown);
+    expect(row!.markdown).toBe(`A paragraph with _emphasis_. ^${savedBlock!.anchorId}\n`);
+
+    expect(res.status).toBe(201);
+    const created = (await res.json()) as { id: string; blockId: string };
+    expect(created.blockId).toBe(savedBlock!.anchorId!);
+  });
+
   test('a subject with read but not comment cannot create a comment', async () => {
     const fixture = await buildFixture();
     await sql`
@@ -639,6 +732,24 @@ describe('POST /pages/:id/comments — the anchor is located in the block\'s sou
     // The mint appended ` ^id` after the excerpt; the excerpt excludes it
     // and the offsets still index the saved source.
     expect(blockText).toBe(`A fresh paragraph, _emphasised_. ^${created.blockId}`);
+    expect(blockText.slice(row.offset_start, row.offset_end)).toBe(row.quote);
+  });
+
+  /**
+   * The mint does not only append: on a block whose canonical spelling
+   * depends on what follows its last byte it also *respells* it — the
+   * escaped trailing space `&#x20;` becomes a literal space once ` ^id`
+   * follows (docs/TODO.md, 2026-09-23). An excerpt located against the
+   * pre-mint source therefore named bytes that were never stored, and a
+   * stored quote that is not a substring of its block's source skips
+   * reconciliation's exact rows on every later save — orphaning a comment on
+   * a block nobody touched, which is the whole point of `locateQuoteInBlock`.
+   */
+  test('an excerpt on a block the mint respells indexes the bytes that were stored, not the ones it was located against', async () => {
+    const { row, blockText, created } = await seedAndPost('This is a content @Seed Owner&#x20;\n', {});
+
+    expect(blockText).toBe(`This is a content @Seed Owner  ^${created.blockId}`);
+    expect(row.quote).toBe('This is a content @Seed Owner ');
     expect(blockText.slice(row.offset_start, row.offset_end)).toBe(row.quote);
   });
 

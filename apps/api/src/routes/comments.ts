@@ -28,10 +28,11 @@ import {
   PageCommentsResponseSchema,
   SetThreadResolvedRequestSchema,
 } from '@deep-wiki/contracts';
-import { locateQuoteInBlock, mintAnchorAtBlock, parse, sliceBlocks } from '@deep-wiki/markdown';
+import { locateQuoteInBlock, mintAnchorAtBlock, parse, sliceBlocks, stripTrailingAnchor } from '@deep-wiki/markdown';
 import { Hono, type Context } from 'hono';
 import type postgres from 'postgres';
 import { sessionMiddleware, type SessionVariables } from '../middleware/session';
+import { savePageRefusal } from './save-page-refusal';
 
 export interface CommentRouteDeps {
   readonly sql: postgres.Sql;
@@ -262,24 +263,45 @@ export function createCommentRoutes(deps: CommentRouteDeps): Hono<{ Variables: S
       // canonical Markdown. `locateQuoteInBlock` guarantees the stored quote
       // is a source substring, which save-time reconciliation's exact rows
       // need; the client's offsets, when sent, only break a tie between
-      // repeated occurrences. Located before the mint's save so the
-      // trailing ` ^id` the mint appends is never part of the excerpt.
-      const slices = sliceBlocks(parse(content.markdown), content.markdown);
-      const block = slices.find((slice) => slice.id === parsed.data.blockId)!;
-      const anchor = locateQuoteInBlock(block.text, parsed.data.quote, parsed.data.offsetStart);
+      // repeated occurrences.
+      //
+      // Located against `minted.markdown` — the bytes this request is about
+      // to store — and not the document that was read, because the mint does
+      // not only append: it also respells whatever canonical form the append
+      // invalidated (an escaped trailing space `&#x20;` becomes a literal
+      // space once ` ^id` follows it). Offsets taken from the pre-mint source
+      // named bytes that were never stored, so the quote stopped being a
+      // substring of its own block and skipped reconciliation's exact rows on
+      // every later save (docs/TODO.md, 2026-09-23). The trailing ` ^id` is
+      // stripped first, so an anchor is never part of an excerpt.
+      const slices = sliceBlocks(parse(minted.markdown), minted.markdown);
+      const block = slices.find((slice) => slice.id === minted.blockId)!;
+      const anchor = locateQuoteInBlock(stripTrailingAnchor(block.text), parsed.data.quote, parsed.data.offsetStart);
 
       if (minted.markdown !== content.markdown) {
         const [currentRow] = await deps.sql<{ content_hash: string }[]>`
           SELECT content_hash FROM live_page_content WHERE node_id = ${pageId} AND workspace_id = ${node.workspace_id}
         `;
-        await savePage(deps.sql, {
-          nodeId: pageId,
-          workspaceId: node.workspace_id,
-          markdown: minted.markdown,
-          expectedContentHash: currentRow!.content_hash,
-          updatedBy: session.userId,
-          changesetWindowMinutes: deps.changesetWindowMinutes,
-        });
+        try {
+          await savePage(deps.sql, {
+            nodeId: pageId,
+            workspaceId: node.workspace_id,
+            markdown: minted.markdown,
+            expectedContentHash: currentRow!.content_hash,
+            updatedBy: session.userId,
+            changesetWindowMinutes: deps.changesetWindowMinutes,
+          });
+        } catch (error) {
+          // A refusal of this save is a refusal of the comment, and it must
+          // read as one. Every branch here was an unhandled 500 until
+          // 2026-09-23: the same `NotCanonicalError` the editor is shown as a
+          // 409 with the normalised document attached reached a person
+          // commenting on a selection as "something went wrong". The mapping
+          // is `PUT /pages/:id`'s own, shared rather than restated.
+          const refusal = savePageRefusal(error);
+          if (refusal) return c.json(refusal.body, refusal.status);
+          throw error;
+        }
         resolvedBlockId = minted.blockId;
       }
 

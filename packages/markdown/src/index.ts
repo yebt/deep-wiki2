@@ -17,6 +17,7 @@ export { collectWikiLinks } from './extensions/wiki-link';
 export type { CollectedWikiLink, WikiLinkNode, WikiLinkResolver, WikiLinkTarget } from './extensions/wiki-link';
 export { collectTags } from './extensions/tag';
 export type { TagNode } from './extensions/tag';
+export { stripTrailingAnchor } from './extensions/block-anchor';
 export type { BlockAnchorNode } from './extensions/block-anchor';
 export type { VerbatimInlineNode, VerbatimNode } from './extensions/verbatim';
 export { buildBlockIndex } from './block-index';
