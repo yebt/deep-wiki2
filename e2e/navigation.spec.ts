@@ -274,7 +274,7 @@ test('the workspace list skeleton occupies the box the loaded rows take', async 
  * nothing while claiming to be expanded. The tree lives in the sidebar
  * now; the contract is the same.
  */
-test('the tree toolbar is 32px, acts only on a row the user picked, and container rows fold on Enter', async ({ page, context }) => {
+test('a tree control is 32px, a picked row shows it is picked, and container rows fold on Enter', async ({ page, context }) => {
   await signInAs(context, fixtures.readerSessionToken);
 
   await page.goto(workspaceUrl(fixtures.workspaceSlug));
@@ -286,10 +286,15 @@ test('the tree toolbar is 32px, acts only on a row the user picked, and containe
   expect((await create.boundingBox())!.height, 'New… height').toBeLessThanOrEqual(33);
   expect((await create.boundingBox())!.height, 'New… height').toBeGreaterThanOrEqual(31);
 
-  // Nothing is selected yet, and the toolbar says so — reachable by
-  // keyboard, since the control is aria-disabled rather than removed.
-  const rename = page.getByRole('button', { name: /^Rename…$/ });
-  await expect(rename).toHaveAttribute('aria-disabled', 'true');
+  // Nothing is selected yet. The absence is meaningful because the row
+  // above it is drawn by the client too (`NavigationTree.vue` renders under
+  // `import.meta.client`), so a visible treeitem proves the tree exists
+  // before this asks what it does not contain.
+  //
+  // What the header *contains* is asserted once, in `tree-writes.spec.ts`
+  // ("exactly three controls"). It is deliberately not repeated here: this
+  // file already asserted a `Rename…` button the 2026-09-23 redesign had
+  // removed, and a second copy of that fact is what let it rot.
   await expect(page.locator('[role="treeitem"][aria-selected="true"]')).toHaveCount(0);
 
   // Pick the shelf. It is now visibly selected — a container fill that
@@ -300,7 +305,6 @@ test('the tree toolbar is 32px, acts only on a row the user picked, and containe
   const unselectedFill = await bookRow.evaluate((el) => getComputedStyle(el).backgroundColor);
   await shelfRow.click();
   await expect(shelf).toHaveAttribute('aria-selected', 'true');
-  await expect(page.getByRole('button', { name: `Rename “${fixtures.bookHistoryShelfTitle}”…` })).toBeVisible();
   const selectedFill = await shelfRow.evaluate((el) => getComputedStyle(el).backgroundColor);
   expect(selectedFill).not.toBe(unselectedFill);
 
