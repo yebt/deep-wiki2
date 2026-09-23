@@ -1016,15 +1016,22 @@ for (const theme of ['light', 'dark'] as const) {
       await expect(page.locator(`#${describedBy}`)).toContainText('\\');
       await page.keyboard.press('Escape');
 
-      // The sidebar's toolbar row fills the pane: New… grows, Rename…
-      // keeps its natural width, and nothing is left empty to the right.
+      // The sidebar's toolbar row fills the pane: New… grows, the other two
+      // keep their natural widths, and nothing is left empty to the right.
+      // The row's last control has been the icon-only Delete since
+      // 2026-09-18; this assertion still named Rename… and had been failing
+      // by exactly Delete's 36px ever since (docs/TODO.md Findings,
+      // 2026-09-23). It asks for the row's *last* control now, so a fourth
+      // one cannot silently walk past the edge either.
       const createBox = (await sidebar.getByTestId('tree-create-open').boundingBox())!;
       const renameBox = (await sidebar.getByTestId('tree-rename-open').boundingBox())!;
+      const deleteBox = (await sidebar.getByTestId('tree-delete-open').boundingBox())!;
       const rowBox = (await sidebar.getByTestId('tree-create-open').locator('..').boundingBox())!;
       expect(createBox.width, 'New… grows past its natural width').toBeGreaterThan(renameBox.width);
-      expect(Math.abs(renameBox.x + renameBox.width - (rowBox.x + rowBox.width)), 'Rename… ends at the row\'s edge').toBeLessThanOrEqual(1);
+      expect(Math.abs(deleteBox.x + deleteBox.width - (rowBox.x + rowBox.width)), 'the last control ends at the row\'s edge').toBeLessThanOrEqual(1);
       expect(Math.round(createBox.height)).toBe(32);
       expect(Math.round(renameBox.height)).toBe(32);
+      expect(Math.round(deleteBox.height)).toBe(32);
 
       // The same title in the same box, and the prose on the same column:
       // the text does not move under the cursor when the mode changes.
@@ -1230,18 +1237,20 @@ test.describe('inside the workspace frame, 320x900 light', () => {
     // the geometry is polled until the row has settled at its width.
     await expect
       .poll(async () => {
-        const rename = (await drawer.getByTestId('tree-rename-open').boundingBox())!;
+        const last = (await drawer.getByTestId('tree-delete-open').boundingBox())!;
         const row = (await drawer.getByTestId('tree-create-open').locator('..').boundingBox())!;
-        return Math.abs(rename.x + rename.width - (row.x + row.width));
+        return Math.abs(last.x + last.width - (row.x + row.width));
       })
       .toBeLessThanOrEqual(1);
     const createBox = (await drawer.getByTestId('tree-create-open').boundingBox())!;
     const renameBox = (await drawer.getByTestId('tree-rename-open').boundingBox())!;
+    const deleteBox = (await drawer.getByTestId('tree-delete-open').boundingBox())!;
     const rowBox = (await drawer.getByTestId('tree-create-open').locator('..').boundingBox())!;
     expect(createBox.width, 'New… grows past its natural width').toBeGreaterThan(renameBox.width);
-    expect(Math.abs(renameBox.x + renameBox.width - (rowBox.x + rowBox.width)), 'Rename… ends at the row\'s edge').toBeLessThanOrEqual(1);
+    expect(Math.abs(deleteBox.x + deleteBox.width - (rowBox.x + rowBox.width)), 'the last control ends at the row\'s edge').toBeLessThanOrEqual(1);
     expect(Math.round(createBox.height)).toBe(32);
     expect(Math.round(renameBox.height)).toBe(32);
+    expect(Math.round(deleteBox.height)).toBe(32);
     await expectNoHorizontalOverflow(page, 'drawer 320');
     await shotShell(page, 'sidebar-320-light');
   });
