@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 import { boundaryContrast } from './contrast';
-import { waitForHydration } from './hydration';
+import { pageCommentsAnswered, waitForHydration } from './hydration';
 import { expectNoHorizontalOverflow } from './overflow';
 import { pageHistoryUrl, pageUrl } from '../apps/web/app/utils/routes';
 
@@ -59,6 +59,14 @@ test('a reader sees the cached content, and the response never reaches the Prose
   await expect(page.getByRole('heading', { level: 1, name: 'E2E Read Page' })).toBeVisible({ timeout: 30000 });
   await expect(page.getByRole('heading', { level: 2, name: 'Overview' })).toBeVisible();
   await expect(page.getByText('Read mode serves this exact content, cached, without reparsing.')).toBeVisible();
+  // The three assertions above are satisfied by the document the *server*
+  // sent, so without this wait the request log below is read a twelfth of
+  // the way through the client's module graph — measured on 2026-09-23,
+  // 45 client requests at that point against 566 once hydration had
+  // finished. The editor bundle is reached by a dynamic import the client
+  // makes, which is exactly the half that window was skipping
+  // (docs/TODO.md Findings, 2026-09-23).
+  await waitForHydration(page);
   expect(editorRequests).toEqual([]);
 });
 
@@ -280,8 +288,15 @@ test.describe('the comments toggle', () => {
 
       await page.goto(pageUrl(fixtures.workspaceSlug, comments.commentsPageId));
       await expect(page.getByRole('heading', { level: 1, name: comments.commentsPageTitle })).toBeVisible({ timeout: 30000 });
-      await expect(page.getByRole('button', { name: /on this block$/ })).toHaveCount(0);
+      // The toggle first: the heading above is the server's, and the
+      // toggle is the only thing here that proves the client has hydrated
+      // *and* the thread fetch has answered. Asserted the other way round,
+      // the absence below held on a commented page with its marks shown —
+      // proved by running it that way on 2026-09-23 (docs/TODO.md
+      // Findings): a mark's absence read before the client draws is an
+      // absence on every page, for every caller.
       await expect(page.getByRole('button', { name: /^Show comments — \d+ open thread/ })).toBeVisible({ timeout: 30000 });
+      await expect(page.getByRole('button', { name: /on this block$/ })).toHaveCount(0);
       await expectNoHorizontalOverflow(page, 'read comments hidden 320');
 
       await shot(page, 'read-comments-hidden-320-light');
@@ -296,6 +311,8 @@ test.describe('the comments toggle', () => {
         await signInAs(context, fixtures.readerSessionToken);
         await context.addCookies([{ name: 'dw-comments', value: preference, domain: 'localhost', path: '/' }]);
 
+        // Registered before the navigation (`pageCommentsAnswered`'s note).
+        const commentsAnswered = pageCommentsAnswered(page);
         await page.goto(pageUrl(fixtures.workspaceSlug, comments.commentsPageId));
         await expect(page.getByRole('heading', { level: 1, name: comments.commentsPageTitle })).toBeVisible({ timeout: 30000 });
         // Every absence below is an absence *after* the client has drawn
@@ -303,6 +320,11 @@ test.describe('the comments toggle', () => {
         // the server sent, so without this wait the whole test passes
         // vacuously on any page (docs/TODO.md Findings, 2026-09-23).
         await waitForHydration(page);
+        // Hydration alone is not enough either: the gutter is drawn from
+        // `GET /pages/:id/comments`, and this screen — whose whole claim
+        // is that nothing is drawn — offers no positive that answer must
+        // have produced. The response is the signal.
+        await commentsAnswered;
 
         await expect(page.locator('[data-block-id="E2ECMTTWO"]')).toHaveCount(1);
         await expect(page.getByRole('button', { name: /on this block$/ })).toHaveCount(0);

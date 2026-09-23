@@ -202,6 +202,13 @@ test('the empty page opens an editor, and its first save reads back after a relo
   // honest before the save and would be a lie after it.
   await page.goto(pageHistoryUrl(seed.workspaceSlug, nodeId));
   await expect(page.getByRole('heading', { level: 1, name: 'Revision history' })).toBeVisible({ timeout: 120_000 });
+  // That `<h1>` is unconditional on this screen — it stands over the
+  // skeleton too — so it proves nothing about which branch rendered. The
+  // revision this save minted is the positive twin the absence below
+  // needs: without it, "No revisions yet" is absent on a skeleton as
+  // surely as on a list, and the assertion would hold for every page in
+  // the product (docs/TODO.md Findings, 2026-09-23).
+  await expect(page.getByRole('main').getByRole('listitem')).toHaveCount(1, { timeout: 120_000 });
   await expect(page.getByText('No revisions yet')).toHaveCount(0);
 });
 
