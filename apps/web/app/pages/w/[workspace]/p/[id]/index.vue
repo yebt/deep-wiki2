@@ -739,6 +739,7 @@ useSeoMeta({ title: () => (title.value ? `${title.value} — deep-wiki` : 'deep-
           :pending-thread-ids="comments.pendingThreadIds.value"
           :composing="composing"
           :can-start="canStart"
+          :can-comment="comments.canComment.value"
           @update:open="onPanelOpen"
           @show-all="focusBlockId = null"
           @reply="onReply"

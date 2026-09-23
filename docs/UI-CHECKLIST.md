@@ -198,6 +198,19 @@ knows which time it is.
       differently in each. A timezone test that runs only in the machine's own zone proves
       nothing. Prefer a pair whose offset crosses a calendar day, so a whole-day error is caught
       and not just a clock offset.
+- [ ] **A relative time ("17 minutes ago") satisfies the zone rule by removing the clock, not by
+      labelling it** — amended 2026-09-23, when the comment thread panel became a conversation
+      and a conversation does not say "Sep 23, 2026, 1:43 PM EDT" about the sentence above it.
+      A relative string is *the same string for every reader in every zone*, which is the
+      ambiguity the rule above exists to remove, so it needs no zone label. The rule's other
+      halves still bind and are what a relative time is checked against: the exact instant is in
+      `<time datetime>`, the absolute **zone-named** form is one hover *and* one focus away (the
+      element's `title`), the value is never server-rendered (it depends on `Date.now()`, so a
+      server pass would bake in the server's clock and change under hydration), and the two-zone
+      test is made against that absolute form — the only half of the pair that *can* differ
+      between two readers. A relative string that runs past about a week stops being information
+      and becomes arithmetic ("37 days ago"), so beyond that window it gives way to the date, in
+      the viewer's own zone like any other.
 
 ### 4.12 Notice tiers — which surface a message takes
 
