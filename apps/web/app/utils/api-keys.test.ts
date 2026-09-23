@@ -2,6 +2,7 @@ import { describe, expect, test } from 'vitest';
 import {
   bookDiffKey,
   bookHistoryKey,
+  keysStaledByRename,
   keysStaledBySave,
   pageDiffKey,
   pageHistoryKey,
@@ -48,6 +49,32 @@ describe('keysStaledBySave', () => {
   });
 
   test('keeps a diff between two named revisions, which never changes, and the members list', () => {
+    expect(staled(pageDiffKey('p1', 'r1', 'r2'))).toBe(false);
+    expect(staled(workspaceMembersKey('ws1'))).toBe(false);
+  });
+});
+
+/**
+ * A rename changes a node's name and nothing else, so it stales exactly
+ * the reads that draw that name: the page’s own (its `<h1>` and the tab
+ * title come out of it) and every workspace activity list, whose rows
+ * name the pages they are about. History and diffs name revisions, not
+ * titles, and the tree is patched in place rather than refetched.
+ */
+describe('keysStaledByRename', () => {
+  const staled = keysStaledByRename('p1');
+
+  test('stales the renamed page’s own read, and no other page’s', () => {
+    expect(staled(pageReadKey('p1'))).toBe(true);
+    expect(staled(pageReadKey('p2'))).toBe(false);
+  });
+
+  test('stales every workspace activity list, whose rows name the page', () => {
+    expect(staled(workspaceActivityKey('any-workspace'))).toBe(true);
+  });
+
+  test('leaves the page’s history, its diffs and the members list alone', () => {
+    expect(staled(pageHistoryKey('p1'))).toBe(false);
     expect(staled(pageDiffKey('p1', 'r1', 'r2'))).toBe(false);
     expect(staled(workspaceMembersKey('ws1'))).toBe(false);
   });

@@ -48,3 +48,17 @@ export function keysStaledBySave(nodeId: string): (key: string) => boolean {
   const own = new Set([pageReadKey(nodeId), pageHistoryKey(nodeId)]);
   return (key) => own.has(key) || key.startsWith('book-history:') || key.startsWith('book-diff:') || key.startsWith('workspace-activity:');
 }
+
+/**
+ * What a renamed node stales: the node's own read — its `<h1>` and the
+ * tab title come out of that response — and every workspace activity
+ * list, whose rows name the pages they are about and whose workspace a
+ * rename does not name. Not its history or its diffs: those name
+ * revisions, not titles. Not the tree either, which is patched in place
+ * from the rename's own answer (`useWorkspaceTree.applyRenamed`) rather
+ * than refetched.
+ */
+export function keysStaledByRename(nodeId: string): (key: string) => boolean {
+  const own = pageReadKey(nodeId);
+  return (key) => key === own || key.startsWith('workspace-activity:');
+}

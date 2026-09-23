@@ -61,7 +61,16 @@ function warmEditMode(): void {
   void loadEditorMount().catch(() => {});
 }
 
-const { status, html, title, workspaceId, location, message, load } = usePageRead(nodeId);
+const { status, html, title: storedTitle, workspaceId, location, message, load } = usePageRead(nodeId);
+/**
+ * The name `PageTitle` is showing: the stored one until someone renames
+ * the page here, then theirs from the moment they press Enter (optimistic)
+ * — and the stored one again if the server refuses. The heading itself is
+ * that component's; this is what the breadcrumb and the tab title read,
+ * so the three never disagree.
+ */
+const renamedTitle = ref<string | null>(null);
+const title = computed(() => renamedTitle.value ?? storedTitle.value);
 // A signed-out visit leaves for sign-in and comes back (`useSignInRedirect`).
 useSignInRedirect().redirectWhenSignedOut(status);
 
@@ -628,7 +637,12 @@ useSeoMeta({ title: () => (title.value ? `${title.value} — deep-wiki` : 'deep-
          D12) — the Markdown parser and the ProseMirror editor are never
          invoked for this request. -->
     <template v-else>
-      <PageHeading :heading="title" />
+      <!-- The title is edited here, on the page, and renaming it renames
+           the node (owner decision, 2026-09-23; `PageTitle`). The name it
+           reports back is what the breadcrumb and the tab title use, so
+           the whole screen carries the optimistic name together and puts
+           the old one back together if the rename is refused. -->
+      <PageTitle :node-id="nodeId" :title="storedTitle" :workspace-id="workspaceId" @update:title="renamedTitle = $event" />
 
       <!-- Nothing on the page yet (see `isEmpty`): the empty state §3 asks
            for — genuinely empty, named in the product's vocabulary, with a

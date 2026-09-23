@@ -55,6 +55,34 @@ describe('useWorkspaceTree', () => {
     expect(second.nodes.value).toEqual(NODES);
   });
 
+  /**
+   * Two instances of this composable hold two transports over one shared
+   * record, and until 2026-09-23 a write through one left the other's own
+   * refs on the pre-write tree — so the *next* write through that second
+   * instance redrew the tree as it was before the first. The case that
+   * made it visible: the page's title is renamed from the page
+   * (`PageTitle`), and the sidebar then reorders a row, which put the old
+   * name back. Each transport now follows the shared record.
+   */
+  test('a write through one instance is not undone by the next write through another', async () => {
+    const fetchTree = vi.fn(async () => ({ rootId: 'root-1', nodes: NODES }));
+    const sidebar = useWorkspaceTree(ref<string | null>('ws-coherent'), { fetchTree });
+    await sidebar.load();
+
+    const page = useWorkspaceTree(ref<string | null>('ws-coherent'), { fetchTree });
+    page.applyRenamed({ id: 'page-1', slug: 'renamed', title: 'Renamed page' });
+    await nextTick();
+    expect(sidebar.nodes.value[0]!.children[0]!.children[0]!.title).toBe('Renamed page');
+
+    // The sidebar's own next write — a rename of something else — must
+    // build on the tree as it now is, not as its transport last saw it.
+    sidebar.applyRenamed({ id: 'book-1', slug: 'book', title: 'Team handbook' });
+    await nextTick();
+    expect(sidebar.nodes.value[0]!.children[0]!.title).toBe('Team handbook');
+    expect(sidebar.nodes.value[0]!.children[0]!.children[0]!.title).toBe('Renamed page');
+    expect(page.nodes.value[0]!.children[0]!.children[0]!.title).toBe('Renamed page');
+  });
+
   test('folding a container is remembered across instances, and everything starts open', async () => {
     const fetchTree = vi.fn(async () => ({ rootId: 'root-1', nodes: NODES }));
     const first = useWorkspaceTree(ref<string | null>('ws-fold'), { fetchTree });

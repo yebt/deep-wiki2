@@ -615,6 +615,50 @@ makes conventions portable across projects.
 
 Discoveries and constraints. Newest first.
 
+### 2026-09-23 — The page title is edited on the page, and a second tree instance silently undid the rename
+
+The owner: *"El title, se edita y es el mismo title del page, como en obsidian."* What shipped is
+the half that needs no change to a single stored byte: the title is editable in place at the top of
+read and edit mode, and editing it renames the node through `PATCH /nodes/:id` — the tree's own
+rename path, classified by the tree's own `classifyWriteRefusal`, so one write has one rule
+wherever it is asked from. The half that was **not** built — the title living in the markdown body
+as the document's first heading — is in Open Questions with the argument, because it would rewrite
+the canonical bytes of every page, shift every block anchor, and give one fact two writers.
+
+**Found on the way: two instances of `useWorkspaceTree` were not coherent.** The sidebar holds one
+and the page now holds another; both mirror their transport's refs into the one shared `useState`
+record, and each was *seeded* from that record exactly once, at creation. So a write through one
+left the other's own refs on the pre-write tree, and the next write through that second instance
+rebuilt the tree from what it last saw — silently undoing the first. Reproduced as a unit test: a
+page renamed from the page, then a rename through the sidebar's instance, and the first rename was
+gone. Each transport now follows the record in both directions (`nodes` and `rootId` only; status,
+message, `manageable` and ownership are `load()`'s). Nothing in the tree's own behaviour changes:
+the optimistic-write contract and its "zero `GET /tree` after a successful PATCH" e2e are
+untouched.
+
+**Decisions worth naming, because a reviewer will ask:**
+
+- **The field is inside the `<h1>`, not instead of it.** The screen keeps exactly one `<h1>` in
+  every state it has (checklist §4.4), and the field carries its own accessible name because a
+  heading is not a label.
+- **No box, and the caret is the indicator.** The reviewed precedent is the source view's text
+  area (`DESIGN-SYSTEM.md` §14, 2026-09-17): a text surface that *is* the document takes the
+  document's treatment, and WCAG 2.4.7 counts the text cursor as a text field's focus indicator.
+  A 56px outlined field where the title stands would be a form control wearing the heading's
+  place.
+- **Two ways in.** The title itself opens the field, as in Obsidian; the pencil beside it is the
+  keyboard's way in and the one with a name and a tooltip, drawn quiet and revealed on hover or
+  focus — the comment gutter's "+" treatment, never out of the tab order.
+- **Optimistic, with the whole screen agreeing.** The heading, the breadcrumb and the tab title
+  read one computed name, so there is no window in which the screen says two things; a refusal
+  puts all three back together.
+
+**Known gaps:** a caller who may only `read` is offered the field and refused by the server — the
+standing "no per-node `write` signal reaches the client" gap the app bar's "Edit" has carried since
+2026-09-14, and fixing it here alone would make this control disagree with the two beside it. The
+title field has no `F2`, which the tree's row has; the pencil is the keyboard path. A rename does
+not stale the page's *history* screen, which shows revision rows rather than titles.
+
 ### 2026-09-23 — Task lists were four layers of nothing, and code had no colour (branch `feat/task-lists-and-highlighting`)
 
 Two owner reports: *"creo que no se soporta ok el task list"*, and code blocks with no syntax
@@ -6040,6 +6084,42 @@ Fixtures kept permanently at `scripts/checks/__fixtures__/test-coverage/`:
 
 Decisions still owed. Move an entry out of this section once answered and record the answer
 in Findings.
+
+- **Should a page's title live in its markdown, as the document's first heading?** The owner
+  asked for the title to be edited on the page, "como en obsidian" (2026-09-23), and half of
+  that shipped: the title is editable in place at the top of read and edit, and editing it
+  renames the node (`PageTitle`, `usePageTitle`). The other half — the title *being* the
+  document's first `#` heading, the way Obsidian's title is its filename and many wikis' is
+  their `h1` — was deliberately **not** built, and this is the argument, for the owner to
+  answer.
+
+  **What it would cost.** Markdown is the source of truth and the round trip through the
+  editor is byte-identical (`PRODUCT.md`); a page's title is `nodes.title`
+  (`docs/SPECS.md`). Making the body carry the title means:
+  - **Every page's canonical bytes change.** A `# Title` line and a blank line are prepended
+    to every stored document in every workspace — a migration over `page_content` and every
+    `page_revision` row, or a divergence between what the editor writes and what history
+    holds. GATE-2's 182 fixtures are all about bytes, and each would need its own answer.
+  - **Every block anchor shifts.** Anchors are per block and stable across edits, which is
+    what comments, diffs, RAG chunk provenance and AI selections all hang off. Inserting a
+    block at the top of every document changes what the first anchor is about, and a
+    comment's "moved, not deleted and inserted" claim is about exactly that.
+  - **Two writers for one fact.** The tree renames a node, the editor edits a document. If
+    the title is in both, then either the editor's first heading is authoritative (and the
+    tree's rename becomes a document edit, taking a revision, a lock and a changeset with it)
+    or `nodes.title` is (and the document's own first line is a lie the renderer has to
+    suppress). Obsidian has neither problem because its title *is* the filename and the body
+    never repeats it.
+  - **The read screen renders the title twice** until the renderer learns to drop the first
+    heading — which is a rule about content that the sanitising render pipeline does not have
+    and that every export, chunk and diff would have to share.
+
+  **What the smaller half already buys.** The person edits the title where they read it, in
+  one field, and the name changes everywhere at once. Nothing about the document's bytes
+  moves. If the owner wants the heading in the body as well, the cheapest honest shape is
+  probably the reverse of the intuition: keep `nodes.title` authoritative and *offer* to
+  insert a matching `# Title` block on the first save of a new page, as content the author
+  then owns — no migration, no anchor shift, and no second writer.
 
 - ~~**Should every frame screen's bar condense, or edit mode's alone?**~~ **Answered
   2026-09-17: edit mode's alone.** `AppShell`'s `condensed` folds the breadcrumb to its last

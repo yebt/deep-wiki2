@@ -54,6 +54,8 @@ const REPO_ROOT = join(import.meta.dirname, '..');
 const SHOTS = process.env.DEEPWIKI_FRAME2_SHOTS ?? '';
 /** The 2026-09-16 regression batch's own set: the row after a drag, with the tree's focus on it. */
 const FIX2_SHOTS = process.env.DEEPWIKI_FIX2_SHOTS ?? '';
+/** The 2026-09-23 authoring batch's own set: the page's title being renamed where it is read. */
+const AUTHORING_SHOTS = process.env.DEEPWIKI_AUTHORING_SHOTS ?? '';
 
 async function shot(page: Page, name: string): Promise<void> {
   if (!SHOTS) return;
@@ -63,6 +65,11 @@ async function shot(page: Page, name: string): Promise<void> {
 async function fix2Shot(page: Page, name: string): Promise<void> {
   if (!FIX2_SHOTS) return;
   await page.screenshot({ path: `${FIX2_SHOTS}/fb-fix2-${name}.png`, fullPage: false });
+}
+
+async function authoringShot(page: Page, name: string): Promise<void> {
+  if (!AUTHORING_SHOTS) return;
+  await page.screenshot({ path: `${AUTHORING_SHOTS}/authoring-${name}.png`, fullPage: false });
 }
 
 async function useTheme(page: Page, theme: 'light' | 'dark'): Promise<void> {
@@ -799,3 +806,68 @@ for (const [width, theme] of [
     });
   });
 }
+
+/**
+ * The page's title, renamed on the page (owner decision, 2026-09-23: "El
+ * title, se edita y es el mismo title del page, como en obsidian"). It
+ * lives in this file rather than in a read-mode one because what it
+ * asserts is a *write*: the same `PATCH /nodes/:id` the tree's own rename
+ * issues, asked from the page, with the tree beside it as the witness
+ * that one node's one name changed.
+ */
+test('the page’s title is renamed on the page: the heading, the breadcrumb and the tree row all follow, and the server agrees', async ({ page }) => {
+  const fixtures = mintFixtures();
+  const renamed = `${fixtures.firstPageTitle} renamed`;
+  await signInAs(page, fixtures.writerSessionToken);
+  await useTheme(page, 'light');
+  await page.goto(pageUrl(seed.workspaceSlug, fixtures.firstPageId));
+
+  // The tree row proves the client has attached (`NavigationTree` loads
+  // under `import.meta.client`), which the title field needs.
+  const row = page.getByRole('treeitem', { name: new RegExp(fixtures.firstPageTitle) });
+  await expect(row).toBeVisible({ timeout: 120_000 });
+  await expect(page.getByRole('heading', { level: 1, name: fixtures.firstPageTitle })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Rename this page' }).click();
+  const field = page.getByTestId('page-title-field');
+  await expect(field).toBeFocused();
+  await authoringShot(page, 'title-editing-1280-light');
+  await expectNoHorizontalOverflow(page, 'page title editing 1280 light');
+
+  await field.fill(renamed);
+  await page.keyboard.press('Enter');
+
+  // Optimistic, and everything on the screen says the same name: the
+  // heading, the breadcrumb, the tab title, and the row in the tree.
+  await expect(page.getByRole('heading', { level: 1, name: renamed })).toBeVisible();
+  await expect(page.getByRole('treeitem', { name: new RegExp(renamed) })).toBeVisible();
+  await expect(page.locator('#content-bar')).toContainText(renamed);
+  await expect(page).toHaveTitle(new RegExp(renamed));
+  expect(await serverBookChildren(page, fixtures.writerSessionToken, fixtures)).toContain(renamed);
+
+  // And it survives a reload, which is the only proof that the rename was
+  // stored rather than drawn.
+  await page.reload();
+  await expect(page.getByRole('heading', { level: 1, name: renamed })).toBeVisible({ timeout: 30_000 });
+});
+
+test('a title already taken by a sibling is refused: the field stays open with the typed name and the reason, and nothing is renamed', async ({ page }) => {
+  const fixtures = mintFixtures();
+  await signInAs(page, fixtures.writerSessionToken);
+  await page.goto(pageUrl(seed.workspaceSlug, fixtures.firstPageId));
+  await expect(page.getByRole('treeitem', { name: new RegExp(fixtures.firstPageTitle) })).toBeVisible({ timeout: 120_000 });
+
+  await page.getByRole('button', { name: 'Rename this page' }).click();
+  const field = page.getByTestId('page-title-field');
+  await field.fill(fixtures.secondPageTitle);
+  await page.keyboard.press('Enter');
+
+  // The field comes back with the typed name still in it, the server's own
+  // sentence beside it, and the page still called what it was called.
+  await expect(page.getByTestId('page-title-error')).toBeVisible();
+  await expect(page.getByTestId('page-title-error')).toContainText(/name/i);
+  await expect(page.getByTestId('page-title-field')).toHaveValue(fixtures.secondPageTitle);
+  await expect(page.getByRole('treeitem', { name: new RegExp(fixtures.firstPageTitle) })).toBeVisible();
+  await authoringShot(page, 'title-refused-1280-light');
+  expect(await serverBookChildren(page, fixtures.writerSessionToken, fixtures)).toContain(fixtures.firstPageTitle);
+});

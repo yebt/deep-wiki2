@@ -101,6 +101,28 @@ export function useWorkspaceTree(workspaceId: MaybeRefOrGetter<string | null>, d
         },
         { flush: 'sync' },
       );
+      /**
+       * And the other direction, added 2026-09-23. Two instances of this
+       * composable hold two transports over one shared record — the
+       * sidebar's and, since the page's title became editable on the page
+       * (`PageTitle`), the screen's — and a write through one used to
+       * leave the other's own refs on the pre-write tree. The *next* write
+       * through that second transport then rebuilt the tree from what it
+       * last saw, silently undoing the first: measured as a page renamed
+       * from the page and the old name back in the sidebar after the next
+       * drag. Only the two refs a write touches are followed; status,
+       * message, `manageable` and ownership are `load()`'s, which each
+       * transport does for itself.
+       */
+      const following = t;
+      watch(
+        record,
+        (shown) => {
+          if (following.nodes.value !== shown.nodes) following.nodes.value = shown.nodes;
+          if (following.rootId.value !== shown.rootId) following.rootId.value = shown.rootId;
+        },
+        { flush: 'sync' },
+      );
       transports.set(workspaceId, t);
     }
     return t;

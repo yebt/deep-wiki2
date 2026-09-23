@@ -407,12 +407,21 @@ function onBeforeUnload(event: BeforeUnloadEvent): void {
 onMounted(() => window.addEventListener('beforeunload', onBeforeUnload));
 onBeforeUnmount(() => window.removeEventListener('beforeunload', onBeforeUnload));
 
+/**
+ * The name `PageTitle` is showing: the session's until someone renames
+ * the page here, then theirs (optimistic), and the session's again if the
+ * rename is refused. The breadcrumb and the tab title read this, so the
+ * screen never says two names at once.
+ */
+const renamedTitle = ref<string | null>(null);
+const shownTitle = computed(() => renamedTitle.value ?? session.value?.title ?? '');
+
 useHead({ htmlAttrs: { lang: 'en' } });
-useSeoMeta({ title: () => (session.value?.title ? `Editing ${session.value.title} — deep-wiki` : 'deep-wiki') });
+useSeoMeta({ title: () => (shownTitle.value ? `Editing ${shownTitle.value} — deep-wiki` : 'deep-wiki') });
 </script>
 
 <template>
-  <AppShell :workspace-id="session?.workspaceId ?? null" :node-id="nodeId" :location="location" :title="session?.title || undefined" :trail="[{ label: 'Editing' }]" condensed>
+  <AppShell :workspace-id="session?.workspaceId ?? null" :node-id="nodeId" :location="location" :title="shownTitle || undefined" :trail="[{ label: 'Editing' }]" condensed>
     <!-- `condensed`: the lighter bar, because here the document must
          outrank the chrome — the breadcrumb keeps the page and "Editing"
          and folds the path above them into an overflow menu; the tree
@@ -675,8 +684,17 @@ useSeoMeta({ title: () => (session.value?.title ? `Editing ${session.value.title
            screen renders it in, so the text under it does not move when
            the mode changes. No eyebrow and no supporting sentence: the
            breadcrumb already says "Editing", and a heading block repeating
-           it would title the page twice. -->
-      <PageHeading :heading="session?.title ?? ''" />
+           it would title the page twice.
+
+           Since 2026-09-23 it is editable here as it is on the read
+           screen, and by the same component: a page's name is one thing,
+           changed in one way, wherever the person is standing. -->
+      <PageTitle
+        :node-id="nodeId"
+        :title="session?.title ?? ''"
+        :workspace-id="session?.workspaceId ?? null"
+        @update:title="renamedTitle = $event"
+      />
 
       <!-- The notices about the editor stand in the pane, directly above
            it, never in the contextual bar: measured at 320×900 with the
@@ -758,7 +776,7 @@ useSeoMeta({ title: () => (session.value?.title ? `Editing ${session.value.title
            claiming it once the document is dirty again, since a stale
            "Saved." next to unsaved edits is worse than no confirmation. -->
       <InlineNotice v-else-if="showSavedBanner" tier="chip" tone="success" class="mb-4">
-        Saved “{{ session?.title }}”.
+        Saved “{{ shownTitle }}”.
       </InlineNotice>
       <!-- The source view's refusal: the chip tier, above the text area
            it is about. It names the line, shows the two spellings *when
