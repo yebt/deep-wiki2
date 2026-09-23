@@ -94,6 +94,21 @@ export const NODE_TYPE_LABELS: Record<NodeType, string> = {
   page: 'Page',
 };
 
+/**
+ * The glyph a row of each type carries. Here rather than in
+ * `NavigationTreeNode` because the inline editor draws the same icon for
+ * the row it is standing in for, and two copies of a type→icon map is the
+ * defect docs/UI-CHECKLIST.md §4.1 names. The icon is never the only
+ * carrier of meaning (§4.3): every row says its type in words too.
+ */
+export const NODE_TYPE_ICONS: Record<NodeType, string> = {
+  workspace: 'i-lucide-globe',
+  shelf: 'i-lucide-library',
+  book: 'i-lucide-book',
+  chapter: 'i-lucide-folder',
+  page: 'i-lucide-file-text',
+};
+
 /** What a container holds, for the reason a non-owner reads: "a shelf with books in it", "a book with chapters or pages in it". */
 function contentsWord(type: NodeType): string {
   const children = legalChildTypes(type).map((child) => `${NODE_TYPE_LABELS[child].toLowerCase()}s`);
@@ -115,6 +130,29 @@ export function deleteRowAction(node: TreeNode, ctx: DeleteContext): TreeRowActi
     return { ...base, disabled: true, reason: `Empty this ${word} first — only the workspace owner can delete a ${word} with ${contentsWord(type)} in it.` };
   }
   return { ...base, disabled: false };
+}
+
+/**
+ * What `New…` has to ask before it can create anything under a row of
+ * `parentType` — the hierarchy's answer, never a question with one answer
+ * (owner criterion, 2026-09-23).
+ *
+ * The owner rejected a dialog whose `Type` radio group offered a single
+ * "Shelf": a control that asks what only has one answer spends the
+ * person's attention for nothing. So the header reads the one table: one
+ * legal child means create it and edit its name in the row; several mean a
+ * short menu picks the kind first. `none` is a page, which holds nothing.
+ */
+export type NewRowChoice =
+  | { readonly kind: 'one'; readonly type: NodeType }
+  | { readonly kind: 'many'; readonly types: readonly NodeType[] }
+  | { readonly kind: 'none' };
+
+export function newRowChoice(parentType: NodeType): NewRowChoice {
+  const types = legalChildTypes(parentType);
+  if (types.length === 0) return { kind: 'none' };
+  if (types.length === 1) return { kind: 'one', type: types[0]! };
+  return { kind: 'many', types };
 }
 
 /** Groups, in menu order: create · rename and move · destinations · copy · delete. Empty groups are dropped. */

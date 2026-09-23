@@ -29,6 +29,13 @@ export interface UseWorkspaceTreeResult {
   readonly applyRenamed: (renamed: RenamedNode) => void;
   readonly removeNode: (nodeId: string) => () => void;
   readonly toggleCollapsed: (nodeId: string) => void;
+  /**
+   * Folds every id given, in one write — the header's "Collapse all". The
+   * caller names the rows because the caller is the one drawing them (the
+   * filter knows which are shown); this composable is where folds live, not
+   * a second place that walks the tree.
+   */
+  readonly collapseAll: (nodeIds: readonly string[]) => void;
   /** Unfold every ancestor of a node so its row is on screen. */
   readonly reveal: (nodeId: string) => void;
   /** The node and its ancestors, outermost first; empty for an id the tree does not hold. */
@@ -135,6 +142,11 @@ export function useWorkspaceTree(workspaceId: MaybeRefOrGetter<string | null>, d
     writeFolds(next);
   }
 
+  function collapseAll(nodeIds: readonly string[]): void {
+    if (nodeIds.length === 0) return;
+    writeFolds(new Set([...collapsedIds.value, ...nodeIds]));
+  }
+
   function pathTo(nodeId: string): readonly TreeNode[] {
     const walk = (list: readonly TreeNode[], trail: TreeNode[]): TreeNode[] | null => {
       for (const node of list) {
@@ -178,6 +190,7 @@ export function useWorkspaceTree(workspaceId: MaybeRefOrGetter<string | null>, d
     applyRenamed,
     removeNode,
     toggleCollapsed,
+    collapseAll,
     reveal,
     pathTo,
   };

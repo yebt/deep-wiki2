@@ -89,21 +89,25 @@ describe('highlightSegments', () => {
   });
 });
 
-describe('useTreeFilter', () => {
-  function setup() {
-    const nodes = ref<readonly TreeNode[]>(TREE);
-    const folds = ref(new Set<string>(['shelf-design']));
-    const collapsedIds = computed<ReadonlySet<string>>(() => folds.value);
-    const toggleCollapsed = (id: string): void => {
-      const next = new Set(folds.value);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      folds.value = next;
-    };
-    const filter = useTreeFilter(nodes, collapsedIds, toggleCollapsed);
-    return { folds, filter };
-  }
+/** The tree, a fold set the person owns, and the filter over both — the shape `NavigationTree` wires up. */
+function setup() {
+  const nodes = ref<readonly TreeNode[]>(TREE);
+  const folds = ref(new Set<string>(['shelf-design']));
+  const collapsedIds = computed<ReadonlySet<string>>(() => folds.value);
+  const toggleCollapsed = (id: string): void => {
+    const next = new Set(folds.value);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    folds.value = next;
+  };
+  const collapseAllUser = (ids: readonly string[]): void => {
+    folds.value = new Set([...folds.value, ...ids]);
+  };
+  const filter = useTreeFilter(nodes, collapsedIds, toggleCollapsed, collapseAllUser);
+  return { folds, filter };
+}
 
+describe('useTreeFilter', () => {
   test('starts hidden and inactive, showing the tree as it is with the person’s own folds', () => {
     const { filter } = setup();
     expect(filter.open.value).toBe(false);
@@ -183,5 +187,62 @@ describe('useTreeFilter', () => {
     filter.show();
     filter.toggleCollapsed('shelf-eng');
     expect(folds.value.has('shelf-eng')).toBe(true);
+  });
+});
+
+/**
+ * "Collapse all" (owner criterion, 2026-09-23; VS Code's title bar has
+ * "Collapse Folders in Explorer", Obsidian's toolbar an "Collapse all"
+ * chevron). It folds every container the tree is currently showing, and it
+ * writes into whichever fold set is current — the person's own, or the
+ * per-query set while a filter is active — for the same reason
+ * `toggleCollapsed` does: a fold made while filtering is about rows the
+ * person may not even be looking at once the query is gone.
+ */
+describe('collapse all', () => {
+  test('a row with something under it is collapsible; a page and an empty book are not', () => {
+    const { filter } = setup();
+    // `book-brand` is a book with nothing in it, so it has nothing to fold
+    // — the same rule the row itself draws its chevron by (`isContainer`).
+    expect([...filter.collapsibleIds.value].sort()).toEqual(['book-auth', 'book-hand', 'ch-ops', 'shelf-design', 'shelf-eng']);
+  });
+
+  test('it folds them into the person’s own set when no filter is active', () => {
+    const { folds, filter } = setup();
+    expect(filter.canCollapseAll.value).toBe(true);
+
+    filter.collapseAll();
+
+    for (const id of filter.collapsibleIds.value) expect(folds.value.has(id), id).toBe(true);
+    expect(filter.canCollapseAll.value, 'nothing is left to collapse').toBe(false);
+  });
+
+  test('while a filter is active it folds into the per-query set, and the person’s own folds are untouched', async () => {
+    const { folds, filter } = setup();
+    const before = new Set(folds.value);
+    filter.show();
+    filter.query.value = 'auth';
+    await nextTick();
+
+    filter.collapseAll();
+
+    expect(filter.effectiveCollapsedIds.value.has('shelf-eng')).toBe(true);
+    expect(folds.value).toEqual(before);
+  });
+
+  test('a tree of pages alone has nothing to collapse, and says so', () => {
+    const nodes = ref<readonly TreeNode[]>([node('page-a', 'page', 'A'), node('page-b', 'page', 'B')]);
+    const folds = ref(new Set<string>());
+    const filter = useTreeFilter(
+      nodes,
+      computed<ReadonlySet<string>>(() => folds.value),
+      () => {},
+      (ids) => {
+        folds.value = new Set([...folds.value, ...ids]);
+      },
+    );
+
+    expect(filter.collapsibleIds.value).toEqual([]);
+    expect(filter.canCollapseAll.value).toBe(false);
   });
 });

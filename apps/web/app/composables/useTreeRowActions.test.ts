@@ -1,7 +1,7 @@
 import { LEGAL_PARENT_TYPES, legalChildTypes, type NodeType } from '@deep-wiki/contracts';
 import { describe, expect, test } from 'vitest';
 import type { TreeNode } from './useTree';
-import { deleteRowAction, treeRowActions, type TreeRowAction } from './useTreeRowActions';
+import { deleteRowAction, newRowChoice, treeRowActions, type TreeRowAction } from './useTreeRowActions';
 
 function node(type: string, id = `${type}-1`, children: TreeNode[] = []): TreeNode {
   return { id, type, slug: id, title: `The ${type}`, position: 0, children };
@@ -195,5 +195,45 @@ describe('treeRowActions', () => {
       expect(deleteRowAction(chapter, { manageable, isOwner: false })).toEqual(byKind(treeRowActions(chapter, { ...MIDDLE, manageable }), 'delete')[0]);
       expect(deleteRowAction(node('page'), { manageable, isOwner: false }).disabled).toBe(false);
     });
+  });
+});
+
+/**
+ * "Never ask a question with one answer" (owner criterion, 2026-09-23). The
+ * header's `New…` asks the hierarchy what may go under the picked row: one
+ * answer means create it, several mean pick first. The dialog that shipped
+ * before this asked with a `Type` radio group holding a single "Shelf"
+ * option, which is the defect the owner named.
+ *
+ * Every case below is derived from the one `LEGAL_PARENT_TYPES` table, so
+ * the last test states the property rather than the answers: a change to
+ * the table moves the menu, and no list here has to be edited to match.
+ */
+describe('newRowChoice', () => {
+  test('a workspace admits exactly one kind of child — a shelf — so the top level never asks', () => {
+    expect(newRowChoice('workspace')).toEqual({ kind: 'one', type: 'shelf' });
+  });
+
+  test('a shelf admits exactly one kind of child, and a chapter does too', () => {
+    expect(newRowChoice('shelf')).toEqual({ kind: 'one', type: 'book' });
+    expect(newRowChoice('chapter')).toEqual({ kind: 'one', type: 'page' });
+  });
+
+  test('a book admits two, so it asks — in the table’s own order', () => {
+    expect(newRowChoice('book')).toEqual({ kind: 'many', types: ['chapter', 'page'] });
+  });
+
+  test('a page holds nothing, so there is nothing to offer', () => {
+    expect(newRowChoice('page')).toEqual({ kind: 'none' });
+  });
+
+  test('the decision is the one table read backwards, for every type at once', () => {
+    for (const parent of Object.keys(LEGAL_PARENT_TYPES) as NodeType[]) {
+      const legal = legalChildTypes(parent);
+      const choice = newRowChoice(parent);
+      if (legal.length === 0) expect(choice, parent).toEqual({ kind: 'none' });
+      else if (legal.length === 1) expect(choice, parent).toEqual({ kind: 'one', type: legal[0] });
+      else expect(choice, parent).toEqual({ kind: 'many', types: legal });
+    }
   });
 });

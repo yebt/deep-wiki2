@@ -101,6 +101,12 @@ export interface UseTreeFilterResult {
   readonly effectiveCollapsedIds: ComputedRef<ReadonlySet<string>>;
   /** Folds into whichever set is current. */
   readonly toggleCollapsed: (nodeId: string) => void;
+  /** Every row the tree is currently showing that has something under it — what "Collapse all" acts on. */
+  readonly collapsibleIds: ComputedRef<readonly string[]>;
+  /** At least one of those is open, so the control has something to do (docs/UI-CHECKLIST.md §3, §6). */
+  readonly canCollapseAll: ComputedRef<boolean>;
+  /** Folds all of them, into whichever set is current — the person's own, or the per-query one. */
+  readonly collapseAll: () => void;
   /** For the live region: the count, in words, or nothing while inactive. */
   readonly announcement: ComputedRef<string>;
   readonly show: () => void;
@@ -114,6 +120,7 @@ export function useTreeFilter(
   nodes: MaybeRefOrGetter<readonly TreeNode[]>,
   collapsedIds: MaybeRefOrGetter<ReadonlySet<string>>,
   toggleUserCollapsed: (nodeId: string) => void,
+  collapseAllUser: (nodeIds: readonly string[]) => void,
 ): UseTreeFilterResult {
   const open = ref(false);
   const query = ref('');
@@ -141,6 +148,36 @@ export function useTreeFilter(
     if (next.has(nodeId)) next.delete(nodeId);
     else next.add(nodeId);
     filterFolds.value = next;
+  }
+
+  /**
+   * The containers of the tree *as shown*: while a filter is active the
+   * pruned tree is what the person is looking at, and collapsing rows that
+   * are not on screen would fold things they never saw.
+   */
+  const collapsibleIds = computed<readonly string[]>(() => {
+    const out: string[] = [];
+    const walk = (list: readonly TreeNode[]): void => {
+      for (const node of list) {
+        if (node.children.length === 0) continue;
+        out.push(node.id);
+        walk(node.children);
+      }
+    };
+    walk(result.value.nodes);
+    return out;
+  });
+
+  const canCollapseAll = computed(() => collapsibleIds.value.some((id) => !effectiveCollapsedIds.value.has(id)));
+
+  function collapseAll(): void {
+    const ids = collapsibleIds.value;
+    if (ids.length === 0) return;
+    if (!active.value) {
+      collapseAllUser(ids);
+      return;
+    }
+    filterFolds.value = new Set([...filterFolds.value, ...ids]);
   }
 
   const announcement = computed(() => {
@@ -173,6 +210,9 @@ export function useTreeFilter(
     matchCount: computed(() => result.value.matchCount),
     effectiveCollapsedIds,
     toggleCollapsed,
+    collapsibleIds,
+    canCollapseAll,
+    collapseAll,
     announcement,
     show,
     hide,
