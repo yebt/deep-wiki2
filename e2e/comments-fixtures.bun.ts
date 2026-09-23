@@ -85,6 +85,11 @@ export interface CommentFixtures {
   readonly freshPageTitle: string;
   readonly freshFirstParagraph: string;
   readonly freshSecondParagraph: string;
+  /** A page whose one paragraph ends in an escaped space — the real-world bytes the mint used to produce a non-canonical document from. */
+  readonly escapedSpacePageId: string;
+  readonly escapedSpacePageTitle: string;
+  readonly escapedSpaceParagraph: string;
+  readonly escapedSpaceSelection: string;
 }
 
 /** Mints the commenter, the editor, the three pages and their threads into `sql`'s database, under `workspaceId`'s root. */
@@ -190,6 +195,16 @@ export async function mintCommentFixtures(sql: postgres.Sql, workspaceId: string
   const freshSecondParagraph = 'A second fresh paragraph, with a few words worth selecting.';
   const freshPage = await makePage('E2E Fresh Page', 23, `${freshFirstParagraph}\n\n${freshSecondParagraph}\n`);
 
+  // The bytes a real page of the project owner's held when commenting on a
+  // selection answered 500 (docs/TODO.md, 2026-09-23). The paragraph ends in
+  // a space, whose canonical spelling is the escape `&#x20;`, and appending
+  // ` ^id` makes that space non-trailing — so its canonical spelling changes
+  // under the mint's own splice. Saved through `savePage()` like every page
+  // here, because the page was never the problem: it is canonical.
+  const escapedSpaceParagraph = 'This is a content @Seed Owner';
+  const escapedSpaceSelection = 'is a content';
+  const escapedSpacePage = await makePage('E2E Escaped Space Page', 24, `${escapedSpaceParagraph}&#x20;\n`);
+
   return {
     commenterSessionToken,
     editorSessionToken,
@@ -208,6 +223,10 @@ export async function mintCommentFixtures(sql: postgres.Sql, workspaceId: string
     freshPageTitle: freshPage.title,
     freshFirstParagraph,
     freshSecondParagraph,
+    escapedSpacePageId: escapedSpacePage.id,
+    escapedSpacePageTitle: escapedSpacePage.title,
+    escapedSpaceParagraph,
+    escapedSpaceSelection,
   };
 }
 

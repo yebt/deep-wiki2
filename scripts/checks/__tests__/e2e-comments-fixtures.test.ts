@@ -59,6 +59,15 @@ describe('e2e/comments-fixtures.bun.ts', () => {
     expect(legacy!.pipeline_version).toBe(1);
     const [legacyThread] = await sql<{ block_id: string }[]>`SELECT block_id FROM comments WHERE page_id = ${fixtures.legacyPageId}`;
     expect(legacyThread!.block_id).toBe('E2ELEGACY1');
+
+    // The escaped-space page is the regression fixture, and its point is that
+    // the bytes are canonical and unanchored: a page already carrying an
+    // anchor, or one `savePage()` had normalised on the way in, would never
+    // drive the mint's own splice (docs/TODO.md, 2026-09-23).
+    const [escapedSpace] = await sql<{ markdown: string }[]>`SELECT markdown FROM page_content WHERE node_id = ${fixtures.escapedSpacePageId}`;
+    expect(escapedSpace!.markdown).toBe('This is a content @Seed Owner&#x20;\n');
+    expect(escapedSpace!.markdown).not.toContain('^');
+    expect(fixtures.escapedSpaceParagraph).toBe('This is a content @Seed Owner');
   }, 30_000);
 
   test('finds the database that holds the workspace among this worktree’s test databases', async () => {

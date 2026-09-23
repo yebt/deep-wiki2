@@ -41,6 +41,10 @@ interface CommentFixtures {
   readonly freshPageTitle: string;
   readonly freshFirstParagraph: string;
   readonly freshSecondParagraph: string;
+  readonly escapedSpacePageId: string;
+  readonly escapedSpacePageTitle: string;
+  readonly escapedSpaceParagraph: string;
+  readonly escapedSpaceSelection: string;
 }
 
 const SHOTS = process.env.DEEPWIKI_FB_COMMENTS_SHOTS ?? '';
@@ -348,6 +352,59 @@ test('a commenter selects words inside a block and starts a thread on them — t
   await page.locator('article > p', { hasText: fixtures.freshSecondParagraph }).hover();
   await page.getByRole('button', { name: '1 comment on this block' }).last().click();
   await expect(dialog(page).locator('blockquote', { hasText: 'a few words' })).toHaveCount(1);
+});
+
+/**
+ * The regression this suite exists for since 2026-09-23. The page's stored
+ * Markdown ends its paragraph in a space, canonically spelled `&#x20;`, and
+ * the mint's ` ^id` splice made that spelling non-canonical — so `savePage()`
+ * refused the comment's own save and the person selecting text got a 500.
+ * Driven through the screen because that is where it was found: a selection,
+ * a Comment button, a body, Post.
+ */
+test('a commenter comments on a selection in a paragraph that ends in an escaped space — the thread is posted, not a failure', async ({ page, context }) => {
+  await signInAs(context, fixtures.commenterSessionToken);
+
+  await page.goto(pageUrl(seed.workspaceSlug, fixtures.escapedSpacePageId));
+  await expect(page.getByRole('heading', { level: 1, name: fixtures.escapedSpacePageTitle })).toBeVisible({ timeout: 30000 });
+  const paragraph = page.locator('article > p', { hasText: fixtures.escapedSpaceParagraph });
+  await expect(paragraph).toBeVisible();
+  await waitForHydration(page);
+  await expect(page.getByRole('button', { name: 'Comment on this block' })).toHaveCount(1, { timeout: 30000 });
+
+  await paragraph.evaluate((element, phrase) => {
+    const text = element.firstChild as Text;
+    const start = text.data.indexOf(phrase);
+    const range = document.createRange();
+    range.setStart(text, start);
+    range.setEnd(text, start + phrase.length);
+    const selection = window.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }, fixtures.escapedSpaceSelection);
+
+  const action = page.getByTestId('comment-selection-action').getByRole('button', { name: 'Comment' });
+  await expect(action).toBeVisible();
+  await action.click();
+
+  const panel = dialog(page);
+  await expect(panel).toBeVisible();
+  await panel.getByLabel('Comment', { exact: true }).fill('A note on a paragraph that ends in a space.');
+  await panel.getByRole('button', { name: 'Post' }).click();
+  // The refusal surfaced here, as an error the composer showed instead of a
+  // posted thread — so this is the assertion of record.
+  await expect(panel.getByRole('status').filter({ hasText: 'Comment posted.' })).toBeVisible({ timeout: 30000 });
+  await expect(panel.locator('[data-comment-placement="anchored"]', { hasText: 'A note on a paragraph that ends in a space.' })).toBeVisible();
+  await expect(panel.getByRole('alert')).toHaveCount(0);
+
+  // And the anchor the mint wrote survives the round trip: the block is
+  // anchored on reload, which only a save that was accepted can produce.
+  await page.reload();
+  await expect(page.getByRole('heading', { level: 1, name: fixtures.escapedSpacePageTitle })).toBeVisible({ timeout: 30000 });
+  await expect(page.locator('article > p', { hasText: fixtures.escapedSpaceParagraph })).toHaveAttribute('data-block-id', /^[0-9A-Za-z]{10}$/);
+  await page.locator('article > p', { hasText: fixtures.escapedSpaceParagraph }).hover();
+  await page.getByRole('button', { name: '1 comment on this block' }).last().click();
+  await expect(dialog(page).locator('blockquote', { hasText: fixtures.escapedSpaceSelection })).toHaveCount(1);
 });
 
 test('the gutter is one tab stop: the arrow keys move between the marks and the "+" slots, and Enter opens the composer', async ({ page, context }) => {
