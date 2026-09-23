@@ -298,6 +298,11 @@ test.describe('the comments toggle', () => {
 
         await page.goto(pageUrl(fixtures.workspaceSlug, comments.commentsPageId));
         await expect(page.getByRole('heading', { level: 1, name: comments.commentsPageTitle })).toBeVisible({ timeout: 30000 });
+        // Every absence below is an absence *after* the client has drawn
+        // what it draws: the marks and the toggle are not in the document
+        // the server sent, so without this wait the whole test passes
+        // vacuously on any page (docs/TODO.md Findings, 2026-09-23).
+        await waitForHydration(page);
 
         await expect(page.locator('[data-block-id="E2ECMTTWO"]')).toHaveCount(1);
         await expect(page.getByRole('button', { name: /on this block$/ })).toHaveCount(0);

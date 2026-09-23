@@ -89,6 +89,14 @@ test('a commenter opens a thread from the mark beside its block, replies, and re
   await page.goto(pageUrl(seed.workspaceSlug, fixtures.commentsPageId));
   await expect(page.getByRole('heading', { level: 1, name: fixtures.commentsPageTitle })).toBeVisible({ timeout: 30000 });
 
+  // Every affordance below is drawn by the client: the article is in the
+  // document the server sent, and the gutter, the marks and the "+" are
+  // not there until the bundle has hydrated it — tens of seconds later on
+  // a cold dev route. Without this wait the positive assertions race
+  // hydration and the absence ones pass vacuously, which is what happened
+  // (docs/TODO.md Findings, 2026-09-23).
+  await waitForHydration(page);
+
   // One mark, beside the commented block, counting root plus reply, and
   // level with the block it belongs to — outside the reading column, which
   // keeps its measured width (§4.4, §6: 658.9px at x=310.5 at 1280).
@@ -157,6 +165,15 @@ test('a reader with read but not comment sees the page and nothing of the overla
   await expect(page.getByRole('heading', { level: 1, name: fixtures.commentsPageTitle })).toBeVisible({ timeout: 30000 });
   await expect(page.getByText(fixtures.commentedQuote)).toBeVisible();
 
+  // Every affordance below is drawn by the client: the article is in the
+  // document the server sent, and the gutter, the marks and the "+" are
+  // not there until the bundle has hydrated it — tens of seconds later on
+  // a cold dev route. Without this wait the positive assertions race
+  // hydration and the absence ones pass vacuously, which is what happened
+  // (docs/TODO.md Findings, 2026-09-23).
+  await waitForHydration(page);
+
+
   // The block is anchored — the attribute is in the cached HTML for every
   // viewer — and still nothing is drawn beside it.
   await expect(page.locator('[data-block-id="E2ECMTTWO"]')).toHaveCount(1);
@@ -188,6 +205,15 @@ test('a commenter starts a thread from a block’s "+": hover, type, Post — th
 
   await page.goto(pageUrl(seed.workspaceSlug, fixtures.freshPageId));
   await expect(page.getByRole('heading', { level: 1, name: fixtures.freshPageTitle })).toBeVisible({ timeout: 30000 });
+
+  // Every affordance below is drawn by the client: the article is in the
+  // document the server sent, and the gutter, the marks and the "+" are
+  // not there until the bundle has hydrated it — tens of seconds later on
+  // a cold dev route. Without this wait the positive assertions race
+  // hydration and the absence ones pass vacuously, which is what happened
+  // (docs/TODO.md Findings, 2026-09-23).
+  await waitForHydration(page);
+
   const paragraph = page.locator('article > p', { hasText: fixtures.freshFirstParagraph });
   await expect(paragraph).toHaveAttribute('data-derived-block-id', /^d:[0-9a-f]{12}#0$/);
   await expect(paragraph).not.toHaveAttribute('data-block-id', /.*/);
@@ -319,6 +345,15 @@ test('the gutter is one tab stop: the arrow keys move between the marks and the 
 
   await page.goto(pageUrl(seed.workspaceSlug, fixtures.commentsPageId));
   await expect(page.getByRole('heading', { level: 1, name: fixtures.commentsPageTitle })).toBeVisible({ timeout: 30000 });
+
+  // Every affordance below is drawn by the client: the article is in the
+  // document the server sent, and the gutter, the marks and the "+" are
+  // not there until the bundle has hydrated it — tens of seconds later on
+  // a cold dev route. Without this wait the positive assertions race
+  // hydration and the absence ones pass vacuously, which is what happened
+  // (docs/TODO.md Findings, 2026-09-23).
+  await waitForHydration(page);
+
   const gutter = page.getByRole('list', { name: 'Comments beside the text' });
   await expect(gutter).toBeVisible();
   const controls = gutter.getByRole('button');
@@ -348,6 +383,15 @@ test('at 320px the affordance fits the column and nothing scrolls sideways; in d
   await signInAs(narrow, fixtures.commenterSessionToken);
   await page.goto(pageUrl(seed.workspaceSlug, fixtures.commentsPageId));
   await expect(page.getByRole('heading', { level: 1, name: fixtures.commentsPageTitle })).toBeVisible({ timeout: 30000 });
+
+  // Every affordance below is drawn by the client: the article is in the
+  // document the server sent, and the gutter, the marks and the "+" are
+  // not there until the bundle has hydrated it — tens of seconds later on
+  // a cold dev route. Without this wait the positive assertions race
+  // hydration and the absence ones pass vacuously, which is what happened
+  // (docs/TODO.md Findings, 2026-09-23).
+  await waitForHydration(page);
+
   await expectNoHorizontalOverflow(page);
   await page.getByText('The first paragraph, which nobody has commented on.').hover();
   await shot(page, 'read-hover-320-light');
