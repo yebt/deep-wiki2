@@ -85,6 +85,34 @@ describe('backfillRender', () => {
     expect(row!.rendered_html).toBe('<h1>already-current</h1>');
   });
 
+  // The 2026-09-23 bump to pipeline version 5: fenced code blocks are
+  // syntax-highlighted at render time now. The Markdown of every page that
+  // has one is unchanged, so `content_hash` is identical and the cached
+  // HTML still holds the flat, uncoloured block — `pipeline_version` is the
+  // only signal that says otherwise, and this test is what proves the bump
+  // actually reaches the corpus rather than only the next save.
+  test('a row cached one pipeline version ago gains the highlighting that bump introduced', async () => {
+    const { workspaceId, nodeId } = await seedPageNode();
+    const markdown = '```ts\nconst x: number = 1;\n```\n';
+    await sql`
+      INSERT INTO page_content (node_id, workspace_id, markdown, rendered_html, content_hash, pipeline_version)
+      VALUES (
+        ${nodeId}, ${workspaceId}, ${markdown},
+        '<pre><code class="language-ts">const x: number = 1;\n</code></pre>',
+        ${`hash-hl-${crypto.randomUUID()}`}, ${CURRENT_PIPELINE_VERSION - 1}
+      )
+    `;
+
+    await backfillRender(sql);
+
+    const [row] = await sql<{ rendered_html: string; pipeline_version: number }[]>`
+      SELECT rendered_html, pipeline_version FROM page_content WHERE node_id = ${nodeId}
+    `;
+    expect(row!.pipeline_version).toBe(CURRENT_PIPELINE_VERSION);
+    expect(row!.rendered_html).toContain('class="hl-keyword"');
+    expect(row!.rendered_html).toContain('<pre><code class="language-ts">');
+  });
+
   test('batching processes more rows than a single batchSize', async () => {
     const seeded = await Promise.all(
       [0, 1, 2].map(async (i) => {

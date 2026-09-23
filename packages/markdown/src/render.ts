@@ -1,6 +1,7 @@
 import type { Root as HastRoot } from 'hast';
+import type { Code } from 'mdast';
 import { toHtml } from 'hast-util-to-html';
-import type { Handler } from 'mdast-util-to-hast';
+import { defaultHandlers, type Handler } from 'mdast-util-to-hast';
 import rehypeRaw from 'rehype-raw';
 import rehypeSanitize, { defaultSchema, type Options as SanitizeSchema } from 'rehype-sanitize';
 import remarkRehype from 'remark-rehype';
@@ -8,6 +9,7 @@ import { unified } from 'unified';
 import { visit } from 'unist-util-visit';
 import { sliceBlocks } from './blocks';
 import { findBlockAnchor, isAnchorableBlock } from './extensions/block-anchor';
+import { HIGHLIGHT_CLASSES, highlightToHast } from './highlight';
 import type { TagNode } from './extensions/tag';
 import type { WikiLinkNode } from './extensions/wiki-link';
 import { parse } from './pipeline';
@@ -105,10 +107,21 @@ const SANITIZE_SCHEMA: SanitizeSchema = {
     ...defaultSchema.attributes,
     // `wikiLinkHandler`/`tagHandler` below carry their class on a plain
     // `<span>`, which the default schema does not otherwise allow a
-    // `className` on. Narrowed to those two literal class names: an open
-    // `className` here would let raw HTML dress any span as a wiki-link
-    // or a tag, or borrow an application class from the read screen.
-    span: [...(defaultSchema.attributes?.span ?? []), ['className', 'wiki-link', 'tag']],
+    // `className` on, and `codeHandler` carries the highlighter's token
+    // vocabulary on one. Narrowed to exactly those literal class names: an
+    // open `className` here would let raw HTML dress any span as a
+    // wiki-link or a tag, or borrow an application class from the read
+    // screen.
+    //
+    // `HIGHLIGHT_CLASSES` is a closed list built from the token kinds
+    // Shiki's CSS-variables theme can emit (`highlight.ts`), never a
+    // prefix match on `hl-`: a prefix would admit whatever a future Shiki
+    // release decided to mint, which is the same open door in a narrower
+    // doorway. The residual is the one the two classes above already
+    // carry and `render.test.ts` already names — raw HTML can *wear* a
+    // token class, which costs a reader nothing, because the sanitiser
+    // bounds the value and not the author.
+    span: [...(defaultSchema.attributes?.span ?? []), ['className', 'wiki-link', 'tag', ...HIGHLIGHT_CLASSES]],
     // versioning-and-collaboration design.md Decision 6: `dataBlockId`
     // must survive sanitisation on any element, not just one tag — the
     // transform below applies it to whichever block-level element a
@@ -208,6 +221,24 @@ const tagHandler: Handler = (_state, node) => {
 const blockAnchorHandler: Handler = () => undefined;
 
 /**
+ * `mdast-util-to-hast` handler for `code` nodes: a fenced block whose info
+ * string names a language this build can highlight is tokenised here, at
+ * render time, on the server (`highlight.ts`). Everything else — no info
+ * string, an unknown language, a diagram fence — falls through to
+ * `mdast-util-to-hast`'s own handler and renders exactly as it did before
+ * highlighting existed.
+ *
+ * Highlighting inside the handler rather than as a later rehype pass is
+ * what keeps the two paths one path: the fallback IS the default handler,
+ * so the unhighlighted shape cannot drift from what the rest of the
+ * pipeline would have produced for it.
+ */
+const codeHandler: Handler = (state, node) => {
+  const code = node as Code;
+  return highlightToHast(code.value, code.lang) ?? defaultHandlers.code(state, code);
+};
+
+/**
  * Bumped whenever the render pipeline's *output shape* changes in a way a
  * saved `page_content.pipeline_version` must be able to detect as stale
  * (versioning-and-collaboration design.md Decision 6, "Staleness
@@ -236,8 +267,17 @@ const blockAnchorHandler: Handler = () => undefined;
  * change, so only the bump carries the attribute to the existing corpus.
  * Until the backfill reaches a page, its unanchored blocks simply offer no
  * comment affordance — degraded, never wrong.
+ *
+ * 5: fenced code blocks are syntax-highlighted at render time
+ * (`highlight.ts`), so a `<pre><code>` now carries `<span class="hl-…">`
+ * token spans. Same shape as 3 and 4 a third time: the Markdown of every
+ * page with a code fence is unchanged, `content_hash` is identical, and
+ * every already-cached `rendered_html` still holds the flat, uncoloured
+ * block. Only the bump carries highlighting to the corpus that was written
+ * before it shipped, and until the backfill reaches a page its code reads
+ * exactly as it did yesterday — degraded, never wrong.
  */
-export const CURRENT_PIPELINE_VERSION = 4;
+export const CURRENT_PIPELINE_VERSION = 5;
 
 /**
  * Removes a `className` that sanitisation emptied rather than removed.
@@ -265,6 +305,7 @@ const renderTransform = unified()
       wikiLink: wikiLinkHandler,
       tag: tagHandler,
       blockAnchor: blockAnchorHandler,
+      code: codeHandler,
     },
   })
   // `allowDangerousHtml` above turns each mdast `html` node into a hast
