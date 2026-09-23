@@ -615,6 +615,98 @@ makes conventions portable across projects.
 
 Discoveries and constraints. Newest first.
 
+### 2026-09-23 — Commenting on a selection answered 500: the anchor mint spliced its way out of canonical form
+
+The project owner selected text on one of their pages, wrote a comment, and got a 500.
+`POST /pages/:id/comments` mints an anchor onto an unanchored block and saves it through
+`savePage()`, which refused:
+
+```
+NotCanonicalError: markdown is not in its own canonical form; normalise before saving
+ canonical: "This is a content @Seed Owner  ^7HZCW31PRF\n"
+```
+
+**The stored bytes, read out of the owner's database:** `"This is a content @Seed Owner&#x20;\n"`.
+Note what that is *not*: it is not a trailing space. The paragraph ends in a space, and canonical
+form spells a trailing space as the entity `&#x20;`, because an unescaped one does not survive a
+reparse. The page's three revisions are all the owner's, minutes apart, through the editor and
+`savePage()` like any other save. **`canonicalise()` is a fixpoint on those bytes.** The page was
+never the problem, no write path bypassed canonicalisation, and the seed is not implicated — the
+first two hypotheses worth having were both wrong, and only reading the real row said so.
+
+**The defect is the splice.** `mintAnchorAtBlock` appends the literal ` ^id` at the block's end
+offset — a byte operation on Markdown source. A block's last bytes are exactly where a spelling
+can depend on what *follows* them: append ` ^id` and the space is no longer trailing, so its
+canonical spelling is a literal space, and `…Owner&#x20; ^ID` is no longer its own fixed point.
+`savePage()` refuses exactly that. The mint had produced a document its own save path rejects.
+
+**`stripBlockAnchors` had it in the other direction**, and worse. It is the inverse splice, and it
+is what `DeadAnchorError.corrected` hands back to a client as "the document to re-submit" — its
+doc comment even claims "canonical, and safe to re-submit". Remove the anchor and the space
+becomes trailing again: `"…Owner \n"`, which canonicalises to `"…Owner\n"`. The correction was a
+document the save path would refuse all over again. Nobody had hit it because it needs a dead
+anchor *and* a spelling the splice invalidates, but it was the same bug with a longer fuse.
+
+**The fix, and why at that layer.** Both functions now return `canonicalise()` of their spliced
+result. The comment-overlay spec already requires it in so many words — "MUST write it into the
+canonical Markdown … The mint MUST round-trip byte-identically" — so this is the contract being
+met, not a new one. The alternative, canonicalising in the comment route before saving, was
+rejected: `mintAnchorAtBlock` is the *one* anchor minter, and a mint that can emit non-canonical
+bytes is a trap laid for every future caller, not just this one. `canonicalise` is idempotent by
+construction, so the result is a fixed point for any input; when the input was canonical — which
+stored page Markdown is, by construction (D1) — the only bytes that differ from the raw splice are
+the ones whose spelling the splice itself invalidated.
+
+**A comment on a page that was never canonical now normalises it.** Stated plainly because it is a
+real consequence: a `page_content` row written around `savePage()` (a direct INSERT, a backfill)
+is not canonical, and the mint canonicalises the whole document rather than only the anchor. That
+is deliberate. A commenter holds `comment`, not `write`: they cannot repair such a page and must
+not be the person who is told about it, and normalisation is the save path's own documented remedy
+for a non-canonical document. The route test `a comment on a page whose stored markdown was never
+canonical still opens a thread, and normalises the page` pins the behaviour so it is a decision
+rather than a side effect.
+
+**The excerpt was being located against bytes that were never stored.** The route located the
+comment's quote in the *pre-mint* source, then saved the minted document. That was already only
+safe because the splice appended; now that the mint also *respells*, the offsets named bytes that
+did not exist in the saved page, and a stored quote that is not a substring of its block's source
+skips save-time reconciliation's exact rows on every later save — orphaning a comment on a block
+nobody touched, which is the whole reason `locateQuoteInBlock` exists. The quote is now located in
+`minted.markdown`, with the trailing ` ^id` stripped first so an anchor is never part of an
+excerpt.
+
+**And the refusal is now honest.** `POST /pages/:id/comments` caught *none* of `savePage()`'s four
+typed refusals, so every one of them reached a person as an unhandled 500 — the same
+`NotCanonicalError` that the editor is shown as a `409` with the normalised document attached.
+This was recorded as a follow-up on 2026-09-13 ("Until it does, a reintroduced dead anchor is a
+500") and only half closed on 2026-09-16, when the mint started passing `reservedIds`: the
+`reservedIds` half removed one *cause*, and the entry then read as done. The mapping is now one
+function, `apps/api/src/routes/save-page-refusal.ts`, called by both `savePage()` callers, so a
+third caller cannot inherit the gap and the two existing ones cannot drift into disagreeing about
+what a stale save is called. It is tested directly: three of the four refusals are races no route
+test can provoke on demand, and asserting the mapping through a route would have left them
+unstated.
+
+**The category — a byte-offset edit into a context-sensitive spelling.** Every splice in this
+repository that edits Markdown *source* by offset is a candidate: the bytes at the seam may be
+spelled the way they are *because* of what is on the other side of it. The two in this module are
+now closed by construction. `packages/db/src/comments/reconcile-comments.ts` re-finds its quote by
+text rather than trusting an offset, so it does not join the class; nothing else splices Markdown
+source by offset today. There is no check for this, deliberately: the property is
+`canonicalise(f(x)) === f(x)`, which is a test each such function can state about itself in one
+line, and a script that tried to find "functions that splice Markdown" would be guessing.
+
+**Seen on the way, not fixed.** `packages/db/testing/provision.integration.test.ts`'s two
+self-healing cases (`provisioning from a container compose left in 'Created'`) fail on this host
+against the real container runtime, before and after this change, with `no container with name or
+ID "deep-wiki-test-heal_postgres_1" found`. Environmental, unrelated, and already the subject of
+the 2026-09-16 entry on the same file.
+
+**Impact.** `mintAnchorAtBlock` and `stripBlockAnchors` are canonical by construction; a comment on
+a selection works on any page, canonical or not; a refused comment save is a typed 409 or 404 the
+client can render, never a 500; and a comment's excerpt indexes the bytes that were actually
+stored. GATE-2 stays at 182.
+
 ### 2026-09-23 — The vacuous-negative sweep: 85 candidates, six real, and why there is no thirteenth check
 
 The entry below ends with a suggestion: *every `toHaveCount(0)` and `not.toBeVisible()` in `e2e/`
