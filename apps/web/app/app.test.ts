@@ -86,7 +86,11 @@ describe('app root', () => {
   test('caps how many toasts may stand at once', async () => {
     const component = await mountApp();
 
-    expect(component.findComponent(UApp).props('toaster')).toMatchObject({ max: 3 });
+    // `findComponent` types `UApp` as a DOM wrapper here (the same reason
+    // the tests above reach for `exists()` and `findAllComponents`), so the
+    // props are read through the component's own instance.
+    const app = component.findComponent(UApp) as unknown as { props: (name: string) => unknown };
+    expect(app.props('toaster')).toMatchObject({ max: 3 });
   });
 
   test('the routed screen really is the one the router resolved', async () => {
