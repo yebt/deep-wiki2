@@ -151,7 +151,7 @@ function mockComments(threads: readonly CommentThread[] = [], status: string = '
     if (thread.anchor.orphaned) continue;
     byBlock.set(thread.anchor.blockId, (byBlock.get(thread.anchor.blockId) ?? 0) + 1 + thread.replies.length);
   }
-  usePageCommentsMock.mockReturnValue({
+  const mocked = {
     status: ref(status),
     threads: ref(threads),
     indicators: computed(() => [...byBlock.entries()].map(([blockId, count]) => ({ blockId, count }))),
@@ -164,8 +164,9 @@ function mockComments(threads: readonly CommentThread[] = [], status: string = '
     reply: vi.fn(async () => true),
     setResolved: vi.fn(async () => true),
     create,
-  });
-  return Object.assign(load, { create });
+  };
+  usePageCommentsMock.mockReturnValue(mocked);
+  return Object.assign(load, { create, reply: mocked.reply, setResolved: mocked.setResolved });
 }
 
 const ANCHORED_HTML = '<p data-block-id="b1">First block.</p><p data-block-id="b2">Second block.</p>';
@@ -619,7 +620,11 @@ describe('read-mode page', () => {
           body: 'Is this still true?',
           mentionedUserIds: [],
         });
-        expect(document.body.querySelector('[data-testid="comments-status"]')?.textContent).toContain('Comment posted.');
+        // §4.12: the sentence names what happened to what, and it is said
+        // twice from one place — the live region for a screen reader, the
+        // toast for a sighted reader.
+        expect(document.body.querySelector('[data-testid="comments-status"]')?.textContent).toContain('Comment posted on “Second block, unanchored.”.');
+        expect(useToast().toasts.value.map((toast) => toast.title)).toContain('Comment posted on “Second block, unanchored.”.');
         expect(document.body.querySelector('[data-testid="comment-composer"]')).toBeNull();
       });
 
@@ -881,5 +886,86 @@ describe('read-mode page', () => {
       await chip.get('button').trigger('click');
       expect(load).toHaveBeenCalledTimes(2);
     });
+
+    /*
+     * The owner's second request of 2026-09-23: "Reply posted." must be a
+     * toast. The 2026-09-23 batch moved the product's transient successes to
+     * `useStatusToast()` and missed the comment flow's three, so a reply
+     * painted a green `success-container` bar across the top of the panel —
+     * above the conversation it was about. §4.12: a transient success is a
+     * toast; the same sentence stays in the live region, which is the half
+     * that is reliably announced; and every failure stays where it is.
+     */
+    describe('transient successes are toasts', () => {
+      function toastTitles(): unknown[] {
+        return useToast().toasts.value.map((toast) => toast.title);
+      }
+
+      test('a posted reply raises a toast naming the thread, says the same sentence in the live region, and paints no bar', async () => {
+        mockRead({ status: 'success', title: 'A Page', html: ANCHORED_HTML, workspaceId: 'ws-1' });
+        mockComments([commentThread({ id: 't1', blockId: 'b1' })]);
+        const component = await mount();
+        await settle();
+
+        await component.get('button[aria-label="1 comment on this block"]').trigger('click');
+        await settle();
+        const dialog = document.body.querySelector<HTMLElement>('[role="dialog"]')!;
+        dialog.querySelector<HTMLElement>('[data-testid="comment-reply-composer"]')!.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+        await settle();
+        const field = dialog.querySelector<HTMLTextAreaElement>('textarea')!;
+        field.value = 'Still true.';
+        field.dispatchEvent(new Event('input', { bubbles: true }));
+        await settle();
+        dialog.querySelector<HTMLElement>('[data-testid="comment-reply-submit"]')!.click();
+        await settle();
+
+        const sentence = 'Reply posted on “Quote of t1”.';
+        expect(toastTitles()).toContain(sentence);
+        const status = document.body.querySelector('[data-testid="comments-status"]')!;
+        expect(status.textContent).toContain(sentence);
+        // The live region is the announcement, never a painted strip.
+        expect(status.className).toContain('sr-only');
+        expect(document.body.querySelector('.bg-success-container')).toBeNull();
+      });
+
+      test('resolving and reopening each confirm themselves in a toast, naming the thread and which way it went', async () => {
+        mockRead({ status: 'success', title: 'A Page', html: ANCHORED_HTML, workspaceId: 'ws-1' });
+        mockComments([commentThread({ id: 't1', blockId: 'b1' })]);
+        const component = await mount();
+        await settle();
+
+        await component.get('button[aria-label="1 comment on this block"]').trigger('click');
+        await settle();
+        document.body.querySelector<HTMLElement>('[data-testid="comment-resolve"]')!.click();
+        await settle();
+
+        expect(toastTitles()).toContain('Thread resolved on “Quote of t1”.');
+      });
+
+      test('a write that failed stays in the panel and raises no toast: an error is never only a toast', async () => {
+        mockRead({ status: 'success', title: 'A Page', html: ANCHORED_HTML, workspaceId: 'ws-1' });
+        const mocked = mockComments([commentThread({ id: 't1', blockId: 'b1' })]);
+        mocked.reply.mockResolvedValueOnce(false);
+        const before = toastTitles().length;
+        const component = await mount();
+        await settle();
+
+        await component.get('button[aria-label="1 comment on this block"]').trigger('click');
+        await settle();
+        const dialog = document.body.querySelector<HTMLElement>('[role="dialog"]')!;
+        dialog.querySelector<HTMLElement>('[data-testid="comment-reply-composer"]')!.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+        await settle();
+        const field = dialog.querySelector<HTMLTextAreaElement>('textarea')!;
+        field.value = 'Still true.';
+        field.dispatchEvent(new Event('input', { bubbles: true }));
+        await settle();
+        dialog.querySelector<HTMLElement>('[data-testid="comment-reply-submit"]')!.click();
+        await settle();
+
+        expect(toastTitles()).toHaveLength(before);
+        expect(document.body.querySelector('[data-testid="comments-status"]')!.textContent).toBe('');
+      });
+    });
+
   });
 });

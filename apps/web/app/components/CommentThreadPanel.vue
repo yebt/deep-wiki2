@@ -46,11 +46,14 @@
  *
  * ## Announcements
  *
- * A failed write is a bar-tier `InlineNotice` (§4.1's three tiers —
- * this is the second) with `role="alert"`; a successful one lands in a
- * live region that is always in the DOM and only changes text, because
- * a region inserted at the moment its text appears is frequently not
- * announced at all (§5).
+ * A failed write is a bar-tier `InlineNotice` (§4.12's bar) with
+ * `role="alert"` — an error stays until it is read, and this panel is the
+ * screen that failed. A successful one lands in a live region that is
+ * always in the DOM and only changes text, because a region inserted at the
+ * moment its text appears is frequently not announced at all (§5); its
+ * **visible** half is a toast the screen raises (`useStatusToast`), since
+ * 2026-09-23. The two say the same sentence, from one place
+ * (`utils/comment-messages.ts`).
  */
 import type { CommentThread } from '@deep-wiki/contracts';
 import type { ThreadPlacement } from './CommentThreadItem.vue';
@@ -135,14 +138,14 @@ const description = computed(() => {
     @update:open="emit('update:open', $event)"
   >
     <template #body>
-      <p
-        data-testid="comments-status"
-        role="status"
-        aria-live="polite"
-        :class="announcement ? 'rounded-md bg-success-container px-3 py-2 text-body-small text-on-success-container' : 'sr-only'"
-      >
-        {{ announcement }}
-      </p>
+      <!-- The live region only, never a visible bar. Until 2026-09-23 this
+           painted a green `success-container` strip across the top of the
+           panel whenever a write succeeded — the owner's second report of
+           that date, pointing at "Reply posted." standing above the
+           conversation it was about. A transient success is a toast
+           (§4.12), and the same sentence is said here because a live region
+           is the half that is reliably announced. -->
+      <p data-testid="comments-status" role="status" aria-live="polite" class="sr-only">{{ announcement }}</p>
 
       <InlineNotice v-if="writeMessage" tier="bar" tone="error" role="alert" icon="i-lucide-circle-alert" title="That didn't go through">
         {{ writeMessage }}

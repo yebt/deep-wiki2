@@ -26,6 +26,7 @@
  *   are one tab stop (`CommentGutter`), drawn quiet until hovered.
  */
 import { adoptMintedAnchor, blockIdOf, blockSelector, commentableBlockOf } from '~/utils/block-element';
+import { commentPosted, replyPosted, threadResolution } from '~/utils/comment-messages';
 import type { NewThreadTarget } from '~/composables/useNewThread';
 import { loadEditorMount } from '~/utils/editor-mount';
 import { pageEditUrl, pageHistoryUrl, workspacesUrl } from '~/utils/routes';
@@ -369,10 +370,36 @@ watch(canStart, (able) => {
   if (able) onSelectionChange();
 });
 
+/**
+ * The comment flow's transient successes are toasts (owner request,
+ * 2026-09-23; docs/UI-CHECKLIST.md §4.12). The 2026-09-23 batch moved
+ * "Saved “X”.", "Created …", "Moved … to the trash." and "Invitation sent
+ * …" and missed these three, so a reply still painted a green bar across the
+ * top of the panel — above the conversation it was about.
+ *
+ * Each sentence is said **twice**, from one place
+ * (`utils/comment-messages.ts`): in the panel's live region, which is what
+ * a screen reader is reliably given, and in the toast, which is what a
+ * sighted person reads. What did *not* move: every failure. A write that
+ * fails stays in the panel's bar notice until it is read, and a refusal
+ * that names a conflict — "your text is still here — reload the page" —
+ * stays with it (§4.12: "An error is never *only* a toast").
+ */
+const { confirmed } = useStatusToast();
+
+/** The excerpt a confirmation names its thread by; empty when the thread has gone from the list. */
+function threadQuote(threadId: string): string {
+  return comments.threads.value.find((thread) => thread.id === threadId)?.anchor.quote ?? '';
+}
+
 async function onPost(): Promise<void> {
   announcement.value = '';
+  // Read before the post: on success `useNewThread` clears the target.
+  const excerpt = newThread.target.value?.excerpt ?? '';
   const ok = await newThread.post();
-  if (ok) announcement.value = 'Comment posted.';
+  if (!ok) return;
+  announcement.value = commentPosted(excerpt);
+  confirmed({ message: announcement.value, icon: 'i-lucide-message-square' });
 }
 
 function onCancel(): void {
@@ -431,17 +458,24 @@ const highlight = computed<{ top: number; height: number } | null>(() => {
 async function onReply(threadId: string, body: string): Promise<void> {
   busy.value = true;
   announcement.value = '';
+  // Read before the write: a successful reply re-reads the thread list.
+  const excerpt = threadQuote(threadId);
   const ok = await comments.reply(threadId, body);
   busy.value = false;
-  if (ok) announcement.value = 'Reply posted.';
+  if (!ok) return;
+  announcement.value = replyPosted(excerpt);
+  confirmed({ message: announcement.value, icon: 'i-lucide-corner-down-left' });
 }
 
 async function onResolve(threadId: string, resolved: boolean): Promise<void> {
   busy.value = true;
   announcement.value = '';
+  const excerpt = threadQuote(threadId);
   const ok = await comments.setResolved(threadId, resolved);
   busy.value = false;
-  if (ok) announcement.value = resolved ? 'Thread resolved.' : 'Thread reopened.';
+  if (!ok) return;
+  announcement.value = threadResolution(excerpt, resolved);
+  confirmed({ message: announcement.value, icon: resolved ? 'i-lucide-check' : 'i-lucide-rotate-ccw' });
 }
 
 function plural(count: number, noun: string): string {
