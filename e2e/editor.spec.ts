@@ -1501,6 +1501,27 @@ test.describe('task items', () => {
     await shotUi(page, 'task-list-1280-light');
   });
 
+  // The owner's review material for this batch, at the three viewports and
+  // themes every screen is presented at.
+  for (const { width, theme } of [
+    { width: 1280, theme: 'dark' as const },
+    { width: 320, theme: 'light' as const },
+  ]) {
+    test(`the checklist in edit mode at ${width} ${theme}`, async ({ page }) => {
+      test.setTimeout(60000);
+      await page.setViewportSize({ width, height: 900 });
+      await page.addInitScript((value) => localStorage.setItem('nuxt-color-mode', value), theme);
+
+      const editor = await openMockedEditor(page, '- [ ] Not done yet\n- [x] Already done\n', 'Task List Test');
+      await expect(editor).toContainText('Not done yet', { timeout: 30000 });
+      await expect(page.locator('html')).toHaveClass(theme === 'dark' ? /dark/ : /light/);
+      await expect(editor.locator(TASK_BOX)).toHaveCount(2);
+
+      await expectNoHorizontalOverflow(page, `edit-mode checklist ${width} ${theme}`);
+      await shotUi(page, `task-list-${width}-${theme}`);
+    });
+  }
+
   test('Enter after a done item starts an item that is not done', async ({ page }) => {
     test.setTimeout(60000);
     const editor = await openMockedEditor(page, '- [x] Already done\n', 'Task List Test');
