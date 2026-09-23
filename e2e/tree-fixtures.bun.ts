@@ -109,7 +109,16 @@ export async function mintTreeFixtures(sql: postgres.Sql, workspaceId: string): 
   const [workspace] = await sql<{ owner_id: string }[]>`SELECT owner_id FROM workspaces WHERE id = ${workspaceId}`;
   if (!workspace) throw new Error('tree-fixtures: the seeded workspace has no owner');
   const { token: ownerSessionToken } = await createSession(sql, { userId: workspace.owner_id, idleTimeoutMinutes: 30, absoluteTimeoutDays: 30 });
-  await insertGrants(sql, workspaceId, 'user', workspace.owner_id, [{ resourceId: shelf!.id, action: 'manage', effect: 'allow' }]);
+  await insertGrants(sql, workspaceId, 'user', workspace.owner_id, [
+    { resourceId: shelf!.id, action: 'manage', effect: 'allow' },
+    // The workspace root, so a **top-level** creation is exercisable at all
+    // (2026-09-23). Ownership is not a grant — `can()` never consults it —
+    // and every other grant here hangs off the fixture shelf, so before
+    // this nobody in these fixtures could write at the root and the one
+    // case where the hierarchy leaves a single legal child (`workspace` →
+    // `shelf`) could not be driven end to end.
+    { resourceId: root!.id, action: 'manage', effect: 'allow' },
+  ]);
 
   return {
     writerSessionToken,

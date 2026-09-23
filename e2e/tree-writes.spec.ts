@@ -198,15 +198,17 @@ test('a created page is drawn from the response, and no GET /tree follows it', a
   await openTree(page, fixtures);
 
   // Pick a page in the book — focus selects without opening (a click on
-  // the book would fold it) — so "New…" resolves to "in this book".
+  // the book would fold it) — so "New…" resolves to "in this book". A book
+  // holds two kinds, so the kind is picked and the name is then typed in
+  // the row itself (2026-09-23: there is no creation dialog any more).
   await page.getByRole('treeitem', { name: new RegExp(fixtures.firstPageTitle) }).focus();
   await page.getByRole('button', { name: 'New…' }).click();
-  await expect(page.getByTestId('tree-create-location-fixed').or(page.getByTestId('tree-create-location'))).toContainText(fixtures.bookTitle);
-  // The toolbar guesses a book's first legal child (a chapter); this test is about a page.
-  await page.getByTestId('tree-create-type').getByLabel('Page', { exact: true }).check();
+  await page.getByRole('menu').getByRole('menuitem', { name: 'Page' }).click();
   const title = `E2E Tree Page Three ${Date.now()}`;
-  await page.getByTestId('tree-create-title').fill(title);
-  await page.getByTestId('tree-create-submit').click();
+  const draftField = page.locator('[data-row-editor] input');
+  await expect(draftField).toBeFocused();
+  await draftField.fill(title);
+  await draftField.press('Enter');
 
   await expect(page.getByRole('treeitem', { name: new RegExp(title) })).toBeVisible();
   const post = requests.find((r) => r.method === 'POST' && r.url.endsWith('/nodes'))!;
@@ -269,22 +271,14 @@ for (const [width, theme] of [
 }
 
 /**
- * The creation dialog asks only what it does not know (owner decision,
- * 2026-09-17). From a row's context menu — "New page…" on the book — the
- * place and the kind are answered by the invocation: the dialog is "New
- * page", leads with the name, focused, states "Page in “<book>”" with a
- * "Change…" disclosure, and creates under the book with the name alone.
- * From the toolbar, the radios show as before. Both shapes are the
- * owner's review material (`fb-editor2-dialog-*`, `DEEPWIKI_FRAME_SHOTS`).
+ * The row's menu names the kind ("New page…" on a book), so nothing is
+ * left to ask: the draft row opens under that row at once and only the
+ * name is typed. Until 2026-09-23 this opened a dialog that led with the
+ * name and folded the two answers behind a "Change…" disclosure; the owner
+ * rejected the dialog itself, so the same principle — ask only what you do
+ * not know — is now expressed by there being nothing to ask at all.
  */
-const EDITOR2_SHOTS = process.env.DEEPWIKI_FRAME_SHOTS ?? '';
-
-async function editor2Shot(page: Page, name: string): Promise<void> {
-  if (!EDITOR2_SHOTS) return;
-  await page.screenshot({ path: `${EDITOR2_SHOTS}/fb-editor2-${name}.png`, fullPage: false });
-}
-
-test('right-click → New page… on the book opens a dialog that asks only for the name, and creates the page there', async ({ page }) => {
+test('right-click → New page… on the book names the page in the row, and creates it there', async ({ page }) => {
   const fixtures = mintFixtures();
   await openTree(page, fixtures);
 
@@ -294,78 +288,22 @@ test('right-click → New page… on the book opens a dialog that asks only for 
   await expect(menu).toBeVisible();
   await menu.getByRole('menuitem', { name: /^New page…/ }).click();
 
-  const dialog = page.getByRole('dialog', { name: 'New page' });
-  await expect(dialog).toBeVisible();
-  const name = dialog.getByLabel('Name');
-  await expect(name).toBeFocused();
-  await expect(dialog.getByTestId('tree-create-summary')).toHaveText(`Page in “${fixtures.bookTitle}”`);
-  await expect(dialog.getByTestId('tree-create-type')).toHaveCount(0);
-  await expect(dialog.getByTestId('tree-create-location')).toHaveCount(0);
-  // The name comes first in the dialog's reading order.
-  const order = await dialog.locator('[data-testid="tree-create-title"], [data-testid="tree-create-summary"]').evaluateAll((els) => els.map((el) => (el as HTMLElement).dataset.testid));
-  expect(order).toEqual(['tree-create-title', 'tree-create-summary']);
-
-  // The disclosure turns the answers back into questions, pre-answered.
-  const change = dialog.getByTestId('tree-create-change');
-  await expect(change).toHaveAccessibleName('Change…');
-  await expect(change).toHaveAttribute('aria-expanded', 'false');
-  await change.click();
-  await expect(change).toHaveAttribute('aria-expanded', 'true');
-  await expect(change).toHaveAccessibleName('Hide the choices');
-  await expect(dialog.getByTestId('tree-create-type').getByRole('radio', { checked: true })).toHaveAttribute('value', 'page');
-  await expect(dialog.getByTestId('tree-create-location').getByRole('radio', { checked: true })).toHaveAttribute('value', fixtures.bookId);
-  await change.click();
-  await expect(dialog.getByTestId('tree-create-summary')).toBeVisible();
+  await expect(page.getByRole('dialog'), 'nothing modal opens any more').toHaveCount(0);
+  const field = page.locator('[data-row-editor] input');
+  await expect(field).toBeFocused();
+  await expect(field).toHaveAttribute('aria-label', 'Name of the new page');
+  // The draft stands under the book, last among its children, which is
+  // where `POST /nodes` will put the real row.
+  const draftRows = book.locator(':scope > [role="group"] > [role="treeitem"]');
+  await expect(draftRows.last()).toHaveAttribute('data-testid', 'tree-draft-row');
 
   const title = `E2E Page From Menu ${Date.now()}`;
-  await name.fill(title);
-  await dialog.getByRole('button', { name: 'Create' }).click();
-  await expect(dialog).toBeHidden();
+  await field.fill(title);
+  await field.press('Enter');
+
   await expect(page.getByRole('treeitem', { name: new RegExp(title) })).toBeVisible();
-  expect(await pageOrder(page, fixtures)).toEqual([fixtures.firstPageTitle, fixtures.secondPageTitle, title]);
   await expect(page.getByRole('status').filter({ hasText: `Created page “${title}” in “${fixtures.bookTitle}”.` })).toHaveCount(1);
 });
-
-for (const [width, theme] of [
-  [1280, 'light'],
-  [1280, 'dark'],
-  [320, 'light'],
-] as const) {
-  test.describe(`the creation dialog's two shapes ${width} ${theme}`, () => {
-    test.use({ viewport: { width, height: 900 } });
-
-    test('pre-answered from the menu, and asking from the toolbar, screenshotted with no sideways scroll', async ({ page }) => {
-      const fixtures = mintFixtures();
-      await useTheme(page, theme);
-      await signInAs(page, fixtures.writerSessionToken);
-      await page.goto(`/workspaces/${seed.workspaceId}`);
-      await expect(page.getByRole('heading', { level: 1, name: 'E2E Workspace' })).toBeVisible({ timeout: 120_000 });
-      await openDrawerIfNarrow(page);
-      const book = page.getByRole('treeitem', { name: new RegExp(fixtures.bookTitle) });
-      await expect(book).toBeVisible({ timeout: 120_000 });
-
-      await book.locator('.dw-tree-row').first().click({ button: 'right' });
-      await page.getByRole('menu').getByRole('menuitem', { name: /^New page…/ }).click();
-      const answered = page.getByRole('dialog', { name: 'New page' });
-      await expect(answered.getByLabel('Name')).toBeFocused();
-      await expect(answered.getByTestId('tree-create-summary')).toContainText(fixtures.bookTitle);
-      await expectNoHorizontalOverflow(page, `dialog answered ${width} ${theme}`);
-      await editor2Shot(page, `dialog-answered-${width}-${theme}`);
-      await page.keyboard.press('Escape');
-      await expect(answered).toBeHidden();
-
-      // The toolbar's New… with the book picked: the kind is not known.
-      await book.focus();
-      await page.getByRole('button', { name: 'New…' }).click();
-      const asking = page.getByRole('dialog', { name: 'New item' });
-      await expect(asking).toBeVisible();
-      await expect(asking.getByTestId('tree-create-type')).toBeVisible();
-      await expect(asking.getByTestId('tree-create-summary')).toHaveCount(0);
-      await expectNoHorizontalOverflow(page, `dialog asking ${width} ${theme}`);
-      await editor2Shot(page, `dialog-asking-${width}-${theme}`);
-    });
-  });
-}
 
 /**
  * Delete (node-trash and navigation-tree specs; design.md Decision 8),
@@ -584,6 +522,280 @@ for (const [width, theme] of [
       await trashShot(page, `force-dialog-${width}-${theme}`);
       await page.keyboard.press('Escape');
       await expect(dialog).toBeHidden();
+    });
+  });
+}
+
+/**
+ * The tree the owner approved on 2026-09-23, driven against the real API.
+ *
+ * The rejection was specific: a red trash beside "New" read as *delete the
+ * workspace*, and a creation dialog asked "Type" with a single "Shelf"
+ * option. So the header carries three controls and nothing destructive,
+ * creation and rename happen in the row, and a question with one answer is
+ * never asked. Every test below is one of those sentences, made observable.
+ *
+ * Screenshots are the owner's review material for this gate — the earlier
+ * batches' were lost with the session scratchpad, so these are the only
+ * ones he has.
+ */
+const TREE_UX_SHOTS = process.env.DEEPWIKI_TREE_UX_SHOTS ?? '';
+
+async function treeUxShot(page: Page, name: string): Promise<void> {
+  if (!TREE_UX_SHOTS) return;
+  await page.screenshot({ path: `${TREE_UX_SHOTS}/tree-ux-${name}.png`, fullPage: false });
+}
+
+/** The field a name is typed into, wherever it stands — the draft row's, or a row being renamed. */
+function nameField(page: Page) {
+  return page.locator('[data-row-editor] input');
+}
+
+test.describe('the tree header', () => {
+  test.use({ viewport: { width: 1280, height: 900 } });
+
+  test('carries exactly three controls — New…, Filter, Collapse all — and none of them destroys anything', async ({ page }) => {
+    const fixtures = mintFixtures();
+    await openTree(page, fixtures);
+
+    const header = page.getByRole('group', { name: 'Tree actions' });
+    const controls = header.getByRole('button');
+    await expect(controls).toHaveCount(3);
+    await expect(controls.nth(0)).toHaveAccessibleName('New…');
+    await expect(controls.nth(1)).toHaveAccessibleName('Filter tree');
+    await expect(controls.nth(2)).toHaveAccessibleName('Collapse all');
+
+    // The two the owner found beside New are gone from the header, and are
+    // on the row's own menu instead (VS Code and Obsidian both).
+    const names = (await controls.allTextContents()).join(' ') + (await controls.evaluateAll((els) => els.map((el) => el.getAttribute('aria-label') ?? '').join(' ')));
+    expect(names.toLowerCase()).not.toMatch(/delete|trash|rename/);
+
+    await treeUxShot(page, 'header-1280-light');
+    await expectNoHorizontalOverflow(page, 'tree header 1280 light');
+  });
+
+  test('Collapse all folds the tree, and says so', async ({ page }) => {
+    const fixtures = mintFixtures();
+    await openTree(page, fixtures);
+    const book = page.getByRole('treeitem', { name: new RegExp(fixtures.bookTitle) });
+    await expect(book).toBeVisible();
+
+    await page.getByRole('button', { name: 'Collapse all' }).click();
+
+    await expect(book).toHaveCount(0);
+    await expect(page.getByTestId('tree-menu-status')).toContainText('Collapsed');
+    // Nothing left to do, and the control says why rather than vanishing.
+    await expect(page.getByRole('button', { name: 'Collapse all' })).toHaveAttribute('aria-disabled', 'true');
+  });
+});
+
+test.describe('creating in the row', () => {
+  test.use({ viewport: { width: 1280, height: 900 } });
+
+  test('a shelf at the top level is named in the tree at once — no menu, no dialog', async ({ page }) => {
+    const fixtures = mintFixtures();
+    // The owner: the one session in these fixtures that may write at the
+    // workspace root, which is where a shelf goes.
+    await openTreeAs(page, fixtures.ownerSessionToken, fixtures);
+
+    await page.getByRole('button', { name: 'New…' }).click();
+
+    // The hierarchy leaves one answer under a workspace, so nothing asked.
+    await expect(page.getByRole('menu')).toHaveCount(0);
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    const field = nameField(page);
+    await expect(field).toBeFocused();
+    await expect(field).toHaveAttribute('aria-label', 'Name of the new shelf');
+    await expect(page.getByTestId('tree-draft-row')).toBeVisible();
+    await treeUxShot(page, 'inline-create-1280-light');
+    await expectNoHorizontalOverflow(page, 'inline create 1280 light');
+
+    const title = `E2E Inline Shelf ${Date.now()}`;
+    await field.fill(title);
+    await field.press('Enter');
+
+    await expect(page.getByRole('treeitem', { name: new RegExp(title) })).toBeVisible();
+    await expect(page.getByTestId('tree-draft-row')).toHaveCount(0);
+    await expect(page.getByTestId('tree-menu-status')).toContainText(`Created shelf “${title}”`);
+  });
+
+  test('a book holds two kinds, so the kind is picked first and then the name is typed in the row', async ({ page }) => {
+    const fixtures = mintFixtures();
+    await openTree(page, fixtures);
+
+    // Pick the book: focus selects without opening (a click would fold it).
+    await page.getByRole('treeitem', { name: new RegExp(fixtures.bookTitle) }).focus();
+    await page.getByRole('button', { name: 'New…' }).click();
+
+    const menu = page.getByRole('menu');
+    await expect(menu).toBeVisible();
+    await expect(menu.getByRole('menuitem')).toHaveCount(2);
+    await expect(menu.getByRole('menuitem').nth(0)).toHaveText('Chapter');
+    await expect(menu.getByRole('menuitem').nth(1)).toHaveText('Page');
+    await treeUxShot(page, 'type-menu-1280-light');
+    await expectNoHorizontalOverflow(page, 'type menu 1280 light');
+
+    await menu.getByRole('menuitem', { name: 'Page' }).click();
+    const field = nameField(page);
+    await expect(field).toHaveAttribute('aria-label', 'Name of the new page');
+
+    const title = `E2E Inline Page ${Date.now()}`;
+    await field.fill(title);
+    await field.press('Enter');
+
+    await expect(page.getByRole('treeitem', { name: new RegExp(title) })).toBeVisible();
+    // Created, then selected and opened: a page has a screen to go to.
+    await expect(page).toHaveURL(/\/p\//);
+  });
+
+  test('Escape cancels and leaves no row behind', async ({ page }) => {
+    const fixtures = mintFixtures();
+    const posts: string[] = [];
+    page.on('request', (request) => {
+      if (request.method() === 'POST' && request.url().endsWith('/nodes')) posts.push(request.url());
+    });
+    await openTree(page, fixtures);
+    const rowsBefore = await page.getByRole('treeitem').count();
+
+    await page.getByRole('treeitem', { name: new RegExp(fixtures.chapterTitle) }).focus();
+    await page.getByRole('button', { name: 'New…' }).click();
+    await expect(nameField(page)).toBeFocused();
+    await nameField(page).fill('Never written');
+    await page.keyboard.press('Escape');
+
+    await expect(page.getByTestId('tree-draft-row')).toHaveCount(0);
+    await expect(page.getByRole('treeitem')).toHaveCount(rowsBefore);
+    expect(posts, 'nothing was written').toEqual([]);
+  });
+
+  test('a name already taken keeps the field, with the reason beside it and the text still in it', async ({ page }) => {
+    const fixtures = mintFixtures();
+    await openTree(page, fixtures);
+
+    await page.getByRole('treeitem', { name: new RegExp(fixtures.bookTitle) }).focus();
+    await page.getByRole('button', { name: 'New…' }).click();
+    await page.getByRole('menu').getByRole('menuitem', { name: 'Page' }).click();
+
+    const field = nameField(page);
+    await field.fill(fixtures.firstPageTitle);
+    await field.press('Enter');
+
+    const error = page.getByTestId('tree-row-editor-error');
+    await expect(error).toBeVisible();
+    await expect(error).toContainText(/already/i);
+    // Never renamed behind the person's back: the text they typed is still
+    // theirs to fix, and the row is still being named.
+    await expect(field).toHaveValue(fixtures.firstPageTitle);
+    await expect(page.getByTestId('tree-draft-row')).toBeVisible();
+    await expect(field).toHaveAttribute('aria-describedby', (await error.getAttribute('id'))!);
+  });
+});
+
+test.describe('renaming in the row', () => {
+  test.use({ viewport: { width: 1280, height: 900 } });
+
+  test('F2 renames where the row stands, and Enter writes it', async ({ page }) => {
+    const fixtures = mintFixtures();
+    await openTree(page, fixtures);
+
+    const row = page.getByRole('treeitem', { name: new RegExp(fixtures.firstPageTitle) });
+    await row.focus();
+    await page.keyboard.press('F2');
+
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    const field = nameField(page);
+    await expect(field).toBeFocused();
+    await expect(field).toHaveAttribute('aria-label', `Rename “${fixtures.firstPageTitle}”`);
+    await expect(field).toHaveValue(fixtures.firstPageTitle);
+    await treeUxShot(page, 'inline-rename-1280-light');
+    await expectNoHorizontalOverflow(page, 'inline rename 1280 light');
+
+    const renamed = `${fixtures.firstPageTitle} renamed`;
+    await field.fill(renamed);
+    await field.press('Enter');
+
+    await expect(page.getByRole('treeitem', { name: new RegExp(renamed) })).toBeVisible();
+    await expect(page.getByTestId('tree-menu-status')).toContainText(`Renamed to “${renamed}”.`);
+    // Focus comes back to the row it was taken from (checklist §5).
+    await expect(page.getByRole('treeitem', { name: new RegExp(renamed) })).toBeFocused();
+  });
+
+  test('"Rename…" from the row’s menu opens the same field, and Escape leaves the name alone', async ({ page }) => {
+    const fixtures = mintFixtures();
+    await openTree(page, fixtures);
+
+    const row = page.getByRole('treeitem', { name: new RegExp(fixtures.secondPageTitle) });
+    await row.locator('.dw-tree-row').first().click({ button: 'right' });
+    await expect(page.getByRole('menu')).toBeVisible();
+    await treeUxShot(page, 'context-menu-1280-light');
+    await page.getByRole('menu').getByRole('menuitem', { name: /^Rename…/ }).click();
+
+    const field = nameField(page);
+    await expect(field).toHaveValue(fixtures.secondPageTitle);
+    await field.fill('Not saved');
+    await page.keyboard.press('Escape');
+
+    await expect(page.getByRole('treeitem', { name: new RegExp(fixtures.secondPageTitle) })).toBeVisible();
+    await expect(page.getByRole('treeitem', { name: /Not saved/ })).toHaveCount(0);
+  });
+});
+
+/**
+ * The owner's review material at the three sizes the frame batches shoot.
+ * The 320 pass is the one that matters most here: a field inside a 280px
+ * pane, at a row's own indent, is where a sideways scroll would appear.
+ */
+for (const [width, theme] of [
+  [1280, 'dark'],
+  [320, 'light'],
+] as const) {
+  test.describe(`tree review material ${width} ${theme}`, () => {
+    test.use({ viewport: { width, height: 900 } });
+
+    test('the header, the draft row, the type menu, a rename and the row menu, screenshotted with no sideways scroll', async ({ page }) => {
+      const fixtures = mintFixtures();
+      await useTheme(page, theme);
+      await signInAs(page, fixtures.writerSessionToken);
+      await page.goto(workspaceUrl(seed.workspaceSlug));
+      await expect(page.getByRole('heading', { level: 1, name: 'E2E Workspace' })).toBeVisible({ timeout: 120_000 });
+      await openDrawerIfNarrow(page);
+      const book = page.getByRole('treeitem', { name: new RegExp(fixtures.bookTitle) });
+      await expect(book).toBeVisible({ timeout: 120_000 });
+
+      await treeUxShot(page, `header-${width}-${theme}`);
+      await expectNoHorizontalOverflow(page, `tree header ${width} ${theme}`);
+
+      // The type menu, where the hierarchy leaves two answers.
+      await book.focus();
+      await page.getByRole('button', { name: 'New…' }).click();
+      await expect(page.getByRole('menu')).toBeVisible();
+      await treeUxShot(page, `type-menu-${width}-${theme}`);
+      await expectNoHorizontalOverflow(page, `type menu ${width} ${theme}`);
+
+      // Then the name, in the row.
+      await page.getByRole('menu').getByRole('menuitem', { name: 'Page' }).click();
+      await expect(nameField(page)).toBeFocused();
+      await nameField(page).fill('A page being named');
+      await treeUxShot(page, `inline-create-${width}-${theme}`);
+      await expectNoHorizontalOverflow(page, `inline create ${width} ${theme}`);
+      await page.keyboard.press('Escape');
+      await expect(page.getByTestId('tree-draft-row')).toHaveCount(0);
+
+      // A rename, on the same field.
+      const row = page.getByRole('treeitem', { name: new RegExp(fixtures.firstPageTitle) });
+      await row.focus();
+      await page.keyboard.press('F2');
+      await expect(nameField(page)).toBeFocused();
+      await treeUxShot(page, `inline-rename-${width}-${theme}`);
+      await expectNoHorizontalOverflow(page, `inline rename ${width} ${theme}`);
+      await page.keyboard.press('Escape');
+
+      // And the row's menu, which is where Rename… and Delete… now live.
+      await row.locator('.dw-tree-row').first().click({ button: 'right' });
+      await expect(page.getByRole('menu')).toBeVisible();
+      await treeUxShot(page, `context-menu-${width}-${theme}`);
+      await expectNoHorizontalOverflow(page, `context menu ${width} ${theme}`);
+      await page.keyboard.press('Escape');
     });
   });
 }
