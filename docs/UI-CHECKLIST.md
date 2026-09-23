@@ -1957,6 +1957,121 @@ measure are the ones already reviewed, so `docs/DESIGN-SYSTEM.md` gains no row.
 - The two-icon-pack requirement (§4.3) remains untested; everything the 2026-09-18 entry
   carried forward stands.
 
+### 2026-09-23 — The tree the owner rejected: three controls in the header, and the name typed in the row — awaiting the owner's eye
+
+**Reviewer:** none yet — this entry is what was shipped for review, not a review.
+**Verdict:** Pending
+
+The owner rejected the navigation tree on 2026-09-23. Branch `feat/tree-like-vscode`;
+`docs/TODO.md` Findings, same date, carries the reasoning, the two primary sources and what
+was found on the way. The correction was built against a research pass read from
+**VS Code's own source** (`explorerView.ts`, `fileActions.contribution.ts`,
+`explorerViewer.ts`) and **Obsidian's official docs**, not from memory.
+
+**The two findings, in the owner's terms**
+
+1. **A red trash button beside `New…` read as "delete the workspace".** The header carried
+   `New…`, `Rename…` and a destructive icon in one row, and nothing in that row said which
+   of the three acted on the workspace and which on a row. Neither reference product ever
+   puts a destructive or identity-changing action next to the creation button: VS Code
+   registers exactly four actions against `MenuId.ViewTitle` and **zero** of them destroy
+   anything; Obsidian keeps Delete and Rename in the right-click menu.
+2. **The creation dialog asked a question with one answer** — a `Type` radio group holding a
+   single "Shelf" option.
+
+**Pre-build contract (§2).** *Who:* a workspace member in the room, reading more than
+editing, who wants to make a page where they are standing or fix a name that is wrong.
+*Goal:* "put a new chapter in this book", "this page is called the wrong thing". *Primary
+action:* `New…`; everything else in the header is a view control. *Data:*
+`GET /workspaces/:id/tree` (id, type, title, children) and `LEGAL_PARENT_TYPES` through
+`newRowChoice()`; the server's own refusal bodies for the errors. *Not:* deleting a
+workspace (recorded in `docs/TODO.md` Phase 3.5, not built), a command palette, moving a node
+across books. *Empty / too much:* a first shelf is created on a tree with no rows to hold it
+(the empty state gives way to the draft row); a 400-page book gets one field and one draft
+row, never a decoration per row.
+
+**What to look at**
+
+1. **The header is three controls — `New…`, `Filter`, `Collapse all` — and nothing
+   destructive.** A `role="group"` named "Tree actions", so the item set is one thing a
+   review and a test can both point at; `NavigationTreeActions.test.ts` asserts the group's
+   *whole* contents, so a fourth control of any kind fails it. `Collapse all` is new and
+   icon-only with a name and a tooltip (§4.3), `aria-disabled` with its reason when
+   everything is already folded (§3, §5). There is deliberately **no `Refresh`** — this tree
+   is drawn from the response of the request that changed it, so the button would have
+   nothing to do (§6, no inert controls); that is said in a comment at the call site rather
+   than built. The `?` keyboard help stays with the "Contents" label rather than in the
+   action group: it is documentation, not an action on the tree, and §5 requires the keys to
+   be named in the UI. **If the owner counts four things in that corner, the `?` is the one
+   to move or drop** — flagged here rather than decided.
+2. **Creation is a row, not a dialog.** `New…` inserts a draft row under the target parent,
+   at that parent's own indent, last among its children — where `POST /nodes` will put the
+   real one — with the name editable in place and focused. Enter confirms, Escape cancels and
+   removes the row. The created row is then selected, and **opened** when it is a page; a
+   shelf, book or chapter has no screen, so being picked and focused is all "opened" can
+   mean for it.
+3. **A question with one answer is never asked.** `newRowChoice()` reads the one
+   `LEGAL_PARENT_TYPES` table: one legal child (workspace → shelf, shelf → book, chapter →
+   page) and `New…` starts naming it with no menu at all; two (a book holds chapters *and*
+   pages) and a short menu picks the kind first. Derived, never a second list.
+4. **Rename is the same field** (`F2`, or the row's menu), opened on the current title
+   selected whole — one code path for both, as VS Code has one `renderInputBox` for creation
+   and rename alike.
+5. **A refusal splits by what the person can do about it.** A name already taken keeps the
+   field open with the typed text still in it and the server's sentence beside it, wired with
+   `aria-describedby` (§5) — never a rename behind the person's back. Anything the field
+   cannot fix (no permission, the parent gone, a dead connection) removes the draft and puts
+   the reason in the chip beside the tree, where a refused drag's reason already stands (§3).
+6. **The keyboard model stays coherent.** Every key the tree answers is a key someone typing
+   a name will press, so the editor marks itself `data-row-editor` and
+   `NavigationTreeNode.onKeydown` ignores what happens inside it — the same guard
+   `data-row-actions` already had for the `⋯` menu (§4.1's hand-rolled-primitive contract).
+   The draft row is a real `treeitem` (`aria-setsize` counts it) and `tabindex="-1"`, so the
+   arrows never land on a text box and the tree stays one tab stop. Focus returns to the row
+   afterwards; the outcome is announced in the tree's live region, which moved to the
+   component root so it is in the DOM before it has anything to say (§5).
+
+**The footer (the owner's sixth item) needed no change — and here is why.** The app has
+exactly one `UFooter`, in `AppShell.vue`'s **`v-else`** branch: the document frame, taken by
+screens that are *not* inside a workspace. Every screen inside the workspace frame renders
+through the `UDashboardPanel` branch, which has no footer. So the footer already stands only
+on `/workspaces`, `/workspaces/new` and the error screen — the shells the criterion itself
+says to keep it on. Removing it would have taken it off exactly those. Recorded in
+`docs/TODO.md` Findings with the evidence.
+
+**Measured** in `e2e/tree-writes.spec.ts` and `e2e/tree.spec.ts` against the real API: the
+header's three controls by accessible name with no destructive one among them; a top-level
+shelf named in the row with no menu and no dialog; a book's two kinds offered and then the
+name typed; Escape leaving no row and writing nothing; a duplicate name keeping the field
+with the error and the text; `F2` renaming in place and focus returning to the row; the
+`Delete` key still opening the trash question. `expectNoHorizontalOverflow` on the pane and
+the document at 1280 light, 1280 dark and 320 light with the draft row, the type menu, a
+rename and the row menu open. Screenshots
+`tree-ux-{header,inline-create,type-menu,inline-rename,context-menu}-{1280-light,1280-dark,320-light}.png`
+in the session scratchpad (`DEEPWIKI_TREE_UX_SHOTS`).
+
+**No new colour, token or rung.** The field takes `h-10` — the tree row's own height, the
+metric the filter box already took for the same reason (`docs/DESIGN-SYSTEM.md` §14,
+2026-09-16), so the row does not change height when it becomes a field and nothing above or
+below it moves (§3). The text stays 16px (§9.5), the shape `rounded-md` (§3.4), the error
+chip the `error-container` pair already in use.
+
+**Known before review, not fixed**
+
+- The `?` keyboard-help control still stands beside "Contents", so that corner holds four
+  things in total if it is counted as part of the header (item 1 above).
+- A blank name simply does not confirm — Enter does nothing, as VS Code's input box does.
+  There is no visible "a name is required" message, because there is no submit button to
+  disable and explain (§3's "Disabled" is about controls, not about an empty field).
+- Creating a page navigates to it, which takes the person off the dashboard. That is what
+  "opened" means in both reference products; if the owner would rather stay put, it is one
+  line.
+- A create started while a filter is active draws the draft under a row the filter is
+  showing; a create under a row the filter has pruned away is not reachable, because the
+  row it would hang off is not on screen.
+- The two-icon-pack requirement (§4.3) remains untested; everything the 2026-09-18 entry
+  carried forward and this batch did not touch stands.
+
 ---
 
 *The next entry goes below this one.*

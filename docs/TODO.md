@@ -417,6 +417,14 @@ product decisions that do not fit any existing phase. This phase holds the latte
       "found on the way, not fixed") the owner's way: `ConfirmDialog` always outranks every
       other overlay, drawer included (owner decision 2026-09-17). The two Reka dialogs both
       sit at `z-index: auto`; the fix is a stacking-context ruling, not a per-screen patch.
+- [ ] **Deleting a workspace lives in the workspaces list (`/workspaces`), never beside the
+      tree** (owner decision 2026-09-23). The tree's header carries nothing destructive at
+      all — the owner read a red trash beside `New…` as "delete the workspace", which is the
+      one thing that row must never be able to mean (Findings, 2026-09-23). A workspace is
+      deleted from the screen that lists workspaces, where the thing being deleted is the
+      row the person is pointing at. Needs the delete-and-trash model extended above the node
+      hierarchy (what happens to members, invitations, the slug) — no design pass yet, and
+      `/workspaces` has no such control today.
 - [ ] **Team decisions register** (owner decision 2026-09-17, new). A per-workspace place
       where important decisions are abstracted out of documents and kept so the knowledge is
       not lost — fed by hand and by the AI when it detects a decision in a document. Related
@@ -752,6 +760,105 @@ the transient one.* Three suites shared one assumption — "a page has content" 
 stated it, so it was never a decision anybody could review. The same shape is worth looking for
 wherever a row is created by one request and filled by another: a workspace before its first
 shelf, a book before its first page, a comment thread before its first reply.
+
+### 2026-09-23 — The owner rejected the tree: a trash beside "New", and a question with one answer (branch `feat/tree-like-vscode`)
+
+**The rejection.** The owner looked at the navigation tree and read the red trash button
+beside `New…` as *delete the workspace*. That misreading is the defect: the header offered
+`New…`, `Rename…` and a destructive icon in one row, and nothing in that row said which of
+the three acted on the workspace and which on a row. He also rejected the creation dialog,
+which asked "Type" with a radio group holding a single option, **Shelf** — a question whose
+only answer was already known.
+
+**What the research said, before anything was built.** Both reference products were read at
+source rather than from memory (the report is in this batch's session scratchpad):
+
+- **VS Code** registers exactly four actions against `MenuId.ViewTitle` for the Explorer —
+  New File, New Folder, Refresh, Collapse Folders (`explorerView.ts`, lines ~1107–1198).
+  **Zero destructive actions are registered there.** Delete and Rename are
+  `MenuId.ExplorerContext` plus keybindings (`Delete`, `F2`) and nothing else
+  (`fileActions.contribution.ts`). Creation is an input box drawn *in the row* at the target
+  folder's own depth — a placeholder item is added to the folder so the tree renders it at
+  the right indent, then put into editable mode (`openExplorerAndCreate` → `renderInputBox`);
+  Enter confirms, Escape cancels. Rename runs through the **same code path**, opening on the
+  current name.
+- **Obsidian** puts New note, New folder, Sort, Auto-reveal, Expand all and Collapse all in
+  the toolbar; Delete and Rename live in the right-click menu. Creation is create-then-name
+  inline, rename is `F2` or the menu, both in place.
+
+Neither product puts a destructive or identity-changing action next to the creation button.
+That is the one thing they agree on without exception, and it is what the owner's reading
+independently discovered.
+
+**What changed.**
+
+1. **The header is three controls: `New…`, `Filter`, `Collapse all`** (`NavigationTreeActions.vue`,
+   now a `role="group"` named "Tree actions" rather than a toolbar of writes). `Collapse all`
+   is new; `Filter` moved into the group from the section-header row. **No `Refresh`**: VS
+   Code needs one because its tree mirrors a filesystem other processes write to, and this
+   tree is drawn from the response of the request that changed it (`useTree`, 2026-09-16), so
+   a Refresh button would be a control with nothing to do — said in a comment at the call
+   site rather than built.
+2. **`Rename…` and the trash left the header.** Both are on the row's own context menu, where
+   they already were, plus the keyboard: **`F2`** renames, **`Delete`** trashes. The delete
+   flow itself is untouched (`useTrash`, the typed-name confirm, the optimistic removal).
+3. **Creation is a row, not a dialog.** `New…` inserts a draft row in the right place with
+   its name editable in place and focused; Enter confirms, Escape cancels and removes the
+   row. The created row is then selected, and opened when it is a page (a shelf, book or
+   chapter has no screen to open). `NavigationTreeDraftRow.vue` is the row,
+   `NavigationTreeRowEditor.vue` the field, `useTreeRowEditor.ts` the state machine
+   (idle → naming → committing → error).
+4. **Never a question with one answer.** `newRowChoice()` reads the one `LEGAL_PARENT_TYPES`
+   table: **one** legal child (workspace → shelf, shelf → book, chapter → page) and `New…`
+   starts naming it immediately, with no menu; **several** (a book holds chapters *and*
+   pages) and a short menu picks the kind first. Derived, never a second list — the table
+   already has five recorded copies in this file's history and `single-source.ts` fails the
+   build on a sixth.
+5. **Rename is the same field**, opened by `F2` or the menu item, on the current title
+   selected whole.
+6. **The footer: nothing to do — see below.**
+
+**How a refusal is answered, and why it splits in two.** The classification the dialog made
+is kept, because it is about what the person can do next:
+
+- **409, a name already taken** → the field stays open, the typed text still in it, the
+  server's own sentence beside it and wired with `aria-describedby`. Never a rename behind
+  the person's back.
+- **403 / 404 / 400 / a dead connection** → the draft row goes away and the reason appears in
+  the chip beside the tree, exactly where a refused drag's reason already stands. None of
+  those is fixable by typing in that field.
+
+**What the tree owes the field.** The tree is an ARIA tree with a roving tabindex and arrow
+navigation, and every key it answers — the arrows, Home, End, Enter, Delete, F2 — is a key
+someone typing a name will press. The editor marks itself `data-row-editor`, which
+`NavigationTreeNode.onKeydown` checks before reporting a press to the tree (the same guard
+`data-row-actions` already had for the `⋯` menu). The draft row is a real `treeitem` so the
+tree's shape stays true (`aria-setsize` counts it), and it is `tabindex="-1"` so the arrows
+never land on a text box. Focus returns to the row afterwards; the outcome is announced in
+the tree's live region, which **moved out of the rows' own branch** — a first shelf is
+created on a tree that has no rows to hold the region.
+
+**Found on the way, not a defect of this batch:** the e2e tree fixtures had no session that
+could write at the **workspace root** — ownership is not a grant and `can()` never consults
+it, and every fixture grant hung off the fixture shelf — so the one case where the hierarchy
+leaves a single legal child (`workspace` → `shelf`) could not be driven end to end at all.
+The owner now gets `manage` on the root in `e2e/tree-fixtures.bun.ts`.
+
+**The footer (owner criterion 6) needed no change, and this is the evidence.** The criterion
+asked for `AppShell`'s footer — "deep-wiki · Material Design 3 · Nuxt UI v4" — to leave the
+workspace frame. It is not in the workspace frame and never was: the app has exactly one
+`UFooter`, at `AppShell.vue:450`, inside the **`v-else`** branch — the document frame, taken
+by a screen that is *not* inside a workspace. Every screen inside the frame (the dashboard,
+read, edit, history, diff, members, settings) renders through the `UDashboardPanel` branch,
+which has no footer at all. The footer therefore stands only on `/workspaces`,
+`/workspaces/new` and the error screen — the "signed-out/marketing-ish shells" the criterion
+itself says to keep it on. Verified by reading every `UFooter` site in `apps/web` and by the
+screenshots in this batch: `tree-ux-header-1280-light.png` (inside the frame, no footer).
+Nothing was removed, because removing it would have taken it off exactly the screens the
+owner asked to keep it on.
+
+**Out of scope, recorded not built:** deleting a **workspace** belongs in the workspaces list
+at `/workspaces`, not beside the tree. Added to the Phase 3.5 roadmap above.
 
 ### 2026-09-17 — Cheap models first: OpenRouter's catalogue priced, and the cheapest routes that declare tools and JSON output (branch `feat/ai-cheap-models`)
 

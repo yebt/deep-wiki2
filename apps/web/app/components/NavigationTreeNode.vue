@@ -68,8 +68,11 @@
  * padding (DESIGN-SYSTEM §7.2's tree-indent value); each row is 40px tall
  * (that table's "default" density row height).
  */
+import type { NodeType } from '@deep-wiki/contracts';
 import type { TreeNode } from '~/composables/useTree';
 import { highlightSegments } from '~/composables/useTreeFilter';
+import { NODE_TYPE_ICONS } from '~/composables/useTreeRowActions';
+import type { TreeRowEditorBinding } from '~/composables/useTreeRowEditor';
 import { pageUrl } from '~/utils/routes';
 
 const props = defineProps<{
@@ -91,6 +94,12 @@ const props = defineProps<{
   currentId?: string | null;
   /** The tree filter's query, if one is active: the matched part of the title is marked. */
   highlight?: string;
+  /**
+   * The one row being named, if any (`useTreeRowEditor`). This row draws a
+   * field in place of its title when the rename names it, and a draft row
+   * at the end of its children when the creation names it as the parent.
+   */
+  editor?: TreeRowEditorBinding | null;
 }>();
 
 /**
@@ -115,15 +124,22 @@ const emit = defineEmits<{
   keydown: [payload: { event: KeyboardEvent; node: TreeNode; parentId: string; index: number }];
 }>();
 
-const NODE_ICONS: Record<string, string> = {
-  workspace: 'i-lucide-globe',
-  shelf: 'i-lucide-library',
-  book: 'i-lucide-book',
-  chapter: 'i-lucide-folder',
-  page: 'i-lucide-file-text',
-};
-
 const dropIndicator = ref<'before' | 'after' | 'on' | null>(null);
+
+/* ─── The row that is being named ─────────────────────────────────────
+ * Two shapes, one field (`NavigationTreeRowEditor`): this row's title is
+ * replaced by a box while it is being renamed, and a draft row stands at
+ * the end of this row's children while something is being created under
+ * it. Everything the row normally does — drag, click, the state layer, the
+ * keyboard — is stood down for the duration, because the row is a text
+ * field and a text field is not a drag handle.
+ */
+const isBeingRenamed = computed(
+  () => props.editor?.snapshot.draft.mode === 'rename' && props.editor.snapshot.draft.nodeId === props.node.id,
+);
+const hasDraftChild = computed(
+  () => props.editor?.snapshot.draft.mode === 'create' && props.editor.snapshot.draft.parentId === props.node.id,
+);
 
 /** Only a page has a destination in this batch; a shelf, book or chapter is a container to fold and to reorder, not a place to go. */
 const isNavigable = computed(() => props.node.type === 'page');
@@ -183,6 +199,14 @@ function warmRoute(): void {
 }
 const isContainer = computed(() => props.node.children.length > 0);
 const isExpanded = computed(() => isContainer.value && !props.collapsedIds.has(props.node.id));
+/**
+ * The children list is drawn while this row is open **or** while a draft
+ * stands in it: a book with nothing in it yet still has to show the row
+ * being typed into, and it has no `role="group"` of its own until it does.
+ */
+const showsChildren = computed(() => isExpanded.value || hasDraftChild.value);
+/** The draft counts among its new siblings while it exists, so the ARIA tree stays true. */
+const childSetSize = computed(() => props.node.children.length + (hasDraftChild.value ? 1 : 0));
 const isSelected = computed(() => props.selectedId === props.node.id);
 const isCurrent = computed(() => props.node.type === 'page' && props.currentId === props.node.id);
 /** The title in pieces, the matched one marked — one piece and no mark when nothing is being filtered. */
@@ -268,6 +292,12 @@ function onKeydown(event: KeyboardEvent): void {
   // control's to handle — Enter opens the menu, it must not also open the
   // page; an arrow must not also move the tree's focus.
   if (target?.closest('[data-row-actions]')) return;
+  // The same, for the field a name is typed into: every key the tree
+  // answers — the arrows, Home, End, Enter, Delete, F2 — is a key someone
+  // typing a name will press, so while the row is a text box the tree
+  // hears none of them (docs/UI-CHECKLIST.md §5's keyboard model stays
+  // coherent because the field, not the tree, is what has focus).
+  if (target?.closest('[data-row-editor]')) return;
   emit('keydown', { event, node: props.node, parentId: props.parentId, index: props.index });
 }
 </script>
@@ -280,7 +310,7 @@ function onKeydown(event: KeyboardEvent): void {
     :aria-level="depth + 1"
     :aria-posinset="index + 1"
     :aria-setsize="setSize"
-    :aria-expanded="isContainer ? isExpanded : undefined"
+    :aria-expanded="isContainer || hasDraftChild ? showsChildren : undefined"
     :aria-selected="isSelected"
     :aria-current="isCurrent ? 'page' : undefined"
     :tabindex="activeId === node.id ? 0 : -1"
@@ -291,10 +321,25 @@ function onKeydown(event: KeyboardEvent): void {
       warmRoute();
     "
   >
+    <!-- Being renamed: the row *is* the field, so nothing else about a row
+         applies to it — no drag, no click-to-open, no state layer, no
+         selected fill. The name is edited where it lives (owner criterion,
+         2026-09-23) and the field is the same one a creation types into. -->
+    <NavigationTreeRowEditor
+      v-if="isBeingRenamed && editor"
+      :snapshot="editor.snapshot"
+      :depth="depth"
+      :has-chevron="isContainer"
+      @update:value="editor.setValue"
+      @commit="editor.commit"
+      @cancel="editor.cancel"
+    />
+
     <!-- `group` on the row, not the `<li>`: the item element holds the
          whole subtree, so a `group-hover` there lit every ancestor's `⋯`
          when a page three levels down was hovered (seen 2026-09-16). -->
     <div
+      v-else
       draggable="true"
       class="dw-tree-row dw-state-layer group flex h-10 min-h-10 items-center gap-2 rounded-md pe-1 text-body-medium text-default"
       :class="[
@@ -334,7 +379,7 @@ function onKeydown(event: KeyboardEvent): void {
         :class="isExpanded ? 'rotate-90' : undefined"
         aria-hidden="true"
       />
-      <UIcon :name="NODE_ICONS[node.type] ?? 'i-lucide-file'" class="size-4 shrink-0 text-muted" aria-hidden="true" />
+      <UIcon :name="NODE_TYPE_ICONS[node.type as NodeType] ?? 'i-lucide-file'" class="size-4 shrink-0 text-muted" aria-hidden="true" />
       <!-- The icon carries the node's type, and an icon is never the only
            carrier of meaning (docs/UI-CHECKLIST.md §4.3) — so the
            accessible name says it in words. `title` keeps the full title
@@ -363,7 +408,7 @@ function onKeydown(event: KeyboardEvent): void {
         <slot name="row-actions" :node="node" :active="activeId === node.id" />
       </span>
     </div>
-    <ul v-if="isExpanded" role="group">
+    <ul v-if="showsChildren" role="group">
       <NavigationTreeNode
         v-for="(child, childIndex) in node.children"
         :key="child.id"
@@ -372,12 +417,13 @@ function onKeydown(event: KeyboardEvent): void {
         :depth="depth + 1"
         :parent-id="node.id"
         :index="childIndex"
-        :set-size="node.children.length"
+        :set-size="childSetSize"
         :active-id="activeId"
         :selected-id="selectedId"
         :collapsed-ids="collapsedIds"
         :current-id="currentId"
         :highlight="highlight"
+        :editor="editor"
         @reorder="onChildReorder"
         @activate="emit('activate', $event)"
         @open="emit('open', $event)"
@@ -388,6 +434,16 @@ function onKeydown(event: KeyboardEvent): void {
           <slot name="row-actions" v-bind="scope" />
         </template>
       </NavigationTreeNode>
+      <!-- Where the new node will land: last among this row's children,
+           which is where `POST /nodes` puts it (`insertCreatedNode`), so
+           the draft stands exactly where the real row will. -->
+      <NavigationTreeDraftRow
+        v-if="hasDraftChild && editor"
+        :editor="editor"
+        :depth="depth + 1"
+        :posinset="childSetSize"
+        :set-size="childSetSize"
+      />
     </ul>
   </li>
 </template>

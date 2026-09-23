@@ -93,7 +93,7 @@ async function openDrawerIfNarrow(page: Page): Promise<void> {
 test.describe('the row context menu', () => {
   test.use({ viewport: { width: 1280, height: 900 } });
 
-  test('right-click → Rename… on a page renames it through the toolbar’s own dialog', async ({ page, context }) => {
+  test('right-click → Rename… on a page renames it in the row itself', async ({ page, context }) => {
     await signInAs(context, writer.writerSessionToken);
     await page.goto(workspaceUrl(seed.workspaceSlug));
 
@@ -126,13 +126,16 @@ test.describe('the row context menu', () => {
 
     await menu.getByRole('menuitem', { name: /^Rename…/ }).click();
 
-    const dialog = page.getByRole('dialog', { name: 'Rename' });
-    await expect(dialog).toBeVisible();
+    // In the row, not in a dialog (owner criterion, 2026-09-23): the field
+    // opens on the current title, selected whole, where the row stands.
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    const field = page.locator('[data-row-editor] input');
+    await expect(field).toBeFocused();
+    await expect(field).toHaveValue(writer.editablePageTitle);
     const renamed = `${writer.editablePageTitle} (renamed)`;
-    await dialog.getByLabel('Name').fill(renamed);
-    await dialog.getByRole('button', { name: 'Rename' }).click();
+    await field.fill(renamed);
+    await field.press('Enter');
 
-    await expect(dialog).toBeHidden();
     await expect(page.getByRole('treeitem', { name: new RegExp(renamed.replace(/[()]/g, '\\$&')) })).toBeVisible({ timeout: 30000 });
     await expect(page.getByRole('status').filter({ hasText: `Renamed to “${renamed}”.` })).toHaveCount(1);
   });

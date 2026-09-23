@@ -67,6 +67,27 @@ describe('useWorkspaceTree', () => {
     expect(second.collapsedIds.value.has('shelf-1')).toBe(true);
   });
 
+  /**
+   * "Collapse all" (owner criterion, 2026-09-23) folds many rows at once,
+   * so it is one write to the fold set rather than one per row: a fold
+   * written per container would be N renders of the tree and N cookie-sized
+   * state writes for one press. The ids come from whoever is drawing the
+   * tree — the filter, which knows which rows are shown — so this composable
+   * stays the place the folds *live* and not a second place that walks them.
+   */
+  test('collapsing many containers at once is one write, and it keeps the folds already there', async () => {
+    const fetchTree = vi.fn(async () => ({ rootId: 'root-1', nodes: NODES }));
+    const tree = useWorkspaceTree(ref<string | null>('ws-collapse-all'), { fetchTree });
+    await tree.load();
+    tree.toggleCollapsed('page-1');
+
+    tree.collapseAll(['shelf-1', 'book-1']);
+
+    expect(tree.collapsedIds.value.has('shelf-1')).toBe(true);
+    expect(tree.collapsedIds.value.has('book-1')).toBe(true);
+    expect(tree.collapsedIds.value.has('page-1'), 'a fold already made is not undone').toBe(true);
+  });
+
   test('revealing a node unfolds every ancestor so the row can be seen', async () => {
     const fetchTree = vi.fn(async () => ({ rootId: 'root-1', nodes: NODES }));
     const tree = useWorkspaceTree(ref<string | null>('ws-reveal'), { fetchTree });
