@@ -61,8 +61,15 @@ export const EditSessionResponseSchema = z.object({
    * has no `expectedContentHash` to send but `null`, which `savePage()`
    * treats as a brand-new page and refuses with a stale-content 409 on
    * every page that already has content (docs/TODO.md Finding, this task).
+   *
+   * `null` when, and only when, the page has no content row at all: a page
+   * the tree created that nobody has saved yet. That is precisely what
+   * `SavePageRequestSchema.expectedContentHash` means by `null` ("the first
+   * save"), so the editor hands this value straight back and the two
+   * spellings of "there is nothing stored yet" stay one value, not two
+   * (docs/TODO.md Findings, 2026-09-23).
    */
-  contentHash: z.string(),
+  contentHash: z.string().nullable(),
   lock: z.object({ holderUserId: z.string(), acquiredAt: z.string(), heartbeatAt: z.string() }),
 });
 export type EditSessionResponse = z.infer<typeof EditSessionResponseSchema>;

@@ -75,6 +75,34 @@ function workspaceOf(node: LocatedNodeRow): { id: string; slug: string } {
   return { id: node.workspace_id, slug: node.workspace_slug };
 }
 
+/**
+ * A page node exists from the moment the tree creates it; its
+ * `page_content` row exists only from its first save. `readPageHtml` and
+ * `readPageMarkdown` answer `undefined` for both "no content row" and "a
+ * trashed page's content", and this file — the only caller of either — is
+ * where those two are told apart: every handler below has already resolved
+ * the node through `live_nodes`, so past that gate `undefined` can only
+ * mean the row was never written.
+ *
+ * Which is not absence. A page the caller may read, that exists and is
+ * live, with no content yet, is an EMPTY DOCUMENT. Until 2026-09-23 the
+ * read route returned `404 not found` for it, so a page created from the
+ * tree — visible in the tree, named in the breadcrumb — answered "This page
+ * does not exist" the moment it was opened (docs/TODO.md Findings,
+ * 2026-09-23; the line dates to the original read route, 6f3ef93). No test
+ * caught it because every fixture in this repository saved content first.
+ *
+ * The defaults live here rather than inside `read-page.ts` on purpose: a
+ * db-layer default would turn a *trashed* page's content read into an empty
+ * document for any future caller that forgot the `live_nodes` gate, and
+ * "trashed answers identically to unknown" is exactly what
+ * `scripts/checks/trash-filter.ts` exists to protect. Absence stays
+ * absence; the empty document is only ever reached past the gate.
+ */
+const NEVER_SAVED_HTML = { renderedHtml: '' } as const;
+/** `contentHash: null` is what `savePage()` reads as "the first save" (D16). */
+const NEVER_SAVED_MARKDOWN = { markdown: '', contentHash: null } as const;
+
 export function createPageRoutes(deps: PageRouteDeps): Hono<{ Variables: SessionVariables }> {
   const app = new Hono<{ Variables: SessionVariables }>();
   const auth = sessionMiddleware(deps.sql, { idleTimeoutMinutes: deps.sessionIdleTimeoutMinutes });
@@ -112,8 +140,8 @@ export function createPageRoutes(deps: PageRouteDeps): Hono<{ Variables: Session
     const authorized = await can(deps.sql, { subjectType: 'user', subjectId: session.userId, resourceId: nodeId, action: 'read' });
     if (!authorized) return c.json(ErrorResponseSchema.parse({ error: 'forbidden' }), 403);
 
-    const content = await readPageHtml(deps.sql, { nodeId, workspaceId: node.workspace_id });
-    if (!content) return c.json(ErrorResponseSchema.parse({ error: 'not found' }), 404);
+    // Never 404 past the `can()` gate: see `NEVER_SAVED_HTML`.
+    const content = (await readPageHtml(deps.sql, { nodeId, workspaceId: node.workspace_id })) ?? NEVER_SAVED_HTML;
 
     return c.json({ html: content.renderedHtml, title: node.title, workspaceId: node.workspace_id, workspace: workspaceOf(node) });
   });
@@ -173,8 +201,13 @@ export function createPageRoutes(deps: PageRouteDeps): Hono<{ Variables: Session
     const authorized = await can(deps.sql, { subjectType: 'user', subjectId: session.userId, resourceId: nodeId, action: 'write' });
     if (!authorized) return c.json(ErrorResponseSchema.parse({ error: 'forbidden' }), 403);
 
-    const content = await readPageMarkdown(deps.sql, { nodeId, workspaceId: node.workspace_id });
-    if (!content) return c.json(ErrorResponseSchema.parse({ error: 'not found' }), 404);
+    // A page with no content row opens an empty editor, not a refusal (see
+    // `NEVER_SAVED_MARKDOWN`): the author's first edit is the whole point of
+    // the node the tree just created. `probe('')` already accepts an empty
+    // document — an author who *clears* a page stores exactly these bytes —
+    // and `acquireLock` can hold a lock on a page before its first save
+    // since 0023 moved `page_locks`' foreign key onto `nodes`.
+    const content = (await readPageMarkdown(deps.sql, { nodeId, workspaceId: node.workspace_id })) ?? NEVER_SAVED_MARKDOWN;
 
     // The probe and the lock acquisition both happen inside this one
     // request — a refused document never touches the lock at all.
@@ -262,8 +295,10 @@ export function createPageRoutes(deps: PageRouteDeps): Hono<{ Variables: Session
     const authorized = await can(deps.sql, { subjectType: 'user', subjectId: session.userId, resourceId: nodeId, action: 'write' });
     if (!authorized) return c.json(ErrorResponseSchema.parse({ error: 'forbidden' }), 403);
 
-    const content = await readPageMarkdown(deps.sql, { nodeId, workspaceId: node.workspace_id });
-    if (!content) return c.json(ErrorResponseSchema.parse({ error: 'not found' }), 404);
+    // Same rule as the edit session this take-over displaces: a page whose
+    // first save has not happened yet hands the new holder an empty document
+    // and a `null` hash, not a refusal (see `NEVER_SAVED_MARKDOWN`).
+    const content = (await readPageMarkdown(deps.sql, { nodeId, workspaceId: node.workspace_id })) ?? NEVER_SAVED_MARKDOWN;
 
     const lock = await takeOverLock(deps.sql, { nodeId, workspaceId: node.workspace_id, userId: session.userId });
 

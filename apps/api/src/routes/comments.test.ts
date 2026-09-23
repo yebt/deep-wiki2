@@ -720,6 +720,29 @@ describe('POST /pages/:id/comments — a reply may not join a thread rooted on a
 // endpoint uses — so the two must agree about what a read-but-not-comment
 // subject sees.
 describe('GET /pages/:id/comments', () => {
+  /**
+   * A page node exists from the moment the tree creates it; its
+   * `page_content` row exists only from its first save, and `comments`'
+   * own FK into `page_content` means a never-saved page can hold no thread
+   * at all. Both list endpoints must still answer — the read screen loads
+   * them beside the article — rather than reporting the page absent, which
+   * is what the sibling read route did until 2026-09-23 (docs/TODO.md
+   * Findings, 2026-09-23). `buildFixture()` creates the page node and no
+   * content row, so this is the never-saved case by simply not inserting one.
+   */
+  test('a page that has never been saved answers an empty thread list, not 404', async () => {
+    const fixture = await buildFixture();
+    const app = buildApp();
+
+    const threads = await app.request(`/pages/${fixture.pageId}/comments`, { headers: { cookie: fixture.commenterCookie } });
+    const indicators = await app.request(`/pages/${fixture.pageId}/comments/indicators`, { headers: { cookie: fixture.commenterCookie } });
+
+    expect(threads.status).toBe(200);
+    expect(((await threads.json()) as { threads: unknown[] }).threads).toEqual([]);
+    expect(indicators.status).toBe(200);
+    expect(((await indicators.json()) as { indicators: unknown[] }).indicators).toEqual([]);
+  });
+
   test('a subject with comment sees a root thread with its nested replies, ordered by creation', async () => {
     const fixture = await buildFixture();
     await sql`

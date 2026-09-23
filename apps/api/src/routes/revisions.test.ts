@@ -98,6 +98,24 @@ describe('GET /pages/:id/history', () => {
     expect(body.workspace).toEqual({ id: fixture.workspaceId, slug: await workspaceSlugOf(fixture.workspaceId) });
   });
 
+  /**
+   * A page node exists from the moment the tree creates it; its
+   * `page_content` row exists only from its first save. This route is
+   * already right about that — it reads `page_revision`, not the content
+   * row — and this test pins it, because the sibling read route was not
+   * (docs/TODO.md Findings, 2026-09-23): it answered `404 not found` for a
+   * page the tree had just created.
+   */
+  test('a page that has never been saved answers an empty history, not 404', async () => {
+    const fixture = await buildFixture();
+    const app = buildApp();
+
+    const res = await app.request(`/pages/${fixture.pageId}/history`, { headers: { cookie: fixture.readerCookie } });
+
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { revisions: unknown[] }).revisions).toEqual([]);
+  });
+
   test('returns a page\'s revisions newest first for a subject with read', async () => {
     const fixture = await buildFixture();
     const first = await savePage(sql, {

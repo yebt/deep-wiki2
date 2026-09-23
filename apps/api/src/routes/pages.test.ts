@@ -206,6 +206,160 @@ describe('GET /pages/:id — the manager trash block', () => {
   });
 });
 
+/**
+ * A page node exists from the moment the tree creates it; its
+ * `page_content` row exists only from its first save. Every fixture in
+ * this file calls `savePage()` before it asks anything, so until 2026-09-23
+ * nothing here exercised the gap between the two — and the read route
+ * answered `404 not found` for a page the tree had just created and the
+ * breadcrumb was showing (docs/TODO.md Findings, 2026-09-23). A page the
+ * caller may read, that exists and is live, with no content yet, renders as
+ * an empty document; it is the *absence of a content row*, never the
+ * absence of a page.
+ *
+ * `buildFixture()` deliberately creates the page node and nothing else, so
+ * every test in this block is the never-saved case by simply not saving.
+ */
+describe('a page that has never been saved', () => {
+  test('GET /pages/:id renders an empty document rather than 404', async () => {
+    const fixture = await buildFixture();
+    const app = buildApp();
+
+    const res = await app.request(`/pages/${fixture.pageId}`, { headers: { cookie: fixture.readerCookie } });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { html: string; title: string; workspaceId: string; workspace: { id: string; slug: string } };
+    expect(body.html).toBe('');
+    expect(body.title).toBe('A Page');
+    expect(body.workspaceId).toBe(fixture.workspaceId);
+    expect(body.workspace).toEqual({ id: fixture.workspaceId, slug: await workspaceSlugOf(fixture.workspaceId) });
+  });
+
+  // The fix must not widen what the route discloses: denial is still a 403
+  // for this route (it is the one route that distinguishes them, because a
+  // subject who directly requests a page URL and is denied is told so —
+  // `usePageRead`'s own note), and an id that names nothing is still a 404.
+  test('a caller without read still gets the same 403, and an unknown id still 404s', async () => {
+    const fixture = await buildFixture();
+    const app = buildApp();
+
+    const denied = await app.request(`/pages/${fixture.pageId}`, { headers: { cookie: fixture.outsiderCookie } });
+    const absent = await app.request(`/pages/${crypto.randomUUID()}`, { headers: { cookie: fixture.readerCookie } });
+
+    expect(denied.status).toBe(403);
+    expect(await denied.json()).toEqual({ error: 'forbidden' });
+    expect(absent.status).toBe(404);
+    expect(await absent.json()).toEqual({ error: 'not found' });
+  });
+
+  // A trashed never-saved page is still absence to everyone without
+  // `manage`: the empty-document rule is reached only after `live_nodes`
+  // has already found the node.
+  test('GET /pages/:id on a trashed never-saved page is refused identically to an unknown id', async () => {
+    const fixture = await buildFixture();
+    await sql`UPDATE nodes SET trashed_at = now(), trash_operation_id = ${crypto.randomUUID()} WHERE id = ${fixture.pageId}`;
+    const app = buildApp();
+
+    const known = await app.request(`/pages/${fixture.pageId}`, { headers: { cookie: fixture.readerCookie } });
+    const unknown = await app.request(`/pages/${crypto.randomUUID()}`, { headers: { cookie: fixture.readerCookie } });
+
+    expect(known.status).toBe(404);
+    expect(unknown.status).toBe(404);
+    expect(await known.json()).toEqual(await unknown.json());
+  });
+
+  // The manager's trash block is the one place that already answered a
+  // missing content row correctly (`html: content?.renderedHtml ?? ''`),
+  // and nothing said so: a page trashed before it was ever saved is the
+  // only way to reach that `??`.
+  test('a manager reading it after it is trashed gets the trash block over an empty document', async () => {
+    const fixture = await buildFixture();
+    const [reader] = await sql<{ id: string }[]>`SELECT subject_id AS id FROM permissions WHERE resource_id = ${fixture.pageId} AND action = 'read' LIMIT 1`;
+    await sql`
+      INSERT INTO permissions (workspace_id, subject_type, subject_id, resource_id, action, effect)
+      VALUES (${fixture.workspaceId}, 'user', ${reader!.id}, ${fixture.pageId}, 'manage', 'allow')
+    `;
+    await sql`UPDATE nodes SET trashed_at = now(), trash_operation_id = ${crypto.randomUUID()} WHERE id = ${fixture.pageId}`;
+    const app = buildApp();
+
+    const res = await app.request(`/pages/${fixture.pageId}`, { headers: { cookie: fixture.readerCookie } });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { html: string; title: string; trash?: { daysLeft: number } };
+    expect(body.html).toBe('');
+    expect(body.title).toBe('A Page');
+    expect(body.trash?.daysLeft).toBe(30);
+  });
+
+  // The other half of the owner's journey: create a page, then click Edit.
+  // `contentHash` is `null` — there is no row to have one — which is
+  // exactly what `savePage()` reads as "the first save" (D16).
+  test('GET /pages/:id/edit-session opens an empty editor and acquires the lock', async () => {
+    const fixture = await buildFixture();
+    const app = buildApp();
+
+    const res = await app.request(`/pages/${fixture.pageId}/edit-session`, { headers: { cookie: fixture.writerCookie } });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { markdown: string; contentHash: string | null; title: string; lock: { holderUserId: string } };
+    expect(body.markdown).toBe('');
+    expect(body.contentHash).toBeNull();
+    expect(body.title).toBe('A Page');
+    expect(body.lock.holderUserId).toBeDefined();
+
+    const [lockRow] = await sql`SELECT holder_user_id FROM page_locks WHERE node_id = ${fixture.pageId}`;
+    expect(lockRow).toBeTruthy();
+  });
+
+  test('the first save from that session persists, and the page then reads back', async () => {
+    const fixture = await buildFixture();
+    const app = buildApp();
+
+    const session = await app.request(`/pages/${fixture.pageId}/edit-session`, { headers: { cookie: fixture.writerCookie } });
+    const { contentHash } = (await session.json()) as { contentHash: string | null };
+
+    const saved = await app.request(`/pages/${fixture.pageId}`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json', cookie: fixture.writerCookie },
+      body: JSON.stringify({ markdown: '# First\n', expectedContentHash: contentHash }),
+    });
+
+    expect(saved.status).toBe(200);
+    const read = await app.request(`/pages/${fixture.pageId}`, { headers: { cookie: fixture.readerCookie } });
+    expect(read.status).toBe(200);
+    expect(((await read.json()) as { html: string }).html).toContain('First');
+  });
+
+  // The lock the empty session takes must behave like any other: a second
+  // writer is refused, and take-over hands them the same empty document.
+  test('the empty session’s lock is a real lock: another writer is refused and can take it over', async () => {
+    const fixture = await buildFixture();
+    const app = buildApp();
+    await app.request(`/pages/${fixture.pageId}/edit-session`, { headers: { cookie: fixture.writerCookie } });
+
+    const [secondWriter] = await sql<{ id: string }[]>`
+      INSERT INTO users (email, password_hash, display_name) VALUES (${`writer6-${crypto.randomUUID()}@example.com`}, 'hash', 'Writer6') RETURNING id
+    `;
+    await sql`
+      INSERT INTO permissions (workspace_id, subject_type, subject_id, resource_id, action, effect)
+      VALUES (${fixture.workspaceId}, 'user', ${secondWriter!.id}, ${fixture.pageId}, 'write', 'allow')
+    `;
+    const secondCookie = await cookieFor(secondWriter!.id);
+
+    const refused = await app.request(`/pages/${fixture.pageId}/edit-session`, { headers: { cookie: secondCookie } });
+    expect(refused.status).toBe(409);
+    expect(((await refused.json()) as { reason: string }).reason).toBe('locked');
+
+    const taken = await app.request(`/pages/${fixture.pageId}/lock/take-over`, { method: 'POST', headers: { cookie: secondCookie } });
+    expect(taken.status).toBe(200);
+    const body = (await taken.json()) as { markdown: string; contentHash: string | null; lock: { holderUserId: string } };
+    expect(body.markdown).toBe('');
+    expect(body.contentHash).toBeNull();
+    expect(body.lock.holderUserId).toBe(secondWriter!.id);
+  });
+
+});
+
 describe('PUT /pages/:id', () => {
   test('a subject with no write grant cannot save, and storage is unchanged', async () => {
     const fixture = await buildFixture();
