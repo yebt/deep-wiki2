@@ -903,7 +903,7 @@ describe('NavigationTree', () => {
         expect(component.find('[data-node-id="page-1"]').exists(), 'a "no" leaves the row').toBe(true);
       });
 
-      test('a "yes" takes the row out at once, and success is said beside the tree with a link to the Trash, and announced', async () => {
+      test('a "yes" takes the row out at once, and success is a toast carrying the way back, and announced', async () => {
         const { removeNode } = mockTree({ status: 'success', nodes: NODES, manageable: ['page-1'] });
         let release!: () => void;
         const trashFetcher = vi.fn(() => new Promise<typeof TRASHED>((resolve) => { release = () => resolve(TRASHED); }));
@@ -920,12 +920,16 @@ describe('NavigationTree', () => {
         await settle();
 
         expect(component.find('[data-node-id="page-1"]').exists()).toBe(false);
-        const notice = component.find('[data-testid="tree-delete-notice"]');
-        expect(notice.exists()).toBe(true);
-        expect(notice.text()).toContain('Moved “First page” to the trash');
-        const link = notice.find('a');
-        expect(link.attributes('href')).toBe('/w/acme/trash');
-        expect(link.text()).toMatch(/trash/i);
+        // The success is the toast tier now (owner decision, 2026-09-23):
+        // transient, dismissible, and carrying the one way back. The chip
+        // beside the tree is gone; the live region still says it, which is
+        // the half §5 relies on.
+        expect(component.find('[data-testid="tree-delete-notice"]').exists()).toBe(false);
+        const toast = useToast().toasts.value.at(-1) as unknown as Record<string, unknown> & { actions?: { label: string; to?: string }[] };
+        expect(toast.title).toBe('Moved “First page” to the trash.');
+        expect(toast.role).toBe('status');
+        expect(toast.actions?.[0]?.label).toBe('Restore from Trash');
+        expect(toast.actions?.[0]?.to).toBe('/w/acme/trash');
         expect(component.get('[data-testid="tree-menu-status"]').text()).toContain('Moved “First page” to the trash');
         // Focus does not fall off the tree with the row: it lands on a neighbour.
         expect((document.activeElement as HTMLElement | null)?.getAttribute('role')).toBe('treeitem');

@@ -237,14 +237,29 @@ describe('workspace members screen', () => {
 
     expect(invite).toHaveBeenCalledWith({ email: 'newbie@example.com', action: 'read' });
     expect(dialog(), 'sent: the dialog closes').toBeNull();
+    // And what a sighted person reads is the toast, which names the
+    // address: "Invitation sent." on a screen that invites people all day
+    // says nothing about which one (owner decision, 2026-09-23 — the
+    // transient successes are toasts).
+    const toast = (useToast().toasts.value as unknown as { title?: string; role?: string }[]).at(-1)!;
+    expect(toast.title).toBe('Invitation sent to newbie@example.com.');
+    expect(toast.role).toBe('status');
   });
 
-  test('a sent invitation is confirmed in a live region on the screen — not inside the dialog — that names the address', async () => {
+  /**
+   * The live region stays — it is the half §5 relies on, always in the DOM
+   * so the announcement is made when its text appears — and since
+   * 2026-09-23 it is the *only* thing on the screen that says it: the
+   * visible confirmation is the toast (see the test above), and the lasting
+   * record is the pending list.
+   */
+  test('a sent invitation is announced from a live region on the screen, never from inside the dialog', async () => {
     mockMembers({ status: 'success', listing, inviteStatus: 'sent', inviteMessage: 'Invitation sent to newbie@example.com.' });
     const component = await mountSuspended(PageInApp, FRAME_STUBS);
 
-    const statuses = component.findAll('main [role="status"]').map((s) => s.text());
-    expect(statuses.some((t) => /newbie@example\.com/.test(t))).toBe(true);
+    const region = component.findAll('main [role="status"]').find((s) => /newbie@example\.com/.test(s.text()));
+    expect(region).toBeDefined();
+    expect(region!.classes()).toContain('sr-only');
     expect(dialog()).toBeNull();
   });
 

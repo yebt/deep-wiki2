@@ -93,6 +93,8 @@ const route = useRoute();
 const workspaceSlug = route.params.workspace as string;
 
 const { status, message, listing, inviteStatus, inviteMessage, load, invite } = useWorkspaceMembers(workspaceSlug);
+/** The toast tier, for the one thing on this screen that is over the moment it happens. */
+const { confirmed } = useStatusToast();
 const workspaceId = computed(() => listing.value?.workspace.id ?? null);
 const allWorkspacesUrl = workspacesUrl();
 // A signed-out visit leaves for sign-in and comes back (`useSignInRedirect`).
@@ -174,10 +176,16 @@ function discardInvite(): void {
 }
 
 async function onInvite(event: FormSubmitEvent<{ email: string; action: ActionValue }>): Promise<void> {
-  await invite({ email: event.data.email, action: event.data.action });
+  const email = event.data.email;
+  await invite({ email, action: event.data.action });
   if (inviteStatus.value === 'sent') {
     inviteState.email = '';
     closeInvite();
+    // The dialog has closed over the screen it was asked from, so the
+    // confirmation is a toast (the owner, 2026-09-23) — and it names the
+    // address, because "Invitation sent." on a screen that invites people
+    // all day says nothing about which one.
+    confirmed({ message: `Invitation sent to ${email}.`, icon: 'i-lucide-mail-check' });
   }
 }
 
@@ -256,13 +264,12 @@ useSeoMeta({ title: 'Members — deep-wiki' });
     <div v-else-if="listing" class="space-y-8">
       <!-- Always in the DOM so the announcement is made when its text
            appears (§5) — on the screen, never inside the dialog, which has
-           closed by the time there is something to say. Styled as a
-           success chip only while it has one. -->
-      <p
-        role="status"
-        aria-live="polite"
-        :class="inviteStatus === 'sent' ? 'rounded-md bg-success-container px-3 py-2 text-body-small text-on-success-container' : 'sr-only'"
-      >
+           closed by the time there is something to say. What a sighted
+           person reads is the toast (`useStatusToast`, 2026-09-23): a sent
+           invitation is transient and successful, and the pending list
+           below is the lasting record of it. This region keeps the
+           announcement, which is the half §5 relies on. -->
+      <p role="status" aria-live="polite" class="sr-only">
         {{ inviteStatus === 'sent' ? inviteMessage : '' }}
       </p>
 

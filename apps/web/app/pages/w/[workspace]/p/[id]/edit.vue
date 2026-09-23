@@ -78,13 +78,22 @@ const isDirty = ref(false);
 // was a modal of its own on this page.
 const { confirm } = useConfirm();
 
-// docs/UI-CHECKLIST.md §3: "Saved." persisting over a document the user
-// has since kept editing is worse than no confirmation at all — it claims
-// something that stopped being true the moment `onEditorUpdate` fired.
-// `useSavePage`'s own status legitimately stays `success` until the next
-// save resolves (documented there as the page component's call, not the
-// composable's); this is that call.
-const showSavedBanner = computed(() => saveStatus.value === 'success' && !isDirty.value);
+// A save that worked is a transient confirmation, so it is a toast (the
+// owner, 2026-09-23, pointing at the green bar under the title: "estas
+// cosas pueden manejarse como toasts"). The tier and everything about it
+// — the status role, the polite announcement, the dismissal, how long it
+// stays — is `useStatusToast`'s; this only says what happened to what,
+// because "Saved." alone is §3's own example of a confirmation too weak
+// to act on.
+//
+// It fires on the *transition* into success rather than being drawn from
+// the status: `useSavePage`'s status legitimately stays `success` until
+// the next save resolves (documented there as the page component's call,
+// not the composable's), and a banner drawn from that kept claiming a
+// document had been saved while it was being edited again. A toast that
+// removes itself cannot make that claim, and the watcher makes sure it is
+// made exactly once per save.
+const { confirmed } = useStatusToast();
 // Bumped to force `EditorSurface` to remount with `currentMarkdown` as its
 // initial doc — it only reads its `markdown` prop once, on mount (see its
 // own header comment) — after the author accepts the corrected document
@@ -415,6 +424,13 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', onBeforeUnload)
  */
 const renamedTitle = ref<string | null>(null);
 const shownTitle = computed(() => renamedTitle.value ?? session.value?.title ?? '');
+
+// Declared here, below the name it reads: a save's confirmation says which
+// page was saved, and the name a person has just changed is the one it has
+// to use.
+watch(saveStatus, (now, before) => {
+  if (now === 'success' && before !== 'success') confirmed({ message: `Saved “${shownTitle.value}”.` });
+});
 
 useHead({ htmlAttrs: { lang: 'en' } });
 useSeoMeta({ title: () => (shownTitle.value ? `Editing ${shownTitle.value} — deep-wiki` : 'deep-wiki') });
@@ -769,14 +785,6 @@ useSeoMeta({ title: () => (shownTitle.value ? `Editing ${shownTitle.value} — d
         <template #actions>
           <UButton size="xs" variant="outline" color="error" icon="i-lucide-refresh-cw" @click="onSave">Retry</UButton>
         </template>
-      </InlineNotice>
-      <!-- `success`: "Saved." is §3's own example of a confirmation too
-           weak to act on ("Saved as revision 12 · 2 min ago" is the bar).
-           This names what was saved, and — `showSavedBanner` — stops
-           claiming it once the document is dirty again, since a stale
-           "Saved." next to unsaved edits is worse than no confirmation. -->
-      <InlineNotice v-else-if="showSavedBanner" tier="chip" tone="success" class="mb-4">
-        Saved “{{ shownTitle }}”.
       </InlineNotice>
       <!-- The source view's refusal: the chip tier, above the text area
            it is about. It names the line, shows the two spellings *when

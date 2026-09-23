@@ -136,8 +136,10 @@ function mockDefaults(
 ) {
   useLockHeartbeatMock.mockReturnValue({ status: ref(saveOverrides.heartbeatStatus ?? 'idle'), start: vi.fn(async () => {}), stop: vi.fn() });
   const save = vi.fn(async () => {});
+  /** Returned so a test can drive the transition into success, which is what the confirmation toast watches. */
+  const saveStatus = ref(saveOverrides.status ?? 'idle');
   useSavePageMock.mockReturnValue({
-    status: ref(saveOverrides.status ?? 'idle'),
+    status: saveStatus,
     contentHash: ref('hash-1'),
     canonical: ref(saveOverrides.canonical ?? null),
     corrected: ref(saveOverrides.corrected ?? null),
@@ -148,7 +150,7 @@ function mockDefaults(
   mockPresence();
   mockFrame();
   const confirm = mockConfirm(false);
-  return { save, confirm };
+  return { save, confirm, saveStatus };
 }
 
 const READY_SESSION = { markdown: '# Hi\n', title: 'A Page', workspaceId: 'ws-1', lock: { holderUserId: 'me', acquiredAt: 'x', heartbeatAt: 'x' } };
@@ -837,42 +839,63 @@ describe('edit-mode page', () => {
     expect(save).toHaveBeenCalledTimes(1);
   });
 
-  // §3 "Success": "Saved." is the exact weak example this rule names.
-  // This must name what was saved, and must stop claiming it once the
-  // document is dirty again. Scoped to `main`: the contextual bar carries
-  // a live region of its own since 2026-09-15 (the sidebar toggle's), and
-  // the save banner is the screen's, in the column.
+  /**
+   * §3 "Success": "Saved." is the exact weak example that rule names, so
+   * the confirmation names what was saved. Since 2026-09-23 it is a toast
+   * rather than a chip under the title (the owner: "estas cosas pueden
+   * manejarse como toasts"), which also answers the other half of that
+   * rule by construction — a notice that removes itself cannot keep
+   * claiming a document is saved while it is being edited again, which is
+   * what the chip had to be computed away to avoid.
+   */
   describe('the success confirmation', () => {
-    test('names what was saved, not a bare "Saved."', async () => {
-      mockDefaults({ status: 'success' });
+    function savedToasts(): { title?: string; role?: string }[] {
+      return (useToast().toasts.value as unknown as { title?: string; role?: string }[]).filter((toast) => /Saved/.test(toast.title ?? ''));
+    }
+
+    test('a save that worked names what was saved, in a toast, once', async () => {
+      const { saveStatus } = mockDefaults();
       mockSession({
         status: 'ready',
         session: { markdown: '# Hi\n', title: 'My Page', workspaceId: 'ws-1', lock: { holderUserId: 'me', acquiredAt: 'x', heartbeatAt: 'x' } },
       });
       const component = await mountSuspended(PageInApp, { global: { stubs: { EditorSurface: true, WorkspaceSidebar: true } } });
+      expect(savedToasts()).toHaveLength(0);
+      // Nothing on the page says it: the chip under the title is gone.
+      expect(component.find('main').text()).not.toMatch(/Saved/);
 
-      const banner = component.get('main [role="status"][aria-live="polite"]');
-      expect(banner.text()).not.toBe('Saved.');
-      expect(banner.text()).toMatch(/My Page/);
+      saveStatus.value = 'success';
+      await component.vm.$nextTick();
+      await nextTick();
+
+      const toasts = savedToasts();
+      expect(toasts).toHaveLength(1);
+      expect(toasts[0]!.title).toBe('Saved “My Page”.');
+      expect(toasts[0]!.title).not.toBe('Saved.');
+      expect(toasts[0]!.role).toBe('status');
+      expect(component.find('main').text()).not.toMatch(/Saved “My Page”/);
     });
 
-    test('stops claiming "Saved" once the document is dirty again', async () => {
-      mockDefaults({ status: 'success' });
+    test('a status that stays `success` between saves does not confirm twice', async () => {
+      const { saveStatus } = mockDefaults();
       mockSession({
         status: 'ready',
         session: { markdown: '# Hi\n', title: 'My Page', workspaceId: 'ws-1', lock: { holderUserId: 'me', acquiredAt: 'x', heartbeatAt: 'x' } },
       });
       const component = await mountSuspended(PageInApp, { global: { stubs: { EditorSurface: true, WorkspaceSidebar: true } } });
-      // The banner, by what it says: the view toggle's own live region
-      // (2026-09-17) is always in the DOM beside it.
-      const savedBanner = () => component.findAll('main [role="status"][aria-live="polite"]').filter((el) => /Saved/.test(el.text()));
-      expect(savedBanner()).toHaveLength(1);
 
-      const editorStub = component.findComponent({ name: 'EditorSurface' });
-      editorStub.vm.$emit('update', '# Hi\n\nedited again\n');
+      saveStatus.value = 'success';
       await component.vm.$nextTick();
+      await nextTick();
+      const first = savedToasts().length;
 
-      expect(savedBanner()).toHaveLength(0);
+      // The document is edited again: `useSavePage` keeps `success` until
+      // the next save resolves, and the confirmation must not be re-made.
+      component.findComponent({ name: 'EditorSurface' }).vm.$emit('update', '# Hi\n\nedited again\n');
+      await component.vm.$nextTick();
+      await nextTick();
+
+      expect(savedToasts()).toHaveLength(first);
     });
   });
 

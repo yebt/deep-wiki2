@@ -5,21 +5,27 @@
  *
  * ## The notice tiers, stated once
  *
- * This product has exactly three notice shapes. Anything that looks like a
- * fourth is one of these with the wrong classes (docs/UI-CHECKLIST.md §4.1:
+ * This product has exactly four notice shapes. Anything that looks like a
+ * fifth is one of these with the wrong classes (docs/UI-CHECKLIST.md §4.1:
  * anything on more than one screen is one component, never one copy per
  * screen — the 2026-09-14 audit counted five shapes across nineteen
- * hand-rolled copies before this file existed).
+ * hand-rolled copies before this file existed). The rule for choosing
+ * between them is docs/UI-CHECKLIST.md §4.12.
  *
  * | Tier      | Component                        | Job                                                                | Shape                                                           |
  * | --------- | -------------------------------- | ------------------------------------------------------------------ | --------------------------------------------------------------- |
  * | **Panel** | `PageNotice`                     | Replaces a screen's content: denied, missing, locked, empty, failed | Filled card (§9.4), heading at the screen's level, icon, actions |
  * | **Bar**   | `InlineNotice` `tier="bar"`      | Stands in for, or beside, a form: a result, a dead link, a refusal | `rounded-md p-4`, icon, `body-large-emphasized` title, body, actions |
  * | **Chip**  | `InlineNotice` `tier="chip"`     | One line about the thing directly below it, with at most one action | `rounded-md px-3 py-2 text-body-small`, action on the same row  |
+ * | **Toast** | `useStatusToast().confirmed()`   | A transient success that is over: saved, created, moved to trash, invited | `UToast` on the overlay rung, one sentence, at most one action, and it removes itself |
  *
  * A bar has a title because it is read on its own — the form it replaced
  * is gone. A chip has none because the thing it is about is still on
- * screen right under it.
+ * screen right under it. A toast is the only tier that **removes
+ * itself**, which is the whole reason nothing that must be read may live
+ * in it: an error, a refusal that names a conflict, "your work is
+ * preserved" after a failed save, and any state the screen itself is in
+ * all stay in one of the three above (owner decision, 2026-09-23).
  *
  * ## Tone
  *

@@ -615,6 +615,47 @@ makes conventions portable across projects.
 
 Discoveries and constraints. Newest first.
 
+### 2026-09-23 — Status banners became toasts, and the tier rule moved into the checklist
+
+The owner, pointing at the green "Saved “parla”." bar under a page title: *"estas cosas pueden
+manejarse como toasts."*
+
+**What moved.** Exactly the transient, successful confirmations: "Saved “X”." (edit mode),
+"Created <kind> “X” in “Y”." and "Moved “X” to the trash." (the tree), and "Invitation sent to
+<address>." (members). Each is now one sentence in a toast through `useStatusToast()`, which is the
+one place the tier's role, politeness, dismissal, icon and duration are chosen — a product where
+each call site picks its own is a fourth notice shape per screen, which is the defect the three
+`InlineNotice` tiers already exist to prevent.
+
+**What deliberately did not move**, because a toast removes itself: every error and refusal, "your
+work is preserved" after a failed save, the lock-lost notice, the not-canonical and dead-anchor
+exits, the tree's refused drag, create, rename and delete reasons, and every `PageNotice` panel —
+those are states the screen is in. The auth screens' success bars stay bars: they replace the form
+the person submitted and carry the next step, which is not transient at all.
+
+**Two surfaces on purpose.** Where a screen already kept an always-present live region — the tree's
+and the members screen's — the region still says the sentence and the toast is what a sighted
+person reads. That pairing was already the case for the trash chip (Review Log, 2026-09-18, which
+records the double announcement as known), so nothing regressed; the visible half simply stopped
+being a chip that stayed. The members screen's region is now `sr-only` in every state rather than
+becoming a hand-rolled success chip — a fifth notice shape nobody had noticed.
+
+**The saved confirmation is now correct by construction.** `useSavePage`'s status legitimately stays
+`success` until the next save resolves, so the chip had to be computed away with
+`showSavedBanner = success && !isDirty` or it went on claiming a document was saved while it was
+being edited again. A notice that removes itself cannot make that claim: the toast fires on the
+*transition* into success, exactly once per save, and `edit.test.ts` holds both halves.
+
+**Where the rules live now.** The four shapes are stated in `InlineNotice.vue`, as the three were;
+the rule for *choosing* between them is new `docs/UI-CHECKLIST.md` §4.12, because which surface a
+message takes is a correctness matter and the checklist wins on those. `docs/DESIGN-SYSTEM.md` §9.6
+loses its "snackbars keep `inverse-surface`" line — that ruling rested on snackbars being rare, and
+a toast on every save is not rare — with the reasoning and both measurements in its §14.
+
+**Not moved because it does not exist yet:** "restored". Trash restore is Phase 9 and the screen is
+not built; when it is, its confirmation is a toast by this rule. A rename from the page's own title
+field is also not confirmed by a toast: the heading the person just typed into is the confirmation.
+
 ### 2026-09-23 — The page title is edited on the page, and a second tree instance silently undid the rename
 
 The owner: *"El title, se edita y es el mismo title del page, como en obsidian."* What shipped is

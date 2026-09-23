@@ -378,6 +378,12 @@ async function onEditorCommit(): Promise<void> {
       applyCreated(outcome.node);
       const where = outcome.node.parentId === (rootId.value ?? '') ? 'the top level' : `“${pathTo(outcome.node.parentId).at(-1)?.title ?? ''}”`;
       announcement.value = `Created ${NODE_TYPE_LABELS[outcome.node.type].toLowerCase()} “${outcome.node.title}” in ${where}.`;
+      // Transient and successful, so the toast tier (2026-09-23). It is
+      // worth saying at all — rather than leaving the new row to speak for
+      // itself — because creating a page navigates away from the screen the
+      // person was on, and a shelf, book or chapter may be created under a
+      // parent the scroll has left behind.
+      confirmed({ message: `Created ${NODE_TYPE_LABELS[outcome.node.type].toLowerCase()} “${outcome.node.title}” in ${where}.` });
       // Selected and opened: the thing just made is the thing being worked
       // on. A page has a screen to go to; a shelf, book or chapter has
       // none, so being picked and focused is all "opened" can mean for it.
@@ -438,9 +444,17 @@ const forceDeleteNode: ForceDeleteFetcher = (nodeId, body) =>
     ? props.forceDeleteFetcher(nodeId, body)
     : $fetch(`${config.public.apiBaseUrl}/nodes/${nodeId}/force-delete`, { method: 'POST', credentials: 'include', body });
 
-/** What the last delete came to: the notice beside the tree, one at a time. */
-const deleteNotice = ref<{ readonly title: string } | null>(null);
+/**
+ * A refusal stays beside the tree until it is read; the success does not
+ * (owner decision, 2026-09-23: "estas cosas pueden manejarse como
+ * toasts"). So there is no `deleteNotice` ref any more — "Moved “X” to the
+ * trash." is a toast carrying the way back, and the always-present live
+ * region below still says it for a screen reader, which is the half of
+ * that pair §5 relies on.
+ */
 const deleteError = ref<string | null>(null);
+/** The product's toast tier — transient successes only (`useStatusToast`). */
+const { confirmed } = useStatusToast();
 /** The node, wherever it stands — the menu's row may be folded away by the time the dialog answers. */
 function nodeById(nodeId: string): TreeNode | null {
   const walk = (list: readonly TreeNode[]): TreeNode | null => {
@@ -464,7 +478,6 @@ async function deleteRow(nodeId: string): Promise<void> {
     announcement.value = action.reason ?? '';
     return;
   }
-  deleteNotice.value = null;
   deleteError.value = null;
   const at = visible.value.findIndex((v) => v.node.id === nodeId);
   const result = await deleteNode(
@@ -476,9 +489,18 @@ async function deleteRow(nodeId: string): Promise<void> {
     deleteError.value = result.message;
     return;
   }
-  // Said twice on purpose: the chip is what a sighted person reads, the
-  // always-present region is what is reliably announced (§5).
-  deleteNotice.value = { title: node.title };
+  // Said twice on purpose: the toast is what a sighted person reads, the
+  // always-present region is what is reliably announced (§5). A trashed
+  // node is recoverable for 30 days, so the way back travels with the
+  // sentence — and the toast carrying an action stays on screen longer
+  // than a plain one (`useStatusToast`). The question that got here was a
+  // typed-name dialog, so §3's "a destructive action gets more than a
+  // toast" is satisfied before this point, not by this notice.
+  confirmed({
+    message: `Moved “${node.title}” to the trash.`,
+    icon: 'i-lucide-trash-2',
+    action: { label: 'Restore from Trash', to: trashUrl(props.workspaceSlug ?? ''), icon: 'i-lucide-undo-2' },
+  });
   announcement.value = `Moved “${node.title}” to the trash — restore it from the Trash.`;
   // The dialog returns focus to the row that asked, and that row is gone:
   // the tree's one tab stop lands on the row now standing where it stood.
@@ -801,12 +823,6 @@ const menuItems = computed<ContextMenuItem[][]>(() => {
              a refusal with its reason, or the success with the way back —
              a destructive action gets more than a toast that vanishes. -->
         <InlineNotice v-if="deleteError" tier="chip" tone="error" role="alert" data-testid="tree-delete-error">{{ deleteError }}</InlineNotice>
-        <InlineNotice v-if="deleteNotice" tier="chip" tone="success" data-testid="tree-delete-notice">
-          Moved “{{ deleteNotice.title }}” to the trash.
-          <template #actions>
-            <UButton variant="link" size="sm" class="p-0" :to="trashUrl(workspaceSlug ?? '')">Restore from Trash</UButton>
-          </template>
-        </InlineNotice>
         <!-- The list scrolls inside the pane: a 400-page book scrolls the
              tree, not the room. One context menu around it, for every
              row (see the script). Its container is the menu rung,

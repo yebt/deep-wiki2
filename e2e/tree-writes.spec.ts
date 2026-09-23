@@ -385,9 +385,13 @@ test('a manager deletes an empty page: the row leaves at once, the DELETE follow
   expect(requests.some((r) => r.method === 'DELETE' && r.url.endsWith(`/nodes/${fixtures.secondPageId}`)), 'the delete was written').toBe(true);
   release();
 
-  const notice = page.getByTestId('tree-delete-notice');
-  await expect(notice).toContainText(`Moved “${fixtures.secondPageTitle}” to the trash.`);
-  await expect(notice.getByRole('link', { name: 'Restore from Trash' })).toHaveAttribute('href', trashUrl(seed.workspaceSlug));
+  // The success is a toast now (owner decision, 2026-09-23): transient,
+  // dismissible, carrying the one way back. The tree's always-present live
+  // region still says it, which is the half §5 relies on.
+  const toast = page.getByRole('status').filter({ hasText: `Moved “${fixtures.secondPageTitle}” to the trash.` });
+  await expect(toast).toBeVisible();
+  await expect(toast.getByRole('link', { name: 'Restore from Trash' })).toHaveAttribute('href', trashUrl(seed.workspaceSlug));
+  await expect(page.getByTestId('tree-delete-notice')).toHaveCount(0);
   await expect(page.getByTestId('tree-menu-status')).toContainText(`Moved “${fixtures.secondPageTitle}” to the trash`);
   // The row that asked is gone, so the tree's tab stop lands on a neighbour, not on the body.
   await expect(page.locator('[role="treeitem"]:focus')).toHaveCount(1);
@@ -466,7 +470,7 @@ test('the owner deleting a chapter with pages types its name: a wrong name is re
   await accept.click();
   await expect(dialog).toBeHidden();
   await expect(page.getByRole('treeitem', { name: new RegExp(fixtures.chapterTitle) })).toHaveCount(0);
-  await expect(page.getByTestId('tree-delete-notice')).toContainText(`Moved “${fixtures.chapterTitle}” to the trash.`);
+  await expect(page.getByRole('status').filter({ hasText: `Moved “${fixtures.chapterTitle}” to the trash.` })).toBeVisible();
   expect(await serverBookChildren(page, fixtures.ownerSessionToken, fixtures)).toEqual([fixtures.firstPageTitle, fixtures.secondPageTitle]);
 });
 
