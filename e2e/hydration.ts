@@ -35,3 +35,31 @@ export async function waitForHydration(page: Page, timeout = 120_000): Promise<v
     { timeout },
   );
 }
+
+/**
+ * A promise that resolves once the browser has been answered for this
+ * page's comment threads (`GET /pages/:id/comments`).
+ *
+ * **A hydration wait is not a fetch wait.** `waitForHydration` says the
+ * client has taken the server's document over; it says nothing about the
+ * requests the hydrated app then makes. The comment overlay is drawn from
+ * one of them — `usePageComments`' single `GET /pages/:id/comments`, which
+ * carries both the threads and `canComment` — so "no mark" and "no toggle"
+ * asserted between hydration and that response are still absences of
+ * something the client has not had the chance to draw. Where a screen
+ * offers a positive the fetch must have produced (the "Show comments"
+ * toggle with its count, the orphaned or unplaced chip), assert that
+ * instead; this is for the screens whose whole claim is that the overlay
+ * draws *nothing*, where there is no such positive to wait for
+ * (docs/TODO.md Findings, 2026-09-23).
+ *
+ * Call it **before** `goto`: `page.waitForResponse` only sees responses
+ * that arrive after it is registered, and on a warm route the answer can
+ * land before the next line runs.
+ */
+export function pageCommentsAnswered(page: Page, timeout = 120_000): Promise<unknown> {
+  return page.waitForResponse(
+    (response) => response.request().method() === 'GET' && /\/pages\/[^/]+\/comments(?:$|\?)/.test(response.url()),
+    { timeout },
+  );
+}

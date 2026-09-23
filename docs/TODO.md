@@ -615,6 +615,95 @@ makes conventions portable across projects.
 
 Discoveries and constraints. Newest first.
 
+### 2026-09-23 — The vacuous-negative sweep: 85 candidates, six real, and why there is no thirteenth check
+
+The entry below ends with a suggestion: *every `toHaveCount(0)` and `not.toBeVisible()` in `e2e/`
+that runs between a `goto` and a `waitForHydration` is a candidate.* That sweep has now been run
+over the whole directory, and the inventory it produced is the reason this batch fixes six
+assertions and builds no check.
+
+**The sweep.** A throwaway script walked every `test(...)` body in `e2e/*.spec.ts`, tracked the
+last `goto`/`reload`/`goBack`/`goForward`, and flagged every negative assertion — `toHaveCount(0)`,
+`not.toBeVisible()`, `toBeHidden()`, `not.toContainText()`, `not.toContain()`, `toEqual([])`,
+`count() === 0` — reached without a `waitForHydration` in between. **85 flags across 18 files.**
+Six were real. The other 79 are sound, and they are sound for four different reasons.
+
+**What actually makes a negative vacuous.** Not the missing hydration wait. The condition is
+narrower and it is *semantic*: the thing asserted absent must be drawn by the **client**, and
+nothing between the navigation and the assertion may prove the client has drawn. The second half
+is what the mechanical rule cannot see, because what proves it is a property of the Vue
+components, not of the test file:
+
+- `getByRole('treeitem')` resolves only after hydration *and* the tree fetch — `NavigationTree.vue`
+  loads under `import.meta.client`. A treeitem being visible is a hydration proof.
+- `getByRole('heading', { level: 1 })` on the read screen resolves from the document the **server**
+  sent (`useApiRead` + `ssrCanAuthenticate`). It proves nothing.
+- `getByTestId('editor-surface')`, the workspaces list, the members listing, the presence
+  indicator, the comment chips: client. The read article, the "Edit" link, the permission-denied
+  notice, the "This page is empty" notice, `sidebar-no-workspace`: server.
+
+Two locators, the same shape, opposite verdicts. A static checker would have to know which Vue
+branch each one lands in.
+
+**The six, and the proof for each.** Proved by running a throwaway probe spec against the real
+stack with each assertion's subject deliberately made to exist.
+
+1. **`e2e/read.spec.ts`, the read-only invariant (two tests) and `e2e/comments.spec.ts`, "a reader
+   with read but not comment sees nothing of the overlay".** These already waited for hydration —
+   the entry below fixed them — and were **still** premature. *A hydration wait is not a fetch
+   wait.* The gutter is drawn from one `GET /pages/:id/comments` (`usePageComments`), which
+   carries both the threads and `canComment`, and it leaves *after* hydration. A screen whose
+   whole claim is that the overlay draws nothing offers no positive that answer must have
+   produced, so there is nothing on it to wait for. Fixed with `pageCommentsAnswered` in
+   `e2e/hydration.ts` — registered before the `goto`, because on a warm route the response lands
+   before the next line runs.
+2. **`e2e/read.spec.ts:283`, the 320 "hidden comments" test.** `expect(marks).toHaveCount(0)` was
+   asserted before the "Show comments" toggle, on the strength of the server's `<h1>`. Proved
+   vacuous directly: the same assertion, made at the same point on a page whose marks **are**
+   shown, passed — and the marks were there, visible, a moment later. Fixed by asserting the
+   toggle first: its count text cannot be drawn without the fetch.
+3. **`e2e/comments.spec.ts:498`** (the pre-backfill page) and **`:223`** (the fresh page) — the
+   same shape, fixed the same way: the chip and the "+" move above the absence, because each is
+   drawn from the answer the missing mark would have been drawn from.
+4. **`e2e/read.spec.ts:62`**, `expect(editorRequests).toEqual([])` — "read mode never reaches the
+   ProseMirror/Milkdown bundle". Not vacuous, but measured at **45 client requests logged at the
+   assertion point against 566 once hydration finished**: the test was sampling a twelfth of the
+   client's module graph, and the editor bundle is reached by a dynamic import in the other
+   eleven twelfths. Now asserted after hydration.
+5. **`e2e/create-and-open.spec.ts:205`**, `expect(getByText('No revisions yet')).toHaveCount(0)`.
+   Sound in this harness, but held up by nothing: the history screen's `<h1>` is
+   **unconditional** — it stands over the skeleton branch too — so the absence would also have
+   held on a screen that had rendered no answer at all. A negative with no positive twin is the
+   shape that hides this, so the twin was added: the one revision the save minted.
+
+**Four false-positive shapes, and why the check is not worth building.**
+
+- **The intervening positive is usually a hydration proof, and telling which requires the app.**
+  79 of 85. See above.
+- **`goBack()`/`goForward()` in a hydrated app are client-side hops.** Hydration is never lost, so
+  every negative after them is sound — but a rule that counts navigations counts these
+  (`e2e/data-layer.spec.ts` alone contributes five).
+- **Some negatives are deliberately about the server's document and must run before hydration.**
+  `e2e/frame.spec.ts:261` asserts the sidebar is hidden after a reload *and before* the
+  `waitForHydration` five lines below it, because "no sidebar flashing by first" is the rule. A
+  check would have to allow-list exactly the assertions that carry the most intent.
+- **An interaction between the navigation and the negative proves nothing.** A click before
+  hydration falls through to a dead element — that is the 2026-09-16 regression `waitForHydration`
+  was written for. So clicks cannot be the proof signal; and they are everywhere, so counting them
+  as one is wrong and not counting them is noise.
+
+And the decisive one: **the check's own stop signal is what two of the six defects already had.**
+`e2e/comments.spec.ts:180` and `e2e/read.spec.ts:323` were fixed yesterday with a
+`waitForHydration` and were still asserting too early. Any check that stops looking at
+`waitForHydration` is blind to them by construction. A rule with 7% precision that cannot see a
+third of its own defect class is not a rule; it is 79 allow-list entries and a false sense of
+cover.
+
+**What replaces it.** The habit, written down here: *a negative assertion needs a positive twin,
+and the twin must be a thing only the client could have drawn.* Where the screen offers one, assert
+it first. Where it offers none — because the claim is that nothing is drawn — wait for the response
+the drawing would have come from. `e2e/hydration.ts` now holds both waits and says which is which.
+
 ### 2026-09-23 — Two e2e tests that had stopped being true, found by running the suite rather than trusting it
 
 Hunting for other defects of the never-saved class (the entry below) meant running the whole

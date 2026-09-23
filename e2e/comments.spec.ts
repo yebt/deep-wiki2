@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
-import { waitForHydration } from './hydration';
+import { pageCommentsAnswered, waitForHydration } from './hydration';
 import { expectNoHorizontalOverflow } from './overflow';
 import { pageEditUrl, pageUrl } from '../apps/web/app/utils/routes';
 
@@ -161,6 +161,9 @@ test('a commenter opens a thread from the mark beside its block, replies, and re
 test('a reader with read but not comment sees the page and nothing of the overlay — no gutter, no chip, no panel', async ({ page, context }) => {
   await signInAs(context, seed.readerSessionToken);
 
+  // Registered before the navigation, because the answer can land before
+  // the next line runs (`pageCommentsAnswered`'s note).
+  const commentsAnswered = pageCommentsAnswered(page);
   await page.goto(pageUrl(seed.workspaceSlug, fixtures.commentsPageId));
   await expect(page.getByRole('heading', { level: 1, name: fixtures.commentsPageTitle })).toBeVisible({ timeout: 30000 });
   await expect(page.getByText(fixtures.commentedQuote)).toBeVisible();
@@ -172,7 +175,11 @@ test('a reader with read but not comment sees the page and nothing of the overla
   // hydration and the absence ones pass vacuously, which is what happened
   // (docs/TODO.md Findings, 2026-09-23).
   await waitForHydration(page);
-
+  // And hydration is not the end of it: this screen's whole claim is that
+  // the overlay draws nothing, so it offers no positive that the thread
+  // fetch must have produced. The response itself is the only signal that
+  // the client has had everything it needs to draw a mark and drawn none.
+  await commentsAnswered;
 
   // The block is anchored — the attribute is in the cached HTML for every
   // viewer — and still nothing is drawn beside it.
@@ -218,11 +225,14 @@ test('a commenter starts a thread from a block’s "+": hover, type, Post — th
   await expect(paragraph).toHaveAttribute('data-derived-block-id', /^d:[0-9a-f]{12}#0$/);
   await expect(paragraph).not.toHaveAttribute('data-block-id', /.*/);
 
-  // No thread yet, so no mark — but a "+" beside every paragraph, quiet
-  // until its block is hovered, and a 24px target (§5).
-  await expect(page.getByRole('button', { name: /^\d+ comments? on this block$/ })).toHaveCount(0);
+  // A "+" beside every paragraph, quiet until its block is hovered, and a
+  // 24px target (§5) — and no mark, because there is no thread yet. The
+  // "+" comes first: it is drawn from `canComment` in the same response
+  // the marks would be drawn from, so it is what proves that "no mark" is
+  // an answer rather than a not-yet (docs/TODO.md Findings, 2026-09-23).
   const starts = page.getByRole('button', { name: 'Comment on this block' });
   await expect(starts).toHaveCount(2);
+  await expect(page.getByRole('button', { name: /^\d+ comments? on this block$/ })).toHaveCount(0);
   await expect(starts.first()).toHaveCSS('opacity', '0');
   await paragraph.hover();
   await expect(starts.first()).toHaveCSS('opacity', '1');
@@ -491,15 +501,20 @@ test('a page whose cached render predates block anchors says its comment cannot 
   await page.goto(pageUrl(seed.workspaceSlug, fixtures.legacyPageId));
   await expect(page.getByRole('heading', { level: 1, name: fixtures.legacyPageTitle })).toBeVisible({ timeout: 30000 });
   await expect(page.getByText(fixtures.legacyQuote)).toBeVisible();
+  // The chip first, because it is the only thing on this screen that
+  // proves the client has hydrated *and* the thread fetch has answered:
+  // the two absences below are absences of things only the client draws,
+  // and before it has drawn they are absent on every page for every
+  // caller (docs/TODO.md Findings, 2026-09-23).
+  const chip = page.getByTestId('comments-unplaced');
+  await expect(chip).toBeVisible({ timeout: 30000 });
+  await expect(chip).toContainText("1 comment can't be shown beside its text until this page is re-rendered.");
+
   // The pre-backfill render carries no anchor for the gutter to use — and
   // no derived id either, so nothing to start a thread on until the
   // backfill reaches this page.
   await expect(page.locator('[data-block-id]')).toHaveCount(0);
   await expect(page.getByRole('button', { name: /on this block$/ })).toHaveCount(0);
-
-  const chip = page.getByTestId('comments-unplaced');
-  await expect(chip).toBeVisible({ timeout: 30000 });
-  await expect(chip).toContainText("1 comment can't be shown beside its text until this page is re-rendered.");
 
   await chip.getByRole('button', { name: 'Show' }).click();
   const panel = dialog(page);
