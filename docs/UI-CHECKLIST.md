@@ -1887,7 +1887,75 @@ title alone; it now picks the Page type and the `pageOrder` helper reads only pa
 
 ---
 
-*The next entry goes below this one.*
+### 2026-09-23 — The read screen's empty state: a page with nothing on it yet — awaiting the owner's eye
+
+**Reviewer:** none yet — this entry is what was shipped for review, not a review.
+**Verdict:** Pending
+
+The owner created a page from the tree and opened it: **"This page does not exist."**
+`GET /pages/:id` read the `page_content` row and treated its absence as the absence of the
+page, so every page answered that between being created and being saved for the first time
+— since pages became creatable, and caught by no test in any layer, because every fixture in
+this repository saves content before it asks anything (`docs/TODO.md` Findings, 2026-09-23,
+has the defect, the second one it hid, and the gap class). The API now renders that page as
+an empty document; this entry is the screen state that answers it.
+
+**Pre-build contract (§2).** *Who:* the person who has just made this page from the tree, one
+click after the toolbar said "Created page “X” in “Y”" — and, less often, anyone arriving at a
+page whose author cleared it and saved. *Goal, in their words:* "read this page" — and there
+is nothing to read yet. *Single primary action:* still none; this is a reading surface, and
+"Start editing" is the transition to the one screen that has a primary action. *Data:* the
+page's `title` and an `html` of `''` — that is the whole response. *Non-goals:* it does not
+guess whether the caller may write (no per-node `write` signal reaches the client — Open
+Questions, 2026-09-14), exactly as the app bar's "Edit" and the history screen's own
+"Start editing" do not. *Empty / too much:* this **is** the empty extreme; there is no
+"too much" of nothing.
+
+**What to look at**
+
+1. **The page's own `<h1>` stands, and the empty state is below it.** Not a not-found notice
+   with the title gone — the page exists, it is named, and the breadcrumb above it was right
+   all along. The notice is `PageNotice` at `level="2"`, so the screen's `<h1>` keeps one type
+   role across every state it has (§4.4); the heading is "This page is empty" and the sentence
+   is "Nothing has been written on it yet. Open the editor to write the first paragraph."
+   — the object named in the product's vocabulary, with the path forward §3 asks for.
+2. **"Start editing" is the history screen's own action, verbatim.** Same words, same Filled
+   tonal emphasis (`variant="soft" color="primary"`, `DESIGN-SYSTEM.md` §9.1), same
+   destination — `pages/w/[workspace]/p/[id]/history.vue` has carried a never-saved empty state
+   since it shipped, and §4.1 asks a new control to match the nearest existing one rather than
+   invent a place. The nearest one is the other screen this node has that can be empty for
+   exactly this reason.
+3. **It replaces the article, rather than standing beside an empty one.** The article is what
+   the comment overlay measures its marks against, and a page with no content has no block to
+   put one on: the gutter, the panel and the selection action are all inside the branch the
+   notice replaces. The API agrees — starting a thread on such a page is now a block conflict,
+   not "not found".
+4. **The same state covers a cleared page.** `markdown: ''` is a legal document and
+   `savePage()` stores exactly those bytes, so a page an author emptied read as a blank column
+   before this. One predicate (`html.trim() === ''`), not one per cause.
+
+**Measured** in `e2e/create-and-open.spec.ts` against the real backend, and deliberately with
+**nothing seeded but the person**: a shelf, a book, a chapter and a page all created through
+the tree, then the page opened — the `<h1>` its title, no not-found copy anywhere, the empty
+state and "Start editing" both present, and the same after a full reload (so the server render
+agrees with the client's). Then the rest of the journey: "Start editing" opens an editor on the
+empty document, the first paragraph typed into it saves, and a fresh load of the read screen
+serves it with the empty state gone.
+
+No new colour, token, rung or component: `PageNotice`, the Filled tonal button and the reading
+measure are the ones already reviewed, so `docs/DESIGN-SYSTEM.md` gains no row.
+
+**Known before review, not fixed**
+
+- The empty state is offered to a caller who may only `read`, who will find "Start editing"
+  refused by the editor — the same standing gap the app bar's "Edit" and the history screen's
+  own "Start editing" have carried since 2026-09-14 (`docs/TODO.md` Open Questions: no
+  per-node `write` signal reaches the client). Fixing it here alone would make this screen
+  disagree with the two beside it.
+- Not shot at 1280 dark or 320: the review material for this batch is the e2e above, which
+  drives the journey rather than photographing it. Say so if the screenshots are wanted.
+- The two-icon-pack requirement (§4.3) remains untested; everything the 2026-09-18 entry
+  carried forward stands.
 
 ---
 
