@@ -607,6 +607,107 @@ makes conventions portable across projects.
 
 Discoveries and constraints. Newest first.
 
+### 2026-09-23 — A page created from the tree answered "This page does not exist", and three layers of tests could not see it
+
+**What the owner did.** Created a page from the navigation tree. The toolbar said
+`Created page “parla” in “complex”.`, the row appeared, the breadcrumb named it — and clicking
+it rendered **"This page does not exist."**
+
+**The defect.** `apps/api/src/routes/pages.ts`, `GET /pages/:id`:
+
+```ts
+const content = await readPageHtml(deps.sql, { nodeId, workspaceId: node.workspace_id });
+if (!content) return c.json(ErrorResponseSchema.parse({ error: 'not found' }), 404);
+```
+
+A page node exists from the moment the tree creates it; its `page_content` row exists only from
+its first save. `readPageHtml` answers `undefined` for a node with no content row, and the route
+read that as the absence of the *page*. The same shape sat in `GET /pages/:id/edit-session` and
+`POST /pages/:id/lock/take-over`, so the editor refused the page as well: there was no way to
+give a newly-created page its first paragraph through the UI at all.
+
+**Not a trash-work regression.** `git log -S` puts the line in `6f3ef93`, the original read
+route. It has been broken since pages became creatable.
+
+**Why nothing caught it — the real defect.** Every fixture in this repository saves content
+before it asks anything. `apps/api/src/routes/pages.test.ts` calls `savePage()` at the top of all
+35 of its tests; `packages/db/src/locks/page-lock.test.ts`'s only seed helper is
+`seedPageWithContent()`; the e2e suites drive pages the seed scripts wrote content into. The
+never-saved node — the state *every* page passes through, for as long as it takes its author to
+type the first word — had no fixture, so it had no test, in any of the three layers. A suite that
+is green because it cannot express the failing state is the finding; the 404 is a symptom.
+
+**The second defect, which the first one hid.** `page_locks` carried
+`page_locks_page_fk (node_id, workspace_id) -> page_content (node_id, workspace_id)` from
+`0010_page_locks.sql`. `page_content` was the composite key on hand in 0010, and pinning the lock
+to it smuggled in "a lock may only exist where content already exists" — invisible for as long as
+`edit-session` answered 404 before it ever reached `acquireLock`. Fixing the 404 turned that into
+a foreign-key violation on the first lock of a brand-new page. Proved directly: with `0023`'s down
+migration applied, inserting a `page_locks` row for a page with no content row fails with
+`insert or update on table "page_locks" violates foreign key constraint "page_locks_page_fk"`.
+
+**The fix.**
+
+- **`apps/api/src/routes/pages.ts`** — a page the caller may read, that exists and is live, with
+  no content row renders as an **empty document**: `NEVER_SAVED_HTML` (`html: ''`) on the read
+  route and `NEVER_SAVED_MARKDOWN` (`markdown: ''`, `contentHash: null`) on `edit-session` and
+  `lock/take-over`. The defaults live in the route and deliberately **not** in
+  `packages/db/src/content/read-page.ts`: those two functions answer `undefined` for "no content
+  row" *and* for "a trashed page's content", and every handler in `pages.ts` has already resolved
+  the node through `live_nodes`, so only past that gate can `undefined` mean the row was never
+  written. A db-layer default would turn a trashed page's content read into an empty document for
+  any future caller that forgot the gate — exactly the disclosure `scripts/checks/trash-filter.ts`
+  exists to prevent.
+- **`packages/contracts/src/pages.ts`** — `EditSessionResponseSchema.contentHash` is
+  `z.string().nullable()`. `null` is already what `SavePageRequestSchema.expectedContentHash`
+  means by "the first save", so the two spellings of "nothing is stored yet" stay one value.
+- **`packages/db/drizzle/0023_page_lock_before_first_save.sql`** — the lock's foreign key moves to
+  `nodes (id, workspace_id, type)`, the key `page_content_node_fk` itself uses (0008), with
+  `node_type` CHECK-pinned to `'page'`. Tenancy and node type stay structurally pinned (a lock on
+  a chapter is still unrepresentable) and "content exists" stops being a precondition for holding
+  a lock. The purge cascade fires one hop earlier: deleting the node took the content row, and
+  with it the lock, before; it takes the lock directly now.
+- **`apps/web/app/pages/w/[workspace]/p/[id]/index.vue`** — the read screen's empty state
+  (`docs/UI-CHECKLIST.md` §3): the page's own `<h1>` stands, and in the article's place a
+  `PageNotice` at `level="2"` reading "This page is empty" with "Start editing" — the history
+  screen's own never-saved action, verbatim and at the same emphasis (§4.1: match the nearest
+  existing screen). It replaces the article rather than standing beside an empty one, because the
+  article is what the comment overlay measures its marks against and a page with no content has no
+  block to put one on. It also covers the page an author *cleared* and saved (`markdown: ''` is a
+  legal document), which read as a blank screen before.
+
+**Absence is untouched.** A caller without `read` still gets the byte-identical 403 this one route
+deliberately returns for a directly-requested URL (`usePageRead`'s own note); an id that names
+nothing still 404s with `{ "error": "not found" }`; and a *trashed* never-saved page is still
+refused identically to an unknown id, because the empty document is only ever reached after
+`live_nodes` has found the node. All three are asserted.
+
+**The tests that were missing, at the three layers the defect crossed.**
+
+- **API** — `apps/api/src/routes/pages.test.ts`, a new `describe('a page that has never been
+  saved')` whose whole trick is *not calling `savePage()`*: read renders empty, edit-session opens
+  an empty editor and takes a real lock, the first save from that session persists and reads back,
+  the empty session's lock refuses a second writer and can be taken over, denial and absence are
+  unchanged, and a trashed never-saved page is absence. Plus the two sibling surfaces that were
+  already right and had no test saying so: `revisions.test.ts` (empty history, not 404) and
+  `comments.test.ts` (empty threads and indicators, not 404).
+- **DB** — `packages/db/src/locks/page-lock.test.ts` gains `seedPageNeverSaved()` beside
+  `seedPageWithContent()`, and two tests: a page that has never been saved can be locked, and a
+  node that is not a page still cannot. `packages/db/drizzle/migration.test.ts` asserts the old
+  constraint is gone, the new one names `nodes(id, workspace_id, type)`, and the CHECK exists.
+- **E2E** — `e2e/create-and-open.spec.ts`, the journey the owner walked: shelf → book → chapter →
+  page, all four created **through the tree**, then the page opened, then typed, saved, reloaded,
+  and its history read. `e2e/create-open-fixtures.bun.ts` mints one member with
+  `read`/`write`/`manage` on the workspace root **and not one node** — the rule of the file is that
+  nothing is seeded but the person, because a seeded page is a page the tree did not create, which
+  is the habit that hid this for as long as it existed.
+
+**The gap class, for the next time.** *A fixture that always reaches the steady state cannot see
+the transient one.* Three suites shared one assumption — "a page has content" — and none of them
+stated it, so it was never a decision anybody could review. The same shape is worth looking for
+wherever a row is created by one request and filled by another: a workspace before its first
+shelf, a book before its first page, a comment thread before its first reply.
+
 ### 2026-09-17 — Cheap models first: OpenRouter's catalogue priced, and the cheapest routes that declare tools and JSON output (branch `feat/ai-cheap-models`)
 
 **The owner's instruction (2026-09-17).** "If the architecture works with cheap models, it will
