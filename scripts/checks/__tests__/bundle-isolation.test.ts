@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { checkBundleIsolation } from '../bundle-isolation';
 
@@ -53,6 +54,30 @@ describe('checkBundleIsolation', () => {
   // Milkdown/ProseMirror-view, just a different forbidden dependency
   // (packages/markdown/src/pipeline.ts's own doc comment records the
   // real incident this generalises from).
+  test('fails when an apps/web file imports the @deep-wiki/markdown barrel', () => {
+    // The barrel reaches render(), and render() reaches the syntax
+    // highlighter's thirty grammars and node:crypto. Read mode serves the
+    // HTML render() produced at save time; it must not also ship the
+    // machine that produced it.
+    const result = checkBundleIsolation(join(FIXTURES_DIR, 'violating-markdown-barrel-in-web'));
+
+    expect(result.ok).toBe(false);
+    expect(result.errors.join('\n')).toContain('@deep-wiki/markdown');
+    expect(result.errors.join('\n')).toContain('@deep-wiki/markdown/pipeline');
+  });
+
+  test('an apps/web import of @deep-wiki/markdown/pipeline is allowed — the subpath is the browser-safe one', () => {
+    // The negative half, and it is not vacuous: the valid fixture's web
+    // page imports `@deep-wiki/markdown/pipeline`, so a rule that matched
+    // the subpath as well as the barrel would fail here rather than
+    // silently forbidding the one import a browser consumer is meant to
+    // make.
+    const webPage = readFileSync(join(FIXTURES_DIR, 'valid', 'apps', 'web', 'pages', 'edit.vue'), 'utf8');
+    expect(webPage).toContain("from '@deep-wiki/markdown/pipeline'");
+
+    expect(checkBundleIsolation(join(FIXTURES_DIR, 'valid')).ok).toBe(true);
+  });
+
   test('fails when the "." export transitively reaches node:crypto', () => {
     const result = checkBundleIsolation(join(FIXTURES_DIR, 'violating-node-crypto'));
 
