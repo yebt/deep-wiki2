@@ -58,7 +58,7 @@
  * "Edit" and the empty state's "Start editing" already do. Fixing it here
  * alone would make this control disagree with the two beside it.
  */
-import { keysStaledByRename } from '~/utils/api-keys';
+import { keysStaledByRename, pageReadKey } from '~/utils/api-keys';
 import type { RenamedNode } from '~/composables/useTree';
 
 const props = withDefaults(
@@ -95,11 +95,17 @@ const title = usePageTitle({
   nodeId: props.nodeId,
   onRenamed: (renamed: RenamedNode) => {
     // The row the sidebar draws is patched from the answer that renamed
-    // it, never refetched (`useTree`'s optimistic writes, 2026-09-16),
-    // and the reads that carry the old name are staled so the next visit
-    // asks again.
+    // it, never refetched (`useTree`'s optimistic writes, 2026-09-16).
     tree.applyRenamed(renamed);
-    clearNuxtData(keysStaledByRename(props.nodeId));
+    // The reads that carry the old name, in the two ways they have to be
+    // treated differently: the lists on *other* screens are cleared, and
+    // this page's own read — which the screen under this heading may be
+    // rendering right now — is refreshed in place, so the article stays
+    // while the request is in flight. Clearing it instead empties
+    // `useApiRead`'s outcome and puts the screen back on its skeleton
+    // (that helper's own note).
+    clearNuxtData(keysStaledByRename());
+    void refreshNuxtData(pageReadKey(props.nodeId));
   },
 });
 

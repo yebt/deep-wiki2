@@ -55,22 +55,23 @@ describe('keysStaledBySave', () => {
 });
 
 /**
- * A rename changes a node's name and nothing else, so it stales exactly
- * the reads that draw that name: the page’s own (its `<h1>` and the tab
- * title come out of it) and every workspace activity list, whose rows
- * name the pages they are about. History and diffs name revisions, not
- * titles, and the tree is patched in place rather than refetched.
+ * A rename changes a node's name and nothing else, so what it stales
+ * elsewhere is every workspace activity list, whose rows name the pages
+ * they are about. History and diffs name revisions, not titles; the tree
+ * is patched in place rather than refetched; and the renamed page's own
+ * read is deliberately absent, because clearing a key a mounted screen is
+ * rendering replaces that screen's content with its own skeleton — it is
+ * refreshed in place instead (`PageTitle`, and the helper's own note).
  */
 describe('keysStaledByRename', () => {
-  const staled = keysStaledByRename('p1');
-
-  test('stales the renamed page’s own read, and no other page’s', () => {
-    expect(staled(pageReadKey('p1'))).toBe(true);
-    expect(staled(pageReadKey('p2'))).toBe(false);
-  });
+  const staled = keysStaledByRename();
 
   test('stales every workspace activity list, whose rows name the page', () => {
     expect(staled(workspaceActivityKey('any-workspace'))).toBe(true);
+  });
+
+  test('leaves the renamed page’s own read alone, because the screen showing it would go blank', () => {
+    expect(staled(pageReadKey('p1'))).toBe(false);
   });
 
   test('leaves the page’s history, its diffs and the members list alone', () => {
