@@ -881,3 +881,144 @@ test('a title already taken by a sibling is refused: the field stays open with t
   await authoringShot(page, 'title-refused-1280-light');
   expect(await serverBookChildren(page, fixtures.writerSessionToken, fixtures)).toContain(fixtures.firstPageTitle);
 });
+
+/* ─── The tree's blank space (owner review, 2026-09-23) ───────────────────
+ *
+ * The owner could not make a second shelf: *"ahora ya no puedo crear más
+ * estanterías aparte de la de raíz"*, *"el menú contextual no funciona
+ * para crear otra estantería en el exterior del tree o base del tree"*.
+ * `New…` aims at the picked row, opening any page picks that page's row,
+ * and nothing un-picked one — so the top level was unreachable. VS Code's
+ * explorer answers both halves with the empty area below the rows: a
+ * click there clears the selection, and a right-click there is the root's
+ * own menu. These two tests drive the journey that was broken, end to
+ * end, against the real API.
+ */
+const TREE3_SHOTS = process.env.DEEPWIKI_TREE3_SHOTS ?? '';
+
+async function tree3Shot(page: Page, name: string): Promise<void> {
+  if (!TREE3_SHOTS) return;
+  await page.screenshot({ path: `${TREE3_SHOTS}/tree3-${name}.png`, fullPage: false });
+}
+
+/**
+ * A point inside the tree and below every row — the explorer's empty area.
+ *
+ * The tree is folded first, and that is a finding rather than test
+ * convenience: measured against the seeded workspace at 1280×900 on
+ * 2026-09-23, the last row's bottom edge *was* the tree's own, so a fully
+ * unfolded tree offers no blank space to click at all. `Escape` on a row
+ * is the road that always exists, and its own test below drives it.
+ */
+async function blankSpot(page: Page): Promise<{ x: number; y: number }> {
+  await page.getByRole('button', { name: 'Collapse all' }).click();
+  const box = (await page.getByRole('tree').boundingBox())!;
+  const rows = page.getByRole('treeitem');
+  const last = (await rows.nth((await rows.count()) - 1).boundingBox())!;
+  const y = last.y + last.height + 12;
+  expect(y, 'the folded tree has blank space below its rows to aim at').toBeLessThan(box.y + box.height - 4);
+  return { x: box.x + 16, y };
+}
+
+/** The top-level titles the server holds for this workspace, as `token` sees them. */
+async function serverShelfTitles(page: Page, token: string): Promise<string[]> {
+  const response = await page.request.get(`${API_URL}/workspaces/${seed.workspaceId}/tree`, { headers: { cookie: `session=${token}` } });
+  const tree = (await response.json()) as { nodes: { title: string }[] };
+  return tree.nodes.map((node) => node.title);
+}
+
+test.describe('the tree’s blank space', () => {
+  test.use({ viewport: { width: 1280, height: 900 } });
+
+  test('a second shelf is creatable after one exists: a click on the blank space clears the selection and New… aims at the top level', async ({ page }) => {
+    const fixtures = mintFixtures();
+    await openTreeAs(page, fixtures.ownerSessionToken, fixtures);
+    const before = await serverShelfTitles(page, fixtures.ownerSessionToken);
+    expect(before.length, 'a shelf already exists — the state the owner was stuck in').toBeGreaterThan(0);
+
+    const spot = await blankSpot(page);
+    // A row is picked, exactly as opening any page picks one — and a shelf
+    // is the sharpest case: with it selected, `New…` aims *inside* it.
+    const shelf = page.getByRole('treeitem', { name: new RegExp(fixtures.shelfTitle) });
+    await shelf.focus();
+    await expect(page.locator('[role="treeitem"][aria-selected="true"]')).toHaveCount(1);
+
+    await page.mouse.click(spot.x, spot.y);
+
+    await expect(page.locator('[role="treeitem"][aria-selected="true"]')).toHaveCount(0);
+    await page.getByRole('button', { name: 'New…' }).click();
+
+    // One legal child under a workspace, so nothing is asked.
+    await expect(page.getByRole('menu')).toHaveCount(0);
+    const field = nameField(page);
+    await expect(field).toBeFocused();
+    await expect(field).toHaveAttribute('aria-label', 'Name of the new shelf');
+    await tree3Shot(page, 'root-create-1280-light');
+    await expectNoHorizontalOverflow(page, 'root create 1280 light');
+
+    const title = `E2E Second Shelf ${Date.now()}`;
+    await field.fill(title);
+    await field.press('Enter');
+
+    await expect(page.getByRole('treeitem', { name: new RegExp(title) })).toBeVisible();
+    expect(await serverShelfTitles(page, fixtures.ownerSessionToken)).toContain(title);
+  });
+
+  test('a right-click on the blank space is the root’s own menu — New shelf…, and nothing that acts on a row', async ({ page }) => {
+    const fixtures = mintFixtures();
+    await openTreeAs(page, fixtures.ownerSessionToken, fixtures);
+
+    const spot = await blankSpot(page);
+    // Something is picked first, so the menu is proved to aim at the root
+    // rather than at whatever was selected.
+    await page.getByRole('treeitem', { name: new RegExp(fixtures.shelfTitle) }).focus();
+    await page.mouse.click(spot.x, spot.y, { button: 'right' });
+
+    const menu = page.getByRole('menu');
+    await expect(menu).toBeVisible();
+    await expect(menu.getByRole('menuitem')).toHaveCount(1);
+    await expect(menu.getByRole('menuitem').first()).toHaveText('New shelf…');
+    await expectNoHorizontalOverflow(page, 'root menu 1280 light');
+
+    await menu.getByRole('menuitem', { name: 'New shelf…' }).click();
+    const field = nameField(page);
+    await expect(field).toBeFocused();
+    await expect(field).toHaveAttribute('aria-label', 'Name of the new shelf');
+
+    const title = `E2E Menu Shelf ${Date.now()}`;
+    await field.fill(title);
+    await field.press('Enter');
+
+    await expect(page.getByRole('treeitem', { name: new RegExp(title) })).toBeVisible();
+    expect(await serverShelfTitles(page, fixtures.ownerSessionToken)).toContain(title);
+  });
+
+  /**
+   * The keyboard's equivalent of the blank space (checklist §5) — and the
+   * only road to the top level while the tree is tall enough to fill its
+   * pane, which the seeded workspace is at 1280×900 with nothing folded.
+   */
+  test('Escape on a row clears the selection with the tree unfolded, where there is no blank space left to click', async ({ page }) => {
+    const fixtures = mintFixtures();
+    await openTreeAs(page, fixtures.ownerSessionToken, fixtures);
+
+    // Nothing is folded, so the rows reach the tree's own bottom edge.
+    const treeBox = (await page.getByRole('tree').boundingBox())!;
+    const rows = page.getByRole('treeitem');
+    const last = (await rows.nth((await rows.count()) - 1).boundingBox())!;
+    expect(last.y + last.height, 'the unfolded tree leaves no blank space').toBeGreaterThanOrEqual(treeBox.y + treeBox.height - 40);
+
+    const page1 = page.getByRole('treeitem', { name: new RegExp(fixtures.firstPageTitle) });
+    await page1.focus();
+    await expect(page.locator('[role="treeitem"][aria-selected="true"]')).toHaveCount(1);
+
+    await page.keyboard.press('Escape');
+
+    await expect(page.locator('[role="treeitem"][aria-selected="true"]')).toHaveCount(0);
+    await expect(page.getByTestId('tree-menu-status')).toContainText('Nothing is selected');
+    await expect(page1).toBeFocused();
+
+    await page.getByRole('button', { name: 'New…' }).click();
+    await expect(nameField(page)).toHaveAttribute('aria-label', 'Name of the new shelf');
+  });
+});

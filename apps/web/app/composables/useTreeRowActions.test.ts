@@ -1,7 +1,7 @@
 import { LEGAL_PARENT_TYPES, legalChildTypes, type NodeType } from '@deep-wiki/contracts';
 import { describe, expect, test } from 'vitest';
 import type { TreeNode } from './useTree';
-import { deleteRowAction, newRowChoice, treeRowActions, type TreeRowAction } from './useTreeRowActions';
+import { deleteRowAction, newRowChoice, treeRootActions, treeRowActions, type TreeRowAction } from './useTreeRowActions';
 
 function node(type: string, id = `${type}-1`, children: TreeNode[] = []): TreeNode {
   return { id, type, slug: id, title: `The ${type}`, position: 0, children };
@@ -235,5 +235,41 @@ describe('newRowChoice', () => {
       else if (legal.length === 1) expect(choice, parent).toEqual({ kind: 'one', type: legal[0] });
       else expect(choice, parent).toEqual({ kind: 'many', types: legal });
     }
+  });
+});
+
+/**
+ * The tree's blank space is a target of its own (owner report,
+ * 2026-09-23: *"ahora ya no puedo crear más estanterías aparte de la de
+ * raíz"*). VS Code's explorer answers a right-click on the empty area
+ * below the rows with the same New File / New Folder the title bar
+ * carries — the target being the root rather than any row — and a click
+ * there clears the selection so the title bar's own New aims at the root
+ * too. `treeRootActions()` is the item set for that menu, and it is the
+ * same table read the same way as every row's.
+ */
+describe('treeRootActions', () => {
+  test('offers exactly the workspace’s legal children — one shelf, and nothing else', () => {
+    const groups = treeRootActions();
+    expect(flat(groups).map((action) => action.childType)).toEqual(legalChildTypes('workspace'));
+    expect(flat(groups).map((action) => action.label)).toEqual(['New shelf…']);
+  });
+
+  test('nothing in it renames, moves or destroys: the blank space is not a row', () => {
+    const kinds = new Set(flat(treeRootActions()).map((action) => action.kind));
+    expect([...kinds]).toEqual(['create']);
+  });
+
+  test('every item is live and carries the type it would create', () => {
+    for (const action of flat(treeRootActions())) {
+      expect(action.disabled).toBe(false);
+      expect(action.childType).toBeTruthy();
+      expect(action.icon).toBe('i-lucide-plus');
+    }
+  });
+
+  test('the item set is the one table read backwards, so a change to it moves this menu too', () => {
+    const fromTable = (Object.keys(LEGAL_PARENT_TYPES) as NodeType[]).filter((child) => LEGAL_PARENT_TYPES[child].includes('workspace'));
+    expect(flat(treeRootActions()).map((action) => action.childType)).toEqual(fromTable);
   });
 });
