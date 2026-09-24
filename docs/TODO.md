@@ -615,6 +615,122 @@ makes conventions portable across projects.
 
 Discoveries and constraints. Newest first.
 
+### 2026-09-23 — The comment panel as a conversation, the anchored-span highlight, and the footer's third asking (branch `feat/comment-thread-view`)
+
+Four owner requests of 2026-09-23, one commit each. What was found on the way, and what is
+owed afterwards.
+
+**1. The panel read as a database row with a form stapled under it** ("así se ve feísimo").
+His screenshot: a title, a green "Reply posted." bar, a "Comment on this block" link, the
+quoted excerpt, a "Show in page" control, an author, a timestamp, a message, a nested reply
+box, and then a "Reply" label over a large empty textarea with Reply and Resolve beneath it.
+
+The shape it became is in `CommentThreadItem.vue`'s own table, and the one structural finding
+is worth repeating here: **the root comment and a reply were two pieces of markup**, and that
+is why the reply had become a lesser thing in a nested box. They are now one `v-for` over one
+list, and `CommentThreadItem.test.ts` asserts the two carry *identical classes* — so the drift
+cannot come back by an edit to one of them. Resolve moved to the thread's header for the same
+reason the owner gave: under the reply field it reads as a second submit for the sentence being
+typed, not as an action on the thread.
+
+**A relative time needed §4.11 amended rather than ignored.** A conversation says "17 minutes
+ago"; §4.11 says every rendered time names its zone. The rule is not wrong — a *bare local
+time* is ambiguous the moment two readers are in different places — but a relative string is
+the same string in every zone, which removes the ambiguity by removing the clock. §4.11 is
+amended in place with that clause and with what a relative time is still held to: the exact
+instant in `<time datetime>`, the absolute zone-named form one hover *and* one focus away, no
+server render (it depends on `Date.now()`), and the two-zone test made against the absolute
+form — the only half of the pair that *can* differ between two readers. Past a week the
+relative form gives way to the date, because "37 days ago" is arithmetic rather than
+information.
+
+**Found on the way: Vue casts an absent boolean prop to `false`.** `canComment` on the panel
+was written as `canComment !== false` on the assumption that an unpassed prop is `undefined`;
+it is not, and two component tests failed as a caller with no grant. Kept the cast and made it
+the rule instead — a permission prop defaults to *denied*, which is also what
+`usePageComments.canComment` does until the response answers. The test file states it.
+
+**2. "Reply posted." was the one transient success the 2026-09-23 batch missed.** Thread
+posted, reply posted, thread resolved and reopened are toasts now; the panel's live region
+keeps the same sentence and is `sr-only` at every moment rather than painting itself when it
+has something to say. Every failure stayed: the write failure is still the panel's bar notice
+and the 409's "your text is still here — reload the page" still stays until it is read.
+`utils/comment-messages.ts` holds the four sentences because each is said twice, and §4.12
+refuses a bare "Reply posted." — each names the thread by its excerpt, cut at a word boundary.
+
+**3. The highlight was a whole-block wash, and it never moved.** The owner: *"no me muestra
+muy bien la relación que hay con respecto a esta parte o a dónde pertenece. Guíate en Word o
+Google Docs."*
+
+The hard part is not the painting, it is that **the two sides are in different alphabets**. A
+stored anchor's `quote` is a slice of the block's *Markdown source* — deliberately, because
+`locateQuoteInBlock` stores a source substring so that save-time reconciliation can match it
+by exact substring on every later save, and a quote that is not one would fall through to
+trigram containment at 0.8 and eventually orphan a comment nobody touched. What the reader
+sees is the *rendered* text. So `Hello **world` — which is what gets stored for a selection of
+`Hello world` over `Hello **world**` — has to be found as `Hello world`.
+`utils/anchor-range.ts` does that in four steps of decreasing confidence (verbatim,
+whitespace-insensitive, smallest subsequence window, then the whole block) and parses no
+Markdown, because read mode boots no parser and `bundle-isolation.ts` enforces it.
+
+- **The CSS Custom Highlight API was considered and rejected**, with a reason rather than a
+  preference: `CSS.highlights` would paint the span without any boxes, and a `::highlight()`
+  pseudo cannot be measured from a test or read from a computed style. This project's rule is
+  that a colour pair is asserted in the running browser (§4.2, §5). A mechanism no gate can
+  see is a mechanism that regresses silently. Boxes behind the article it is, one per
+  `getClientRects()` rectangle, so a span crossing a line break looks like a highlight.
+- **Scrolling is an act, not a side effect.** Focus and hover move the highlight; only an
+  activated quotation scrolls, and only when `needsReveal` says the span is not already in
+  front of the reader — measured against the sticky bar's own 56px, since a span behind chrome
+  is not visible even though its rect is inside the window (§6).
+- **"Show in page" did not survive**, and that was the question to answer rather than a
+  liberty taken. Once focusing a thread lights its span, a separate button repeats what focus
+  has done; the quotation is the control now, with the quoted text as its visible label and
+  `Show “…” in the page` as its accessible name. The affordance sits on the thing it points
+  at, which is the relation that was missing.
+
+**4. The footer, at the third asking.** The 2026-09-23 tree batch recorded that it "needed no
+change" because it already stood only on the shells outside a workspace. That answered a
+different question — *where* it stands — and not the owner's, which is whether it should. It
+should not, and the decision is in the commit and at the removed call site: the left half
+repeated the brand mark the same frame's header carries, the right half named the toolkit, it
+cost a `contentinfo` landmark holding nothing anyone can act on, and it kept the `UMain` +
+`UFooter` pairing §6 names as *the* vertical-overflow trap on five screens. Also found: the
+footer stood on **five** screens, not the three the request named — the account screen and
+registration settings have it too, which only the unit tests knew.
+
+**Owed, and not done here**
+
+- **A build string would earn a footer's place.** A self-hosted team reporting a defect should
+  be able to say which build they are running, and nothing version-shaped reaches the client.
+  Minting one is a change to `packages/contracts/src/env.ts` **and** `env.example` together (a
+  machine-checked pair, `scripts/checks/env-example.ts`), which is a deliberate change and not
+  a footer's side effect. If the owner wants the footer back, this is what it should carry.
+- **`app.config.ts` lost seventeen lines of `UFooter` theme override** with the component.
+  What they recorded is kept here: `UFooter` renders its slots right → center → left in the
+  DOM so `lg:order-*` can put them back on wide viewports, and below `lg` the container is not
+  a flex box at all, so DOM order wins and the brand renders *under* the trailing meta. A
+  future footer needs `container: 'flex flex-col-reverse gap-y-3 lg:flex-row'` and `mt-0` on
+  the left and center slots, or it ships with its two halves in the wrong order below `lg`.
+- **A span low inside a very long block is scrolled to by centring the block**, not the span:
+  a `Range` has no `scrollIntoView`, and a paragraph in the 72ch measure is short enough that
+  centring it puts the span on screen. A 2,000-word paragraph would not be. A scroll
+  calculation of our own is the fix and is not worth it until a page has one.
+- **A read-only member who can see threads is not reachable from the server.** The API answers
+  `{ threads: [] }` to a caller without `comment` (comment-threads spec, "Comment Data Never
+  Reaches A Subject Without Read"), so "sees the conversation and cannot reply" is a component
+  state and not an e2e one. `CommentThreadItem.test.ts` and `CommentThreadPanel.test.ts` hold
+  it; the e2e asserts the product's actual rule, which is that such a member sees nothing of
+  the overlay at all.
+- **The marker stripper is best-effort by construction.** `[*_~`]` are removed wherever they
+  stand, which is right for a marker and wrong for `snake_case`'s underscore — and the
+  subsequence step is what covers the difference. A quote whose only distinguishing characters
+  are markup would fall through to the whole block, which is the honest answer rather than a
+  wrong span.
+- `CommentThreadPanel.vue` still states its `bg-accented` retarget on the one slideover
+  instead of in `app.config.ts` beside the modal, dropdown and popover. Unchanged from
+  2026-09-16.
+
 ### 2026-09-23 — Two toasts are one tier working, and a screenshot that claims a theme has to assert it
 
 Two things the e2e suite taught this batch after the toasts landed, both worth keeping.
