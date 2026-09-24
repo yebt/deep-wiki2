@@ -38,7 +38,9 @@ describe('new workspace screen', () => {
     expect(component.findAll('h1')).toHaveLength(1);
     expect(component.find('header').exists()).toBe(true);
     expect(component.find('main').exists()).toBe(true);
-    expect(component.find('footer').exists()).toBe(true);
+    // No footer anywhere, in either frame: the owner asked three times
+    // and it went on 2026-09-23 (the reasoning is in `AppShell.vue`).
+    expect(component.find('footer').exists()).toBe(false);
   });
 
   test('both fields have a programmatically associated label, and the slug follows the name until it is edited by hand', async () => {
