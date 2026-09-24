@@ -40,6 +40,12 @@
  * sentence is a whole sentence rather than a truncated one. The field
  * points at it with `aria-describedby`, so it is read as part of the field
  * and not as a stray paragraph (§5).
+ *
+ * ── The two ways out ───────────────────────────────────────────────────
+ *
+ * Escape, and a pointerdown anywhere outside the field. Both discard what
+ * was typed; the note over `onPointerDownOutside` says why that rather
+ * than the commit-on-blur the page's title field takes.
  */
 import { NODE_TYPE_ICONS, NODE_TYPE_LABELS } from '~/composables/useTreeRowActions';
 import type { EditorSnapshot } from '~/composables/useTreeRowEditor';
@@ -117,10 +123,48 @@ onMounted(() => {
   };
   void nextTick(take);
 });
+
+/* ─── Clicking away ──────────────────────────────────────────────────────
+ * A pointerdown anywhere outside the field cancels, and **the half-typed
+ * name is discarded** — byte for byte the outcome Escape already has.
+ *
+ * The owner reported on 2026-09-23 that only Escape got out of a draft row:
+ * a person who changed their mind and clicked elsewhere was left with a
+ * field still standing in the tree. Two ways out of one field that
+ * disagreed about the typed text would be worse than either, so this is
+ * deliberately *not* the commit-on-blur the page's title field takes
+ * (`PageTitle`, Obsidian's behaviour for a document's own name). The
+ * difference is what the two fields are for: the title field is changing a
+ * name that already exists, and a stray click there should not throw the
+ * edit away; this field's create half has nothing to go back to, so a
+ * commit would silently make a node the person had stopped asking for. VS
+ * Code's own input box discards on both roads, and both halves of this
+ * field are that one road.
+ *
+ * `pointerdown` in the **capture** phase, so a click on `New…` while a
+ * draft is open cancels the old field before the new one is asked for, and
+ * so the decision is taken before any other handler acts on the same
+ * gesture. A write already in flight is never abandoned: the state machine
+ * ignores a cancel during `committing` (`useTreeRowEditor`), and this
+ * returns early rather than leaning on that, so the reason stands where the
+ * gesture is read.
+ */
+const root = ref<HTMLElement | null>(null);
+
+function onPointerDownOutside(event: Event): void {
+  if (props.snapshot.phase === 'committing') return;
+  const target = event.target as Node | null;
+  if (target && root.value?.contains(target)) return;
+  emit('cancel');
+}
+
+onMounted(() => document.addEventListener('pointerdown', onPointerDownOutside, true));
+onBeforeUnmount(() => document.removeEventListener('pointerdown', onPointerDownOutside, true));
 </script>
 
 <template>
   <div
+    ref="root"
     data-row-editor
     class="flex flex-col gap-1 pe-1"
     :style="{ paddingLeft: `${depth * 12 + 8}px` }"

@@ -1024,6 +1024,79 @@ test.describe('the tree’s blank space', () => {
 });
 
 /**
+ * Getting out of the row being named (owner report, 2026-09-23: only
+ * Escape cancelled a draft row, so a person who changed their mind and
+ * clicked elsewhere was left with a field standing in the tree). A
+ * pointerdown outside the field now cancels it, discarding the half-typed
+ * name exactly as Escape does — the reasoning is at
+ * `NavigationTreeRowEditor.onPointerDownOutside`.
+ */
+test.describe('leaving the row being named', () => {
+  test.use({ viewport: { width: 1280, height: 900 } });
+
+  test('a click outside the draft row cancels it, writes nothing, and leaves no row behind', async ({ page }) => {
+    const fixtures = mintFixtures();
+    const posts: string[] = [];
+    page.on('request', (request) => {
+      if (request.method() === 'POST' && request.url().endsWith('/nodes')) posts.push(request.url());
+    });
+    await openTree(page, fixtures);
+    const rowsBefore = await page.getByRole('treeitem').count();
+
+    await page.getByRole('treeitem', { name: new RegExp(fixtures.chapterTitle) }).focus();
+    await page.getByRole('button', { name: 'New…' }).click();
+    const field = nameField(page);
+    await expect(field).toBeFocused();
+    await field.fill('Half a name');
+
+    // The document beside the tree — as far from the field as a person can
+    // reasonably click while still in the product.
+    await page.getByRole('heading', { level: 1 }).first().click();
+
+    await expect(page.getByTestId('tree-draft-row')).toHaveCount(0);
+    await expect(page.getByRole('treeitem')).toHaveCount(rowsBefore);
+    await expect(page.getByRole('treeitem', { name: /Half a name/ })).toHaveCount(0);
+    expect(posts, 'nothing was written').toEqual([]);
+  });
+
+  test('a click outside a rename cancels it too: the row keeps the name it had', async ({ page }) => {
+    const fixtures = mintFixtures();
+    const patches: string[] = [];
+    page.on('request', (request) => {
+      if (request.method() === 'PATCH' && /\/nodes\/[^/]+$/.test(request.url())) patches.push(request.url());
+    });
+    await openTree(page, fixtures);
+
+    const row = page.getByRole('treeitem', { name: new RegExp(fixtures.firstPageTitle) });
+    await row.focus();
+    await page.keyboard.press('F2');
+    await expect(nameField(page)).toBeFocused();
+    await nameField(page).fill('Not saved either');
+
+    await page.getByRole('heading', { level: 1 }).first().click();
+
+    await expect(page.locator('[data-row-editor]')).toHaveCount(0);
+    await expect(page.getByRole('treeitem', { name: new RegExp(fixtures.firstPageTitle) })).toBeVisible();
+    await expect(page.getByRole('treeitem', { name: /Not saved either/ })).toHaveCount(0);
+    expect(patches, 'nothing was renamed').toEqual([]);
+  });
+
+  test('a click on New… while a draft is open cancels the old field and opens a new one', async ({ page }) => {
+    const fixtures = mintFixtures();
+    await openTree(page, fixtures);
+
+    await page.getByRole('treeitem', { name: new RegExp(fixtures.chapterTitle) }).focus();
+    await page.getByRole('button', { name: 'New…' }).click();
+    await nameField(page).fill('Abandoned');
+
+    await page.getByRole('button', { name: 'New…' }).click();
+
+    await expect(page.getByTestId('tree-draft-row')).toHaveCount(1);
+    await expect(nameField(page)).toHaveValue('');
+  });
+});
+
+/**
  * The `?` beside "Contents" (owner report, 2026-09-23: clicking it did
  * nothing, which was literally true — a `UButton` inside a `UTooltip`
  * with no `@click`). It now opens a popover that lists the keys, which is

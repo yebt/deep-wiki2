@@ -142,6 +142,64 @@ describe('NavigationTreeRowEditor', () => {
     expect(field(root).getAttribute('aria-busy')).toBe('true');
   });
 
+  /**
+   * Clicking away cancels, and the half-typed name is discarded — the same
+   * outcome Escape has, because two ways out of one field that disagree
+   * about the typed text is worse than either. The owner reported on
+   * 2026-09-23 that only Escape got out of a draft row; VS Code's input box
+   * behaves this way, and so does every explorer's rename.
+   */
+  describe('a pointerdown outside the field', () => {
+    async function pointerDownOn(target: EventTarget): Promise<void> {
+      target.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, cancelable: true }));
+      await nextTick();
+    }
+
+    test('cancels, discarding the typed name, exactly as Escape does', async () => {
+      const events: string[] = [];
+      await mount({
+        snapshot: snapshot(CREATE, { value: 'Half a name' }),
+        depth: 2,
+        onCommit: () => events.push('commit'),
+        onCancel: () => events.push('cancel'),
+      });
+
+      await pointerDownOn(document.body);
+
+      expect(events, 'cancelled, never committed behind the person’s back').toEqual(['cancel']);
+    });
+
+    test('a pointerdown inside the field is not outside it', async () => {
+      const events: string[] = [];
+      const root = await mount({ snapshot: snapshot(CREATE, { value: 'Notes' }), depth: 2, onCancel: () => events.push('cancel') });
+
+      await pointerDownOn(field(root));
+      await pointerDownOn(root.querySelector('[data-row-editor]')!);
+
+      expect(events).toEqual([]);
+    });
+
+    test('a write already in flight is never abandoned by a stray click', async () => {
+      const events: string[] = [];
+      await mount({ snapshot: snapshot(CREATE, { phase: 'committing', value: 'Notes' }), depth: 2, onCancel: () => events.push('cancel') });
+
+      await pointerDownOn(document.body);
+
+      expect(events, 'the row must not vanish while the request is landing').toEqual([]);
+    });
+
+    test('the listener goes with the field: a pointerdown after it closes cancels nothing', async () => {
+      const events: string[] = [];
+      await mount({ snapshot: snapshot(RENAME, { value: 'Day one' }), depth: 1, onCancel: () => events.push('cancel') });
+      wrapper?.unmount();
+      wrapper = null;
+
+      await pointerDownOn(document.body);
+
+      expect(events).toEqual([]);
+    });
+  });
+
   test('the row keeps the tree’s indent, so the field is where the row would have been', async () => {
     const root = await mount({ snapshot: snapshot(CREATE), depth: 3 });
     const row = root.querySelector<HTMLElement>('[data-row-editor]');
