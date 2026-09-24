@@ -68,6 +68,7 @@ import type { ContextMenuItem } from '@nuxt/ui';
 import type { NodeType } from '@deep-wiki/contracts';
 import type { TreeNode } from '~/composables/useTree';
 import { deleteNode, type ForceDeleteFetcher, type TrashFetcher } from '~/composables/useTrash';
+import { shortcutsSentence, type KeyboardShortcut } from '~/composables/useKeyboardShortcuts';
 import { useTreeFilter } from '~/composables/useTreeFilter';
 import { NODE_TYPE_LABELS, deleteRowAction, treeRootActions, treeRowActions, type TreeRowAction } from '~/composables/useTreeRowActions';
 import {
@@ -334,8 +335,28 @@ function onToggle(nodeId: string): void {
   toggleCollapsed(nodeId);
 }
 
-const KEYBOARD_HELP =
-  'Arrow keys move through the tree, Enter opens a page or folds a shelf, book or chapter, Alt with the arrow keys moves an item among its siblings, F2 renames an item where it stands, Delete moves an item to the trash, and Shift+F10 opens a row’s menu.';
+/**
+ * Every key the tree answers, once — drawn in the `?` popover
+ * (`KeyboardShortcutsHelp`) and spoken in the tree's own description
+ * below it, from one list (`useKeyboardShortcuts`). docs/UI-CHECKLIST.md
+ * §5 requires the keys to be named in the UI, and §5 again requires a
+ * stated keyboard equivalent for every pointer-only manipulation: the
+ * `Alt`-arrows are the drag's, and `Escape` is the blank space's.
+ */
+const TREE_SHORTCUTS: readonly KeyboardShortcut[] = [
+  { keys: ['↑', '↓'], spoken: 'The up and down arrows', description: 'move through the tree' },
+  { keys: ['←', '→'], spoken: 'The left and right arrows', description: 'fold a shelf, book or chapter, or step into it' },
+  { keys: ['Home', 'End'], spoken: 'Home and End', description: 'jump to the first and last row' },
+  { keys: ['Enter'], spoken: 'Enter', description: 'opens a page, or folds a shelf, book or chapter' },
+  { keys: ['Alt', '↑', '↓', '→'], spoken: 'Alt with the arrow keys', description: 'moves an item among its siblings' },
+  { keys: ['F2'], spoken: 'F2', description: 'renames an item where it stands' },
+  { keys: ['Delete'], spoken: 'Delete', description: 'moves an item to the trash' },
+  { keys: ['Esc'], spoken: 'Escape', description: 'picks nothing, so New… creates at the top level' },
+  { keys: ['Shift', 'F10'], spoken: 'Shift and F10', description: 'open the row’s menu' },
+  { keys: ['Ctrl', 'Shift', 'F'], spoken: 'Control or Command with Shift and F', description: 'filters the tree by title' },
+];
+
+const KEYBOARD_HELP = shortcutsSentence(TREE_SHORTCUTS);
 
 /* ─── Naming a row, in the row ────────────────────────────────────────
  * The owner rejected the tree's create and rename dialogs on 2026-09-23.
@@ -778,20 +799,17 @@ const menuItems = computed<ContextMenuItem[][]>(() => {
          an action on the tree — it states the keys, which
          docs/UI-CHECKLIST.md §5 requires to be named in the UI and not only
          in a comment — so it stands with the label rather than in the
-         header's action group below. -->
+         header's action group below.
+
+         It opens a popover rather than carrying a tooltip and nothing else:
+         the owner clicked it on 2026-09-23 and nothing happened, which was
+         literally true (a `UButton` with no `@click`), and §6 counts a
+         control that does nothing as observable breakage. The same list is
+         spoken in the paragraph below, which is the tree's own description,
+         so the two cannot drift (`useKeyboardShortcuts`). -->
     <div class="flex items-center justify-between gap-2 px-2">
       <span id="navigation-tree-heading" class="text-title-small text-muted">Contents</span>
-      <UTooltip :text="KEYBOARD_HELP" :ui="{ content: 'max-w-64 h-auto py-2 text-wrap' }">
-        <UButton
-          icon="i-lucide-circle-help"
-          variant="ghost"
-          color="neutral"
-          size="xs"
-          square
-          aria-label="Keyboard help"
-          aria-describedby="navigation-tree-keyboard-help"
-        />
-      </UTooltip>
+      <KeyboardShortcutsHelp :shortcuts="TREE_SHORTCUTS" heading="Keys in the tree" />
       <p id="navigation-tree-keyboard-help" class="sr-only">{{ KEYBOARD_HELP }}</p>
     </div>
 

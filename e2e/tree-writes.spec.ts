@@ -1022,3 +1022,49 @@ test.describe('the tree’s blank space', () => {
     await expect(nameField(page)).toHaveAttribute('aria-label', 'Name of the new shelf');
   });
 });
+
+/**
+ * The `?` beside "Contents" (owner report, 2026-09-23: clicking it did
+ * nothing, which was literally true — a `UButton` inside a `UTooltip`
+ * with no `@click`). It now opens a popover that lists the keys, which is
+ * what docs/UI-CHECKLIST.md §5 asks for and §6's "no inert interactions"
+ * demands. Driven here rather than in a unit test because a `UPopover`'s
+ * non-modal content does not mount under the component-test environment
+ * at all (`KeyboardShortcutsHelp.test.ts` records the measurement).
+ */
+test.describe('the tree’s keyboard help', () => {
+  test.use({ viewport: { width: 1280, height: 900 } });
+
+  test('the ? opens a popover that names every key, Escape closes it, and focus comes back to the control', async ({ page }) => {
+    const fixtures = mintFixtures();
+    await openTreeAs(page, fixtures.writerSessionToken, fixtures);
+
+    const help = page.getByRole('button', { name: 'Keyboard help' });
+    await expect(help).toHaveAttribute('aria-expanded', 'false');
+
+    await help.click();
+
+    const panel = page.getByRole('dialog');
+    await expect(panel).toBeVisible();
+    await expect(help).toHaveAttribute('aria-expanded', 'true');
+    // It names the surface it opened, which is what makes the pair a
+    // disclosure rather than two unrelated things (§5).
+    expect(await help.getAttribute('aria-controls')).toBe(await panel.getAttribute('id'));
+
+    await expect(panel).toContainText('Keys in the tree');
+    for (const phrase of ['move through the tree', 'renames an item where it stands', 'moves an item to the trash']) {
+      await expect(panel).toContainText(phrase);
+    }
+    // The two chords that stand in for a pointer (§5): the drag's, and the
+    // blank space's.
+    await expect(panel.getByText('Alt', { exact: true })).toBeVisible();
+    await expect(panel.getByText('Esc', { exact: true })).toBeVisible();
+    await tree3Shot(page, 'help-1280-light');
+    await expectNoHorizontalOverflow(page, 'keyboard help 1280 light');
+
+    await page.keyboard.press('Escape');
+    await expect(panel).toHaveCount(0);
+    await expect(help).toBeFocused();
+    await expect(help).toHaveAttribute('aria-expanded', 'false');
+  });
+});

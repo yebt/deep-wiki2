@@ -221,10 +221,33 @@ describe('NavigationTree', () => {
 
       const help = component.get('button[aria-label="Keyboard help"]');
       expect(help.attributes('type')).toBe('button');
+      // It opens something (`KeyboardShortcutsHelp`) rather than being a
+      // tooltip with no action, which is what the owner clicked on
+      // 2026-09-23 and found inert (§6).
+      expect(help.attributes('aria-haspopup')).toBe('dialog');
+      expect(help.attributes('aria-expanded')).toBe('false');
       const tree = component.get('[role="tree"]');
       const describedBy = tree.attributes('aria-describedby')!;
       expect(component.get(`#${describedBy}`).text()).toMatch(/Alt with the arrow keys/);
       expect(component.get(`#${tree.attributes('aria-labelledby')}`).text()).toBe('Contents');
+    });
+
+    /**
+     * Every key the tree answers has to be *named in the UI* (§5), and the
+     * two that are a pointer's keyboard equivalent most of all: the
+     * `Alt`-arrows stand for a drag, and `Escape` stands for a click on the
+     * blank space. The list and the spoken sentence come from one source, so
+     * this asserts the sentence and the list is the same facts.
+     */
+    test('the spoken description names every key the tree answers, including the two that stand in for a pointer', async () => {
+      mockTree({ status: 'success', nodes: NODES });
+      const component = await mount();
+
+      const help = component.get('#navigation-tree-keyboard-help').text();
+      for (const key of ['Alt with the arrow keys', 'F2', 'Delete', 'Escape', 'Shift and F10']) {
+        expect(help, key).toContain(key);
+      }
+      expect(help).toMatch(/New… creates at the top level/);
     });
   });
 
