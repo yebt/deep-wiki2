@@ -15,7 +15,7 @@
  *
  * | Part | Where | Why |
  * | --- | --- | --- |
- * | The excerpt | Top, as a blockquote | It is what the thread is *about* — a subject line, which is what every threaded conversation puts first. §2.3 gives a blockquote its treatment: an `outline-variant` left rule and `text-muted`. |
+ * | The excerpt | Top, as a blockquote, and it **is** the control that shows the text in the page | It is what the thread is *about* — a subject line, which is what every threaded conversation puts first. §2.3 gives a blockquote its treatment: an `outline-variant` left rule and `text-muted`. Word links the card to its anchor and Docs pairs it with the highlighted span; in both the quoted text is the thing you act on, so the separate "Show in page" button is gone (2026-09-23). |
  * | The messages | One `<ol>`, root and replies alike | The owner's "a reply is visibly inside the thread, not a second-class nested box". A reply is not a different kind of object from the comment that opened the thread, so it is not drawn as one: same avatar, same author line, same body, same classes — asserted in the test, so the two cannot drift apart. |
  * | Resolve | The header, beside the subject | The owner's "Resolve is a thread-level action and should read as one". Under the reply field it read as a second submit for the sentence being typed. |
  * | The reply field | Last, one line, grown on focus | The owner's "a quiet one-line affordance that grows when focused, not a permanently open box that dominates the panel". Several threads have to stack legibly in one panel, and a 3-row box per thread is what stopped them doing so. |
@@ -88,7 +88,15 @@ const props = withDefaults(
 const emit = defineEmits<{
   reply: [threadId: string, body: string];
   resolve: [threadId: string, resolved: boolean];
+  /** Show this thread's anchored text in the page, and scroll to it if it is off screen. */
   locate: [blockId: string];
+  /**
+   * This thread is the one the reader is on — focus moved into it, or the
+   * pointer entered it. The screen moves the document highlight to follow
+   * (`useAnchorHighlight`), which is the tie Word draws between a card and
+   * its anchor and Docs draws between a card and a highlighted span.
+   */
+  focusThread: [threadId: string];
 }>();
 
 const draft = ref('');
@@ -151,7 +159,13 @@ const replyLabelId = useId();
 </script>
 
 <template>
-  <article :aria-labelledby="headingId" class="rounded-lg bg-default p-4" :data-comment-placement="placement">
+  <article
+    :aria-labelledby="headingId"
+    class="rounded-lg bg-default p-4"
+    :data-comment-placement="placement"
+    @focusin="emit('focusThread', thread.id)"
+    @pointerenter="emit('focusThread', thread.id)"
+  >
     <!-- The subject: what this thread is about, and — when the text is no
          longer where it was — a badge plus one sentence saying so. -->
     <header data-testid="comment-thread-header" class="mb-4">
@@ -170,11 +184,45 @@ const replyLabelId = useId();
         </p>
       </div>
 
-      <blockquote class="border-s-2 border-default ps-3 text-body-small text-muted">“{{ thread.anchor.quote }}”</blockquote>
+      <!-- The subject **is** the control that shows the text in the page.
+           "Show in page" stood beside it as its own labelled button until
+           2026-09-23 and no longer does: once focusing a thread highlights
+           its span, a second control repeats what focus has already done,
+           and it spent a tab stop and a line of the card saying "show in
+           page" instead of pointing at anything. Putting the affordance on
+           the quotation puts it on the thing it points at, which is the
+           relation the owner said was missing — Word links the card to its
+           anchor, Docs pairs the card with the highlighted span, and in
+           both the quoted text is what you act on.
 
-      <!-- The thread's own actions, beside its subject: where it points,
-           and whether it is done. Never under the reply field, where they
-           read as a second submit for the sentence being typed. -->
+           The visible label is the quote; the accessible name is the quote
+           with the verb around it, so the visible string is contained in
+           the accessible one (WCAG 2.5.3) and a screen-reader user is told
+           what activating it does. A tooltip carries the same words for a
+           sighted user (§4.3). Hover, focus and press are the M3 state
+           layer (§5.2), never a step to another surface rung. -->
+      <UTooltip v-if="placement === 'anchored' && !pending" text="Show this text in the page">
+        <blockquote class="border-s-2 border-default ps-3">
+          <button
+            data-testid="comment-locate"
+            type="button"
+            class="dw-state-layer w-full rounded-md px-1 py-0.5 text-start text-body-small text-muted"
+            :aria-label="`Show “${thread.anchor.quote}” in the page`"
+            @click="emit('locate', thread.anchor.blockId)"
+          >
+            “{{ thread.anchor.quote }}”
+          </button>
+        </blockquote>
+      </UTooltip>
+      <!-- Orphaned, unplaced, or still being posted: there is nothing in
+           the page to show, and the sentence above says which of those it
+           is rather than leaving a control to do nothing (§6, no inert
+           interactions). -->
+      <blockquote v-else class="border-s-2 border-default ps-3 text-body-small text-muted">“{{ thread.anchor.quote }}”</blockquote>
+
+      <!-- The thread's own action, beside its subject: whether it is done.
+           Never under the reply field, where it read as a second submit for
+           the sentence being typed. -->
       <div class="mt-2 flex flex-wrap items-center gap-2">
         <!-- Colour is never the only signal (§5): the word and the icon. -->
         <UBadge v-if="thread.resolved" data-testid="comment-resolved" variant="outline" color="success" icon="i-lucide-check" size="sm">
@@ -188,17 +236,6 @@ const replyLabelId = useId();
         </UBadge>
 
         <div class="ms-auto flex flex-wrap items-center gap-2">
-          <UButton
-            v-if="placement === 'anchored' && !pending"
-            data-testid="comment-locate"
-            size="sm"
-            variant="ghost"
-            color="neutral"
-            icon="i-lucide-locate"
-            @click="emit('locate', thread.anchor.blockId)"
-          >
-            Show in page
-          </UButton>
           <UButton
             v-if="canReply && !pending"
             data-testid="comment-resolve"

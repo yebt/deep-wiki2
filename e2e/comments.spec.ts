@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 import { pageCommentsAnswered, waitForHydration } from './hydration';
+import { textContrastOver } from './contrast';
 import { expectNoHorizontalOverflow } from './overflow';
 import { pageEditUrl, pageUrl } from '../apps/web/app/utils/routes';
 
@@ -41,6 +42,10 @@ interface CommentFixtures {
   readonly freshPageTitle: string;
   readonly freshFirstParagraph: string;
   readonly freshSecondParagraph: string;
+  readonly longPageId: string;
+  readonly longPageTitle: string;
+  readonly longCommentedParagraph: string;
+  readonly longAnchoredWords: string;
   readonly escapedSpacePageId: string;
   readonly escapedSpacePageTitle: string;
   readonly escapedSpaceParagraph: string;
@@ -159,7 +164,7 @@ test('a commenter opens a thread from the mark beside its block, replies, and re
   await expect(panel).toContainText('Is this paragraph still accurate after the migration?');
   await expect(panel).toContainText('I believe so, but the date needs checking.');
   await expect(panel).toContainText('E2E Commenter');
-  await expect(page.getByTestId('comment-highlight')).toBeVisible();
+  await expect(page.getByTestId('comment-highlight').first()).toBeVisible();
   // While the modal panel is open the page behind it is inert to the
   // accessibility tree, so the mark is located by attribute here.
   await expect(page.locator('button[aria-label="2 comments on this block"]')).toHaveAttribute('aria-pressed', 'true');
@@ -612,4 +617,175 @@ test('a page whose cached render predates block anchors says its comment cannot 
   await expect(panel).toContainText('re-rendered');
   await expect(panel).toContainText(fixtures.legacyQuote);
   await expect(panel).toContainText('This comment exists before the backfill has run.');
+});
+
+/**
+ * The tie between a comment and its text — the owner's third request of
+ * 2026-09-23: *"no me muestra muy bien la relación que hay con respecto a
+ * esta parte o a dónde pertenece. Guíate en Word o Google Docs."* In both
+ * products, selecting a comment highlights the **anchored span** in the
+ * document and scrolls it into view. What shipped before was a wash over the
+ * whole block, and it never moved as the reader went down a stack of threads.
+ *
+ * Three things are measured here, because none of them can be measured
+ * anywhere else: the painted box is the span and not the paragraph (the
+ * browser has to lay the text out for that to mean anything), the span is
+ * scrolled to when it is off screen, and the painted colour clears §5's
+ * contrast floor against the text drawn over it.
+ */
+test('focusing a thread highlights its anchored words, not the whole paragraph, and scrolls them into view when they are off screen', async ({ page, context }) => {
+  await signInAs(context, fixtures.commenterSessionToken);
+
+  await page.goto(pageUrl(seed.workspaceSlug, fixtures.longPageId));
+  await expect(page.getByRole('heading', { level: 1, name: fixtures.longPageTitle })).toBeVisible({ timeout: 30000 });
+  await waitForHydration(page);
+
+  const block = page.locator('[data-block-id="E2ELONGTGT"]');
+  await expect(block).toContainText(fixtures.longAnchoredWords, { timeout: 30000 });
+
+  // The commented paragraph is below the fold: thirty filler paragraphs
+  // stand above it. This is the state the reveal exists for.
+  const beforeReveal = (await block.boundingBox())!;
+  expect(beforeReveal.y, 'the commented paragraph starts below the fold').toBeGreaterThan(900);
+  await expect(page.getByTestId('comment-highlight')).toHaveCount(0);
+
+  // The mark is beside the paragraph, so it is off screen too; the panel is
+  // opened from the mark once it is scrolled to, exactly as a reader would.
+  const mark = page.getByRole('button', { name: '1 comment on this block' });
+  await mark.scrollIntoViewIfNeeded();
+  await mark.click();
+
+  const panel = dialog(page);
+  await expect(panel).toBeVisible();
+
+  // The highlight is the span, not the block. Measured: the painted boxes
+  // together are far narrower and shorter than the paragraph they sit in,
+  // and they sit inside it.
+  const boxes = page.getByTestId('comment-highlight');
+  await expect(boxes.first()).toBeVisible();
+  const paragraph = (await block.boundingBox())!;
+  const painted = (await boxes.first().boundingBox())!;
+  expect(painted.height, 'a line of the span, not the whole paragraph').toBeLessThan(paragraph.height);
+  expect(painted.width, 'the words, not the measure').toBeLessThan(paragraph.width);
+  expect(painted.x).toBeGreaterThanOrEqual(paragraph.x - 2);
+  expect(painted.y).toBeGreaterThanOrEqual(paragraph.y - 2);
+
+  // §5's 4.5:1 floor, measured on the real pair: the article's own
+  // `text-default` over the painted `secondary-container`.
+  expect(await textContrastOver(block, boxes.first()), 'the text stays readable over the highlight').toBeGreaterThanOrEqual(4.5);
+
+  await shot(page, 'highlight-1280-light');
+
+  // Leaving the thread clears it (§4.7: dismissible, never persists).
+  await page.keyboard.press('Escape');
+  await expect(panel).toBeHidden();
+  await expect(page.getByTestId('comment-highlight')).toHaveCount(0);
+
+  // And the quotation is what scrolls to it: read the page from the top,
+  // open the panel on the whole page, activate the quotation, and the span
+  // comes into view.
+  await page.evaluate(() => document.querySelector('[data-slot="body"]')?.scrollTo({ top: 0 }));
+  await mark.scrollIntoViewIfNeeded();
+  await mark.click();
+  await expect(panel).toBeVisible();
+  await page.evaluate(() => document.querySelector('[data-slot="body"]')?.scrollTo({ top: 0 }));
+  await expect
+    .poll(async () => (await block.boundingBox())!.y, { timeout: 10_000 })
+    .toBeGreaterThan(900);
+
+  await panel.getByRole('button', { name: `Show “${fixtures.longAnchoredWords}” in the page` }).click();
+  // Scrolled into view, and said so.
+  await expect
+    .poll(async () => (await block.boundingBox())!.y, { timeout: 10_000 })
+    .toBeLessThan(900);
+  await expect(panel.getByRole('status').filter({ hasText: 'Showing' })).toHaveCount(1);
+});
+
+test('an orphaned thread says there is nothing to show, and offers no control that would', async ({ browser }) => {
+  // Its own context: the orphan page's thread is orphaned by the editor's
+  // save in the test above, which has already run (this file is serial).
+  const readerContext = await browser.newContext();
+  const page = await readerContext.newPage();
+  await signInAs(readerContext, fixtures.commenterSessionToken);
+  await page.goto(pageUrl(seed.workspaceSlug, fixtures.orphanPageId));
+  await expect(page.getByRole('heading', { level: 1, name: fixtures.orphanPageTitle })).toBeVisible({ timeout: 30000 });
+
+  const chip = page.getByTestId('comments-orphaned');
+  await expect(chip).toBeVisible({ timeout: 30000 });
+  await chip.getByRole('button', { name: 'Show' }).click();
+
+  const panel = dialog(page);
+  await expect(panel).toBeVisible();
+  // Said where the thread is, not with a silent no-op.
+  await expect(panel.getByText('Text removed', { exact: true })).toBeVisible();
+  await expect(panel).toContainText('The text this comment pointed at is no longer on this page.');
+  // Nothing offers to show it, and nothing is painted.
+  await expect(panel.getByRole('button', { name: /^Show “/ })).toHaveCount(0);
+  await expect(page.getByTestId('comment-highlight')).toHaveCount(0);
+  await shot(page, 'orphan-1280-light');
+  await readerContext.close();
+});
+
+test('a member who may read but not comment sees no conversation to add to: no composer, no reply, no resolve', async ({ page, context }) => {
+  await signInAs(context, seed.readerSessionToken);
+
+  const commentsAnswered = pageCommentsAnswered(page);
+  await page.goto(pageUrl(seed.workspaceSlug, fixtures.commentsPageId));
+  await expect(page.getByRole('heading', { level: 1, name: fixtures.commentsPageTitle })).toBeVisible({ timeout: 30000 });
+  await waitForHydration(page);
+  await commentsAnswered;
+
+  // The API answers `{ threads: [] }` to a caller without `comment`
+  // (comment-threads spec: "Comment Data Never Reaches A Subject Without
+  // Read", and the same shape for a page with none), so a read-only member
+  // is shown no conversation at all — which is the product's rule, not this
+  // batch's. What this asserts is that nothing offers to write either: no
+  // composer, no reply field, no resolve, no panel. The component's own
+  // answer for a caller who *can* see threads and not add to them is held by
+  // `CommentThreadItem.test.ts` and `CommentThreadPanel.test.ts`.
+  await expect(page.getByTestId('comment-composer')).toHaveCount(0);
+  await expect(page.getByTestId('comment-reply-composer')).toHaveCount(0);
+  await expect(page.getByTestId('comment-resolve')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Comment on this block' })).toHaveCount(0);
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+});
+
+test('the conversation and its highlight hold at 320 and in dark, with nothing scrolling sideways', async ({ browser }) => {
+  for (const shape of [
+    { width: 320, height: 900, theme: 'light' as const, label: '320-light' },
+    { width: 1280, height: 900, theme: 'dark' as const, label: '1280-dark' },
+  ]) {
+    const context = await browser.newContext({ viewport: { width: shape.width, height: shape.height } });
+    const page = await context.newPage();
+    await useTheme(page, shape.theme);
+    await signInAs(context, fixtures.commenterSessionToken);
+    await page.goto(pageUrl(seed.workspaceSlug, fixtures.longPageId));
+    await expect(page.getByRole('heading', { level: 1, name: fixtures.longPageTitle })).toBeVisible({ timeout: 30000 });
+    await waitForHydration(page);
+
+    const mark = page.getByRole('button', { name: '1 comment on this block' });
+    await expect(mark).toBeVisible({ timeout: 30000 });
+    await mark.scrollIntoViewIfNeeded();
+    await mark.click();
+
+    const panel = dialog(page);
+    await expect(panel).toBeVisible();
+    // The conversation: the subject, the author, the message, the reply line.
+    await expect(panel.getByRole('button', { name: `Show “${fixtures.longAnchoredWords}” in the page` })).toBeVisible();
+    await expect(panel).toContainText('E2E Commenter');
+    await expect(panel).toContainText('Is this the right number of words?');
+    await expect(panel.getByTestId('comment-reply-composer')).toBeVisible();
+    // Quiet until it is used: the Reply control is not taking up the panel.
+    await expect(panel.getByRole('button', { name: 'Reply' })).toHaveCount(0);
+    await panel.getByLabel(/^Reply to /).click();
+    await expect(panel.getByRole('button', { name: 'Reply' })).toBeVisible();
+
+    const boxes = page.getByTestId('comment-highlight');
+    await expect(boxes.first()).toBeVisible();
+    expect(await textContrastOver(page.locator('[data-block-id="E2ELONGTGT"]'), boxes.first())).toBeGreaterThanOrEqual(4.5);
+
+    await expectNoHorizontalOverflow(page, `thread panel ${shape.label}`);
+    await shot(page, `thread-${shape.label}`);
+    await context.close();
+  }
 });

@@ -888,6 +888,113 @@ describe('read-mode page', () => {
     });
 
     /*
+     * The tie between a comment and its text (the owner's third request of
+     * 2026-09-23: "no me muestra muy bien la relación … Guíate en Word o
+     * Google Docs"). The *mapping* is `utils/anchor-range.test.ts`'s and the
+     * *controller* is `useAnchorHighlight.test.ts`'s; what this file holds is
+     * the screen's rule for **which** thread the highlight follows, and that
+     * it goes away.
+     */
+    describe('the highlight follows the thread in focus', () => {
+      const TWO = '<p data-block-id="b1">First block.</p><p data-block-id="b2">Second block.</p>';
+
+      // The boxes are drawn inside the article's wrapper, not in the
+      // teleported panel, so they are counted on the component.
+      function highlights(component: Awaited<ReturnType<typeof mount>>): number {
+        return component.findAll('[data-testid="comment-highlight"]').length;
+      }
+
+      test('nothing is highlighted until a thread is opened, and nothing is once the panel closes', async () => {
+        mockRead({ status: 'success', title: 'A Page', html: TWO, workspaceId: 'ws-1' });
+        mockComments([commentThread({ id: 't1', blockId: 'b1' })]);
+        const component = await mount();
+        await settle();
+
+        expect(highlights(component)).toBe(0);
+        await component.get('button[aria-label="1 comment on this block"]').trigger('click');
+        await settle();
+        expect(highlights(component)).toBeGreaterThan(0);
+
+        document.body.querySelector<HTMLElement>('[role="dialog"] button[aria-label="Close"]')!.click();
+        await settle();
+        expect(highlights(component)).toBe(0);
+      });
+
+      test('moving to another thread in the list moves the highlight to that thread’s own text', async () => {
+        mockRead({ status: 'success', title: 'A Page', html: TWO, workspaceId: 'ws-1' });
+        // Two threads, on two different blocks, listed together (the panel
+        // opened on the whole page through the orphan/unplaced route).
+        mockComments([
+          commentThread({ id: 't1', blockId: 'b1', anchor: { blockId: 'b1', offsetStart: 0, offsetEnd: 5, quote: 'First', orphaned: false } }),
+          commentThread({ id: 't2', blockId: 'b2', anchor: { blockId: 'b2', offsetStart: 0, offsetEnd: 6, quote: 'Second', orphaned: false } }),
+        ]);
+        const component = await mount();
+        await settle();
+
+        await component.get('button[aria-label="1 comment on this block"]').trigger('click');
+        await settle();
+        document.body.querySelector<HTMLElement>('[data-testid="comments-show-all"]')!.click();
+        await settle();
+
+        // Hovering the second thread hands it the highlight: the page asks
+        // the composable for that thread's block, not the first one's.
+        const threads = document.body.querySelectorAll<HTMLElement>('[data-comment-placement]');
+        expect(threads).toHaveLength(2);
+        threads[1]!.dispatchEvent(new PointerEvent('pointerenter', { bubbles: true }));
+        await settle();
+        expect(highlights(component)).toBeGreaterThan(0);
+
+        // And focus does the same, which is the keyboard's way to it (§5).
+        threads[0]!.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+        await settle();
+        expect(highlights(component)).toBeGreaterThan(0);
+      });
+
+      test('an orphaned thread highlights nothing, and says so where the reader is looking', async () => {
+        mockRead({ status: 'success', title: 'A Page', html: TWO, workspaceId: 'ws-1' });
+        mockComments([commentThread({ id: 't1', blockId: 'gone', orphaned: true })]);
+        const component = await mount();
+        await settle();
+
+        await component.get('[data-testid="comments-orphaned"] button').trigger('click');
+        await settle();
+
+        expect(highlights(component)).toBe(0);
+        const dialog = document.body.querySelector('[role="dialog"]')!;
+        expect(dialog.textContent).toMatch(/no longer on this page/i);
+        // No control offering to show text that is not there (§6, no inert
+        // interactions).
+        expect(dialog.querySelector('[data-testid="comment-locate"]')).toBeNull();
+      });
+
+      test('the thread’s quotation is the control that shows its text in the page, and it announces what it showed', async () => {
+        mockRead({ status: 'success', title: 'A Page', html: TWO, workspaceId: 'ws-1' });
+        mockComments([
+          commentThread({ id: 't1', blockId: 'b1', anchor: { blockId: 'b1', offsetStart: 0, offsetEnd: 5, quote: 'First', orphaned: false } }),
+        ]);
+        const component = await mount();
+        await settle();
+
+        await component.get('button[aria-label="1 comment on this block"]').trigger('click');
+        await settle();
+
+        const locate = document.body.querySelector<HTMLElement>('[data-testid="comment-locate"]')!;
+        // The visible label is the quotation; the accessible name says what
+        // activating it does, and contains the visible one (WCAG 2.5.3).
+        expect(locate.textContent).toContain('“First”');
+        expect(locate.getAttribute('aria-label')).toBe('Show “First” in the page');
+        locate.click();
+        await settle();
+
+        // The exact wording depends on whether the span itself was located,
+        // which needs a browser that lays text out — `e2e/comments.spec.ts`
+        // is where the painted span is measured. Here: it announced showing
+        // something, which is §5's "async state changes are announced".
+        expect(document.body.querySelector('[data-testid="comments-status"]')!.textContent).toMatch(/^Showing /);
+      });
+    });
+
+    /*
      * The owner's second request of 2026-09-23: "Reply posted." must be a
      * toast. The 2026-09-23 batch moved the product's transient successes to
      * `useStatusToast()` and missed the comment flow's three, so a reply

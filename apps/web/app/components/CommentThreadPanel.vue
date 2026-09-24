@@ -97,6 +97,8 @@ const emit = defineEmits<{
   locate: [blockId: string];
   /** Start a thread on the focused block — a second one beside its mark, or the first from the panel's empty view. */
   start: [blockId: string];
+  /** The thread the reader is on, so the screen's document highlight can follow it (`useAnchorHighlight`). */
+  focusThread: [threadId: string];
 }>();
 
 const visible = computed(() =>
@@ -190,6 +192,7 @@ const description = computed(() => {
             @reply="(threadId, body) => emit('reply', threadId, body)"
             @resolve="(threadId, resolved) => emit('resolve', threadId, resolved)"
             @locate="(blockId) => emit('locate', blockId)"
+            @focus-thread="(threadId) => emit('focusThread', threadId)"
           />
         </li>
       </ol>
