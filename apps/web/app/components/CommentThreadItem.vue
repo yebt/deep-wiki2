@@ -201,8 +201,13 @@ const replyLabelId = useId();
            what activating it does. A tooltip carries the same words for a
            sighted user (§4.3). Hover, focus and press are the M3 state
            layer (§5.2), never a step to another surface rung. -->
-      <UTooltip v-if="placement === 'anchored' && !pending" text="Show this text in the page">
-        <blockquote class="border-s-2 border-default ps-3">
+      <blockquote v-if="placement === 'anchored' && !pending" class="border-s-2 border-default ps-3">
+        <!-- The tooltip wraps the *button*, not the quotation around it: a
+             `UTooltip` renders as its own child (`as-child`), and a
+             blockquote is not focusable, so a tooltip on the quotation
+             would never show for a keyboard user (§4.3 asks for both the
+             name and the tooltip). -->
+        <UTooltip text="Show this text in the page">
           <button
             data-testid="comment-locate"
             type="button"
@@ -212,8 +217,8 @@ const replyLabelId = useId();
           >
             “{{ thread.anchor.quote }}”
           </button>
-        </blockquote>
-      </UTooltip>
+        </UTooltip>
+      </blockquote>
       <!-- Orphaned, unplaced, or still being posted: there is nothing in
            the page to show, and the sentence above says which of those it
            is rather than leaving a control to do nothing (§6, no inert
@@ -235,9 +240,8 @@ const replyLabelId = useId();
           Posting…
         </UBadge>
 
-        <div class="ms-auto flex flex-wrap items-center gap-2">
+        <div v-if="canReply && !pending" class="ms-auto flex flex-wrap items-center gap-2">
           <UButton
-            v-if="canReply && !pending"
             data-testid="comment-resolve"
             size="sm"
             variant="ghost"

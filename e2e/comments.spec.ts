@@ -56,7 +56,7 @@ const SHOTS = process.env.DEEPWIKI_FB_COMMENTS_SHOTS ?? '';
 
 async function shot(page: Page, name: string): Promise<void> {
   if (!SHOTS) return;
-  await page.screenshot({ path: `${SHOTS}/fb-comments-${name}.png`, fullPage: false });
+  await page.screenshot({ path: `${SHOTS}/comments2-${name}.png`, fullPage: false });
 }
 
 async function useTheme(page: Page, theme: 'light' | 'dark'): Promise<void> {
@@ -190,6 +190,10 @@ test('a commenter opens a thread from the mark beside its block, replies, and re
   await expect(toast(page, 'Reply posted on')).toBeVisible({ timeout: 30000 });
   await expectNoSuccessBar(page);
   await expect(panel).toContainText('Checked: the date is right.');
+  // The conversation with its reply, and the confirmation as a toast rather
+  // than a bar over it — the owner's first two requests in one frame.
+  await expectTheme(page, 'light');
+  await shot(page, 'reply-1280-light');
 
   // Resolve: the word and an icon, and the control flips to Reopen.
   await panel.getByRole('button', { name: 'Resolve' }).click();
