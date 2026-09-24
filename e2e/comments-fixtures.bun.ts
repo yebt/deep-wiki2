@@ -85,6 +85,15 @@ export interface CommentFixtures {
   readonly freshPageTitle: string;
   readonly freshFirstParagraph: string;
   readonly freshSecondParagraph: string;
+  /**
+   * A long page whose commented paragraph sits well below the fold, with the
+   * thread anchored to a few words *inside* it — what the anchored-span
+   * highlight and the scroll-into-view are measured against (2026-09-23).
+   */
+  readonly longPageId: string;
+  readonly longPageTitle: string;
+  readonly longCommentedParagraph: string;
+  readonly longAnchoredWords: string;
   /** A page whose one paragraph ends in an escaped space — the real-world bytes the mint used to produce a non-canonical document from. */
   readonly escapedSpacePageId: string;
   readonly escapedSpacePageTitle: string;
@@ -195,6 +204,22 @@ export async function mintCommentFixtures(sql: postgres.Sql, workspaceId: string
   const freshSecondParagraph = 'A second fresh paragraph, with a few words worth selecting.';
   const freshPage = await makePage('E2E Fresh Page', 23, `${freshFirstParagraph}\n\n${freshSecondParagraph}\n`);
 
+  // The anchored-span highlight and the scroll (owner request, 2026-09-23:
+  // "guíate en Word o Google Docs"). Two properties need a page this shape:
+  // the thread is anchored to a few words *inside* a paragraph, so a
+  // whole-block wash and a real span highlight are distinguishable by
+  // measurement; and the paragraph sits below thirty others, so it is off
+  // screen at 900px and the reveal has something to do.
+  const longAnchoredWords = 'exactly these five words here';
+  const longCommentedParagraph = `A paragraph near the foot of a long page, holding ${longAnchoredWords} and a good deal of other prose around them so that a highlight of the whole block would measure very differently from a highlight of the words themselves.`;
+  const filler = Array.from(
+    { length: 30 },
+    (_unused, index) =>
+      `Filler paragraph ${index + 1}, long enough to take up a line or two of the reading measure and push what follows it down the page. ^E2ELONG${String(index).padStart(3, '0')}`,
+  ).join('\n\n');
+  const longPage = await makePage('E2E Long Page', 25, `${filler}\n\n${longCommentedParagraph} ^E2ELONGTGT\n`);
+  await thread(longPage, 'E2ELONGTGT', longAnchoredWords, 'Is this the right number of words?');
+
   // The bytes a real page of the project owner's held when commenting on a
   // selection answered 500 (docs/TODO.md, 2026-09-23). The paragraph ends in
   // a space, whose canonical spelling is the escape `&#x20;`, and appending
@@ -223,6 +248,10 @@ export async function mintCommentFixtures(sql: postgres.Sql, workspaceId: string
     freshPageTitle: freshPage.title,
     freshFirstParagraph,
     freshSecondParagraph,
+    longPageId: longPage.id,
+    longPageTitle: longPage.title,
+    longCommentedParagraph,
+    longAnchoredWords,
     escapedSpacePageId: escapedSpacePage.id,
     escapedSpacePageTitle: escapedSpacePage.title,
     escapedSpaceParagraph,

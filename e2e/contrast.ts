@@ -85,3 +85,51 @@ export async function boundaryContrast(control: Locator): Promise<number> {
     return (lighter + 0.05) / (darker + 0.05);
   });
 }
+
+/**
+ * Measures the contrast between a block's own **text colour** and the colour
+ * a highlight paints **behind** it — docs/UI-CHECKLIST.md §5's 4.5:1 floor
+ * for body text, on a pair no single element carries.
+ *
+ * The comment highlight is drawn as absolutely positioned boxes behind the
+ * article (`useAnchorHighlight`), so neither element knows about the other:
+ * the text's `color` is on the block, the fill is on the box, and the
+ * composited result exists only on screen. Both are read in the running
+ * browser and composited here, which is the only honest way to assert that
+ * a reader can still read the sentence a comment points at (added
+ * 2026-09-23, with the anchored-span highlight).
+ */
+export async function textContrastOver(text: Locator, fill: Locator): Promise<number> {
+  const textColour = await text.evaluate((element) => getComputedStyle(element).color);
+  return fill.evaluate(
+    (element, colour) => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 1;
+      canvas.height = 1;
+      const context = canvas.getContext('2d', { willReadFrequently: true })!;
+
+      function toRgb(css: string): [number, number, number] {
+        context.clearRect(0, 0, 1, 1);
+        context.fillStyle = css;
+        context.fillRect(0, 0, 1, 1);
+        const [r, g, b] = context.getImageData(0, 0, 1, 1).data;
+        return [r!, g!, b!];
+      }
+
+      function luminance([r, g, b]: [number, number, number]): number {
+        const channel = (value: number) => {
+          const c = value / 255;
+          return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+        };
+        return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
+      }
+
+      const foreground = luminance(toRgb(colour));
+      const background = luminance(toRgb(getComputedStyle(element).backgroundColor));
+      const lighter = Math.max(foreground, background);
+      const darker = Math.min(foreground, background);
+      return (lighter + 0.05) / (darker + 0.05);
+    },
+    textColour,
+  );
+}
