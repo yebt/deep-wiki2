@@ -68,6 +68,25 @@ describe('e2e/comments-fixtures.bun.ts', () => {
     expect(escapedSpace!.markdown).toBe('This is a content @Seed Owner&#x20;\n');
     expect(escapedSpace!.markdown).not.toContain('^');
     expect(fixtures.escapedSpaceParagraph).toBe('This is a content @Seed Owner');
+
+    // The long page carries the two properties the anchored-span highlight
+    // and the scroll are measured against (2026-09-23): its thread points at
+    // a few words *inside* a paragraph, so a whole-block wash and a span
+    // highlight are distinguishable by measurement; and the commented
+    // paragraph is the last of thirty-one, so it is below the fold. A fixture
+    // that lost either would leave the e2e passing for the wrong reason.
+    const [long] = await sql<{ rendered_html: string }[]>`SELECT rendered_html FROM page_content WHERE node_id = ${fixtures.longPageId}`;
+    expect(long!.rendered_html).toContain('data-block-id="E2ELONGTGT"');
+    expect((long!.rendered_html.match(/data-block-id=/g) ?? []).length).toBe(31);
+    const [longThread] = await sql<{ block_id: string; quote: string }[]>`
+      SELECT block_id, quote FROM comments WHERE page_id = ${fixtures.longPageId}
+    `;
+    expect(longThread!.block_id).toBe('E2ELONGTGT');
+    expect(longThread!.quote).toBe(fixtures.longAnchoredWords);
+    // The quote is a strict substring of the paragraph, which is what makes
+    // the span narrower than the block.
+    expect(fixtures.longCommentedParagraph).toContain(fixtures.longAnchoredWords);
+    expect(fixtures.longAnchoredWords.length).toBeLessThan(fixtures.longCommentedParagraph.length / 3);
   }, 30_000);
 
   test('finds the database that holds the workspace among this worktree’s test databases', async () => {

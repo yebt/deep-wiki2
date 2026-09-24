@@ -239,9 +239,13 @@ test.describe('the comments toggle', () => {
         await mark.click();
         const panel = page.getByRole('dialog', { name: 'Comments' });
         await expect(panel).toBeVisible();
-        await panel.getByLabel('Reply').fill('@E2E Commenter please confirm the date.');
+        // The reply field is one quiet line until it is used; `fill` focuses
+        // it, which is what brings the Reply control out (2026-09-23).
+        await panel.getByLabel(/^Reply to /).fill('@E2E Commenter please confirm the date.');
         await panel.getByRole('button', { name: 'Reply' }).click();
-        await expect(panel.getByRole('status').filter({ hasText: 'Reply posted.' })).toBeVisible({ timeout: 30000 });
+        // The sentence now names the thread by its excerpt, and its visible
+        // half is a toast rather than a bar in the panel (§4.12).
+        await expect(page.getByRole('status').filter({ hasText: 'Reply posted on' }).first()).toBeVisible({ timeout: 30000 });
         await page.keyboard.press('Escape');
         await expect(panel).toBeHidden();
 
