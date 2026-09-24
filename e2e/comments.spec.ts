@@ -63,6 +63,16 @@ async function useTheme(page: Page, theme: 'light' | 'dark'): Promise<void> {
   await page.addInitScript((value) => localStorage.setItem('nuxt-color-mode', value), theme);
 }
 
+/**
+ * A screenshot that claims a theme has to assert it: the preference is
+ * applied by color-mode's own client plugin, and a shot taken in the window
+ * between the server's light document and the client's dark one comes out
+ * light while the file name says dark (docs/TODO.md Findings, 2026-09-23).
+ */
+async function expectTheme(page: Page, theme: 'light' | 'dark'): Promise<void> {
+  await expect(page.locator('html')).toHaveClass(theme === 'dark' ? /\bdark\b/ : /\blight\b/);
+}
+
 const seed: SeedFixtures = JSON.parse(readFileSync(new URL('.auth-fixtures.json', import.meta.url), 'utf8'));
 const REPO_ROOT = join(import.meta.dirname, '..');
 
@@ -511,9 +521,11 @@ test('at 320px the affordance fits the column and nothing scrolls sideways; in d
   await darkPage.goto(pageUrl(seed.workspaceSlug, fixtures.commentsPageId));
   await expect(darkPage.getByRole('heading', { level: 1, name: fixtures.commentsPageTitle })).toBeVisible({ timeout: 30000 });
   await darkPage.getByText('The first paragraph, which nobody has commented on.').hover();
+  await expectTheme(darkPage, 'dark');
   await shot(darkPage, 'read-hover-1280-dark');
   await darkPage.getByRole('button', { name: 'Comment on this block' }).first().click();
   await expect(dialog(darkPage).getByTestId('comment-composer')).toBeVisible();
+  await expectTheme(darkPage, 'dark');
   await shot(darkPage, 'composer-1280-dark');
   await dark.close();
 });
@@ -785,6 +797,7 @@ test('the conversation and its highlight hold at 320 and in dark, with nothing s
     expect(await textContrastOver(page.locator('[data-block-id="E2ELONGTGT"]'), boxes.first())).toBeGreaterThanOrEqual(4.5);
 
     await expectNoHorizontalOverflow(page, `thread panel ${shape.label}`);
+    await expectTheme(page, shape.theme);
     await shot(page, `thread-${shape.label}`);
     await context.close();
   }
