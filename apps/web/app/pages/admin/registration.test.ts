@@ -71,7 +71,9 @@ describe('instance registration screen', () => {
     expect(component.findAll('h1')).toHaveLength(1);
     expect(component.find('header').exists()).toBe(true);
     expect(component.find('main').exists()).toBe(true);
-    expect(component.find('footer').exists()).toBe(true);
+    // No footer anywhere, in either frame: the owner asked three times
+    // and it went on 2026-09-23 (the reasoning is in `AppShell.vue`).
+    expect(component.find('footer').exists()).toBe(false);
     expect(component.findComponent(WorkspaceSidebar).exists()).toBe(false);
   });
 

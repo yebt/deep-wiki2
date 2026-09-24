@@ -23,7 +23,9 @@ describe('account placeholder', () => {
     expect(component.findAll('h1')).toHaveLength(1);
     expect(component.get('h1').text()).toBe('Profile');
     expect(component.text()).toContain('You');
-    expect(component.find('footer').exists(), 'the document frame has a footer').toBe(true);
+    // No footer anywhere, in either frame: the owner asked three times
+    // and it went on 2026-09-23 (the reasoning is in `AppShell.vue`).
+    expect(component.find('footer').exists(), 'no footer in either frame').toBe(false);
     const notice = component.get('main [role="status"]');
     expect(notice.text()).toMatch(/not built yet/i);
     expect(component.findAll('a').find((a) => /reset password/i.test(a.text()))?.attributes('href')).toBe('/forgot-password');

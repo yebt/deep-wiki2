@@ -39,7 +39,9 @@ describe('workspaces index screen', () => {
     expect(component.findAll('h1')).toHaveLength(1);
     expect(component.find('header').exists()).toBe(true);
     expect(component.find('main').exists()).toBe(true);
-    expect(component.find('footer').exists()).toBe(true);
+    // No footer anywhere, in either frame: the owner asked three times
+    // and it went on 2026-09-23 (the reasoning is in `AppShell.vue`).
+    expect(component.find('footer').exists()).toBe(false);
   });
 
   test('renders a skeleton shaped like the list while it loads, not a spinner', async () => {

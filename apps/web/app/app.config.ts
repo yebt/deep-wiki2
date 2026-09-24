@@ -419,24 +419,14 @@ export default defineAppConfig({
       base: 'flex min-h-0 flex-1 flex-col',
     },
 
-    footer: {
-      slots: {
-        root: 'bg-elevated border-t border-default',
-        // `UFooter` renders its slots right → center → left in the DOM
-        // so that `lg:order-1/2/3` can put them back in reading order on
-        // wide viewports. Below `lg` the container is not a flex box at
-        // all, so DOM order wins and the brand ends up *under* the
-        // trailing meta. Making the container a reversed column at every
-        // width below `lg` restores left → center → right; `lg:flex-row`
-        // hands it back to the library's own ordering. The `mt-3` the
-        // theme puts on the (previously last) left and center slots is
-        // dropped in favour of one `gap-y-3` on the container, so the
-        // spacing does not depend on which item happens to be first.
-        container: 'flex flex-col-reverse gap-y-3 lg:flex-row',
-        left: 'mt-0',
-        center: 'mt-0',
-      },
-    },
+    // No `footer` block: the product has no `UFooter` since 2026-09-23
+    // (the owner asked three times; the reasoning is at the removed call
+    // site in `AppShell.vue`). Theme overrides for a component nothing
+    // renders are configuration that cannot be wrong, which is worse than
+    // configuration that can — so the seventeen lines that fixed
+    // `UFooter`'s mobile stacking order went with it, and the finding they
+    // recorded is in `docs/TODO.md`. A future footer that earns its place
+    // starts by reading that entry.
 
     // The navigation drawer's list — `UNavigationMenu` vertical, the
     // management sidebar's doors (§9.2). Two of the library's defaults are
