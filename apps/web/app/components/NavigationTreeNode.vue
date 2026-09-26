@@ -65,8 +65,11 @@
  * not derived, since this component has no way to see its own position in
  * its parent's list otherwise. A drop in the middle band reparents under
  * that row, appended at the end of its children. Depth is `depth * 12px`
- * padding (DESIGN-SYSTEM §7.2's tree-indent value); each row is 40px tall
- * (that table's "default" density row height).
+ * padding (DESIGN-SYSTEM §7.2's tree-indent value) plus a chevron column
+ * every row reserves whether or not it has a chevron to put in it — see
+ * the note beside the chevron in the template, and the owner's second
+ * finding of 2026-09-23; each row is 40px tall (that table's "default"
+ * density row height).
  */
 import type { NodeType } from '@deep-wiki/contracts';
 import type { TreeNode } from '~/composables/useTree';
@@ -329,7 +332,6 @@ function onKeydown(event: KeyboardEvent): void {
       v-if="isBeingRenamed && editor"
       :snapshot="editor.snapshot"
       :depth="depth"
-      :has-chevron="isContainer"
       @update:value="editor.setValue"
       @commit="editor.commit"
       @cancel="editor.cancel"
@@ -371,7 +373,20 @@ function onKeydown(event: KeyboardEvent): void {
       @pointerenter="warmRoute"
     >
       <!-- The fold state is drawn as well as announced: a chevron that
-           turns, beside the type icon, on every container row. -->
+           turns, beside the type icon, on every container row.
+
+           **Every row reserves the chevron's column, container or not**
+           (the owner's second finding of 2026-09-23: "the page row's icon
+           does not read as one level deeper"). Drawing the chevron only on
+           a container took its 16px and the 8px gap beside it back out of
+           a leaf's row, so a page's type icon landed 24px to the left of
+           where its own indent put it — which is 12 past its parent's
+           icon and exactly level with its *grandparent's*. Measured on the
+           seeded tree at 1280: shelf 32px, book 44px, page **32px**, so
+           two levels shared one offset and the deepest row read as the
+           shallowest. The step itself was never wrong; §7.2's 12px is the
+           value and stays it. Reserving the column is what makes each
+           level's icon 12px past the level above it, with no new number. -->
       <UIcon
         v-if="isContainer"
         name="i-lucide-chevron-right"
@@ -379,7 +394,13 @@ function onKeydown(event: KeyboardEvent): void {
         :class="isExpanded ? 'rotate-90' : undefined"
         aria-hidden="true"
       />
-      <UIcon :name="NODE_TYPE_ICONS[node.type as NodeType] ?? 'i-lucide-file'" class="size-4 shrink-0 text-muted" aria-hidden="true" />
+      <span v-else data-row-chevron-spacer class="size-4 shrink-0" aria-hidden="true" />
+      <UIcon
+        :name="NODE_TYPE_ICONS[node.type as NodeType] ?? 'i-lucide-file'"
+        data-row-icon
+        class="size-4 shrink-0 text-muted"
+        aria-hidden="true"
+      />
       <!-- The icon carries the node's type, and an icon is never the only
            carrier of meaning (docs/UI-CHECKLIST.md §4.3) — so the
            accessible name says it in words. `title` keeps the full title
