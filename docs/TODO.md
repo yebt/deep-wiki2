@@ -615,6 +615,79 @@ makes conventions portable across projects.
 
 Discoveries and constraints. Newest first.
 
+### 2026-09-26 — Running the comment batch's own suites: four assertions that had never passed, and the panel covering the thing it points at
+
+`feat/comment-thread-view` was written without its verification stages ever being run. Running
+them found nothing wrong with any of the four surfaces the owner asked for and four things wrong
+with the evidence for them — three assertions that could never have passed and one that passed
+without meaning what it said. The pattern is the one this file has now recorded three times: a
+test written beside a change, never executed, and stale the moment the markup moved.
+
+**1. The toast cannot be reached by its role while the panel is open.** `e2e/comments.spec.ts`
+asserted `getByRole('status')` filtered by a close control, and waited thirty seconds for an
+element that was on the screen the whole time. Measured in the browser: while the comments panel
+is open the toast renders as `<li role="status">`, 384×72, on `z-index: 100`, with its `Close`
+button — and one of its ancestors carries `aria-hidden="true"`, because the panel is a modal
+`USlideover` and Reka hides the rest of the document from assistive technology while it is open.
+An `aria-hidden` subtree is not in the accessibility tree, so no `getByRole` can match it.
+
+The **product** is not wrong, and §4.12 already says why: the panel keeps a live region carrying
+the same sentence, inside the dialog, and "the region is what is reliably announced, the toast is
+what a sighted person reads". Both halves are now asserted together (`expectConfirmed`), the toast
+by its element with §7's own exemption named at the call site — "where no role or accessible name
+can express the target", and a node the accessibility tree does not contain is that case.
+
+**What is owed:** this is the only surface in the product that raises a toast while its own modal
+stays open — every other confirmation follows a dialog that has closed — and it is the only one
+with a live region to cover it. A later surface that raises a toast from inside a modal and has no
+region would confirm silently to a screen-reader user. The rule is: **a toast raised while a modal
+is open is not announced; the surface owes a live region of its own.** Worth a §4.12 clause if a
+second such surface appears.
+
+**2. `document.querySelector('[data-slot="body"]')` is the sidebar, not the document pane.** The
+highlight e2e scrolled "the pane" back to the top before asking whether the span was below the
+fold. There are two `data-slot="body"` panes on a workspace screen and the tree's comes first:
+measured, `scrollHeight` 615 against the document pane's 2234. The article never moved, and the
+assertion failed on a screen that was behaving correctly. `e2e/overflow.ts` had already solved
+this — it reaches the pane through `#content-main` — and the e2e now does the same. The pane *is*
+scrollable while the panel is open (`scrollTop` 1570 → 0); a modal locks the body, not a nested
+overflow container.
+
+**3. `toBeLessThan(900)` is not "in view".** The same test's post-condition for the reveal. The
+suite's own viewport is 1280×**720**, so a span at y=730 satisfied it while sitting under the
+fold — and the review screenshot taken straight after showed a panel and no highlight, which is
+the one thing that shot exists for. It is `toBeInViewport()` now, which is the property and also
+waits for the smooth scroll the shot was racing.
+
+**4. Two assertions the conversation rewrite had already invalidated.** The excerpt is the label
+of a button now, and its text node carries the template's newlines, so `getByText(/^“.*”$/)`
+matched nothing (a Playwright regex does not cross a newline); it asks the quotation directly. And
+the orphan test asked for a `Reply` **button**, which no longer exists until the reply line is
+focused — it drives the focus and asserts both states.
+
+**The finding that is about the product, not the tests: the panel covers the text it is
+discussing.** Measured at 1280×900 with the thread open and its quotation activated:
+
+| | |
+| --- | --- |
+| Article column | 658.9px at x=450.5, right edge **1109.5** |
+| Comments panel | 448px at x=**832** (`USlideover`'s `max-w-md`) |
+| Article covered | **277.5px — 42.1% of the column** |
+| The anchored span, this fixture | x=853.1, width 231.5 — **entirely behind the panel** |
+
+So the highlight this batch exists to draw is, for any span past roughly the 58% mark of a line,
+painted underneath the panel that is talking about it — after the quotation has scrolled it "into
+view", in both themes. `e2e/comments.spec.ts` is green because `toBeInViewport` is about the
+viewport and not about occlusion, which is a fair distinction for a test and not for a reader.
+
+This is the standing "the contextual (third) pane is still an overlay" debt (carried since
+2026-09-15) arriving at the one feature whose whole point depends on it. The fix is §6's three
+panes at ≥1280 — the content pane giving way rather than being covered — which is a change to the
+shell's columns and therefore §1's "a system change to be made deliberately and once", not
+something to improvise inside this batch by shifting the article sideways when a panel opens.
+Recorded for the owner with the numbers above; below `xl` the overlay is what §6 asks for and
+nothing here changes that.
+
 ### 2026-09-25 — The inline-creation redesign removed the only way to aim at the top level (branch `fix/tree-root-and-draft`)
 
 Four things the owner reported on 2026-09-23 after the tree's create-and-rename moved into the

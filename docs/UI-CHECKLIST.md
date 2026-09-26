@@ -2381,8 +2381,37 @@ fill §5.2 reserves for a selected/active state — at `rounded-xs` (`corner-ext
 rung the diff's word-level marks already take for a mark inside prose); the avatar, the
 author's type role and the blockquote are the ones already reviewed.
 
+**Verification, 2026-09-26.** The batch above was written without its gates being run; they have
+now all been run against this branch. `bun run check` (12), `typecheck`, `lint`, `apps/web`'s own
+suite (1226 tests in 127 files) and `e2e/{comments,read,smoke,navigation}.spec.ts` (44 tests) are
+green. Four assertions in the e2e had never passed or never meant what they said — the toast
+located by a role it cannot carry while a modal is open, "the pane" that was the sidebar,
+`toBeLessThan(900)` standing in for "in view" on a 720-tall viewport, and two assertions the
+conversation rewrite had already invalidated. All four are corrected and the reasons are at the
+call sites and in `docs/TODO.md` Findings, 2026-09-26. Screenshots
+`comments2-{thread,reply,highlight,orphan}-{1280-light,1280-dark}.png`,
+`comments2-{thread,read-hover,composer}-320-light.png` and
+`comments2-workspaces-1280-{light,dark}.png` in the session scratchpad, each measured with
+`expectNoHorizontalOverflow` and each asserting the theme it claims.
+
 **Known before review, not fixed**
 
+- **The panel covers the words it is pointing at.** Measured at 1280×900 with the thread open and
+  its quotation activated: the article column is 658.9px at x=450.5 (right edge 1109.5) and the
+  panel is 448px at x=832, so **277.5px — 42.1% of the column — is behind it**, and this
+  fixture's anchored span (x=853.1, width 231.5) is behind it *entirely*, in both themes, after
+  the reveal has scrolled it into view. Any span past roughly the 58% mark of a line is hidden
+  while the panel is open. This is §6's third pane still being an overlay — carried since
+  2026-09-15 — arriving at the one feature whose point depends on it; the answer is the content
+  pane giving way at ≥1280 rather than being covered, which is a change to the shell's columns and
+  therefore §1's "made deliberately and once", not one to improvise here. Below `xl` the overlay
+  is what §6 asks for. `docs/TODO.md` Findings, 2026-09-26, carries the measurements.
+- **A toast raised while this panel is open is not announced.** The toaster sits under an
+  `aria-hidden` ancestor while a modal `USlideover` is open, so the toast is read by a sighted
+  person and never by assistive technology; the panel's live region carries the same sentence and
+  is what §4.12 relies on. This is the only surface in the product that raises a toast while its
+  own modal stays open, and it is the only one with a region to cover it — a second such surface
+  would need one, and would then be worth a §4.12 clause.
 - A read-only member who can *see* a conversation is not reachable from the server: the API
   answers `{ threads: [] }` without `comment`. The component state exists and is held by
   `CommentThreadItem.test.ts`; the e2e asserts the product's actual rule instead.
