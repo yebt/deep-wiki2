@@ -142,6 +142,64 @@ describe('NavigationTreeRowEditor', () => {
     expect(field(root).getAttribute('aria-busy')).toBe('true');
   });
 
+  /**
+   * Clicking away cancels, and the half-typed name is discarded — the same
+   * outcome Escape has, because two ways out of one field that disagree
+   * about the typed text is worse than either. The owner reported on
+   * 2026-09-23 that only Escape got out of a draft row; VS Code's input box
+   * behaves this way, and so does every explorer's rename.
+   */
+  describe('a pointerdown outside the field', () => {
+    async function pointerDownOn(target: EventTarget): Promise<void> {
+      target.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, cancelable: true }));
+      await nextTick();
+    }
+
+    test('cancels, discarding the typed name, exactly as Escape does', async () => {
+      const events: string[] = [];
+      await mount({
+        snapshot: snapshot(CREATE, { value: 'Half a name' }),
+        depth: 2,
+        onCommit: () => events.push('commit'),
+        onCancel: () => events.push('cancel'),
+      });
+
+      await pointerDownOn(document.body);
+
+      expect(events, 'cancelled, never committed behind the person’s back').toEqual(['cancel']);
+    });
+
+    test('a pointerdown inside the field is not outside it', async () => {
+      const events: string[] = [];
+      const root = await mount({ snapshot: snapshot(CREATE, { value: 'Notes' }), depth: 2, onCancel: () => events.push('cancel') });
+
+      await pointerDownOn(field(root));
+      await pointerDownOn(root.querySelector('[data-row-editor]')!);
+
+      expect(events).toEqual([]);
+    });
+
+    test('a write already in flight is never abandoned by a stray click', async () => {
+      const events: string[] = [];
+      await mount({ snapshot: snapshot(CREATE, { phase: 'committing', value: 'Notes' }), depth: 2, onCancel: () => events.push('cancel') });
+
+      await pointerDownOn(document.body);
+
+      expect(events, 'the row must not vanish while the request is landing').toEqual([]);
+    });
+
+    test('the listener goes with the field: a pointerdown after it closes cancels nothing', async () => {
+      const events: string[] = [];
+      await mount({ snapshot: snapshot(RENAME, { value: 'Day one' }), depth: 1, onCancel: () => events.push('cancel') });
+      wrapper?.unmount();
+      wrapper = null;
+
+      await pointerDownOn(document.body);
+
+      expect(events).toEqual([]);
+    });
+  });
+
   test('the row keeps the tree’s indent, so the field is where the row would have been', async () => {
     const root = await mount({ snapshot: snapshot(CREATE), depth: 3 });
     const row = root.querySelector<HTMLElement>('[data-row-editor]');
@@ -153,5 +211,55 @@ describe('NavigationTreeRowEditor', () => {
     const root = await mount({ snapshot: snapshot(CREATE), depth: 0 });
     const line = root.querySelector('[data-row-editor] > div');
     expect(line?.className).toContain('h-10');
+  });
+
+  /**
+   * The owner's fourth finding of 2026-09-23: the field read as "a tall
+   * bordered box that dwarfs the row it sits in". It was a `UInput` — M3's
+   * text field, an outlined 40px control with a ring — standing among rows
+   * that carry no boundary at all.
+   *
+   * The correction is the treatment `docs/DESIGN-SYSTEM.md` §14 already
+   * records twice, for the source view's text area (2026-09-17) and the
+   * page's title field (2026-09-23): a text surface that *is* the thing
+   * around it draws no box, and the caret in `primary` is its focus
+   * indicator (WCAG 2.4.7 counts the text cursor for a text field).
+   */
+  describe('it reads as the row, being typed in', () => {
+    test('draws no box: no ring, no border, no fill, no elevation', async () => {
+      const root = await mount({ snapshot: snapshot(CREATE, { value: 'Notes' }), depth: 1 });
+      const classes = field(root).className;
+
+      expect(classes).not.toMatch(/(^|\s)ring/);
+      expect(classes).not.toMatch(/(^|\s)(border|rounded|shadow)/);
+      expect(classes).toContain('bg-transparent');
+      // A `UInput` draws its ring, fill and radius on the root slot it
+      // wraps the input in, so the absence has to be checked on the whole
+      // editor and not only on the element that takes the typing.
+      const editor = root.querySelector('[data-row-editor]')!;
+      expect(editor.querySelectorAll('[class*="ring"], [class*="shadow"]')).toHaveLength(0);
+      expect(field(root).tagName, 'the field is the input itself').toBe('INPUT');
+    });
+
+    test('the caret is the focus indicator, the same one the title field and the source view take', async () => {
+      const root = await mount({ snapshot: snapshot(RENAME, { value: 'Day one' }), depth: 2 });
+      // `main.css` §13 draws the caret in `primary` and no outline for this class.
+      expect(field(root).className).toContain('dw-row-editor-field');
+    });
+
+    test('the text keeps §9.5’s 16px floor, which is the one thing it does not take from the row', async () => {
+      const root = await mount({ snapshot: snapshot(CREATE), depth: 0 });
+      // Below 16px iOS Safari zooms the viewport on focus, which binds every
+      // text-entry control; the row's own 14px label gives way for it, as
+      // the source view's 14px code role did (DESIGN-SYSTEM §14, 2026-09-17).
+      expect(field(root).className).toContain('text-body-large');
+    });
+
+    test('a write in flight is said without a box either: a spinner beside the field, and aria-busy on it', async () => {
+      const root = await mount({ snapshot: snapshot(CREATE, { phase: 'committing', value: 'Notes' }), depth: 0 });
+
+      expect(field(root).getAttribute('aria-busy')).toBe('true');
+      expect(root.querySelector('[data-testid="tree-row-editor-busy"]')).not.toBeNull();
+    });
   });
 });

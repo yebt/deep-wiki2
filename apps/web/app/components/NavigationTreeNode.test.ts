@@ -589,6 +589,36 @@ describe('NavigationTreeNode', () => {
       expect(rowOf(component.dom, 'page-1').style.paddingLeft).toBe('32px');
     });
 
+    /**
+     * The owner's second finding of 2026-09-23: "the page row's icon does
+     * not read as one level deeper". The indent above was never wrong — the
+     * chevron was. A container drew a 16px chevron and an 8px gap before its
+     * type icon and a leaf drew neither, so a leaf's icon started 24px to the
+     * left of where its own 12px-deeper indent put it: one level down, one
+     * level of icon offset *back*, and a page's icon landed exactly level
+     * with its grandparent's. Reserving the column on every row is the whole
+     * fix, and it introduces no number §7.2 does not already give.
+     *
+     * The offsets themselves are measured in the running browser, where a
+     * layout exists — `e2e/tree.spec.ts`, "one level is one 12px step".
+     */
+    test('a leaf reserves the chevron’s column, so its icon sits one step past its parent’s', async () => {
+      const component = await mountNode({ depth: 1 });
+
+      const shelf = rowOf(component.dom, 'shelf-1');
+      const leaf = rowOf(component.dom, 'page-1');
+
+      // The container draws a chevron; the leaf draws a spacer of the same
+      // width in the same place.
+      expect(shelf.querySelector('[data-row-chevron-spacer]')).toBeNull();
+      expect(leaf.querySelector('[data-row-chevron-spacer]')).not.toBeNull();
+      // Either way the type icon is the row's second child, so the two rows
+      // differ by their padding alone — which is the 12px step.
+      for (const row of [shelf, leaf]) {
+        expect([...row.children].indexOf(row.querySelector('[data-row-icon]')!)).toBe(1);
+      }
+    });
+
     test('a leaf renders no empty child group', async () => {
       const component = await mountNode({ node: node({ id: 'page-9', title: 'Alone' }) });
 

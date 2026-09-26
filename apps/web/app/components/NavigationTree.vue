@@ -54,13 +54,23 @@
  *   and success said there too with a link to the Trash, and announced.
  *   Live only where the tree response says `manageable` or `isOwner`;
  *   elsewhere it stays in the menu, disabled, with the reason on show.
+ * - The blank space below the rows is a target of its own (2026-09-23):
+ *   a click there clears the selection, and a right-click there opens the
+ *   root's menu (`treeRootActions`). Without it the top level became
+ *   unreachable the moment any row was selected — and since opening a
+ *   page selects that page's row, a second shelf could not be made at
+ *   all. VS Code's explorer does both; `useTreeRowActions` carries the
+ *   citation and the owner's words. `Escape` on a row is the keyboard's
+ *   equivalent (§5) — and the only road left once the tree is tall enough
+ *   to have no blank space to click.
  */
 import type { ContextMenuItem } from '@nuxt/ui';
 import type { NodeType } from '@deep-wiki/contracts';
 import type { TreeNode } from '~/composables/useTree';
 import { deleteNode, type ForceDeleteFetcher, type TrashFetcher } from '~/composables/useTrash';
+import { shortcutsSentence, type KeyboardShortcut } from '~/composables/useKeyboardShortcuts';
 import { useTreeFilter } from '~/composables/useTreeFilter';
-import { NODE_TYPE_LABELS, deleteRowAction, treeRowActions, type TreeRowAction } from '~/composables/useTreeRowActions';
+import { NODE_TYPE_LABELS, deleteRowAction, treeRootActions, treeRowActions, type TreeRowAction } from '~/composables/useTreeRowActions';
 import {
   useTreeRowEditor,
   type CreateNodeFetcher,
@@ -255,6 +265,19 @@ function onKeydown({ event, node, parentId, index }: { event: KeyboardEvent; nod
       event.preventDefault();
       void deleteRow(node.id);
       break;
+    // The keyboard's equivalent of a click on the tree's blank space
+    // (checklist §5: every pointer-only manipulation has a stated keyboard
+    // equivalent, named in the UI — the `?` help names this one). It is
+    // also the *only* road to the top level once the tree is tall enough
+    // to fill its pane: measured against the seeded workspace on
+    // 2026-09-23, the rows reached the tree's own bottom edge, so there
+    // was no blank space left to click.
+    case 'Escape':
+      if (selectedId.value === null) break;
+      event.preventDefault();
+      selectedId.value = null;
+      announcement.value = 'Nothing is selected. New… creates at the top level.';
+      break;
     case 'ArrowDown':
       event.preventDefault();
       focusNode(flat[at + 1]?.node.id);
@@ -312,8 +335,28 @@ function onToggle(nodeId: string): void {
   toggleCollapsed(nodeId);
 }
 
-const KEYBOARD_HELP =
-  'Arrow keys move through the tree, Enter opens a page or folds a shelf, book or chapter, Alt with the arrow keys moves an item among its siblings, F2 renames an item where it stands, Delete moves an item to the trash, and Shift+F10 opens a row’s menu.';
+/**
+ * Every key the tree answers, once — drawn in the `?` popover
+ * (`KeyboardShortcutsHelp`) and spoken in the tree's own description
+ * below it, from one list (`useKeyboardShortcuts`). docs/UI-CHECKLIST.md
+ * §5 requires the keys to be named in the UI, and §5 again requires a
+ * stated keyboard equivalent for every pointer-only manipulation: the
+ * `Alt`-arrows are the drag's, and `Escape` is the blank space's.
+ */
+const TREE_SHORTCUTS: readonly KeyboardShortcut[] = [
+  { keys: ['↑', '↓'], spoken: 'The up and down arrows', description: 'move through the tree' },
+  { keys: ['←', '→'], spoken: 'The left and right arrows', description: 'fold a shelf, book or chapter, or step into it' },
+  { keys: ['Home', 'End'], spoken: 'Home and End', description: 'jump to the first and last row' },
+  { keys: ['Enter'], spoken: 'Enter', description: 'opens a page, or folds a shelf, book or chapter' },
+  { keys: ['Alt', '↑', '↓', '→'], spoken: 'Alt with the arrow keys', description: 'moves an item among its siblings' },
+  { keys: ['F2'], spoken: 'F2', description: 'renames an item where it stands' },
+  { keys: ['Delete'], spoken: 'Delete', description: 'moves an item to the trash' },
+  { keys: ['Esc'], spoken: 'Escape', description: 'picks nothing, so New… creates at the top level' },
+  { keys: ['Shift', 'F10'], spoken: 'Shift and F10', description: 'open the row’s menu' },
+  { keys: ['Ctrl', 'Shift', 'F'], spoken: 'Control or Command with Shift and F', description: 'filters the tree by title' },
+];
+
+const KEYBOARD_HELP = shortcutsSentence(TREE_SHORTCUTS);
 
 /* ─── Naming a row, in the row ────────────────────────────────────────
  * The owner rejected the tree's create and rename dialogs on 2026-09-23.
@@ -520,6 +563,12 @@ async function deleteRow(nodeId: string): Promise<void> {
  * there is exactly one way a menu opens.
  */
 const menuEntry = ref<FlatNode | null>(null);
+/**
+ * The menu was opened on the tree's blank space rather than on a row, so
+ * its items are the root's (`treeRootActions`) and the thing it creates
+ * goes at the top level. Exactly one of this and `menuEntry` is ever set.
+ */
+const menuOnRoot = ref(false);
 const menuOpen = ref(false);
 /** What the menu asked for once it has closed and focus is back on the row — a dialog opened before that would return focus to a menu item that no longer exists. */
 let afterMenuClose: (() => void) | null = null;
@@ -534,16 +583,40 @@ function onContextMenu(event: MouseEvent): void {
   const rowEl = (event.target as HTMLElement | null)?.closest<HTMLElement>('[data-node-id]');
   const entry = rowEl?.dataset.nodeId ? entryOf(rowEl.dataset.nodeId) : null;
   if (!entry) {
-    // The tree's padding, not a row: nothing to offer, and no native
-    // menu for the browser's own idea of the page either.
-    event.preventDefault();
+    // The blank space below the rows: the root's own menu, and the
+    // selection cleared with it so the header's `New…` aims there too —
+    // the pointer's other half of the same answer (`onTreeClick`).
+    menuEntry.value = null;
+    menuOnRoot.value = true;
+    selectedId.value = null;
     return;
   }
   menuEntry.value = entry;
+  menuOnRoot.value = false;
   // Right-clicking a row picks it, as every explorer does; the toolbar
   // then names it too.
   activeId.value = entry.node.id;
   selectedId.value = entry.node.id;
+}
+
+/**
+ * A click on the tree's blank space clears the selection.
+ *
+ * This is the whole of the 2026-09-23 regression: `New…` aims at the
+ * selected row (`NavigationTreeActions`), every visit to a page selects
+ * that page's row, and until now nothing un-selected — so once anything
+ * had been picked, the top level was unreachable and a second shelf could
+ * not be made. VS Code's explorer clears its selection on a click in the
+ * empty area for exactly this reason; the header then aims at the root
+ * and offers the one child a workspace legally holds.
+ *
+ * The tab stop is deliberately left where it is: a selection is what the
+ * header acts on, focus is where the keyboard is, and dropping focus off
+ * the tree to clear a selection would be a checklist §5 failure.
+ */
+function onTreeClick(event: MouseEvent): void {
+  if ((event.target as HTMLElement | null)?.closest('[role="treeitem"]')) return;
+  selectedId.value = null;
 }
 
 /** The `⋯` button and the keyboard open the menu by the one road right-click takes: a `contextmenu` event, anchored under the control. */
@@ -575,6 +648,14 @@ function onMenuCloseAutoFocus(event: Event): void {
     if (nodeId) {
       activeId.value = nodeId;
       treeEl.value?.querySelector<HTMLElement>(`[data-node-id="${nodeId}"]`)?.focus();
+    } else {
+      // The blank space's menu hangs off no row, and focusing one would
+      // re-select it — undoing the very thing a right-click on the blank
+      // space just did. The tree itself takes the focus instead: it is
+      // `tabindex="-1"`, so focus stays inside the tree (checklist §5) and
+      // Tab from there reaches the row holding the tab stop, which is a
+      // descendant and therefore next in document order.
+      treeEl.value?.focus();
     }
     run?.();
   }, 0);
@@ -673,24 +754,39 @@ onBeforeUnmount(() => {
 });
 defineShortcuts(computed(() => (focusInSidebar.value ? { meta_shift_f: { usingInput: true, handler: toggleFilter } } : {})));
 
+/** The blank space's one action: name a new top-level node, in a draft row of the tree's own list. */
+function runRootAction(action: TreeRowAction): void {
+  if (action.kind !== 'create' || !action.childType) return;
+  const type = action.childType;
+  afterMenuClose = () => startCreate({ parentId: rootId.value ?? '', type });
+}
+
 const menuItems = computed<ContextMenuItem[][]>(() => {
+  const toItems = (groups: readonly (readonly TreeRowAction[])[], run: (action: TreeRowAction) => void): ContextMenuItem[][] =>
+    groups.map((group) =>
+      group.map((action) => ({
+        label: action.label,
+        icon: action.icon,
+        disabled: action.disabled,
+        description: action.reason,
+        to: action.to,
+        onSelect: action.disabled || action.to ? undefined : () => run(action),
+      })),
+    );
+
+  if (menuOnRoot.value) return toItems(treeRootActions(), runRootAction);
+
   const entry = menuEntry.value;
   if (!entry) return [];
-  return treeRowActions(entry.node, {
-    index: entry.index,
-    siblingCount: entry.siblings.length,
-    workspaceSlug: props.workspaceSlug ?? '',
-    manageable: manageable.value,
-    isOwner: isOwner.value,
-  }).map((group) =>
-    group.map((action) => ({
-      label: action.label,
-      icon: action.icon,
-      disabled: action.disabled,
-      description: action.reason,
-      to: action.to,
-      onSelect: action.disabled || action.to ? undefined : () => runAction(entry, action),
-    })),
+  return toItems(
+    treeRowActions(entry.node, {
+      index: entry.index,
+      siblingCount: entry.siblings.length,
+      workspaceSlug: props.workspaceSlug ?? '',
+      manageable: manageable.value,
+      isOwner: isOwner.value,
+    }),
+    (action) => runAction(entry, action),
   );
 });
 </script>
@@ -703,20 +799,17 @@ const menuItems = computed<ContextMenuItem[][]>(() => {
          an action on the tree — it states the keys, which
          docs/UI-CHECKLIST.md §5 requires to be named in the UI and not only
          in a comment — so it stands with the label rather than in the
-         header's action group below. -->
+         header's action group below.
+
+         It opens a popover rather than carrying a tooltip and nothing else:
+         the owner clicked it on 2026-09-23 and nothing happened, which was
+         literally true (a `UButton` with no `@click`), and §6 counts a
+         control that does nothing as observable breakage. The same list is
+         spoken in the paragraph below, which is the tree's own description,
+         so the two cannot drift (`useKeyboardShortcuts`). -->
     <div class="flex items-center justify-between gap-2 px-2">
       <span id="navigation-tree-heading" class="text-title-small text-muted">Contents</span>
-      <UTooltip :text="KEYBOARD_HELP" :ui="{ content: 'max-w-64 h-auto py-2 text-wrap' }">
-        <UButton
-          icon="i-lucide-circle-help"
-          variant="ghost"
-          color="neutral"
-          size="xs"
-          square
-          aria-label="Keyboard help"
-          aria-describedby="navigation-tree-keyboard-help"
-        />
-      </UTooltip>
+      <KeyboardShortcutsHelp :shortcuts="TREE_SHORTCUTS" heading="Keys in the tree" />
       <p id="navigation-tree-keyboard-help" class="sr-only">{{ KEYBOARD_HELP }}</p>
     </div>
 
@@ -850,7 +943,9 @@ const menuItems = computed<ContextMenuItem[][]>(() => {
             role="tree"
             aria-labelledby="navigation-tree-heading"
             aria-describedby="navigation-tree-keyboard-help"
-            class="min-h-0 flex-1 overflow-y-auto px-1"
+            tabindex="-1"
+            class="min-h-0 flex-1 overflow-y-auto px-1 outline-none"
+            @click="onTreeClick"
             @contextmenu="onContextMenu"
           >
             <NavigationTreeNode

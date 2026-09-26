@@ -2289,4 +2289,135 @@ session scratchpad (`DEEPWIKI_AUTHORING_SHOTS`).
 
 ---
 
+### 2026-09-25 — The tree the owner rejected, answered: the top level reachable again, the `?` that did nothing, and the row being named — awaiting the owner's eye
+
+**Reviewer:** none yet — this entry is what was shipped for review, not a review.
+**Verdict:** Pending
+
+The owner's four reports on the tree of 2026-09-23, after creation and rename moved into the row
+(this log's 2026-09-23 entry, "The tree the owner rejected"). Branch `fix/tree-root-and-draft`,
+one commit each; `docs/TODO.md` Findings, 2026-09-25, carries the reasoning, the regression's
+cause and the gap class behind it. The correction was built against the same research pass read
+from **VS Code's own source** and **Obsidian's official docs** that the rejected batch used.
+
+**The one regression among the four, in the owner's terms:** *"ahora ya no puedo crear más
+estanterías aparte de la de raíz"*. `New…` aims at the picked row; every road into the tree picks
+one; nothing un-picked one. The dialog the inline row replaced had asked for a *place*, with the
+top level among the answers, so the workspace was always one click away — and the row that
+replaced it reads the screen's state instead of asking, which is the whole point of it. After the
+first shelf existed, the workspace was the one parent a person could no longer name.
+
+**Pre-build contract (§2), all four.** *Who:* a workspace member in the room, looking after the
+tree beside the document — most often the person who has just made one shelf and wants a second.
+*Goal, in their words:* "make a shelf out here, not inside that one", "what are the keys?", "never
+mind, forget this name", "stop shouting at me with a box". *Primary action:* unchanged — `New…` in
+the tree; everything added here is a way to aim it, a way out of it, or documentation. *Data:*
+`GET /workspaces/:id/tree` and `LEGAL_PARENT_TYPES` through `newRowChoice()`, exactly as before;
+nothing new from the server. *Not:* deleting a workspace, a command palette, multi-select, a
+shortcut surface for **edit mode** (owed, and named as owed rather than invented — `docs/TODO.md`).
+*Empty / too much:* an empty tree renders its first-run notice and **no** `role="tree"` element, so
+the blank space does not exist there and the header's `New…` — which already aims at the top level,
+nothing being selected — is the road; a tree tall enough to fill its pane has **no** blank space
+either, which is why the keyboard road below is not a convenience.
+
+**What to look at**
+
+1. **The blank area below the rows is the root's.** A click there clears the selection — the tree's
+   live region says "Nothing is selected", so `New…` reads "in the workspace" — and a right-click
+   there opens a menu holding "New shelf…" and nothing that acts on a row. Both precedents do
+   exactly this (`deep-wiki2-review/tree-ux-research.md` §1.1, §1.4). **`Escape` on a row is the
+   keyboard's equivalent and the only road when the tree is taller than its pane** (§5: a
+   pointer-only manipulation needs a stated keyboard twin, and this one is stated in the help
+   below). Measured: an unfolded seeded tree at 1280×900 ends at the tree's own bottom edge, so
+   there is genuinely nothing to click. Folded, there is — **while the folded top level fits the
+   pane**, which is a real limit and not a test detail; see the known item below.
+2. **The `?` beside "Contents" opens a popover that names every key.** It was a `UButton` inside a
+   `UTooltip` with no `@click` — the one inert interaction on the screen (§6). It now carries
+   `aria-expanded` and `aria-controls` pointing at the panel it opens, Escape closes it and focus
+   returns to the control (§5). The `sr-only` sentence is derived from the same list the panel
+   draws, so the keys are not written down twice (§4.1).
+3. **A pointerdown outside the row being named cancels it**, discarding the half-typed name —
+   byte for byte the outcome Escape already had. Deliberately *not* the commit-on-blur the page's
+   title field takes, and the note at `NavigationTreeRowEditor.onPointerDownOutside` says why: that
+   field is changing a name that exists, this one's create half has nothing to go back to, and a
+   commit would make a node the person had stopped asking for. A write already in flight is never
+   abandoned.
+4. **The row being named is the row, not a box standing in it** (the owner's fourth finding: "a
+   tall bordered box that dwarfs the row it sits in"). A plain `<input>` with no ring, border,
+   fill, radius or elevation, at the row's own 40px line, with the caret in `primary` as its focus
+   indicator — the treatment `docs/DESIGN-SYSTEM.md` §14 already gives the source view's text area
+   and the page's title field, now with three applications rather than two exceptions. The
+   indicator is relocated, never removed (§5, pass/fail). The text keeps §9.5's 16px floor.
+5. **One level is one 12px step, measured at the icon.** The page row's icon did not read as one
+   level deeper because only a container reserved the chevron's 16px column: measured at 1280
+   before the fix, shelf **32px**, book **44px**, page **32px** — the deepest row level with its
+   grandparent. Every row reserves the column now. §7.2's 12px is unchanged and no value was
+   invented; the missing statement — that an indent is only an indent if the thing the eye
+   measures it by moves with it — is now in §7.2 with the measurement.
+
+**Measured** in `apps/web`'s own suite (1205 tests, green) and, against the real backend, in
+`e2e/tree.spec.ts`, `e2e/tree-writes.spec.ts` and `e2e/navigation.spec.ts`: a second shelf created
+after one exists, through the blank space and through its menu, with the server agreeing; the root
+menu holding exactly one item; `Escape` on a row clearing the selection with the tree unfolded,
+where no blank space is left; the help popover's `aria-expanded`/`aria-controls` pair, the tree's own
+phrases present in it, Escape and the focus return (the component's own suite holds that every
+key of the list it is handed is drawn beside what that key does, and that the `sr-only` sentence
+is derived from the same list); a click outside a draft and outside a rename writing
+nothing (`POST`/`PATCH` counted at zero) and leaving no row behind; a click on `New…` while a draft
+is open replacing the field; the named row's box equal to the row's own box, and the field's
+computed `outline-style`, `border-width`, `box-shadow`, `border-radius`, `background-color`,
+`caret-color` and `font-size`; and each level's icon x, asserted as a 12px step.
+`expectNoHorizontalOverflow` on every screenshot (§6). Screenshots
+`tree3-{root-create,help,draft,indent}-{1280-light,1280-dark,320-light}.png` in the session
+scratchpad (`DEEPWIKI_TREE3_SHOTS`), each with its theme asserted beside it (`expectTheme`) — the
+2026-09-23 finding about a dark shot that came out light.
+
+**Findings against my own work, fixed before review.** Two, both in the review material rather
+than in the product. The help popover's own shot asked for `getByRole('dialog')` and at **320**
+that resolves to two elements, because below `lg` the sidebar the tree stands in *is* a
+focus-trapped `role="dialog"` (§6's drawer) and the popover stands over it — the locator is named
+now, which is what §7 asks for anyway. And `blankSpot`'s premise had decayed (the known item
+below): the folded top level had outgrown a 900px pane, so the helper refused rather than clicking
+the last row and calling it the empty area.
+
+**No new colour, token or rung.** `.dw-row-editor-field` is `.dw-title-editor`'s two declarations
+under a second name; the chevron spacer is the width the chevron already had; the root menu is the
+row menu's own component and rung.
+
+**Known before review, not fixed**
+
+- **`expectTheme` now exists in three e2e specs** (`authoring`, `tree`, `tree-writes`) beside three
+  copies of `useTheme`. That is §4.1's copy defect in the test suite rather than the product, and
+  the right home is a shared `e2e/theme.ts` beside `e2e/overflow.ts` and `e2e/contrast.ts`. Not
+  done here: it touches every spec that photographs a theme, which is most of them, and this batch
+  owns four findings on the tree.
+- **The blank space's e2e needs a pane taller than the review's 900 to have any blank space in.**
+  Every test in `e2e/tree-writes.spec.ts` mints its own shelf, so the workspace's top level grows
+  by a row per test, and the folded top level stopped fitting a 900px viewport while this batch was
+  being verified (thirty-nine rows ending at y=1584 in a tree ending at y=839). The helper now
+  refuses with the numbers and the describe states a taller viewport; the affordance measured is a
+  pointer target rather than a layout, so the viewport is the knob that changes nothing about the
+  claim. `docs/TODO.md` Findings, 2026-09-25, records the shape. It will decay again as the file
+  grows; a fixture that mints into a workspace it shares is the underlying cause.
+- The keyboard help's list is hand-written and has to agree with the tree's handlers; nothing makes
+  that mechanical. **Edit mode still has no shortcut surface at all** — the general gap the
+  2026-09-23 task-list entry recorded as owed, unchanged by this batch.
+- **An empty tree has no blank space to right-click.** `nodes.length === 0` renders the first-run
+  notice in place of the `<ul role="tree">`, so neither the click nor the menu exists until one
+  shelf does. Nothing is lost — nothing is selected on an empty tree, so `New…` already aims at the
+  top level — but the affordance a person has just learned is absent on the one screen where it
+  would be most reassuring. Hanging the menu off the notice as well is a few lines and a decision
+  about whether the notice is a target; recorded rather than taken (§1's standing rule).
+- The blank-space road needs blank space. On a tall tree the keyboard's `Escape` is the only way to
+  the top level, and the help names it — but a person who does not open the help and does not fold
+  the tree has no visible affordance. A "Workspace" root row, which neither reference product has,
+  is the alternative and is the owner's call.
+- A `UPopover`'s non-modal content does not mount under the component-test environment at all, so
+  the popover is driven in e2e and the unit test covers the list
+  (`KeyboardShortcutsHelp.test.ts` records the measurement).
+- The two-icon-pack requirement (§4.3) remains untested; everything the 2026-09-23 entries carried
+  forward and this batch did not touch stands.
+
+---
+
 *The next entry goes below this one.*

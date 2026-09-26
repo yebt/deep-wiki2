@@ -221,10 +221,33 @@ describe('NavigationTree', () => {
 
       const help = component.get('button[aria-label="Keyboard help"]');
       expect(help.attributes('type')).toBe('button');
+      // It opens something (`KeyboardShortcutsHelp`) rather than being a
+      // tooltip with no action, which is what the owner clicked on
+      // 2026-09-23 and found inert (§6).
+      expect(help.attributes('aria-haspopup')).toBe('dialog');
+      expect(help.attributes('aria-expanded')).toBe('false');
       const tree = component.get('[role="tree"]');
       const describedBy = tree.attributes('aria-describedby')!;
       expect(component.get(`#${describedBy}`).text()).toMatch(/Alt with the arrow keys/);
       expect(component.get(`#${tree.attributes('aria-labelledby')}`).text()).toBe('Contents');
+    });
+
+    /**
+     * Every key the tree answers has to be *named in the UI* (§5), and the
+     * two that are a pointer's keyboard equivalent most of all: the
+     * `Alt`-arrows stand for a drag, and `Escape` stands for a click on the
+     * blank space. The list and the spoken sentence come from one source, so
+     * this asserts the sentence and the list is the same facts.
+     */
+    test('the spoken description names every key the tree answers, including the two that stand in for a pointer', async () => {
+      mockTree({ status: 'success', nodes: NODES });
+      const component = await mount();
+
+      const help = component.get('#navigation-tree-keyboard-help').text();
+      for (const key of ['Alt with the arrow keys', 'F2', 'Delete', 'Escape', 'Shift and F10']) {
+        expect(help, key).toContain(key);
+      }
+      expect(help).toMatch(/New… creates at the top level/);
     });
   });
 
@@ -369,6 +392,102 @@ describe('NavigationTree', () => {
 
       expect(actions.props('selectedId')).toBe('shelf-1');
       expect(component.findAll('[aria-selected="true"]')[0]!.attributes('data-node-id')).toBe('shelf-1');
+    });
+
+    /**
+     * The regression the owner hit on 2026-09-23: *"ahora ya no puedo crear
+     * más estanterías aparte de la de raíz"*. `New…` aims at the selected
+     * row, the open page selects its own row on every visit, and nothing
+     * un-selected — so after the first shelf there was no reachable way to
+     * aim at the top level again. VS Code's explorer answers this with the
+     * blank space below the rows: a click there clears the selection, and a
+     * right-click there is the root's own menu.
+     */
+    test('a click on the tree’s blank space clears the selection, so New… aims at the top level again', async () => {
+      mockTree({ status: 'success', nodes: NODES });
+      const component = await mount();
+      const actions = component.findComponent(NavigationTreeActions);
+
+      await component.findAll('[role="treeitem"]')[0]!.trigger('focus');
+      await nextTick();
+      expect(actions.props('selectedId')).toBe('shelf-1');
+
+      await component.get('[role="tree"]').trigger('click');
+      await nextTick();
+
+      expect(actions.props('selectedId'), 'nothing is picked any more').toBeNull();
+      expect(component.findAll('[aria-selected="true"]')).toHaveLength(0);
+      // The tab stop stays on a real row: clearing a selection must not
+      // drop focus off the tree (checklist §5).
+      expect(component.findAll('[role="treeitem"]').filter((item) => item.attributes('tabindex') === '0')).toHaveLength(1);
+    });
+
+    /**
+     * A click on the blank space is pointer-only, and checklist §5 asks for
+     * a stated keyboard equivalent. It is also the only road left when the
+     * tree is tall enough to fill its pane: measured against the seeded
+     * workspace on 2026-09-23, the last row's bottom edge was the tree's
+     * own, so there was no blank space to aim at.
+     */
+    test('Escape on a row clears the selection too, and says so', async () => {
+      mockTree({ status: 'success', nodes: NODES });
+      const component = await mount();
+      const actions = component.findComponent(NavigationTreeActions);
+
+      const row = component.findAll('[role="treeitem"]')[0]!;
+      await row.trigger('focus');
+      await nextTick();
+      expect(actions.props('selectedId')).toBe('shelf-1');
+
+      const escape = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+      row.element.dispatchEvent(escape);
+      await nextTick();
+
+      expect(actions.props('selectedId')).toBeNull();
+      expect(escape.defaultPrevented).toBe(true);
+      expect(component.get('[data-testid="tree-menu-status"]').text()).toMatch(/nothing is selected/i);
+      // The row keeps the tab stop: clearing a selection is not leaving the tree.
+      expect(row.attributes('tabindex')).toBe('0');
+    });
+
+    test('Escape with nothing selected is left alone, so an overlay above the tree still gets it', async () => {
+      mockTree({ status: 'success', nodes: NODES });
+      const component = await mount();
+
+      const escape = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+      component.findAll('[role="treeitem"]')[0]!.element.dispatchEvent(escape);
+      await nextTick();
+
+      expect(escape.defaultPrevented).toBe(false);
+    });
+
+    test('a click on a row is the row’s, not the blank space’s: it still selects', async () => {
+      mockTree({ status: 'success', nodes: NODES });
+      const component = await mount();
+
+      await component.get('[data-node-id="book-1"] [draggable="true"]').trigger('click');
+      await nextTick();
+
+      expect(component.findComponent(NavigationTreeActions).props('selectedId')).toBe('book-1');
+    });
+
+    test('with nothing picked, New… creates the top level’s one legal child — the second shelf', async () => {
+      mockTree({ status: 'success', nodes: NODES });
+      const component = await mount();
+
+      await component.findAll('[role="treeitem"]')[0]!.trigger('focus');
+      await nextTick();
+      await component.get('[role="tree"]').trigger('click');
+      await nextTick();
+
+      // What the header would emit for an unpicked tree — the same road the
+      // button takes (`NavigationTreeActions` asks the hierarchy).
+      component.findComponent(NavigationTreeActions).vm.$emit('create', { parentId: 'root-1', type: 'shelf' });
+      await nextTick();
+
+      const draft = component.get('[data-testid="tree-draft-row"]');
+      expect(draft.attributes('aria-level'), 'at the top level, beside the shelf that already exists').toBe('1');
+      expect(component.get('[data-row-editor] input').attributes('aria-label')).toBe('Name of the new shelf');
     });
 
     test('New… puts a draft row where the new node will land — no dialog opens', async () => {
@@ -987,6 +1106,46 @@ describe('NavigationTree', () => {
         expect(names.join(' ').toLowerCase()).not.toMatch(/delete|trash/);
         expect(useConfirm().pending.value, 'nothing was even asked').toBeNull();
       });
+    });
+
+    /**
+     * The blank space below the rows is the root's own target — the other
+     * half of the 2026-09-23 regression. VS Code registers New File and New
+     * Folder against the explorer's empty area as well as against a folder;
+     * here the one hierarchy table leaves a workspace exactly one child, so
+     * the menu holds "New shelf…" and nothing else.
+     */
+    test('a right-click on the tree’s blank space opens the root’s own menu: New shelf…, and nothing that acts on a row', async () => {
+      mockTree({ status: 'success', nodes: NODES });
+      const component = await mount();
+
+      await component.get('[role="tree"]').trigger('contextmenu', { clientX: 40, clientY: 400 });
+      await settle();
+
+      expect(menu()).not.toBeNull();
+      const labels = menuItems().map((item) => item.textContent?.trim() ?? '');
+      expect(labels).toEqual(['New shelf…']);
+      expect(labels.join(' ').toLowerCase()).not.toMatch(/rename|delete|move/);
+    });
+
+    test('the blank space’s menu creates at the top level, whatever row was picked before it', async () => {
+      mockTree({ status: 'success', nodes: NODES });
+      const component = await mount();
+
+      // A page is picked, as it is on every visit to a page's own screen.
+      await component.get('[data-node-id="page-1"]').trigger('focus');
+      await nextTick();
+      expect(component.findComponent(NavigationTreeActions).props('selectedId')).toBe('page-1');
+
+      await component.get('[role="tree"]').trigger('contextmenu', { clientX: 40, clientY: 400 });
+      await settle();
+      const create = menuItems().find((item) => item.textContent?.includes('New shelf…'))!;
+      create.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      await settle();
+
+      const draft = component.get('[data-testid="tree-draft-row"]');
+      expect(draft.attributes('aria-level')).toBe('1');
+      expect(component.get('[data-row-editor] input').attributes('aria-label')).toBe('Name of the new shelf');
     });
 
     test('the `⋯` button opens the same menu', async () => {

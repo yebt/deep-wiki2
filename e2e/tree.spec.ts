@@ -39,6 +39,8 @@ interface EditorFixtures {
 const seed: SeedFixtures = JSON.parse(readFileSync(new URL('.auth-fixtures.json', import.meta.url), 'utf8'));
 const REPO_ROOT = join(import.meta.dirname, '..');
 const SHOTS = process.env.DEEPWIKI_TREE_SHOTS ?? '';
+/** The 2026-09-25 batch's own set: the indent step, one level per 12px. */
+const TREE3_SHOTS = process.env.DEEPWIKI_TREE3_SHOTS ?? '';
 
 let writer: EditorFixtures;
 
@@ -68,9 +70,39 @@ async function useTheme(page: Page, theme: 'light' | 'dark'): Promise<void> {
   await page.addInitScript((value) => localStorage.setItem('nuxt-color-mode', value), theme);
 }
 
+/** What the document is actually painted in, asserted beside every screenshot that claims a theme. */
+async function expectTheme(page: Page, theme: 'light' | 'dark'): Promise<void> {
+  // A preference applied by color-mode's own client plugin arrives after
+  // hydration, so a shot taken before it came out in the other theme and the
+  // evidence was quietly false (docs/TODO.md Findings, 2026-09-23). The claim
+  // the file name makes is asserted rather than trusted.
+  await expect(page.locator('html')).toHaveClass(theme === 'dark' ? /\bdark\b/ : /\blight\b/);
+}
+
 async function shot(page: Page, name: string): Promise<void> {
   if (!SHOTS) return;
   await page.screenshot({ path: `${SHOTS}/fb-tree-${name}.png`, fullPage: false });
+}
+
+async function tree3Shot(page: Page, name: string): Promise<void> {
+  if (!TREE3_SHOTS) return;
+  await page.screenshot({ path: `${TREE3_SHOTS}/tree3-${name}.png`, fullPage: false });
+}
+
+/**
+ * The left edge of a row's **type icon** — the glyph that says shelf, book
+ * or page — in viewport coordinates.
+ *
+ * The icon rather than the row's padding, because the padding was never the
+ * thing that was wrong: a row's `padding-left` already stepped by
+ * docs/DESIGN-SYSTEM.md §7.2's 12px, and the icon still did not, because a
+ * container drew a 16px chevron and an 8px gap in front of its icon and a
+ * leaf drew neither. What a person sees is the icon.
+ */
+async function iconX(row: ReturnType<Page['getByRole']>): Promise<number> {
+  const icon = row.locator(':scope > .dw-tree-row > [data-row-icon]').first();
+  await expect(icon).toBeVisible();
+  return (await icon.boundingBox())!.x;
 }
 
 /**
@@ -350,6 +382,46 @@ for (const [width, theme] of [
       await expect(page.getByRole('button', { name: 'Clear filter' })).toBeVisible();
       await shot(page, `filter-empty-${width}-${theme}`);
       await expectNoHorizontalOverflow(page, `filter empty ${width} ${theme}`);
+    });
+
+    /**
+     * The owner's second finding of 2026-09-23: *"the page row's icon does
+     * not read as one level deeper"*. Shelf → book → page is the deepest
+     * chain the seeded reader can see, and it is exactly the chain that was
+     * wrong: measured before the fix at 1280, the shelf's icon stood at
+     * x=32, the book's at x=44 and the page's back at **x=32** — two levels
+     * sharing one offset, with the deepest row drawn as the shallowest,
+     * because only a container reserved the chevron's 16px and the 8px gap
+     * beside it.
+     *
+     * This asserts the step itself rather than the three numbers, so it
+     * survives the pane being resized or the drawer being narrower, and
+     * fails the moment a level stops being a level. §7.2's 12px is the
+     * value; nothing here invents one.
+     */
+    test('one level is one 12px step: each level’s icon sits 12px past the level above it', async ({ page, context }) => {
+      await signInAs(context, seed.readerSessionToken);
+      await useTheme(page, theme);
+      await page.goto(workspaceUrl(seed.workspaceSlug));
+      await expect(page.getByRole('heading', { level: 1, name: 'E2E Workspace' })).toBeVisible({ timeout: FIRST_ROW_TIMEOUT });
+      await openDrawerIfNarrow(page);
+
+      const shelf = page.getByRole('treeitem', { name: new RegExp(seed.bookHistoryShelfTitle) });
+      await expect(shelf).toBeVisible({ timeout: FIRST_ROW_TIMEOUT });
+      const book = page.getByRole('treeitem', { name: new RegExp(seed.bookHistoryBookTitle) });
+      await expect(book).toBeVisible();
+      // The book's own first child, by position rather than by title, so no
+      // fixture field has to be minted for a page the seed already makes.
+      const leaf = book.locator(':scope > [role="group"] > [role="treeitem"]').first();
+      await expect(leaf).toBeVisible();
+
+      const offsets = [await iconX(shelf), await iconX(book), await iconX(leaf)];
+
+      expect(offsets[1]! - offsets[0]!, `book vs shelf at ${width} ${theme} (${offsets.join(', ')})`).toBe(12);
+      expect(offsets[2]! - offsets[1]!, `page vs book at ${width} ${theme} (${offsets.join(', ')})`).toBe(12);
+      await expectTheme(page, theme);
+      await tree3Shot(page, `indent-${width}-${theme}`);
+      await expectNoHorizontalOverflow(page, `indent ${width} ${theme}`);
     });
   });
 }

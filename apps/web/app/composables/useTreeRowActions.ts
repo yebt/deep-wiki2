@@ -155,6 +155,35 @@ export function newRowChoice(parentType: NodeType): NewRowChoice {
   return { kind: 'many', types };
 }
 
+/**
+ * What the tree's **blank space** offers — the root's own menu.
+ *
+ * The owner could not make a second shelf on 2026-09-23 (*"ahora ya no
+ * puedo crear más estanterías aparte de la de raíz"*): `New…` aims at the
+ * picked row, a visit to any page picks that page's row, and nothing ever
+ * un-picked one, so the top level became unreachable the moment anything
+ * was selected. VS Code answers the same question with the explorer's
+ * empty area — a click there clears the selection, and a right-click
+ * there offers New File / New Folder against the root rather than against
+ * a row (`explorerView.ts`, `fileActions.contribution.ts`; this batch's
+ * research report carries the citations).
+ *
+ * The item set is the one `LEGAL_PARENT_TYPES` table read the same way
+ * `treeRowActions` reads it, with `workspace` as the parent — never a
+ * second list. Nothing that acts on a row is here, because the blank
+ * space is not a row: there is nothing to rename, move or delete.
+ */
+export function treeRootActions(): readonly (readonly TreeRowAction[])[] {
+  const creates: TreeRowAction[] = legalChildTypes('workspace').map((childType) => ({
+    kind: 'create',
+    label: `New ${NODE_TYPE_LABELS[childType].toLowerCase()}…`,
+    icon: 'i-lucide-plus',
+    disabled: false,
+    childType,
+  }));
+  return creates.length > 0 ? [creates] : [];
+}
+
 /** Groups, in menu order: create · rename and move · destinations · copy · delete. Empty groups are dropped. */
 export function treeRowActions(node: TreeNode, ctx: TreeRowActionContext): readonly (readonly TreeRowAction[])[] {
   const type = node.type as NodeType;
