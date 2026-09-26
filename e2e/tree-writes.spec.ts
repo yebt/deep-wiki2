@@ -76,6 +76,15 @@ async function useTheme(page: Page, theme: 'light' | 'dark'): Promise<void> {
   await page.addInitScript((value) => localStorage.setItem('nuxt-color-mode', value), theme);
 }
 
+/** What the document is actually painted in, asserted beside every screenshot that claims a theme. */
+async function expectTheme(page: Page, theme: 'light' | 'dark'): Promise<void> {
+  // A preference applied by color-mode's own client plugin arrives after
+  // hydration, so a shot taken before it came out in the other theme and the
+  // evidence was quietly false (docs/TODO.md Findings, 2026-09-23). The claim
+  // the file name makes is asserted rather than trusted.
+  await expect(page.locator('html')).toHaveClass(theme === 'dark' ? /\bdark\b/ : /\blight\b/);
+}
+
 /**
  * Below `lg` the sidebar is a drawer; this opens it so the tree is on
  * screen. The toggle is server-rendered and visible before Vue has
@@ -893,6 +902,12 @@ test('a title already taken by a sibling is refused: the field stays open with t
  * click there clears the selection, and a right-click there is the root's
  * own menu. These two tests drive the journey that was broken, end to
  * end, against the real API.
+ *
+ * The batch's review material is written by the loop at the foot of this
+ * file and nowhere else: it states its viewport and its theme and asserts
+ * the theme it claims (docs/TODO.md Findings, 2026-09-23 — a dark shot that
+ * came out light is false evidence). The journey tests here photograph
+ * nothing, so no shot is taken in a theme no one chose.
  */
 const TREE3_SHOTS = process.env.DEEPWIKI_TREE3_SHOTS ?? '';
 
@@ -904,11 +919,19 @@ async function tree3Shot(page: Page, name: string): Promise<void> {
 /**
  * A point inside the tree and below every row — the explorer's empty area.
  *
- * The tree is folded first, and that is a finding rather than test
- * convenience: measured against the seeded workspace at 1280×900 on
- * 2026-09-23, the last row's bottom edge *was* the tree's own, so a fully
- * unfolded tree offers no blank space to click at all. `Escape` on a row
- * is the road that always exists, and its own test below drives it.
+ * **The tree is folded first, and that is a finding rather than test
+ * convenience.** Measured against the seeded workspace at 1280×900 on
+ * 2026-09-23, an unfolded tree's last row ended at the tree's own bottom
+ * edge, so there was no blank space to click at all; `Escape` on a row is
+ * the road that always exists, and its own test below drives it. The
+ * product-level consequence is recorded in this batch's Review Log entry.
+ *
+ * **And the pane has to be tall enough to hold the folded top level**, which
+ * is why the describe below states a viewport taller than the review's three
+ * — see the note on it. The premise is asserted rather than assumed: if the
+ * folded rows fill the pane there is genuinely nothing to aim at, and a test
+ * that clicked the last row instead of the empty area would pass while
+ * proving the opposite of what it claims.
  */
 async function blankSpot(page: Page): Promise<{ x: number; y: number }> {
   await page.getByRole('button', { name: 'Collapse all' }).click();
@@ -916,7 +939,12 @@ async function blankSpot(page: Page): Promise<{ x: number; y: number }> {
   const rows = page.getByRole('treeitem');
   const last = (await rows.nth((await rows.count()) - 1).boundingBox())!;
   const y = last.y + last.height + 12;
-  expect(y, 'the folded tree has blank space below its rows to aim at').toBeLessThan(box.y + box.height - 4);
+  expect(
+    y,
+    `the folded tree leaves blank space below its rows to aim at — ${await rows.count()} rows ending at ` +
+      `${last.y + last.height} in a tree ending at ${box.y + box.height}. If this fails, the workspace's top ` +
+      `level has outgrown the pane: give this describe a taller viewport, or mint fewer shelves above it.`,
+  ).toBeLessThan(box.y + box.height - 4);
   return { x: box.x + 16, y };
 }
 
@@ -928,7 +956,19 @@ async function serverShelfTitles(page: Page, token: string): Promise<string[]> {
 }
 
 test.describe('the tree’s blank space', () => {
-  test.use({ viewport: { width: 1280, height: 900 } });
+  /**
+   * Taller than the review's 900, deliberately. Every test in this file
+   * mints its own shelf (`mintFixtures`, so a reorder never inherits an
+   * order another test left), so the workspace's **top level** grows by one
+   * row per test as the file runs — and the blank space this describe is
+   * about exists only while the folded top level fits the pane. At 900 it
+   * stopped fitting: measured on 2026-09-25, 39 folded rows ending at
+   * y=1584 in a tree ending at y=839, which `blankSpot` refused rather than
+   * clicking the last row and calling it the empty area. The viewport is
+   * the one knob that does not change what is being tested; the affordance
+   * measured here is a pointer target, not a layout.
+   */
+  test.use({ viewport: { width: 1280, height: 2000 } });
 
   test('a second shelf is creatable after one exists: a click on the blank space clears the selection and New… aims at the top level', async ({ page }) => {
     const fixtures = mintFixtures();
@@ -953,7 +993,6 @@ test.describe('the tree’s blank space', () => {
     const field = nameField(page);
     await expect(field).toBeFocused();
     await expect(field).toHaveAttribute('aria-label', 'Name of the new shelf');
-    await tree3Shot(page, 'root-create-1280-light');
     await expectNoHorizontalOverflow(page, 'root create 1280 light');
 
     const title = `E2E Second Shelf ${Date.now()}`;
@@ -1117,7 +1156,9 @@ test.describe('the tree’s keyboard help', () => {
 
     await help.click();
 
-    const panel = page.getByRole('dialog');
+    // By name: the drawer below `lg` is a `role="dialog"` too (see the
+    // review-material test at the foot of this file).
+    const panel = page.getByRole('dialog', { name: 'Keyboard help' });
     await expect(panel).toBeVisible();
     await expect(help).toHaveAttribute('aria-expanded', 'true');
     // It names the surface it opened, which is what makes the pair a
@@ -1132,7 +1173,6 @@ test.describe('the tree’s keyboard help', () => {
     // blank space's.
     await expect(panel.getByText('Alt', { exact: true })).toBeVisible();
     await expect(panel.getByText('Esc', { exact: true })).toBeVisible();
-    await tree3Shot(page, 'help-1280-light');
     await expectNoHorizontalOverflow(page, 'keyboard help 1280 light');
 
     await page.keyboard.press('Escape');
@@ -1165,6 +1205,19 @@ async function themeColour(page: Page, variable: string): Promise<string> {
   }, variable);
 }
 
+/**
+ * One fixture for all nine shots below. None of the three tests writes
+ * anything — the rename is cancelled, the draft is never confirmed — so they
+ * need no fresh rows, and every `mintFixtures()` adds a shelf to the
+ * workspace's top level, which is the thing `blankSpot` above needs to fit
+ * inside the pane.
+ */
+let reviewFixtures: TreeFixtures;
+
+test.beforeAll(() => {
+  reviewFixtures = mintFixtures();
+});
+
 for (const [width, theme] of [
   [1280, 'light'],
   [1280, 'dark'],
@@ -1174,7 +1227,7 @@ for (const [width, theme] of [
     test.use({ viewport: { width, height: 900 } });
 
     test('the row being named is the row: same height, no box, the caret its indicator', async ({ page }) => {
-      const fixtures = mintFixtures();
+      const fixtures = reviewFixtures;
       await useTheme(page, theme);
       await openTreeAs(page, fixtures.ownerSessionToken, fixtures);
 
@@ -1217,6 +1270,7 @@ for (const [width, theme] of [
       // §9.5's floor: below 16px iOS Safari zooms the viewport on focus.
       expect(style.fontSize).toBe('16px');
 
+      await expectTheme(page, theme);
       await tree3Shot(page, `draft-${width}-${theme}`);
       await expectNoHorizontalOverflow(page, `row being named ${width} ${theme}`);
 
@@ -1226,23 +1280,18 @@ for (const [width, theme] of [
     });
 
     test('New… with nothing selected opens a shelf draft at the top level, screenshotted', async ({ page }) => {
-      const fixtures = mintFixtures();
+      const fixtures = reviewFixtures;
       await useTheme(page, theme);
       await openTreeAs(page, fixtures.ownerSessionToken, fixtures);
 
-      // Something is picked, as opening any page picks it; a click on the
-      // blank space below the rows is the road back to the top level — the
-      // one the owner could not find (*"ya no puedo crear más estanterías
-      // aparte de la de raíz"*). The pointer's road rather than Escape's at
-      // every width, because inside the 320 drawer Escape is the drawer's.
-      // The tree is folded first (see `blankSpot`: an unfolded tree fills its
-      // pane and offers nothing to click), then a row that survives the fold
-      // is picked, so the count below is about the click and not about the
-      // picked row having been folded out of sight.
-      const spot = await blankSpot(page);
-      await page.getByRole('treeitem', { name: new RegExp(fixtures.shelfTitle) }).focus();
-      await expect(page.locator('[role="treeitem"][aria-selected="true"]')).toHaveCount(1);
-      await page.mouse.click(spot.x, spot.y);
+      // The dashboard opens with nothing selected — no page is on screen to
+      // pick a row for — which is already the state this shot is of: `New…`
+      // aiming at the workspace. The two roads *back* to that state once a
+      // row has been picked (a click on the blank space, and `Escape` on a
+      // row) are what the describes above drive; they are not re-driven here,
+      // because the blank space needs a pane taller than the review's 900 to
+      // exist at all (`blankSpot`) and inside the 320 drawer a pointer road
+      // and a keyboard road would each need their own caveat.
       await expect(page.locator('[role="treeitem"][aria-selected="true"]')).toHaveCount(0);
 
       await page.getByRole('button', { name: 'New…' }).click();
@@ -1252,21 +1301,27 @@ for (const [width, theme] of [
       // At the top level, so the draft stands at the tree's own indent.
       await expect(page.getByTestId('tree-draft-row')).toHaveAttribute('aria-level', '1');
 
+      await expectTheme(page, theme);
       await tree3Shot(page, `root-create-${width}-${theme}`);
       await expectNoHorizontalOverflow(page, `root create ${width} ${theme}`);
     });
 
     test('the keyboard help, open, screenshotted', async ({ page }) => {
-      const fixtures = mintFixtures();
+      const fixtures = reviewFixtures;
       await useTheme(page, theme);
       await openTreeAs(page, fixtures.ownerSessionToken, fixtures);
 
       const help = page.getByRole('button', { name: 'Keyboard help' });
       await help.click();
-      const panel = page.getByRole('dialog');
+      // By name, not by role alone: below `lg` the sidebar *is* a
+      // focus-trapped `role="dialog"` (§6's drawer), so at 320 an unnamed
+      // query resolves to two — the drawer the tree stands in and the
+      // popover standing over it.
+      const panel = page.getByRole('dialog', { name: 'Keyboard help' });
       await expect(panel).toBeVisible();
       await expect(panel).toContainText('Keys in the tree');
 
+      await expectTheme(page, theme);
       await tree3Shot(page, `help-${width}-${theme}`);
       await expectNoHorizontalOverflow(page, `keyboard help ${width} ${theme}`);
     });

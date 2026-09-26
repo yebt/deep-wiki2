@@ -70,6 +70,15 @@ async function useTheme(page: Page, theme: 'light' | 'dark'): Promise<void> {
   await page.addInitScript((value) => localStorage.setItem('nuxt-color-mode', value), theme);
 }
 
+/** What the document is actually painted in, asserted beside every screenshot that claims a theme. */
+async function expectTheme(page: Page, theme: 'light' | 'dark'): Promise<void> {
+  // A preference applied by color-mode's own client plugin arrives after
+  // hydration, so a shot taken before it came out in the other theme and the
+  // evidence was quietly false (docs/TODO.md Findings, 2026-09-23). The claim
+  // the file name makes is asserted rather than trusted.
+  await expect(page.locator('html')).toHaveClass(theme === 'dark' ? /\bdark\b/ : /\blight\b/);
+}
+
 async function shot(page: Page, name: string): Promise<void> {
   if (!SHOTS) return;
   await page.screenshot({ path: `${SHOTS}/fb-tree-${name}.png`, fullPage: false });
@@ -410,6 +419,7 @@ for (const [width, theme] of [
 
       expect(offsets[1]! - offsets[0]!, `book vs shelf at ${width} ${theme} (${offsets.join(', ')})`).toBe(12);
       expect(offsets[2]! - offsets[1]!, `page vs book at ${width} ${theme} (${offsets.join(', ')})`).toBe(12);
+      await expectTheme(page, theme);
       await tree3Shot(page, `indent-${width}-${theme}`);
       await expectNoHorizontalOverflow(page, `indent ${width} ${theme}`);
     });

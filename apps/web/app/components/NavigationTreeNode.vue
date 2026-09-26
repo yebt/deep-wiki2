@@ -380,13 +380,14 @@ function onKeydown(event: KeyboardEvent): void {
            does not read as one level deeper"). Drawing the chevron only on
            a container took its 16px and the 8px gap beside it back out of
            a leaf's row, so a page's type icon landed 24px to the left of
-           where its own indent put it — which is 12 past its parent's
-           icon and exactly level with its *grandparent's*. Measured on the
-           seeded tree at 1280: shelf 32px, book 44px, page **32px**, so
-           two levels shared one offset and the deepest row read as the
-           shallowest. The step itself was never wrong; §7.2's 12px is the
-           value and stays it. Reserving the column is what makes each
-           level's icon 12px past the level above it, with no new number. -->
+           where its own indent put it — which is 12px *behind* its
+           parent's icon and exactly level with its *grandparent's*.
+           Measured on the seeded tree at 1280: shelf 32px, book 44px,
+           page **32px**, so two levels shared one offset and the deepest
+           row read as the shallowest. The step itself was never wrong;
+           §7.2's 12px is the value and stays it. Reserving the column is
+           what makes each level's icon 12px past the level above it, with
+           no new number. -->
       <UIcon
         v-if="isContainer"
         name="i-lucide-chevron-right"

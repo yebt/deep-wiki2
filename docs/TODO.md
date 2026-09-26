@@ -615,6 +615,87 @@ makes conventions portable across projects.
 
 Discoveries and constraints. Newest first.
 
+### 2026-09-25 — The inline-creation redesign removed the only way to aim at the top level (branch `fix/tree-root-and-draft`)
+
+Four things the owner reported on 2026-09-23 after the tree's create-and-rename moved into the
+row (`feat/tree-like-vscode`, the 2026-09-23 entry below). One of them is a regression that
+batch introduced, and it is the interesting one; the other three are things that batch left
+undone or drew wrong.
+
+**The regression: `New…` aims at the selected row, and nothing un-selected one.** The owner's
+words were *"ahora ya no puedo crear más estanterías aparte de la de raíz"* and *"el menú
+contextual no funciona para crear otra estantería en el exterior del tree o base del tree"*.
+The cause is a straight consequence of the redesign and of nothing else. The creation dialog it
+replaced asked for a *place* — a parent, chosen in a radio group, with "top level" among the
+answers — so the top level was always one click away whatever the tree's state was. The inline
+row does not ask: it draws the draft under the row that is picked, which is the whole point
+(*where* the thing lands is shown rather than described). But **every road into the tree picks a
+row** — opening a page picks it, arrowing to one picks it, right-clicking one picks it — and
+there was no road back out. So after the first shelf existed, the workspace itself was the one
+parent the person could no longer name. Nothing in the batch's own review material could have
+caught it: every test opened a fresh tree, where nothing is selected yet, and the state the
+owner was stuck in is the state a tree is in for the rest of the day.
+
+*How it was closed.* The blank area below the rows, which is what both reference products use
+for exactly this (`deep-wiki2-review/tree-ux-research.md` §1.1, §1.4): a click there clears the
+selection, and a right-click there is the root's own menu, holding "New shelf…" and nothing that
+acts on a row. `Escape` on a row is the keyboard's equivalent, and it is the *only* road when
+the tree is tall enough to fill its pane — measured on the seeded workspace at 1280×900, an
+unfolded tree's last row ends at the tree's own bottom edge, so there is no blank space to aim
+at. That measurement is a finding in its own right: "click the empty area" is not a complete
+answer for a tree that can be taller than its pane, and the two roads are documented together
+in the keyboard help.
+
+**The `?` beside "Contents" did nothing — literally.** It was a `UButton` inside a `UTooltip`
+with no `@click` and no target, so the one control whose job is to name the keys was the one
+inert interaction on the screen (checklist §6). It is now a `UPopover` listing them, and the
+`sr-only` sentence a screen reader is given is **derived** from that same list
+(`shortcutsSentence`) rather than written beside it — the keys were about to be written down
+twice, which is the defect checklist §4.1 names, and one list rendered two ways is the answer.
+The list itself is still hand-written and still has to agree with the handlers; nothing yet
+makes that mechanical, and edit mode has no such surface at all (owed below). Found on the way:
+a `UPopover`'s non-modal content does not mount at all under the component-test environment, so
+the popover
+itself is driven in `e2e/tree-writes.spec.ts` and the unit test covers the list; the measurement
+is recorded in `KeyboardShortcutsHelp.test.ts` so the next person does not spend the same hour.
+
+**Only `Escape` got out of a draft row.** A person who changed their mind and clicked elsewhere
+was left with a field still standing in the tree. A pointerdown outside it now cancels, in the
+**capture** phase so a click on `New…` while a draft is open cancels the old field before the
+new one is asked for. It **discards** the half-typed name, which is deliberately not the
+commit-on-blur the page's title field takes: that field is changing a name that already exists
+and a stray click should not throw the edit away, while this field's create half has nothing to
+go back to, so a commit would silently make a node the person had stopped asking for. VS Code's
+input box discards on both roads and both halves of this field are that one road. A write
+already in flight is never abandoned.
+
+**The field was a box, and the indent was not an indent.** Both are `docs/DESIGN-SYSTEM.md` §14
+rows of 2026-09-25 and the reasoning lives there; the two measurements worth repeating here are
+that the draft field was M3's 40px *text field* standing among rows that draw no boundary at
+all, and that the tree's 12px indent step (§7.2) was implemented correctly on the row's padding
+while the icon a person actually measures a level by stepped 32 → 44 → **32** across shelf →
+book → page, because only a container reserved the chevron's column.
+
+**Found by running the suite, not by reading it: the blank space's own test had a premise that
+decays.** `e2e/tree-writes.spec.ts` mints a fresh fixture per test so a reorder never inherits an
+order another test left behind — and each mint adds one row to the workspace's **top level**. The
+blank space exists only while the *folded* top level fits the pane, so the premise gets weaker with
+every test added to the file: measured on 2026-09-25 at 1280×900, thirty-nine folded rows ended at
+y=1584 in a tree ending at y=839, and the helper refused rather than clicking the last row and
+calling it the empty area. Two fixes, both taken: the helper's failure now says what to do and
+quotes the numbers, and its describe states a viewport tall enough for the folded top level (the
+viewport is the one knob that does not change what is being tested — the affordance measured is a
+pointer target, not a layout). The nine review shots, which write nothing, now share one fixture
+instead of minting nine. The shape is worth remembering: **a fixture that accumulates into shared
+state makes every later assertion about that state weaker, and the assertion that notices is the
+one that measures geometry.**
+
+**The gap class, for the next redesign.** Three of the four are the same shape: a redesign
+replaced a surface that asked a question with one that reads the screen's state, and every
+invariant the old surface carried *by asking* had to be re-established by hand. The parent, the
+way out of the field, and the keys were each one of those. Worth asking of any such replacement:
+what did the thing being removed guarantee that nothing now does?
+
 ### 2026-09-23 — Two toasts are one tier working, and a screenshot that claims a theme has to assert it
 
 Two things the e2e suite taught this batch after the toasts landed, both worth keeping.
