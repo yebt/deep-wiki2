@@ -1141,3 +1141,134 @@ test.describe('the tree’s keyboard help', () => {
     await expect(help).toHaveAttribute('aria-expanded', 'false');
   });
 });
+
+/* ─── Review material for the 2026-09-25 batch ────────────────────────────
+ *
+ * Three surfaces at each of the three combinations the review asks for
+ * (docs/UI-CHECKLIST.md §4.2, §6): the draft row aimed at the top level,
+ * the row being named, and the keyboard help. The measurements travel with
+ * the screenshots rather than in a test of their own, because both of the
+ * owner's findings are about what a screenshot shows and neither can be
+ * proved by one: a box's height and a field's computed boundary are
+ * numbers, and "it looks like the row now" is not.
+ */
+
+/** The computed value of a theme variable, read as `e2e/editor-source.spec.ts` reads it. */
+async function themeColour(page: Page, variable: string): Promise<string> {
+  return page.evaluate((name) => {
+    const probe = document.createElement('span');
+    probe.style.color = `var(${name})`;
+    document.body.append(probe);
+    const colour = getComputedStyle(probe).color;
+    probe.remove();
+    return colour;
+  }, variable);
+}
+
+for (const [width, theme] of [
+  [1280, 'light'],
+  [1280, 'dark'],
+  [320, 'light'],
+] as const) {
+  test.describe(`the tree’s row editor and help, ${width} ${theme}`, () => {
+    test.use({ viewport: { width, height: 900 } });
+
+    test('the row being named is the row: same height, no box, the caret its indicator', async ({ page }) => {
+      const fixtures = mintFixtures();
+      await useTheme(page, theme);
+      await openTreeAs(page, fixtures.ownerSessionToken, fixtures);
+
+      const item = page.getByRole('treeitem', { name: new RegExp(fixtures.shelfTitle) });
+      // Before: the row's own box, which is the number the field must not change.
+      const before = (await item.locator('.dw-tree-row').first().boundingBox())!;
+
+      await item.focus();
+      await page.keyboard.press('F2');
+      const field = nameField(page);
+      await expect(field).toBeFocused();
+      await expect(field).toHaveValue(fixtures.shelfTitle);
+
+      // After: the field's line, measured like for like. The owner's fourth
+      // finding of 2026-09-23 was a field that "dwarfs the row it sits in";
+      // §3's "no layout shift" is the rule it broke.
+      const after = (await page.locator('[data-row-editor] > div').first().boundingBox())!;
+      expect(after.height, `the named row keeps the row's height at ${width} ${theme}`).toBe(before.height);
+
+      const style = await field.evaluate((el) => {
+        const computed = getComputedStyle(el);
+        return {
+          outlineStyle: computed.outlineStyle,
+          borderWidth: computed.borderWidth,
+          boxShadow: computed.boxShadow,
+          borderRadius: computed.borderRadius,
+          backgroundColor: computed.backgroundColor,
+          caretColor: computed.caretColor,
+          fontSize: computed.fontSize,
+        };
+      });
+      expect(style.outlineStyle, 'no ring around the row being typed in').toBe('none');
+      expect(style.borderWidth).toBe('0px');
+      expect(style.boxShadow).toBe('none');
+      expect(style.borderRadius, 'nothing is drawn, so nothing is rounded').toBe('0px');
+      expect(style.backgroundColor, 'no fill either — the row’s own ground shows through').toBe('rgba(0, 0, 0, 0)');
+      // The indicator is relocated, never removed (§5, pass/fail): the caret
+      // in `primary`, as the source view's text area and the title field.
+      expect(style.caretColor).toBe(await themeColour(page, '--ui-primary'));
+      // §9.5's floor: below 16px iOS Safari zooms the viewport on focus.
+      expect(style.fontSize).toBe('16px');
+
+      await tree3Shot(page, `draft-${width}-${theme}`);
+      await expectNoHorizontalOverflow(page, `row being named ${width} ${theme}`);
+
+      await page.keyboard.press('Escape');
+      await expect(page.locator('[data-row-editor]')).toHaveCount(0);
+      await expect(page.getByRole('treeitem', { name: new RegExp(fixtures.shelfTitle) })).toBeVisible();
+    });
+
+    test('New… with nothing selected opens a shelf draft at the top level, screenshotted', async ({ page }) => {
+      const fixtures = mintFixtures();
+      await useTheme(page, theme);
+      await openTreeAs(page, fixtures.ownerSessionToken, fixtures);
+
+      // Something is picked, as opening any page picks it; a click on the
+      // blank space below the rows is the road back to the top level — the
+      // one the owner could not find (*"ya no puedo crear más estanterías
+      // aparte de la de raíz"*). The pointer's road rather than Escape's at
+      // every width, because inside the 320 drawer Escape is the drawer's.
+      // The tree is folded first (see `blankSpot`: an unfolded tree fills its
+      // pane and offers nothing to click), then a row that survives the fold
+      // is picked, so the count below is about the click and not about the
+      // picked row having been folded out of sight.
+      const spot = await blankSpot(page);
+      await page.getByRole('treeitem', { name: new RegExp(fixtures.shelfTitle) }).focus();
+      await expect(page.locator('[role="treeitem"][aria-selected="true"]')).toHaveCount(1);
+      await page.mouse.click(spot.x, spot.y);
+      await expect(page.locator('[role="treeitem"][aria-selected="true"]')).toHaveCount(0);
+
+      await page.getByRole('button', { name: 'New…' }).click();
+      const field = nameField(page);
+      await expect(field).toBeFocused();
+      await expect(field).toHaveAttribute('aria-label', 'Name of the new shelf');
+      // At the top level, so the draft stands at the tree's own indent.
+      await expect(page.getByTestId('tree-draft-row')).toHaveAttribute('aria-level', '1');
+
+      await tree3Shot(page, `root-create-${width}-${theme}`);
+      await expectNoHorizontalOverflow(page, `root create ${width} ${theme}`);
+    });
+
+    test('the keyboard help, open, screenshotted', async ({ page }) => {
+      const fixtures = mintFixtures();
+      await useTheme(page, theme);
+      await openTreeAs(page, fixtures.ownerSessionToken, fixtures);
+
+      const help = page.getByRole('button', { name: 'Keyboard help' });
+      await help.click();
+      const panel = page.getByRole('dialog');
+      await expect(panel).toBeVisible();
+      await expect(panel).toContainText('Keys in the tree');
+
+      await tree3Shot(page, `help-${width}-${theme}`);
+      await expectNoHorizontalOverflow(page, `keyboard help ${width} ${theme}`);
+    });
+  });
+}

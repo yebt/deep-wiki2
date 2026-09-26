@@ -24,16 +24,37 @@
  * reason: a click in the field is not a click on the row, and a row that
  * is being named is not draggable.
  *
- * ── The field's metrics ────────────────────────────────────────────────
+ * ── The field's metrics: it *is* the row ───────────────────────────────
  *
- * `h-10` — 40px, the tree row's own height (docs/DESIGN-SYSTEM.md §7.2),
- * the same metric the tree's filter box already takes for the same reason
- * (that file's §14, 2026-09-16: a 56px content-area field in a 280px pane
- * reads as a form control that wandered into the furniture). It is exactly
- * the height of the row it replaces, so nothing above or below it moves
- * when the field appears (§3, "no layout shift"). The text stays 16px
- * (`size="xl"`, §9.5 — below 16px iOS Safari zooms on focus) and the shape
- * `rounded-md` (§3.4, controls at `corner-medium`), both inherited.
+ * The owner's fourth finding of 2026-09-23 was that this field read as "a
+ * tall bordered box that dwarfs the row it sits in". It was a `UInput` —
+ * M3's text field — so it brought a ring, a fill and a radius into a pane
+ * whose thirty other rows draw no boundary at all, and the one row being
+ * typed in was the only object on screen with an edge. A `h-10` on the
+ * `base` slot had made it the row's *height* without making it the row.
+ *
+ * So the field is a plain `<input>` that draws nothing: no ring, no
+ * border, no fill, no radius, no elevation. Its focus indicator is the
+ * caret, in the `primary` role (`main.css` §13, `.dw-row-editor-field`) —
+ * the treatment docs/DESIGN-SYSTEM.md §14 already records twice, for the
+ * source view's text area (2026-09-17) and the page's title field
+ * (2026-09-23), for the same reason each time: a text surface that *is*
+ * the thing around it is not a control among controls, and WCAG 2.4.7
+ * counts the text cursor as a text field's focus indicator. The indicator
+ * is relocated, never removed (checklist §5 is pass/fail on it).
+ *
+ * `h-10` on the line — 40px, the tree row's own height
+ * (docs/DESIGN-SYSTEM.md §7.2) — so nothing above or below it moves when
+ * the field appears (§3, "no layout shift"), and the row measures the same
+ * 40px before and after. The text keeps §9.5's 16px floor
+ * (`text-body-large`) rather than the row's own 14px `body-medium`: below
+ * 16px iOS Safari zooms the viewport on focus, which binds every
+ * text-entry control, and the source view's 14px code role gave way for
+ * exactly that (§14, 2026-09-17).
+ *
+ * A write in flight is said without a box either: a spinner beside the
+ * field and `aria-busy` on it, where `UInput`'s `loading` used to put an
+ * icon inside the control's own leading slot.
  *
  * A refusal the person can fix by typing stands *under* the field rather
  * than beside it: 280px of pane has no room beside a 40px field, and the
@@ -55,8 +76,6 @@ const props = defineProps<{
   snapshot: EditorSnapshot;
   /** The indent the row stands at — `NavigationTreeNode`'s `depth * 12 + 8` (DESIGN-SYSTEM §7.2). */
   depth: number;
-  /** A container's rows carry a chevron; a spacer keeps the field's left edge where the title's was. */
-  hasChevron?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -85,7 +104,7 @@ const label = computed(() =>
 const icon = computed(() => NODE_TYPE_ICONS[draft.value.type] ?? 'i-lucide-file');
 const isCommitting = computed(() => props.snapshot.phase === 'committing');
 
-const input = ref<{ inputRef?: HTMLInputElement | null } | null>(null);
+const input = ref<HTMLInputElement | null>(null);
 
 /**
  * The field takes focus the moment it exists, and a rename opens with the
@@ -114,7 +133,7 @@ const FOCUS_ATTEMPTS = 5;
 onMounted(() => {
   let left = FOCUS_ATTEMPTS;
   const take = (): void => {
-    const el = input.value?.inputRef;
+    const el = input.value;
     if (!el || document.activeElement === el) return;
     el.focus();
     el.select();
@@ -173,27 +192,42 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', onPointerDownO
     @dblclick.stop
   >
     <div class="flex h-10 min-h-10 items-center gap-2">
-      <!-- The chevron's width, kept but not drawn: a row being renamed is a
-           field, not a disclosure, and the field must start where the title
-           it replaces started. -->
-      <span v-if="hasChevron" class="size-4 shrink-0" aria-hidden="true" />
+      <!-- The chevron's column, reserved and not drawn: a row being named is
+           a field, not a disclosure, and the field must start where the
+           title it replaces started. Every row reserves it — a leaf as much
+           as a container — which is what makes one level read as one level
+           (`NavigationTreeNode`, and DESIGN-SYSTEM §7.2's 12px step). -->
+      <span class="size-4 shrink-0" aria-hidden="true" />
       <UIcon :name="icon" class="size-4 shrink-0 text-muted" aria-hidden="true" />
-      <UInput
+      <!-- `.dw-row-editor-field` is the caret in `primary` and no outline
+           (`main.css` §13) — the indicator the source view's text area and
+           the page's title field take, for the same reason. The field
+           draws nothing else: it is the row, being typed in. -->
+      <input
         :id="fieldId"
         ref="input"
-        :model-value="snapshot.value"
+        class="dw-row-editor-field min-w-0 flex-1 bg-transparent p-0 text-body-large text-default"
+        :value="snapshot.value"
         :aria-label="label"
         :aria-describedby="snapshot.error ? errorId : hintId"
+        :aria-invalid="snapshot.error ? 'true' : undefined"
         :aria-busy="isCommitting ? 'true' : undefined"
-        :loading="isCommitting"
         autocomplete="off"
         spellcheck="false"
-        class="min-w-0 flex-1"
-        :ui="{ base: 'h-10' }"
-        @update:model-value="emit('update:value', String($event))"
+        @input="emit('update:value', ($event.target as HTMLInputElement).value)"
         @keydown.enter.prevent.stop="emit('commit')"
         @keydown.escape.prevent.stop="emit('cancel')"
         @keydown.stop
+      >
+      <!-- The write is in flight. A spinner beside the field rather than
+           inside it, because the field has no inside any more; the words
+           are on the field itself, as `aria-busy`. -->
+      <UIcon
+        v-if="isCommitting"
+        data-testid="tree-row-editor-busy"
+        name="i-lucide-loader-circle"
+        class="size-4 shrink-0 animate-spin text-muted"
+        aria-hidden="true"
       />
     </div>
 

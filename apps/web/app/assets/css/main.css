@@ -1069,3 +1069,27 @@ body {
 .dw-title-editor:focus-visible {
   outline: none;
 }
+
+/* The tree's row editor (`NavigationTreeRowEditor`, 2026-09-25) is the
+   fourth text surface to take this treatment, and the owner's fourth
+   finding of 2026-09-23 is why: the field read as "a tall bordered box
+   that dwarfs the row it sits in". It was a `UInput` — M3's text field,
+   an outlined control with a ring and a fill — standing among tree rows
+   that draw no boundary at all, so the one row being typed in was the
+   only object in the pane with an edge. A row being named is *the row*,
+   the same object as the thirty rows above it, not a form control that
+   has landed in the furniture; so it draws no ring, border, fill or
+   radius, and the caret in `primary` is its focus indicator (WCAG 2.4.7
+   counts the text cursor for a text field, and M3 draws its own field's
+   caret in this role — `md.comp.outlined-text-field.caret.color`). The
+   indicator is relocated, never removed (checklist §5, pass/fail): the
+   same move the source view's text area made on 2026-09-17 and the
+   page's title field on 2026-09-23. Recorded in
+   docs/DESIGN-SYSTEM.md §14. */
+.dw-row-editor-field {
+  caret-color: var(--ui-primary);
+}
+
+.dw-row-editor-field:focus-visible {
+  outline: none;
+}

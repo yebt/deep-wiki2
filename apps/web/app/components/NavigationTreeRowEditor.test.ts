@@ -212,4 +212,54 @@ describe('NavigationTreeRowEditor', () => {
     const line = root.querySelector('[data-row-editor] > div');
     expect(line?.className).toContain('h-10');
   });
+
+  /**
+   * The owner's fourth finding of 2026-09-23: the field read as "a tall
+   * bordered box that dwarfs the row it sits in". It was a `UInput` — M3's
+   * text field, an outlined 40px control with a ring — standing among rows
+   * that carry no boundary at all.
+   *
+   * The correction is the treatment `docs/DESIGN-SYSTEM.md` §14 already
+   * records twice, for the source view's text area (2026-09-17) and the
+   * page's title field (2026-09-23): a text surface that *is* the thing
+   * around it draws no box, and the caret in `primary` is its focus
+   * indicator (WCAG 2.4.7 counts the text cursor for a text field).
+   */
+  describe('it reads as the row, being typed in', () => {
+    test('draws no box: no ring, no border, no fill, no elevation', async () => {
+      const root = await mount({ snapshot: snapshot(CREATE, { value: 'Notes' }), depth: 1 });
+      const classes = field(root).className;
+
+      expect(classes).not.toMatch(/(^|\s)ring/);
+      expect(classes).not.toMatch(/(^|\s)(border|rounded|shadow)/);
+      expect(classes).toContain('bg-transparent');
+      // A `UInput` draws its ring, fill and radius on the root slot it
+      // wraps the input in, so the absence has to be checked on the whole
+      // editor and not only on the element that takes the typing.
+      const editor = root.querySelector('[data-row-editor]')!;
+      expect(editor.querySelectorAll('[class*="ring"], [class*="shadow"]')).toHaveLength(0);
+      expect(field(root).tagName, 'the field is the input itself').toBe('INPUT');
+    });
+
+    test('the caret is the focus indicator, the same one the title field and the source view take', async () => {
+      const root = await mount({ snapshot: snapshot(RENAME, { value: 'Day one' }), depth: 2 });
+      // `main.css` §13 draws the caret in `primary` and no outline for this class.
+      expect(field(root).className).toContain('dw-row-editor-field');
+    });
+
+    test('the text keeps §9.5’s 16px floor, which is the one thing it does not take from the row', async () => {
+      const root = await mount({ snapshot: snapshot(CREATE), depth: 0 });
+      // Below 16px iOS Safari zooms the viewport on focus, which binds every
+      // text-entry control; the row's own 14px label gives way for it, as
+      // the source view's 14px code role did (DESIGN-SYSTEM §14, 2026-09-17).
+      expect(field(root).className).toContain('text-body-large');
+    });
+
+    test('a write in flight is said without a box either: a spinner beside the field, and aria-busy on it', async () => {
+      const root = await mount({ snapshot: snapshot(CREATE, { phase: 'committing', value: 'Notes' }), depth: 0 });
+
+      expect(field(root).getAttribute('aria-busy')).toBe('true');
+      expect(root.querySelector('[data-testid="tree-row-editor-busy"]')).not.toBeNull();
+    });
+  });
 });
