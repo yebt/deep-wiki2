@@ -1,6 +1,10 @@
 import { readFileSync } from 'node:fs';
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
+import { expectNoHorizontalOverflow } from './overflow';
 import { workspaceUrl } from '../apps/web/app/utils/routes';
+
+/** Review material for the footer's removal, written only when asked for. */
+const SHOTS = process.env.DEEPWIKI_FB_COMMENTS_SHOTS ?? '';
 
 /**
  * Navigation, end to end: from the front door to a page's content, by
@@ -318,3 +322,52 @@ test('a tree control is 32px, a picked row shows it is picked, and container row
   await shelf.press('Enter');
   await expect(book).toHaveCount(0);
 });
+
+/**
+ * The document frame after the footer went (`feat/comment-thread-view`,
+ * 2026-09-23; docs/DESIGN-SYSTEM.md §14 and this batch's Review Log entry).
+ *
+ * The workspace chooser is the screen a person meets first inside the product
+ * and one of the five that carried the `UFooter`. Two things are measured
+ * because neither could be measured anywhere else: that the `contentinfo`
+ * landmark is gone from a *frame* screen — `e2e/smoke.spec.ts` and
+ * `e2e/auth-layout.spec.ts` assert its absence on the sign-in family, which
+ * never had one, so between them nothing covered the screens that did — and
+ * that the screen now fits its viewport exactly. The second is the payoff:
+ * §6 names `UMain` + `UFooter` as *the* vertical-overflow trap, it has cost
+ * this product two review findings (2026-09-04 and 2026-09-06), and this
+ * screen overflowed by exactly the footer's height until the pairing went.
+ *
+ * Both themes, because the measurement is of a rendered box and a theme is
+ * free to change what is in it.
+ */
+for (const theme of ['light', 'dark'] as const) {
+  test(`the workspace chooser signs nothing at its foot and fits the viewport exactly (${theme})`, async ({ page, context }) => {
+    await signInAs(context, fixtures.readerSessionToken);
+    await page.addInitScript((value) => localStorage.setItem('nuxt-color-mode', value), theme);
+
+    await gotoAndWaitForHydration(page, '/workspaces');
+    await expect(page.getByRole('heading', { level: 1, name: 'Workspaces' })).toBeVisible({ timeout: 30000 });
+    await expect(page.getByRole('link', { name: /E2E Workspace/ })).toBeVisible({ timeout: 30000 });
+    // A screenshot that claims a theme has to assert it (the 2026-09-23
+    // finding: colour mode is applied by a client plugin, so a shot taken
+    // before it lands comes out light with `dark` in its name).
+    await expect(page.locator('html')).toHaveClass(theme === 'dark' ? /\bdark\b/ : /\blight\b/);
+
+    // No `contentinfo`, and no `footer` element under any other role.
+    await expect(page.getByRole('contentinfo')).toHaveCount(0);
+    expect(await page.locator('footer').count(), 'nothing signs the product at the foot of the screen').toBe(0);
+    // And nothing says what the product is built with, which is what the
+    // footer's right half said.
+    await expect(page.getByText(/Material Design 3/i)).toHaveCount(0);
+
+    const box = await page.evaluate(() => ({
+      scrollHeight: document.documentElement.scrollHeight,
+      innerHeight: window.innerHeight,
+    }));
+    expect(box.scrollHeight, `vertical overflow: ${box.scrollHeight} against ${box.innerHeight}`).toBe(box.innerHeight);
+    await expectNoHorizontalOverflow(page, `the workspace chooser in ${theme}`);
+
+    if (SHOTS) await page.screenshot({ path: `${SHOTS}/comments2-workspaces-1280-${theme}.png`, fullPage: false });
+  });
+}

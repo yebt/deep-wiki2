@@ -103,21 +103,65 @@ function dialog(page: Page) {
 }
 
 /**
+ * The panel has finished sliding in. `toBeVisible` is true from the first
+ * frame of the entrance, and a screenshot taken there catches the panel
+ * mid-transform, clipped by the viewport's right edge — which is what the
+ * first cut of the dark review material did. The settled panel is flush with
+ * that edge, so its right edge reaching the viewport's width is the same fact
+ * stated as an assertion rather than as a wait.
+ */
+async function settled(panel: ReturnType<typeof dialog>): Promise<void> {
+  const width = panel.page().viewportSize()!.width;
+  await expect
+    .poll(async () => {
+      const box = await panel.boundingBox();
+      return box ? Math.round(box.x + box.width) : -1;
+    })
+    .toBe(width);
+}
+
+/**
  * The toast tier (owner request, 2026-09-23: "Reply posted." must be a
- * toast). `UApp`'s toaster is portalled outside the panel, so a toast is
- * looked for on the page and never inside the dialog — which is the whole
- * point: it is no longer a bar standing over the conversation it is about.
+ * toast). The toaster stands outside the panel, which is the whole point: the
+ * confirmation is no longer a bar over the conversation it is about.
  *
- * The panel's own live region says the same sentence and is also a
- * `status` (§4.12: the region is what is announced, the toast is what a
- * sighted person reads), so the toast is told apart by the close control
- * §4.12 requires it to keep — the region has none.
+ * **Located by its element, not by its role, and this is not a §7 exemption
+ * taken lightly.** Measured in the running browser (2026-09-25): while the
+ * comments panel is open the toast renders as
+ * `<li role="status">` at 384×72 on `z-index: 100`, with its `Close` control
+ * — and one of its ancestors carries `aria-hidden="true"`, because the panel
+ * is a modal `USlideover` and Reka hides the rest of the document from
+ * assistive technology while it is open. An `aria-hidden` subtree is not in
+ * the accessibility tree, so `getByRole('status')` cannot match the toast
+ * however long it waits; the first cut of this assertion did exactly that and
+ * could never have passed. §7 allows reaching past a role "where no role or
+ * accessible name can express the target", and a node the accessibility tree
+ * does not contain is that case.
+ *
+ * What covers the announcement is the panel's own live region, which *is*
+ * inside the dialog and carries the same sentence — §4.12's "the region is
+ * what is reliably announced, the toast is what a sighted person reads". Each
+ * assertion below therefore checks both halves, because on this surface
+ * neither one alone is the confirmation. Recorded in docs/TODO.md.
  */
 function toast(page: Page, sentence: string) {
-  return page
-    .getByRole('status')
-    .filter({ hasText: sentence })
-    .filter({ has: page.getByRole('button', { name: /close/i }) });
+  return page.locator('li[role="status"]').filter({ hasText: sentence });
+}
+
+/**
+ * Both halves of a confirmation on this screen: the toast a sighted person
+ * reads, standing outside the panel and keeping its close control, and the
+ * sentence in the panel's live region, which is the announced half.
+ */
+async function expectConfirmed(page: Page, sentence: string): Promise<void> {
+  const raised = toast(page, sentence);
+  await expect(raised).toBeVisible({ timeout: 30000 });
+  // §4.12: dismissible, always.
+  await expect(raised.locator('button[aria-label="Close"]')).toHaveCount(1);
+  // Outside the conversation, not over it.
+  await expect(page.locator(`[role="dialog"] li[role="status"]:has-text("${sentence}")`)).toHaveCount(0);
+  await expect(dialog(page).getByTestId('comments-status')).toContainText(sentence);
+  await expectNoSuccessBar(page);
 }
 
 /** The green bar this batch removed: it painted `bg-success-container` inside the panel. */
@@ -187,8 +231,7 @@ test('a commenter opens a thread from the mark beside its block, replies, and re
   await panel.getByRole('button', { name: 'Reply' }).click();
   // The confirmation is a toast, outside the panel, naming the thread it is
   // about — and no bar is painted over the conversation (§4.12).
-  await expect(toast(page, 'Reply posted on')).toBeVisible({ timeout: 30000 });
-  await expectNoSuccessBar(page);
+  await expectConfirmed(page, 'Reply posted on');
   await expect(panel).toContainText('Checked: the date is right.');
   // The conversation with its reply, and the confirmation as a toast rather
   // than a bar over it — the owner's first two requests in one frame.
@@ -197,8 +240,7 @@ test('a commenter opens a thread from the mark beside its block, replies, and re
 
   // Resolve: the word and an icon, and the control flips to Reopen.
   await panel.getByRole('button', { name: 'Resolve' }).click();
-  await expect(toast(page, 'Thread resolved on')).toBeVisible({ timeout: 30000 });
-  await expectNoSuccessBar(page);
+  await expectConfirmed(page, 'Thread resolved on');
   await expect(panel.getByText('Resolved', { exact: true })).toBeVisible();
   await expect(panel.getByRole('button', { name: 'Reopen' })).toBeVisible();
 
@@ -311,8 +353,7 @@ test('a commenter starts a thread from a block’s "+": hover, type, Post — th
   // Optimistic, then confirmed: the composer closes, the live region
   // says so, the thread is in the panel, and the mark is beside the
   // block — placed under the anchor the server minted, before any reload.
-  await expect(toast(page, 'Comment posted on')).toBeVisible({ timeout: 30000 });
-  await expectNoSuccessBar(page);
+  await expectConfirmed(page, 'Comment posted on');
   await expect(composer).toHaveCount(0);
   await expect(panel).toContainText('Started from read mode.');
   await expect(panel.getByTestId('comment-pending')).toHaveCount(0);
@@ -336,7 +377,17 @@ test('a commenter starts a thread from a block’s "+": hover, type, Post — th
   await reloaded.click();
   await expect(dialog(page)).toContainText('Started from read mode.');
   await expect(dialog(page)).toContainText(fixtures.freshFirstParagraph);
-  await expect(dialog(page).getByText(/^“.*”$/).first()).not.toContainText('^');
+  // The excerpt is the block's *rendered* text, never its source: a `^id`
+  // anchor marker reaching the panel would be the mint leaking its own
+  // bookkeeping into the conversation. Asked of the quotation itself rather
+  // than of "an element whose whole text is a quoted string" — which is what
+  // stood here until 2026-09-25 and had stopped matching anything: since the
+  // panel became a conversation the excerpt is the label of a button, and its
+  // text node carries the template's newlines, which a `.` in a Playwright
+  // regex does not cross. The locator resolved to nothing and the assertion
+  // failed as "element(s) not found" — a test made stale by a change three
+  // commits earlier, and only running the suite could say so.
+  await expect(dialog(page).getByTestId('comment-locate').first()).not.toContainText('^');
 });
 
 test('a commenter selects words inside a block and starts a thread on them — the thread carries the selection as its excerpt', async ({ page, context }) => {
@@ -390,7 +441,7 @@ test('a commenter selects words inside a block and starts a thread on them — t
   await expect(composer.getByTestId('comment-composer-excerpt')).toHaveText('“a few words”');
   await panel.getByLabel('Comment', { exact: true }).fill('These words specifically.');
   await panel.getByRole('button', { name: 'Post' }).click();
-  await expect(toast(page, 'Comment posted on')).toBeVisible({ timeout: 30000 });
+  await expectConfirmed(page, 'Comment posted on');
 
   // The server located the words in the block's source: the excerpt the
   // thread keeps is the selection, not the whole paragraph.
@@ -443,7 +494,7 @@ test('a commenter comments on a selection in a paragraph that ends in an escaped
   await panel.getByRole('button', { name: 'Post' }).click();
   // The refusal surfaced here, as an error the composer showed instead of a
   // posted thread — so this is the assertion of record.
-  await expect(toast(page, 'Comment posted on')).toBeVisible({ timeout: 30000 });
+  await expectConfirmed(page, 'Comment posted on');
   await expect(panel.locator('[data-comment-placement="anchored"]', { hasText: 'A note on a paragraph that ends in a space.' })).toBeVisible();
   await expect(panel.getByRole('alert')).toHaveCount(0);
 
@@ -598,7 +649,14 @@ test('a thread whose paragraph another user deleted is shown as orphaned, with i
   await expect(panel).toContainText('no longer on this page');
   await expect(panel).toContainText(fixtures.orphanQuote);
   await expect(panel).toContainText('Keep this note even if the paragraph goes.');
-  // Still a thread: it can be replied to and resolved.
+  // Still a thread: it can be replied to and resolved. Since the panel became
+  // a conversation the reply affordance is one quiet line that grows when it is
+  // used, so the Reply *control* is not on screen until the field is focused —
+  // which is what this now drives. Asking for the button outright is what stood
+  // here until 2026-09-25 and had stopped being true.
+  await expect(panel.getByTestId('comment-reply-composer')).toBeVisible();
+  await expect(panel.getByRole('button', { name: 'Reply' })).toHaveCount(0);
+  await panel.getByLabel(/^Reply to /).click();
   await expect(panel.getByRole('button', { name: 'Reply' })).toBeVisible();
   await expect(panel.getByRole('button', { name: 'Resolve' })).toBeVisible();
   await readerContext.close();
@@ -690,8 +748,6 @@ test('focusing a thread highlights its anchored words, not the whole paragraph, 
   // `text-default` over the painted `secondary-container`.
   expect(await textContrastOver(block, boxes.first()), 'the text stays readable over the highlight').toBeGreaterThanOrEqual(4.5);
 
-  await shot(page, 'highlight-1280-light');
-
   // Leaving the thread clears it (§4.7: dismissible, never persists).
   await page.keyboard.press('Escape');
   await expect(panel).toBeHidden();
@@ -700,21 +756,51 @@ test('focusing a thread highlights its anchored words, not the whole paragraph, 
   // And the quotation is what scrolls to it: read the page from the top,
   // open the panel on the whole page, activate the quotation, and the span
   // comes into view.
-  await page.evaluate(() => document.querySelector('[data-slot="body"]')?.scrollTo({ top: 0 }));
+  //
+  // `scrollToTop` reaches the pane through `#content-main`, the way
+  // `e2e/overflow.ts` does, and not through `document.querySelector`. The
+  // first `[data-slot="body"]` in the document is the **sidebar's** — measured
+  // 2026-09-25: `scrollHeight` 615 against the pane's 2234 — so the plain
+  // query scrolled the tree instead of the article, left the article where it
+  // was, and the "below the fold" assertion below failed on a screen that was
+  // behaving correctly. Two `data-slot="body"` panes on one screen and no
+  // reason a query should land on ours; the pane is named, not found.
+  async function scrollToTop(): Promise<void> {
+    await page.evaluate(() => {
+      const main = document.getElementById('content-main');
+      (main?.closest('[data-slot="body"]') as HTMLElement | null)?.scrollTo({ top: 0 });
+    });
+  }
+
+  await scrollToTop();
   await mark.scrollIntoViewIfNeeded();
   await mark.click();
   await expect(panel).toBeVisible();
-  await page.evaluate(() => document.querySelector('[data-slot="body"]')?.scrollTo({ top: 0 }));
+  // The pane still scrolls while the panel is open — the slideover locks the
+  // body, not a nested overflow container (measured: `scrollTop` 1570 → 0).
+  await scrollToTop();
   await expect
     .poll(async () => (await block.boundingBox())!.y, { timeout: 10_000 })
     .toBeGreaterThan(900);
 
   await panel.getByRole('button', { name: `Show “${fixtures.longAnchoredWords}” in the page` }).click();
-  // Scrolled into view, and said so.
-  await expect
-    .poll(async () => (await block.boundingBox())!.y, { timeout: 10_000 })
-    .toBeLessThan(900);
+  // Scrolled into view, and said so. Asserted as "the painted span is in the
+  // viewport", not as a y below some number: `toBeLessThan(900)` stood here
+  // and is not the property — the suite's own viewport is 720 tall, so a span
+  // at y=730 satisfied it while sitting under the fold, and the review shot
+  // taken straight afterwards caught the smooth scroll still running and
+  // showed no highlight at all. `toBeInViewport` is the property, and waiting
+  // for it is also what makes the shot below the settled frame.
+  await expect(page.getByTestId('comment-highlight').first()).toBeInViewport();
+  await expect(block).toBeInViewport();
   await expect(panel.getByRole('status').filter({ hasText: 'Showing' })).toHaveCount(1);
+
+  // The review material is shot **here**, after the reveal, and not at the
+  // first measurement above: there the paragraph sat at the foot of the
+  // viewport where `scrollIntoViewIfNeeded` had left it, so the shot the owner
+  // would look at showed a panel and no highlight — the one thing it is for.
+  await settled(panel);
+  await shot(page, 'highlight-1280-light');
 });
 
 test('an orphaned thread says there is nothing to show, and offers no control that would', async ({ browser }) => {
@@ -769,6 +855,10 @@ test('a member who may read but not comment sees no conversation to add to: no c
 test('the conversation and its highlight hold at 320 and in dark, with nothing scrolling sideways', async ({ browser }) => {
   for (const shape of [
     { width: 320, height: 900, theme: 'light' as const, label: '320-light' },
+    // The wide light pass is here rather than in the reply test above so the
+    // three labels are the same frame in three shapes — the comparison §4.1
+    // asks for is between shots of one surface, not between two surfaces.
+    { width: 1280, height: 900, theme: 'light' as const, label: '1280-light' },
     { width: 1280, height: 900, theme: 'dark' as const, label: '1280-dark' },
   ]) {
     const context = await browser.newContext({ viewport: { width: shape.width, height: shape.height } });
@@ -805,4 +895,93 @@ test('the conversation and its highlight hold at 320 and in dark, with nothing s
     await shot(page, `thread-${shape.label}`);
     await context.close();
   }
+});
+
+/**
+ * The dark half of the review material. §4.2 asks for every surface in two
+ * contrasting themes, one of them dark, and the three surfaces above were shot
+ * in light only: the conversation carrying a reply, the anchored-span highlight
+ * and the orphan. This drives the same three in dark and asserts each one in
+ * the running browser rather than trusting the file name — including the
+ * contrast pair, which is measured per theme because the tone tables are
+ * different tables and an argument about tone gaps is not a measurement.
+ *
+ * It writes nothing. The conversation it opens is the one the first test in
+ * this file left — root plus two replies, resolved — and the orphan is the one
+ * the editor's real save orphaned; this file is serial, so both are already
+ * standing by the time this runs.
+ */
+test('the conversation, the highlight and the orphan in the dark theme', async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  const page = await context.newPage();
+  await useTheme(page, 'dark');
+  await signInAs(context, fixtures.commenterSessionToken);
+
+  // 1. The conversation with its replies, and the reply line brought out.
+  await page.goto(pageUrl(seed.workspaceSlug, fixtures.commentsPageId));
+  await expect(page.getByRole('heading', { level: 1, name: fixtures.commentsPageTitle })).toBeVisible({ timeout: 30000 });
+  await waitForHydration(page);
+  const mark = page.getByRole('button', { name: '3 comments on this block' });
+  await expect(mark).toBeVisible({ timeout: 30000 });
+  await mark.click();
+
+  const panel = dialog(page);
+  await expect(panel).toBeVisible();
+  await expect(panel).toContainText('Is this paragraph still accurate after the migration?');
+  await expect(panel).toContainText('Checked: the date is right.');
+  await panel.getByLabel(/^Reply to /).click();
+  await expect(panel.getByRole('button', { name: 'Reply' })).toBeVisible();
+  // Still no bar over the conversation in this theme either (§4.12).
+  await expectNoSuccessBar(page);
+  const commentsBlock = page.locator('[data-block-id="E2ECMTTWO"]');
+  expect(await textContrastOver(commentsBlock, page.getByTestId('comment-highlight').first())).toBeGreaterThanOrEqual(4.5);
+  await expectNoHorizontalOverflow(page, 'the conversation in dark');
+  await expectTheme(page, 'dark');
+  await settled(panel);
+  await shot(page, 'reply-1280-dark');
+
+  // 2. The anchored span, painted and revealed in dark.
+  await page.goto(pageUrl(seed.workspaceSlug, fixtures.longPageId));
+  await expect(page.getByRole('heading', { level: 1, name: fixtures.longPageTitle })).toBeVisible({ timeout: 30000 });
+  await waitForHydration(page);
+  const longMark = page.getByRole('button', { name: '1 comment on this block' });
+  await expect(longMark).toBeVisible({ timeout: 30000 });
+  await longMark.scrollIntoViewIfNeeded();
+  await longMark.click();
+  await expect(panel).toBeVisible();
+  const longBlock = page.locator('[data-block-id="E2ELONGTGT"]');
+  const boxes = page.getByTestId('comment-highlight');
+  await expect(boxes.first()).toBeVisible();
+  const paragraph = (await longBlock.boundingBox())!;
+  const painted = (await boxes.first().boundingBox())!;
+  expect(painted.width, 'the words, not the measure').toBeLessThan(paragraph.width);
+  expect(await textContrastOver(longBlock, boxes.first()), 'the text stays readable over the highlight in dark').toBeGreaterThanOrEqual(4.5);
+  // Activate the quotation before shooting, for the reason the light shot
+  // moved: opening a mark leaves the paragraph wherever the reader was, and a
+  // "highlight" shot with the span off the foot of the screen shows nothing.
+  await panel.getByRole('button', { name: `Show “${fixtures.longAnchoredWords}” in the page` }).click();
+  await expect(boxes.first()).toBeInViewport();
+  await expect(longBlock).toBeInViewport();
+  await expect(panel.getByRole('status').filter({ hasText: 'Showing' })).toHaveCount(1);
+  await expectNoHorizontalOverflow(page, 'the highlight in dark');
+  await expectTheme(page, 'dark');
+  await settled(panel);
+  await shot(page, 'highlight-1280-dark');
+
+  // 3. The orphan, which paints nothing and says so.
+  await page.goto(pageUrl(seed.workspaceSlug, fixtures.orphanPageId));
+  await expect(page.getByRole('heading', { level: 1, name: fixtures.orphanPageTitle })).toBeVisible({ timeout: 30000 });
+  const chip = page.getByTestId('comments-orphaned');
+  await expect(chip).toBeVisible({ timeout: 30000 });
+  await chip.getByRole('button', { name: 'Show' }).click();
+  await expect(panel).toBeVisible();
+  await expect(panel.getByText('Text removed', { exact: true })).toBeVisible();
+  await expect(panel.getByRole('button', { name: /^Show “/ })).toHaveCount(0);
+  await expect(page.getByTestId('comment-highlight')).toHaveCount(0);
+  await expectNoHorizontalOverflow(page, 'the orphan in dark');
+  await expectTheme(page, 'dark');
+  await settled(panel);
+  await shot(page, 'orphan-1280-dark');
+
+  await context.close();
 });
