@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
  * The application chrome — the one component every route renders inside,
- * and the only place a header, a sidebar, a footer or a content column is
+ * and the only place a header, a sidebar or a content column is
  * declared. It exists because the chrome was previously written three
  * times and the copies drifted (docs/UI-CHECKLIST.md §4.1); it now has two
  * frames, chosen by whether the screen is *inside a workspace*.
@@ -69,13 +69,18 @@
  *
  * ── The document frame ───────────────────────────────────────────────
  *
- * The frame the product had before 2026-09-15, unchanged: a full-height
- * column, the top app bar with the brand and the theme toggle, `UMain`,
- * a footer. Height: `min-h-svh` plus `flex-1` on `UMain`, whose own base
+ * The frame the screens outside a workspace take — the chooser, new
+ * workspace, registration, the account screen and the error screen: a
+ * full-height column, the top app bar with the brand and the theme toggle,
+ * and `UMain`. Height: `min-h-svh` plus `flex-1` on `UMain`, whose own base
  * (viewport minus the header, no allowance for a footer) is replaced
  * centrally in `app.config.ts`. Width: the shell's, for the same reason
  * it owns the height — five screens once wrote their own column and it
  * drifted to 658.9px at x=32 with 589px of empty page beside it.
+ *
+ * **It has no footer, since 2026-09-23** (the owner's fourth request of
+ * that date, and his third asking). The reasoning is at the call site in
+ * the template, where the next person to consider adding one will read it.
  *
  * ── The content column, in both frames ──────────────────────────────
  *
@@ -439,6 +444,38 @@ const overflowMenu = computed<DropdownMenuItem[][]>(() => [
       </template>
     </UHeader>
 
+    <!-- No footer. It said "deep-wiki" on the left and "Material Design 3 ·
+         Nuxt UI v4" on the right, and the owner asked three times for it to
+         go (2026-09-23 the third time). Both halves were a signature rather
+         than information, and each failed a rule this repository already
+         has:
+
+         - The left half repeated the brand mark 700px above it, in the same
+           frame's own header. docs/UI-CHECKLIST.md §4.4 refuses an eyebrow
+           that repeats its heading — "spends a hierarchy level for
+           nothing" — and this is that defect one landmark down.
+         - The right half named the toolkit. That is a fact about how the
+           product is built, recorded where facts about the build belong
+           (`docs/DESIGN-SYSTEM.md`, `apps/web/PRODUCT.md` Brand
+           Commitments). apps/web/PRODUCT.md's voice is "plain, specific,
+           never coy"; a colophon on a workspace chooser is none of those,
+           and PRODUCT.md's principle 6 says chrome recedes so the content
+           stays the primary surface.
+         - It cost a `contentinfo` landmark holding nothing anyone can act
+           on — a stop on the screen-reader tour of five screens with
+           nothing at the end of it (§5's landmarks are for navigating to
+           content, not for signatures).
+         - And it kept the `UMain` + `UFooter` pairing §6 names as *the*
+           vertical-overflow trap, which cost this product two review
+           findings (2026-09-04 and 2026-09-06). Removing the footer
+           removes the trap from the five screens that still had it.
+
+         **What would earn the place:** the build the instance is running,
+         so a self-hosted team reporting a defect can say which one. No
+         version reaches the client today, and minting one is a change to
+         `packages/contracts/src/env.ts` and `env.example` — a deliberate
+         pair, machine-checked, not a footer's side effect. Recorded in
+         docs/TODO.md as the way back rather than invented here. -->
     <UMain>
       <UContainer class="py-10 sm:py-16" :class="center ? 'my-auto' : undefined">
         <div :class="columnClass">
@@ -446,14 +483,5 @@ const overflowMenu = computed<DropdownMenuItem[][]>(() => [
         </div>
       </UContainer>
     </UMain>
-
-    <UFooter>
-      <template #left>
-        <p class="text-body-small text-muted">deep-wiki</p>
-      </template>
-      <template #right>
-        <p class="text-body-small text-muted">Material Design 3 · Nuxt UI v4</p>
-      </template>
-    </UFooter>
   </div>
 </template>

@@ -239,9 +239,19 @@ test.describe('the comments toggle', () => {
         await mark.click();
         const panel = page.getByRole('dialog', { name: 'Comments' });
         await expect(panel).toBeVisible();
-        await panel.getByLabel('Reply').fill('@E2E Commenter please confirm the date.');
+        // The reply field is one quiet line until it is used; `fill` focuses
+        // it, which is what brings the Reply control out (2026-09-23).
+        await panel.getByLabel(/^Reply to /).fill('@E2E Commenter please confirm the date.');
         await panel.getByRole('button', { name: 'Reply' }).click();
-        await expect(panel.getByRole('status').filter({ hasText: 'Reply posted.' })).toBeVisible({ timeout: 30000 });
+        // The sentence now names the thread by its excerpt. What this matches
+        // is the **live region** the panel keeps, not the toast: while the panel
+        // is open the toaster sits under an `aria-hidden` ancestor (Reka hides
+        // the document behind a modal from assistive technology), so no
+        // `getByRole` can reach a toast from here — measured 2026-09-25, and
+        // `e2e/comments.spec.ts`'s `expectConfirmed` is where the toast itself
+        // is asserted, by its element. This line's job is the sentence, and on
+        // that it is the announced half, which is the one §4.12 relies on.
+        await expect(page.getByRole('status').filter({ hasText: 'Reply posted on' }).first()).toBeVisible({ timeout: 30000 });
         await page.keyboard.press('Escape');
         await expect(panel).toBeHidden();
 

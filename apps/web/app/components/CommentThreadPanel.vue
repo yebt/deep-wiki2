@@ -28,19 +28,32 @@
  * view, because no mark can point at a block that is gone (§4.7), which
  * is why the description always counts the detached ones out loud.
  *
- * Every thread renders open — root, replies, reply field, resolve —
- * rather than collapsed behind a disclosure: the panel scrolls, a
- * collapsed thread is one more click on every read, and §2's "a comment
- * thread with 60 replies" is handled by the panel's own scroll, which
- * `USlideover` gives its body.
+ * Every thread renders open — subject, messages, the reply line — rather
+ * than collapsed behind a disclosure: the panel scrolls, a collapsed
+ * thread is one more click on every read, and §2's "a comment thread with
+ * 60 replies" is handled by the panel's own scroll, which `USlideover`
+ * gives its body.
+ *
+ * ## Several threads on one block have to stack legibly
+ *
+ * Each thread is its own `bg-default` card on the panel's `bg-accented`
+ * ground (§9.4's inset corollary), 16px apart, and each one is *short*
+ * since 2026-09-23 — the reply affordance inside it is one line until it
+ * is used (`CommentThreadItem`). Three threads on a paragraph used to be
+ * three 3-row textareas and six buttons; they are now three subjects with
+ * their conversations under them, which is what makes a stack readable
+ * rather than a scroll (the owner's first request, 2026-09-23).
  *
  * ## Announcements
  *
- * A failed write is a bar-tier `InlineNotice` (§4.1's three tiers —
- * this is the second) with `role="alert"`; a successful one lands in a
- * live region that is always in the DOM and only changes text, because
- * a region inserted at the moment its text appears is frequently not
- * announced at all (§5).
+ * A failed write is a bar-tier `InlineNotice` (§4.12's bar) with
+ * `role="alert"` — an error stays until it is read, and this panel is the
+ * screen that failed. A successful one lands in a live region that is
+ * always in the DOM and only changes text, because a region inserted at the
+ * moment its text appears is frequently not announced at all (§5); its
+ * **visible** half is a toast the screen raises (`useStatusToast`), since
+ * 2026-09-23. The two say the same sentence, from one place
+ * (`utils/comment-messages.ts`).
  */
 import type { CommentThread } from '@deep-wiki/contracts';
 import type { ThreadPlacement } from './CommentThreadItem.vue';
@@ -61,6 +74,19 @@ const props = defineProps<{
   composing?: boolean;
   /** Whether the caller may start a thread here: the focused view then offers "Comment on this block". */
   canStart?: boolean;
+  /**
+   * Whether the caller may add to a thread at all (the API's `canComment`).
+   * Distinct from `canStart`, which is also `false` while the comments
+   * toggle is hiding the marks: a person who has put the marks away can
+   * still reply to the thread a chip brought them to.
+   *
+   * **Absent means denied.** Vue casts an absent boolean prop to `false`,
+   * and that is the right way round for a grant: `usePageComments.canComment`
+   * is likewise `false` until the response says otherwise, so a panel that
+   * rendered before the answer arrived offers nothing rather than offering
+   * something the server will refuse.
+   */
+  canComment?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -71,6 +97,8 @@ const emit = defineEmits<{
   locate: [blockId: string];
   /** Start a thread on the focused block — a second one beside its mark, or the first from the panel's empty view. */
   start: [blockId: string];
+  /** The thread the reader is on, so the screen's document highlight can follow it (`useAnchorHighlight`). */
+  focusThread: [threadId: string];
 }>();
 
 const visible = computed(() =>
@@ -112,14 +140,14 @@ const description = computed(() => {
     @update:open="emit('update:open', $event)"
   >
     <template #body>
-      <p
-        data-testid="comments-status"
-        role="status"
-        aria-live="polite"
-        :class="announcement ? 'rounded-md bg-success-container px-3 py-2 text-body-small text-on-success-container' : 'sr-only'"
-      >
-        {{ announcement }}
-      </p>
+      <!-- The live region only, never a visible bar. Until 2026-09-23 this
+           painted a green `success-container` strip across the top of the
+           panel whenever a write succeeded — the owner's second report of
+           that date, pointing at "Reply posted." standing above the
+           conversation it was about. A transient success is a toast
+           (§4.12), and the same sentence is said here because a live region
+           is the half that is reliably announced. -->
+      <p data-testid="comments-status" role="status" aria-live="polite" class="sr-only">{{ announcement }}</p>
 
       <InlineNotice v-if="writeMessage" tier="bar" tone="error" role="alert" icon="i-lucide-circle-alert" title="That didn't go through">
         {{ writeMessage }}
@@ -160,9 +188,11 @@ const description = computed(() => {
             :placement="placementOf(thread)"
             :busy="busy"
             :pending="pendingThreadIds?.includes(thread.id) ?? false"
+            :can-reply="canComment"
             @reply="(threadId, body) => emit('reply', threadId, body)"
             @resolve="(threadId, resolved) => emit('resolve', threadId, resolved)"
             @locate="(blockId) => emit('locate', blockId)"
+            @focus-thread="(threadId) => emit('focusThread', threadId)"
           />
         </li>
       </ol>

@@ -198,6 +198,19 @@ knows which time it is.
       differently in each. A timezone test that runs only in the machine's own zone proves
       nothing. Prefer a pair whose offset crosses a calendar day, so a whole-day error is caught
       and not just a clock offset.
+- [ ] **A relative time ("17 minutes ago") satisfies the zone rule by removing the clock, not by
+      labelling it** — amended 2026-09-23, when the comment thread panel became a conversation
+      and a conversation does not say "Sep 23, 2026, 1:43 PM EDT" about the sentence above it.
+      A relative string is *the same string for every reader in every zone*, which is the
+      ambiguity the rule above exists to remove, so it needs no zone label. The rule's other
+      halves still bind and are what a relative time is checked against: the exact instant is in
+      `<time datetime>`, the absolute **zone-named** form is one hover *and* one focus away (the
+      element's `title`), the value is never server-rendered (it depends on `Date.now()`, so a
+      server pass would bake in the server's clock and change under hydration), and the two-zone
+      test is made against that absolute form — the only half of the pair that *can* differ
+      between two readers. A relative string that runs past about a week stops being information
+      and becomes arithmetic ("37 days ago"), so beyond that window it gives way to the date, in
+      the viewer's own zone like any other.
 
 ### 4.12 Notice tiers — which surface a message takes
 
@@ -2286,6 +2299,133 @@ session scratchpad (`DEEPWIKI_AUTHORING_SHOTS`).
   said twice for a screen-reader user, as it was before this batch (2026-09-18 records it).
 - The two-icon-pack requirement (§4.3) remains untested; everything the 2026-09-23 entries above
   carried forward and this batch did not touch stands.
+
+---
+
+### 2026-09-23 — The comment panel as a conversation, the anchored-span highlight, the comment toasts, and the footer — awaiting the owner's eye
+
+**Reviewer:** none yet — this entry is what was shipped for review, not a review.
+**Verdict:** Pending
+
+Four of the owner's requests of 2026-09-23, one commit each on `feat/comment-thread-view`;
+`docs/TODO.md` Findings, same date, carries the measurements, the three rejected
+alternatives and what is owed.
+
+**Pre-build contract (§2).** *Who:* a member with `comment` on a page, reading it and
+answering a thread someone opened on a paragraph — and, less often, the person who wrote the
+thread coming back to resolve it. *Goal, in their words:* "read this conversation and say
+something back", and "show me which words this is about". *Single primary action:* still none
+— the read screen is a reading surface; inside the panel the one primary is Post, and a
+thread's Reply is the second. *Data:* `GET /pages/:id/comments` — every thread's author,
+body, `createdAt`, replies, `canComment`, and the anchor's `blockId`/`quote`; the article's
+own rendered text for the span. Nothing new from the server. *Not:* editing or deleting a
+comment, a mention inbox, threading a reply to a reply, a third pane (the panel is still an
+overlay). *Empty / too much:* a block with no thread shows the composer alone; §2's "a
+comment thread with 60 replies" is the panel's own scroll, and a stack of threads on one
+paragraph is now three subjects rather than three 3-row textareas.
+
+**What to look at**
+
+1. **The panel is a conversation.** The excerpt is the thread's subject, at the top, as
+   §2.3's blockquote. The root comment and every reply are messages of **one list**, drawn by
+   one piece of markup — the same `UAvatar` initials the dashboard's change rows carry, the
+   same `body-medium-emphasized` author, the same body — and the test asserts the two carry
+   identical classes, so a reply cannot drift back into a second-class nested box. Resolve is
+   a thread-level action beside the subject. The reply affordance is one quiet line that grows
+   when it is focused. A caller who may not comment gets the conversation and no affordance at
+   all, never a disabled one (§3).
+2. **The instant is relative, and §4.11 is amended in place to allow it.** "17 minutes ago",
+   with the absolute zone-named form as the element's `title` — reachable on hover *and*
+   focus — and the exact instant in `<time datetime>`. The amendment is the new §4.11 bullet
+   and the reasoning is there: a relative string is the same string in every zone, which
+   removes the ambiguity the rule exists for by removing the clock rather than labelling it.
+   Past a week it gives way to the date, in the viewer's own zone, tested across two zones
+   that cross a calendar day.
+3. **A comment highlights its own words.** Opening or focusing a thread paints the **anchored
+   span** — one box per line it wraps onto, behind the article, never written into it — and
+   the highlight follows the thread the reader is on and clears when the panel closes (§4.7).
+   Activating the quotation scrolls to the span, and only when it is not already in front of
+   the reader, measured against the sticky bar's 56px (§6). An orphan paints nothing and says
+   why where the reader is looking.
+   **"Show in page" does not survive**: the quotation is the control now, with the quoted text
+   as its visible label and `Show “…” in the page` as its accessible name (§4.3, and WCAG
+   2.5.3 — the visible string is contained in the accessible one), a tooltip, and the M3 state
+   layer for hover, focus and press. The affordance is on the thing it points at.
+4. **Thread posted, reply posted, thread resolved and reopened are toasts** (§4.12), each
+   naming the thread by its excerpt. The green bar inside the panel is gone; the live region
+   keeps the same sentence and is `sr-only` at every moment. Every failure stayed where it
+   was — the bar notice, and the 409 that says the text is still here.
+5. **There is no footer.** The owner asked three times. It said "deep-wiki" — the brand mark
+   the same frame's header carries 700px above it, which is §4.4's eyebrow rule one landmark
+   down — and "Material Design 3 · Nuxt UI v4", a fact about the build rather than about the
+   workspace the person is in. It cost a `contentinfo` landmark with nothing in it anyone can
+   act on, and it kept the `UMain` + `UFooter` pairing §6 names as *the* vertical-overflow
+   trap on five screens (not the three the request named: the account screen and registration
+   settings had it too). Nothing earns the place yet; a build string would, and
+   `docs/TODO.md` records what minting one costs.
+
+**Measured** in `apps/web`'s own suite and, against the real backend, in `e2e/comments.spec.ts`
+at 1280 light, 1280 dark and 320 light: the painted box narrower and shorter than the
+paragraph it sits in; the article's own `text-default` over the painted `secondary-container`
+at ≥ 4.5:1 in both themes (`textContrastOver`, a new helper for a pair no single element
+carries); the span scrolled to when it is off screen and left alone when it is not; the toast
+outside the panel with no bar inside it; the reply control absent until the field is focused;
+an orphan offering no control; a `read`-only member offered nothing that writes; and
+`expectNoHorizontalOverflow` on the pane and the document at every width shot. Every
+screenshot asserts the theme it claims (`expectTheme`, the 2026-09-23 finding). Screenshots
+`comments2-{thread,reply,highlight,orphan,320}-*.png` in the session scratchpad
+(`DEEPWIKI_FB_COMMENTS_SHOTS`).
+
+**No new colour, token or rung.** The highlight keeps `secondary-container` — the container
+fill §5.2 reserves for a selected/active state — at `rounded-xs` (`corner-extra-small`, the
+rung the diff's word-level marks already take for a mark inside prose); the avatar, the
+author's type role and the blockquote are the ones already reviewed.
+
+**Verification, 2026-09-26.** The batch above was written without its gates being run; they have
+now all been run against this branch. `bun run check` (12), `typecheck`, `lint`, `apps/web`'s own
+suite (1226 tests in 127 files) and `e2e/{comments,read,smoke,navigation}.spec.ts` (44 tests) are
+green. Four assertions in the e2e had never passed or never meant what they said — the toast
+located by a role it cannot carry while a modal is open, "the pane" that was the sidebar,
+`toBeLessThan(900)` standing in for "in view" on a 720-tall viewport, and two assertions the
+conversation rewrite had already invalidated. All four are corrected and the reasons are at the
+call sites and in `docs/TODO.md` Findings, 2026-09-26. Screenshots
+`comments2-{thread,reply,highlight,orphan}-{1280-light,1280-dark}.png`,
+`comments2-{thread,read-hover,composer}-320-light.png` and
+`comments2-workspaces-1280-{light,dark}.png` in the session scratchpad, each measured with
+`expectNoHorizontalOverflow` and each asserting the theme it claims.
+
+**Known before review, not fixed**
+
+- **The panel covers the words it is pointing at.** Measured at 1280×900 with the thread open and
+  its quotation activated: the article column is 658.9px at x=450.5 (right edge 1109.5) and the
+  panel is 448px at x=832, so **277.5px — 42.1% of the column — is behind it**, and this
+  fixture's anchored span (x=853.1, width 231.5) is behind it *entirely*, in both themes, after
+  the reveal has scrolled it into view. Any span past roughly the 58% mark of a line is hidden
+  while the panel is open. This is §6's third pane still being an overlay — carried since
+  2026-09-15 — arriving at the one feature whose point depends on it; the answer is the content
+  pane giving way at ≥1280 rather than being covered, which is a change to the shell's columns and
+  therefore §1's "made deliberately and once", not one to improvise here. Below `xl` the overlay
+  is what §6 asks for. `docs/TODO.md` Findings, 2026-09-26, carries the measurements.
+- **A toast raised while this panel is open is not announced.** The toaster sits under an
+  `aria-hidden` ancestor while a modal `USlideover` is open, so the toast is read by a sighted
+  person and never by assistive technology; the panel's live region carries the same sentence and
+  is what §4.12 relies on. This is the only surface in the product that raises a toast while its
+  own modal stays open, and it is the only one with a region to cover it — a second such surface
+  would need one, and would then be worth a §4.12 clause.
+- A read-only member who can *see* a conversation is not reachable from the server: the API
+  answers `{ threads: [] }` without `comment`. The component state exists and is held by
+  `CommentThreadItem.test.ts`; the e2e asserts the product's actual rule instead.
+- A span low inside a very long block is scrolled to by centring the **block**; a `Range` has
+  no `scrollIntoView` and a paragraph in the 72ch measure is short enough that this lands. A
+  2,000-word paragraph would not be.
+- The marker stripper that translates a source quote into its visible form is best-effort by
+  construction; a quote whose only distinguishing characters are markup falls through to the
+  whole block, which is honest rather than wrong.
+- `CommentThreadPanel` still states its `bg-accented` retarget on itself rather than in
+  `app.config.ts` beside the modal, dropdown and popover (unchanged since 2026-09-16), and the
+  contextual pane is still an overlay.
+- The two-icon-pack requirement (§4.3) remains untested; everything the 2026-09-23 entries
+  above carried forward and this batch did not touch stands.
 
 ---
 

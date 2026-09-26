@@ -60,7 +60,7 @@ mockFrameCollaborators();
 
 /**
  * `AppShell` owns two things no screen may restate: the chrome (the
- * full-height column, the app bar, the footer) and the content column's
+ * full-height column, the app bar) and the content column's
  * width *and horizontal position*.
  *
  * The second is the one with a history. Measured on the running app at
@@ -142,7 +142,7 @@ describe('AppShell', () => {
       const component = await mountShell();
 
       expect(component.findComponent(WorkspaceSidebar).exists()).toBe(false);
-      expect(component.findAll('footer')).toHaveLength(1);
+      expect(component.find('header a[href="/"]').exists()).toBe(true);
     });
 
     test('the breadcrumb walks workspace › shelf › book › chapter › page, linking the workspace and the page only', async () => {
@@ -547,7 +547,30 @@ describe('AppShell', () => {
 
       expect(component.findAll('header')).toHaveLength(1);
       expect(component.findAll('main')).toHaveLength(1);
-      expect(component.findAll('footer')).toHaveLength(1);
+    });
+
+    /*
+     * The owner asked three times for the footer to go, the third time on
+     * 2026-09-23, and it is gone from both frames. It said "deep-wiki" —
+     * the brand mark the same frame's header already carries, 700px above
+     * it — and "Material Design 3 · Nuxt UI v4", which is a fact about the
+     * build rather than about the workspace the person is in. The reasoning
+     * is at the removed call site in `AppShell.vue`.
+     *
+     * This is the assertion of record for its absence, in both frames, so
+     * one cannot come back unnoticed — and it names what was in it, so a
+     * future footer that carries something a person can act on is a
+     * deliberate change to this test rather than an accident.
+     */
+    test('there is no footer in either frame, and nothing signs the product at the foot of a screen', async () => {
+      const outside = await mountShell();
+      const inside = await mountShell({ workspaceId: 'ws-1' });
+
+      expect(outside.findAll('footer')).toHaveLength(0);
+      expect(inside.findAll('footer')).toHaveLength(0);
+      expect(outside.text()).not.toContain('Material Design 3');
+      // The brand is in the header, and only there: one mention per screen.
+      expect(outside.findAll('*').filter((node) => node.element.children.length === 0 && node.text() === 'deep-wiki')).toHaveLength(1);
     });
 
     test('the brand is the way back from any screen, so it is a link and not a label', async () => {
@@ -611,12 +634,12 @@ describe('AppShell', () => {
       expect(component.findAll('header button')[1]!.attributes('aria-label')).toBe('Toggle color theme');
     });
 
-    test('the screen’s content is not in the header or the footer', async () => {
+    test('the screen’s content is not in the header', async () => {
       const component = await mountShell();
 
       const slot = component.get('[data-testid="shell-slot"]').element;
       expect(component.get('header').element.contains(slot)).toBe(false);
-      expect(component.get('footer').element.contains(slot)).toBe(false);
+      expect(component.get('main').element.contains(slot)).toBe(true);
     });
   });
 });

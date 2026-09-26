@@ -26,6 +26,7 @@
  *   are one tab stop (`CommentGutter`), drawn quiet until hovered.
  */
 import { adoptMintedAnchor, blockIdOf, blockSelector, commentableBlockOf } from '~/utils/block-element';
+import { commentPosted, replyPosted, shortQuote, threadResolution } from '~/utils/comment-messages';
 import type { NewThreadTarget } from '~/composables/useNewThread';
 import { loadEditorMount } from '~/utils/editor-mount';
 import { pageEditUrl, pageHistoryUrl, workspacesUrl } from '~/utils/routes';
@@ -369,10 +370,36 @@ watch(canStart, (able) => {
   if (able) onSelectionChange();
 });
 
+/**
+ * The comment flow's transient successes are toasts (owner request,
+ * 2026-09-23; docs/UI-CHECKLIST.md §4.12). The 2026-09-23 batch moved
+ * "Saved “X”.", "Created …", "Moved … to the trash." and "Invitation sent
+ * …" and missed these three, so a reply still painted a green bar across the
+ * top of the panel — above the conversation it was about.
+ *
+ * Each sentence is said **twice**, from one place
+ * (`utils/comment-messages.ts`): in the panel's live region, which is what
+ * a screen reader is reliably given, and in the toast, which is what a
+ * sighted person reads. What did *not* move: every failure. A write that
+ * fails stays in the panel's bar notice until it is read, and a refusal
+ * that names a conflict — "your text is still here — reload the page" —
+ * stays with it (§4.12: "An error is never *only* a toast").
+ */
+const { confirmed } = useStatusToast();
+
+/** The excerpt a confirmation names its thread by; empty when the thread has gone from the list. */
+function threadQuote(threadId: string): string {
+  return comments.threads.value.find((thread) => thread.id === threadId)?.anchor.quote ?? '';
+}
+
 async function onPost(): Promise<void> {
   announcement.value = '';
+  // Read before the post: on success `useNewThread` clears the target.
+  const excerpt = newThread.target.value?.excerpt ?? '';
   const ok = await newThread.post();
-  if (ok) announcement.value = 'Comment posted.';
+  if (!ok) return;
+  announcement.value = commentPosted(excerpt);
+  confirmed({ message: announcement.value, icon: 'i-lucide-message-square' });
 }
 
 function onCancel(): void {
@@ -393,11 +420,15 @@ const unplacedThreadCount = computed(
 
 function openBlock(blockId: string): void {
   focusBlockId.value = blockId;
+  // A new block's threads: the highlight starts on the first of them rather
+  // than staying on whichever thread was last hovered in the panel before.
+  activeThreadId.value = null;
   panelOpen.value = true;
 }
 
 function openAll(): void {
   focusBlockId.value = null;
+  activeThreadId.value = null;
   panelOpen.value = true;
 }
 
@@ -405,43 +436,127 @@ function onPanelOpen(open: boolean): void {
   panelOpen.value = open;
   if (!open) {
     focusBlockId.value = null;
+    // Leaving the threads clears the highlight: §4.7 asks that it be
+    // dismissible and never persist, and the panel closing is the dismissal.
+    activeThreadId.value = null;
     // Closing the panel with nothing typed is a cancel; with a draft, the
     // draft survives and the next "+" reopens the composer with it.
     if (composing.value && newThread.body.value.trim() === '') newThread.cancel();
   }
 }
 
-/** "Show in page" from the panel: scroll the block into view and highlight it (§4.7). */
-function locate(blockId: string): void {
-  focusBlockId.value = blockId;
-  articleEl.value?.querySelector(blockSelector(blockId))?.scrollIntoView({ block: 'center' });
-}
+/**
+ * The tie between a comment and its text (owner request, 2026-09-23:
+ * *"no me muestra muy bien la relación … Guíate en Word o Google Docs"*).
+ *
+ * In both reference products the comment in front of the reader is the one
+ * whose text is highlighted: Word draws the link from card to anchor, Docs
+ * highlights the span and pairs it with the card. What stood here was a wash
+ * over the whole *block*, which says "somewhere in this paragraph" — and the
+ * block it washed was the one the panel was filtered on, so it never moved
+ * as the reader went down a stack of threads.
+ *
+ * Now:
+ *
+ * - **The highlight follows the thread the reader is on.** `activeThreadId`
+ *   is the last thread focused or hovered in the panel; until one is, it is
+ *   the first thread the panel is showing, so opening a mark highlights what
+ *   that mark points at. Closing the panel clears it — the highlight is
+ *   dismissible and never persists (docs/UI-CHECKLIST.md §4.7).
+ * - **It is the anchored span, not the block.** `useAnchorHighlight` locates
+ *   the quote inside the block's rendered text and paints one box per line
+ *   the span wraps onto, behind the article. A quote it cannot locate falls
+ *   back to the whole block, which is what the anchor honestly covers then.
+ * - **An orphan has nothing to highlight**, so nothing is painted and the
+ *   thread itself says why where the reader is looking ("Text removed" and
+ *   one sentence), rather than a control doing nothing.
+ * - **Scrolling is an act, not a side effect.** Moving between threads moves
+ *   the highlight only; activating a thread's quotation scrolls to it, and
+ *   only when it is not already in front of the reader (`needsReveal`).
+ *   Tabbing through a panel of threads must not drag the document about.
+ */
+const activeThreadId = ref<string | null>(null);
 
-/** The highlighted block's box, measured against the same wrapper the marks are placed in. */
-const highlight = computed<{ top: number; height: number } | null>(() => {
-  // `placed` is read so the box re-measures whenever the marks do.
-  void placed.value;
-  const blockId = focusBlockId.value;
-  const root = articleEl.value;
-  if (!blockId || !root) return null;
-  const element = root.querySelector<HTMLElement>(blockSelector(blockId));
-  return element ? { top: element.offsetTop, height: element.offsetHeight } : null;
+/** The thread whose text is highlighted: the one the reader is on, else the first the panel shows. */
+const activeThread = computed(() => {
+  const shown = focusBlockId.value
+    ? comments.threads.value.filter((thread) => !thread.anchor.orphaned && thread.anchor.blockId === focusBlockId.value)
+    : comments.threads.value;
+  return shown.find((thread) => thread.id === activeThreadId.value) ?? shown[0] ?? null;
 });
+
+const highlightTarget = computed(() => {
+  if (!panelOpen.value) return null;
+  // While a thread is being written, the text it is about is what the
+  // highlight shows — the selected words for a selection, the block for a
+  // "+". Docs does the same: the span you are commenting on stays lit while
+  // you type, so you can see what you are about to attach the sentence to.
+  const composerTarget = newThread.target.value;
+  if (composing.value && composerTarget) return { blockId: composerTarget.blockId, quote: composerTarget.excerpt };
+  const thread = activeThread.value;
+  if (!thread || thread.anchor.orphaned) return null;
+  return { blockId: thread.anchor.blockId, quote: thread.anchor.quote };
+});
+
+// `placed` is passed as the layout signal: it is re-measured whenever the
+// article resizes, a font lands or the viewport reflows, which is exactly
+// when a painted box would otherwise be left behind (§4.7, "the indicator
+// stays correct while scrolling").
+const highlight = useAnchorHighlight(articleEl, overlayEl, highlightTarget, placed);
+
+/**
+ * The thread's quotation, activated: show its text in the page. Named for
+ * the thread rather than the block, because several threads on one block
+ * point at different spans of it.
+ */
+function locate(blockId: string): void {
+  // Deliberately **not** `focusBlockId = blockId`, which is what stood here:
+  // that filters the panel to one block, and "show me this text" is not "show
+  // me fewer threads". A reader who opened the whole page's threads and asked
+  // one of them where it points would have the rest taken off the list, with a
+  // "Show all" appearing to undo something they never asked for.
+  //
+  // The highlight is already on the right thread by the time this runs — the
+  // quotation is a button, so activating it focuses it, and the thread's
+  // `focusin` hands the highlight over (§5's keyboard path is the same event).
+  // So the only case owed anything is the one where it did not: activate the
+  // first thread on the block asked for.
+  if (activeThread.value?.anchor.blockId !== blockId) {
+    activeThreadId.value =
+      comments.threads.value.find((thread) => !thread.anchor.orphaned && thread.anchor.blockId === blockId)?.id ?? null;
+  }
+  nextTick(() => {
+    highlight.reveal();
+    const thread = activeThread.value;
+    announcement.value = thread
+      ? highlight.located.value
+        ? `Showing ${shortQuote(thread.anchor.quote)} in the page.`
+        : 'Showing the paragraph this comment is on.'
+      : '';
+  });
+}
 
 async function onReply(threadId: string, body: string): Promise<void> {
   busy.value = true;
   announcement.value = '';
+  // Read before the write: a successful reply re-reads the thread list.
+  const excerpt = threadQuote(threadId);
   const ok = await comments.reply(threadId, body);
   busy.value = false;
-  if (ok) announcement.value = 'Reply posted.';
+  if (!ok) return;
+  announcement.value = replyPosted(excerpt);
+  confirmed({ message: announcement.value, icon: 'i-lucide-corner-down-left' });
 }
 
 async function onResolve(threadId: string, resolved: boolean): Promise<void> {
   busy.value = true;
   announcement.value = '';
+  const excerpt = threadQuote(threadId);
   const ok = await comments.setResolved(threadId, resolved);
   busy.value = false;
-  if (ok) announcement.value = resolved ? 'Thread resolved.' : 'Thread reopened.';
+  if (!ok) return;
+  announcement.value = threadResolution(excerpt, resolved);
+  confirmed({ message: announcement.value, icon: resolved ? 'i-lucide-check' : 'i-lucide-rotate-ccw' });
 }
 
 function plural(count: number, noun: string): string {
@@ -697,12 +812,20 @@ useSeoMeta({ title: () => (title.value ? `${title.value} — deep-wiki` : 'deep-
              `md` and only while a mark exists — from `md` up they stand in
              the margin outside the column (see `CommentGutter`). -->
         <div ref="overlayEl" class="relative isolate" @mouseover="onArticleMouseover" @mouseleave="hoveredBlockId = null">
+          <!-- The highlight: one box per line the anchored span wraps onto,
+               drawn *behind* the article (`-z-10` inside this `isolate`
+               wrapper) so the cached HTML is never written into. Opaque
+               `secondary-container` — the container fill §5.2 reserves for a
+               selected/active state, legible under `text-default` in both
+               themes by the tone-gap rule (§10.1), and measured in the
+               running browser by `e2e/comments.spec.ts`. -->
           <div
-            v-if="highlight"
+            v-for="(box, index) in highlight.boxes.value"
+            :key="index"
             data-testid="comment-highlight"
             aria-hidden="true"
-            class="absolute -inset-x-2 -z-10 rounded-md bg-secondary-container"
-            :style="{ top: `${highlight.top}px`, height: `${highlight.height}px` }"
+            class="absolute -z-10 rounded-xs bg-secondary-container"
+            :style="{ top: `${box.top}px`, left: `${box.left}px`, width: `${box.width}px`, height: `${box.height}px` }"
           />
           <!-- `html` is server-produced by remark-rehype + rehype-sanitize with an explicit allowlist (design.md D12); it is never client-supplied or user-editable at this route. -->
           <!-- eslint-disable-next-line vue/no-v-html -->
@@ -739,12 +862,14 @@ useSeoMeta({ title: () => (title.value ? `${title.value} — deep-wiki` : 'deep-
           :pending-thread-ids="comments.pendingThreadIds.value"
           :composing="composing"
           :can-start="canStart"
+          :can-comment="comments.canComment.value"
           @update:open="onPanelOpen"
           @show-all="focusBlockId = null"
           @reply="onReply"
           @resolve="onResolve"
           @locate="locate"
           @start="startThreadOnBlock"
+          @focus-thread="activeThreadId = $event"
         >
           <template #composer>
             <CommentComposer

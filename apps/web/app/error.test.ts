@@ -51,7 +51,9 @@ describe('error screen', () => {
     // A screen, so it carries the shell's landmarks — not a bare page.
     expect(component.find('header').exists()).toBe(true);
     expect(component.find('main').exists()).toBe(true);
-    expect(component.find('footer').exists()).toBe(true);
+    // No footer anywhere, in either frame: the owner asked three times
+    // and it went on 2026-09-23 (the reasoning is in `AppShell.vue`).
+    expect(component.find('footer').exists()).toBe(false);
     // Never a bare status code as the message (§3).
     expect(component.text()).not.toMatch(/HTTP 404/);
   });
