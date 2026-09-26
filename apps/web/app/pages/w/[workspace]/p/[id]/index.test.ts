@@ -992,6 +992,37 @@ describe('read-mode page', () => {
         // something, which is §5's "async state changes are announced".
         expect(document.body.querySelector('[data-testid="comments-status"]')!.textContent).toMatch(/^Showing /);
       });
+
+      test('asking a thread where it points shows its text and leaves the list alone', async () => {
+        mockRead({ status: 'success', title: 'A Page', html: TWO, workspaceId: 'ws-1' });
+        mockComments([
+          commentThread({ id: 't1', blockId: 'b1', anchor: { blockId: 'b1', offsetStart: 0, offsetEnd: 5, quote: 'First', orphaned: false } }),
+          commentThread({ id: 't2', blockId: 'b2', anchor: { blockId: 'b2', offsetStart: 0, offsetEnd: 6, quote: 'Second', orphaned: false } }),
+        ]);
+        const component = await mount();
+        await settle();
+
+        // Open one block's threads, then widen to the page's: the list holds two.
+        await component.get('button[aria-label="1 comment on this block"]').trigger('click');
+        await settle();
+        document.body.querySelector<HTMLElement>('[data-testid="comments-show-all"]')!.click();
+        await settle();
+        expect(document.body.querySelectorAll('[data-comment-placement]')).toHaveLength(2);
+
+        // "Show me this text" is not "show me fewer threads": the quotation
+        // moves the highlight and the document, never the list. Filtering the
+        // panel here would drop the other thread and put a "Show all" back on
+        // the screen to undo something the reader never asked for.
+        const quotations = document.body.querySelectorAll<HTMLElement>('[data-testid="comment-locate"]');
+        expect(quotations).toHaveLength(2);
+        quotations[1]!.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+        quotations[1]!.click();
+        await settle();
+
+        expect(document.body.querySelectorAll('[data-comment-placement]')).toHaveLength(2);
+        expect(document.body.querySelector('[data-testid="comments-show-all"]')).toBeNull();
+        expect(document.body.querySelector('[data-testid="comments-status"]')!.textContent).toMatch(/^Showing /);
+      });
     });
 
     /*

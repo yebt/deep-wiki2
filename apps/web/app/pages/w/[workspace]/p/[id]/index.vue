@@ -510,7 +510,21 @@ const highlight = useAnchorHighlight(articleEl, overlayEl, highlightTarget, plac
  * point at different spans of it.
  */
 function locate(blockId: string): void {
-  focusBlockId.value = blockId;
+  // Deliberately **not** `focusBlockId = blockId`, which is what stood here:
+  // that filters the panel to one block, and "show me this text" is not "show
+  // me fewer threads". A reader who opened the whole page's threads and asked
+  // one of them where it points would have the rest taken off the list, with a
+  // "Show all" appearing to undo something they never asked for.
+  //
+  // The highlight is already on the right thread by the time this runs — the
+  // quotation is a button, so activating it focuses it, and the thread's
+  // `focusin` hands the highlight over (§5's keyboard path is the same event).
+  // So the only case owed anything is the one where it did not: activate the
+  // first thread on the block asked for.
+  if (activeThread.value?.anchor.blockId !== blockId) {
+    activeThreadId.value =
+      comments.threads.value.find((thread) => !thread.anchor.orphaned && thread.anchor.blockId === blockId)?.id ?? null;
+  }
   nextTick(() => {
     highlight.reveal();
     const thread = activeThread.value;
